@@ -406,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_legacymerge_devices()
         elif self.path == "/api/smartsensor/status":
             self._handle_smartsensor_status()
+        elif self.path == "/api/trainingprogram":
+            self._handle_trainingprogram_list()
         else:
             self.send_response(404)
             self.end_headers()
@@ -483,6 +485,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_legacymerge_live(body)
         elif self.path == "/api/smartsensor/forget":
             self._handle_smartsensor_forget()
+        elif self.path == "/api/trainingprogram":
+            self._handle_trainingprogram_save(body)
+        elif self.path == "/api/trainingprogram/delete":
+            self._handle_trainingprogram_delete(body)
+        elif self.path == "/api/trainingprogram/install":
+            self._handle_trainingprogram_install(body)
         else:
             self.send_response(404)
             self.end_headers()
