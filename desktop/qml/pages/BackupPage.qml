@@ -47,9 +47,22 @@ PageFlickable {
         // existing backups, since those are suunto specific") - this mechanism only ever
         // touches the Ambit3's own flash regions (write_nav.py's nav --save/restore), so it
         // has nothing to do while a Garmin is the connected device.
+        // Real, 2026-08-23: this mechanism is write_nav.py's nav --save/restore - the
+        // Ambit3 SBEM flash regions, same as everything else gated on
+        // DeviceCapabilities.supportsRoutes. Found live: "Create backup now" against a
+        // connected Ambit1 got a real 502 (skipped every SBEM region, "this watch does not
+        // declare it") - same fix as Watch Settings/Sport Modes/Routes/POIs.
+        Text {
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
+            width: 480
+            wrapMode: Text.WordWrap
+            color: Theme.mutedText
+            text: qsTr("%1 doesn't support Backup & Restore on this app yet.").arg(HomeViewModel.deviceDisplayName)
+        }
+
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -84,7 +97,7 @@ PageFlickable {
 
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -135,7 +148,7 @@ PageFlickable {
         // and the backup lands there; the desktop sync client carries it to the cloud. ---
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
