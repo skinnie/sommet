@@ -31,6 +31,7 @@ memory), so there's nothing safe to send for THAT specific piece yet.
 """
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -64,7 +65,18 @@ def run(args):
             "once (needs cmake + a C compiler + libusb-1.0; see that script's own header "
             "comment). Ambit1/2 settings/logs need it; device identity/battery don't - "
             "those already work via write_nav.py/device_info.py.")
-    proc = subprocess.run([str(binary), *args], capture_output=True, text=True, timeout=120)
+    # Real bug, caught 2026-08-23 with an Ambit1 AND an Ambit3 Sport connected at once: the
+    # CLI used to always open whichever Suunto device it saw first, silently ignoring which
+    # watch the app had selected - settings for the selected Ambit1 came back as the Ambit3
+    # Sport's data instead. AMBIT_PRODUCT_ID is the same env var run_tool() already sets for
+    # every other tool (write_nav.py etc) from the app's selected device, so this needs no new
+    # plumbing - just honor it here too, via the CLI's own --device.
+    device_args = []
+    env_pid = os.environ.get("AMBIT_PRODUCT_ID")
+    if env_pid:
+        device_args = ["--device", env_pid]
+    proc = subprocess.run([str(binary), *device_args, *args],
+                           capture_output=True, text=True, timeout=120)
     try:
         # libambit itself prints a couple of unconditional debug lines to stdout ahead of
         # the real payload (vendored, unmodified - see openambit_libambit/README.md), and

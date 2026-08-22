@@ -128,18 +128,58 @@ static void log_push_cb(void *userref, ambit_log_entry_t *entry) {
     ctx->index++;
 }
 
-static ambit_object_t *open_first_device(ambit_device_info_t **out_devices, ambit_device_info_t **out_info) {
+/* -1 = no --device given: fall back to "first legacy-family device seen" (this CLI's whole
+ * purpose is the legacy PMEM 2.0 family, so that's the sane default with one watch plugged
+ * in). >=0 = an explicit product_id from --device, required whenever more than one Suunto
+ * device might be on the bus - see this function's own comment for why. */
+static int g_selected_pid = -1;
+
+static const int LEGACY_PIDS[] = {0x0010, 0x0019, 0x001a, 0x001d};
+
+static int is_legacy_pid(int pid) {
+    for (size_t i = 0; i < sizeof(LEGACY_PIDS) / sizeof(LEGACY_PIDS[0]); i++)
+        if (LEGACY_PIDS[i] == pid) return 1;
+    return 0;
+}
+
+/* Real bug, caught 2026-08-23 with an Ambit1 AND an Ambit3 Sport connected at once: this used
+ * to be open_first_device(), which unconditionally opened libambit_enumerate()'s list HEAD -
+ * whichever Suunto device hid_enumerate() happened to list first, ignoring which watch the
+ * app had selected. That device_support.c table recognizes every Ambit model, not just the
+ * legacy family, so the "first" device could easily be an Ambit3 - which was happening live:
+ * settings for the selected Ambit1 were silently coming back from the Ambit3 Sport instead
+ * (its driver has no navigation_read, which is exactly the "Driver does not support
+ * navigation_waypoint_read" warning that gave it away). Fixed: honor --device when given
+ * (the app always passes the selected watch's product_id now), else fall back to the first
+ * legacy-family device in the list - never silently pick an Ambit3+. */
+static ambit_object_t *open_selected_device(ambit_device_info_t **out_devices,
+                                             ambit_device_info_t **out_info) {
     ambit_device_info_t *devices = libambit_enumerate();
     if (!devices) return NULL;
-    ambit_object_t *dev = libambit_new(devices);
+
+    ambit_device_info_t *target = NULL;
+    for (ambit_device_info_t *d = devices; d; d = d->next) {
+        if (g_selected_pid >= 0) {
+            if (d->product_id == g_selected_pid) { target = d; break; }
+        } else if (is_legacy_pid(d->product_id)) {
+            target = d;
+            break;
+        }
+    }
+    if (!target) {
+        libambit_free_enumeration(devices);
+        return NULL;
+    }
+
+    ambit_object_t *dev = libambit_new(target);
     *out_devices = devices;
-    *out_info = devices;
+    *out_info = target;
     return dev;
 }
 
 static int cmd_device_info(void) {
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
     ambit_device_status_t status = {0};
     libambit_device_status_get(dev, &status);
@@ -159,7 +199,7 @@ static int cmd_device_info(void) {
 
 static int cmd_settings(void) {
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
     ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
@@ -224,7 +264,7 @@ static int cmd_logs(const char *outdir) {
     if (stat(outdir, &st) != 0) mkdir(outdir, 0755);
 
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
     log_ctx_t ctx = { .idx = NULL, .outdir = (char *)outdir, .index = 0, .first = 1 };
@@ -289,7 +329,7 @@ static int cmd_gps_orbit_write(const char *path) {
     fclose(f);
 
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) {
         fputs("@@JSON@@\n", stdout);
         printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
@@ -314,7 +354,7 @@ static int cmd_gps_orbit_write(const char *path) {
  * don't just trust the ack" discipline - see custom_modes_andre.md). */
 static int cmd_poi_add(const char *name, double lat, double lon) {
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
     ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
@@ -371,7 +411,7 @@ static int cmd_poi_add(const char *name, double lat, double lon) {
  * ps->routes is left exactly as read. */
 static int cmd_poi_clear(void) {
     ambit_device_info_t *devices, *info;
-    ambit_object_t *dev = open_first_device(&devices, &info);
+    ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
     ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
@@ -407,9 +447,17 @@ static int cmd_poi_clear(void) {
 }
 
 int main(int argc, char **argv) {
+    /* Optional leading "--device PID" (decimal or 0x-hex) picks which connected Suunto
+     * device this invocation talks to - required whenever more than one might be on the
+     * bus (see open_selected_device()'s own comment for the real bug this fixes). */
+    if (argc >= 3 && strcmp(argv[1], "--device") == 0) {
+        g_selected_pid = (int)strtol(argv[2], NULL, 0);
+        argv += 2;
+        argc -= 2;
+    }
     if (argc < 2) {
-        fprintf(stderr, "usage: %s device-info|settings|logs OUTDIR|gps-orbit-write FILE\n",
-                argv[0]);
+        fprintf(stderr, "usage: %s [--device PID] device-info|settings|logs OUTDIR|"
+                "gps-orbit-write FILE\n", argv[0]);
         return 2;
     }
     if (strcmp(argv[1], "device-info") == 0) return cmd_device_info();

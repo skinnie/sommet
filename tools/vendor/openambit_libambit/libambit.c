@@ -68,13 +68,17 @@ ambit_device_info_t * libambit_enumerate(void)
     while (current) {
         ambit_device_info_t *tmp = ambit_device_info_new(current);
 
+        /* Real bug, caught 2026-08-23 with two Suunto USB devices connected at once:
+         * this always set tmp->next but never reassigned `devices` to `tmp`, so every
+         * device after the first one hid_enumerate() returned was built, then silently
+         * orphaned (leaked, never linked into the returned list). Callers that trusted
+         * this to enumerate every connected device (like this project's ambit_legacy_cli,
+         * which then always opened the list HEAD) always silently got whichever single
+         * device hid_enumerate() happened to list first - which could be the wrong watch
+         * when more than one is plugged in. Fixed: prepend properly. */
         if (tmp) {
-            if (devices) {
-                tmp->next = devices;
-            }
-            else {
-                devices = tmp;
-            }
+            tmp->next = devices;
+            devices = tmp;
         }
         current = current->next;
     }
