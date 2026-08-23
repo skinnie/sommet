@@ -22,6 +22,7 @@ QtObject {
     readonly property string gear: "\ue52f"            // directions_bike
     readonly property string coach: "\ue0bf"           // forum (chat bubble)
     readonly property string appZone: "\ue86f"         // code (App Zone scripting)
+    readonly property string apps: "\ue5c3"            // apps (3x3 grid) - the Apps menu
 
     readonly property string add: ""
     readonly property string arrowBack: ""

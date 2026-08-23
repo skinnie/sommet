@@ -9,7 +9,7 @@ An App Zone app is hand-written script (a counter, a pace/HR readout, an estimat
 step list - so the input here is a source editor, and the source is POSTed to the compiler as-is.
 Reference: Suunto's App Zone Developer Manual (linked in the UI).
 
-    ./tools/apps_gui.py               # serves http://127.0.0.1:8765, opens your browser
+    ./tools/apps_gui.py               # serves http://127.0.0.1:8767, opens your browser
     ./tools/apps_gui.py --port 9000 --no-browser
 """
 
@@ -723,7 +723,11 @@ def _log_startup_failure(exc):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8765)
+    # Distinct default from workout_gui.py (8765): the desktop app launches both from one
+    # "Suunto Apps" card, and a shared port meant the second button just re-opened the first
+    # tool's page already serving on 8765 - "the two buttons use the same url". A caller can
+    # still override with --port.
+    ap.add_argument("--port", type=int, default=8767)
     ap.add_argument("--no-browser", action="store_true",
                      help="don't open a browser automatically (default: open one)")
     args = ap.parse_args()

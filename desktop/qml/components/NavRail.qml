@@ -106,36 +106,21 @@ Rectangle {
             selected: root.currentPage === "backup"
             onClicked: root.pageSelected("backup")
         }
-        // Real, 2026-08-08 ("a new menu, for suunto, called Intervals") - Suunto-only, same
-        // as the App-Zone compiler it launches (tools/workout_gui.py) being an Ambit3
-        // mechanism with no Garmin equivalent. Kailash excluded too, real 2026-08-09
-        // ("intervals menu should only appear for ambit or nothing connect") - App-Zone
-        // workouts are a CustomModes/Suunto-Apps mechanism, same one Kailash's own
-        // Sport Modes page exclusion is based on (no CustomModes region on that watch).
+        // Suunto Apps - ONE entry, 2026-08-23 (André: "it should only [be] one card, that
+        // then show two options"). The page offers both builders it used to take two nav
+        // entries to reach: the Interval Workout Builder (tools/workout_gui.py) and the
+        // free-form App Builder (tools/apps_gui.py). Both are Ambit3/Traverse App-Zone
+        // mechanisms - no Garmin equivalent, and Kailash has no CustomModes region - so both
+        // stay excluded. Visible whenever EITHER experimental toggle is on, so turning on just
+        // one still surfaces the merged page (the card offers both regardless; the toggles
+        // remain two separate Settings switches for now).
         NavItem {
             width: parent.width
-            // Experimental menu feature (2026-08-17): gated on its own toggle in Settings, the
-            // same per-feature model the Android app uses. Still Ambit-only (rides App-Zone).
-            visible: DeviceService.intervalsEnabled && HomeViewModel.anyDevice
+            visible: (DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
+                     && HomeViewModel.anyDevice
                      && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
-                     // Traverse/Traverse Alpha have no TrainingProgram region - no planned moves.
-                     && !HomeViewModel.isTraverse
-            useIntervalsIcon: true
-            label: qsTr("Intervals")
-            selected: root.currentPage === "intervals"
-            onClicked: root.pageSelected("intervals")
-        }
-        // App Zone builder (write + compile + install a generic Suunto App) - its own
-        // experimental toggle, same model as Intervals. Ambit3 AND Traverse (both have a
-        // CustomModes + Apps region); Kailash excluded (no CustomModes), Garmin excluded (no
-        // Suunto-Apps concept) - unlike Intervals it does NOT need a TrainingProgram region, so
-        // Traverse is not excluded here.
-        NavItem {
-            width: parent.width
-            visible: DeviceService.appZoneEnabled && HomeViewModel.anyDevice
-                     && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
-            glyph: Icons.appZone
-            label: qsTr("App Zone")
+            glyph: Icons.apps
+            label: qsTr("Apps")
             selected: root.currentPage === "appZone"
             onClicked: root.pageSelected("appZone")
         }

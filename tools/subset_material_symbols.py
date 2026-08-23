@@ -50,6 +50,7 @@ POI_GLYPHS = {
 # fit ("forum" - a conversation bubble, matches the chat half of the Coach screen).
 EXTRA_GLYPHS = {
     "coach": "forum",
+    "apps": "apps",   # the 3x3 grid - the "Suunto Apps" / "Apps" menu icon
 }
 
 
