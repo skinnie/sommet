@@ -753,10 +753,47 @@ class Handler(BaseHTTPRequestHandler):
             modes, saved = None, False
         if not isinstance(modes, list):
             modes, saved = None, False
+        if saved:
+            self._send_json(200, {
+                "ok": True, "saved": True, "source": "file",
+                "maxModes": self.LEGACY_MAX_SPORT_MODES, "modes": modes})
+            return
+
+        # No master copy yet. Seed it from the WATCH's own real modes rather than a factory
+        # table - the whole point of the 2026-08-23 Ambit1 work is that this family CAN be
+        # read (docs/ambit1_sport_mode_format.md), so showing invented presets next to a
+        # connected watch would be showing data that isn't there. Falls back to the factory
+        # set only when there is no readable Ambit1 (no watch, or a different model).
+        if selected_is_legacy():
+            try:
+                sys.path.insert(0, str(TOOLS_DIR))
+                import legacy_link                              # noqa: PLC0415
+                env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+                old = os.environ.get("AMBIT_PRODUCT_ID")
+                if env_pid:
+                    os.environ["AMBIT_PRODUCT_ID"] = env_pid
+                try:
+                    with WATCH_LOCK:
+                        info = legacy_link.ambit1_sport_mode_read()
+                finally:
+                    if env_pid:
+                        if old is None:
+                            os.environ.pop("AMBIT_PRODUCT_ID", None)
+                        else:
+                            os.environ["AMBIT_PRODUCT_ID"] = old
+                if info.get("ok") and info.get("modes"):
+                    self._send_json(200, {
+                        "ok": True, "saved": False, "source": "watch",
+                        "maxModes": self.LEGACY_MAX_SPORT_MODES,
+                        "modes": info["modes"]})
+                    return
+            except (RuntimeError, OSError):
+                pass    # not an Ambit1, or the read failed - fall through to the factory set
+
         self._send_json(200, {
-            "ok": True, "saved": saved,
+            "ok": True, "saved": False, "source": "factory",
             "maxModes": self.LEGACY_MAX_SPORT_MODES,
-            "modes": modes if saved else self.LEGACY_FACTORY_SPORT_MODES})
+            "modes": self.LEGACY_FACTORY_SPORT_MODES})
 
     def _handle_legacy_sport_modes_save(self, body):
         """POST /api/legacy/sport-modes - replaces the host master copy. Local only; writing to

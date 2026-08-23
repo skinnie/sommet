@@ -111,6 +111,17 @@ def poi_clear():
     return run(["poi-clear"])
 
 
+def ambit1_sport_mode_read():
+    """The REAL sport modes currently on an Ambit1, decoded off the watch.
+
+    This is the thing openambit/openambit2 cannot do at all (see
+    docs/ambit1_sport_mode_format.md): the region is readable via the generic 0x0b17 flash
+    read, and the Ambit1's 76-byte settings blob is decoded by ambit1_sport_mode.c. Ambit1
+    ONLY - the CLI hard-refuses any other product_id rather than risk applying this layout to
+    an Ambit2, which uses the standard 90-byte one."""
+    return run(["ambit1-sport-mode-read"])
+
+
 def sport_mode_write_presets(dry_run=False):
     """Blind-overwrites the watch's sport modes with the first 10 of openambit2's own 19
     factory presets (Running/Trail Running/.../Ski Touring) - capped to 10 in
