@@ -58,6 +58,7 @@
 #include <sys/stat.h>
 #include <math.h>
 #include "libambit.h"
+#include "protocol.h"   /* libambit_protocol_command - raw 0x0b17 flash read, see cmd_sport_mode_dump */
 
 static void json_str(FILE *f, const char *s) {
     fputc('"', f);
@@ -682,6 +683,84 @@ static int write_sport_modes(ambit_sport_mode_device_settings_t *settings, size_
     return rc == 0 ? 0 : 1;
 }
 
+/* Raw flash READ of the sport-mode region - the backup openambit2 has no equivalent of.
+ *
+ * Found 2026-08-23 while about to do the first real sport-mode write: pmem20.c's
+ * read_log_chunk() is NOT log-specific despite its name - it just sends
+ * ambit_command_log_read (0x0b17) with an arbitrary {u32 address, u32 length} and returns the
+ * bytes, which is the same generic flash-read command this project's own write_nav.py already
+ * uses on Ambit3 ("read-only: 0x0b17 reads flash, nothing is written"). It's `static`, and its
+ * pmem20/driver_data plumbing is private to the driver, so this issues the same command
+ * directly instead - read-only either way, nothing is written.
+ *
+ * This does NOT decode sport modes (nobody can - there is no deserializer anywhere, which is
+ * the whole reason the host has to hold the master copy). It captures the region's raw BYTES,
+ * so whatever is on the watch before a blind write can be put back verbatim later via
+ * libambit_pmem20_data_write at the same address - restore without ever understanding the
+ * format. Chunked at the Bluebird driver's own 0x200 (512 B, its device_support.c
+ * driver_param); a short/failed reply ends the dump rather than padding it with junk, so the
+ * file only ever holds bytes the watch really returned. */
+#define LEGACY_SPORT_MODE_ADDR  0x00002000
+#define LEGACY_READ_CHUNK       512
+
+static int cmd_sport_mode_dump(const char *path, uint32_t total) {
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
+        return 1;
+    }
+
+    FILE *out = fopen(path, "wb");
+    if (!out) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"cannot open output file\"}\n");
+        libambit_close(dev);
+        libambit_free_enumeration(devices);
+        return 1;
+    }
+
+    uint32_t got = 0;
+    int failed = 0;
+    while (got < total) {
+        uint32_t want = total - got;
+        if (want > LEGACY_READ_CHUNK) want = LEGACY_READ_CHUNK;
+
+        uint8_t send[8];
+        uint32_t addr = LEGACY_SPORT_MODE_ADDR + got;
+        send[0] = addr & 0xff; send[1] = (addr >> 8) & 0xff;
+        send[2] = (addr >> 16) & 0xff; send[3] = (addr >> 24) & 0xff;
+        send[4] = want & 0xff; send[5] = (want >> 8) & 0xff;
+        send[6] = (want >> 16) & 0xff; send[7] = (want >> 24) & 0xff;
+
+        uint8_t *reply = NULL;
+        size_t replylen = 0;
+        if (libambit_protocol_command(dev, 0x0b17, send, sizeof(send),
+                                       &reply, &replylen, 0) != 0
+            || replylen < want + 8) {
+            libambit_protocol_free(reply);
+            failed = 1;
+            break;
+        }
+        fwrite(reply + 8, 1, want, out);
+        libambit_protocol_free(reply);
+        got += want;
+    }
+    fclose(out);
+
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": %s, \"bytes\": %u, \"address\": %u, \"truncated\": %s, \"path\": ",
+           got > 0 ? "true" : "false", got, LEGACY_SPORT_MODE_ADDR,
+           failed ? "true" : "false");
+    json_str(stdout, path);
+    printf("}\n");
+
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return got > 0 ? 0 : 1;
+}
+
 static int cmd_sport_mode_write_presets(bool dry_run) {
     ambit_sport_mode_device_settings_t *settings = build_preset_sport_modes();
     if (!settings) {
@@ -742,6 +821,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "sport-mode-write-presets") == 0) {
         bool dry_run = (argc >= 3 && strcmp(argv[2], "--dry-run") == 0);
         return cmd_sport_mode_write_presets(dry_run);
+    }
+    if (strcmp(argv[1], "sport-mode-dump") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: %s sport-mode-dump FILE [BYTES]\n", argv[0]);
+            return 2;
+        }
+        uint32_t n = (argc >= 4) ? (uint32_t)strtoul(argv[3], NULL, 0) : 8192;
+        return cmd_sport_mode_dump(argv[2], n);
     }
     if (strcmp(argv[1], "sport-mode-write") == 0) {
         if (argc < 3) {
