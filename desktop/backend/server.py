@@ -2609,23 +2609,36 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_customodes_displays_ambit1(self, mode, edits, confirm):
         """The Ambit1 half of POST /api/customodes/displays.
 
-        Supports `setRow`, `add` and `remove`. setRow is a fixed-size, in-place patch; add
+        Supports `setRow`, `add`, `remove` and `setType`. setRow is a fixed-size, in-place patch; add
         and remove RESIZE the record, so the patcher corrects the four nested lengths
         (DISPLAYS / MODE / MODES / root) and re-derives every offset afterwards. `setType`
-        (changing a layout's row count) is still not supported and is reported back as an
-        unsupported op rather than silently dropped.
+        is done as replace-with-a-clone plus the layout's default rows, which is
+        what SuuntoLink itself does (verified in its own capture: a 3-row retyped to 1-row
+        came back as rows [10], not the old values).
 
         Row addressing matches what the reader emitted: display indices count USER displays
         only, with the computed built-in tail excluded on both sides."""
         # Layout key -> the template id the watch stores, matching SportModesPage's own
         # displayTypes table (the Ambit1 uses the same ids as the Ambit3).
         LAYOUT_ID = {"3-row": 260, "2-row": 261, "1-row": 262, "graph": 257}
+        # The row values SuuntoLink itself writes for a freshly-created / retyped display,
+        # read straight out of its own USB capture (assets/pcap/2026-08-23-ambit1-suuntolink):
+        #   260 rows [10,11,0] views [5]   261 rows [10,0] views [5]
+        #   262 rows [10]                  257 rows [6,32,5]
+        # These match SportModesPage's own displayTypes defaults exactly, so the UI's staged
+        # preview and what lands on the watch agree.
+        LAYOUT_DEFAULT_ROWS = {
+            260: [10, 11, 5],
+            261: [10, 5],
+            262: [10],
+            257: [6, 32, 5],
+        }
         rows = []
         unsupported = []
         for e in edits:
             if not isinstance(e, dict):
                 continue
-            if e.get("op") in ("setRow", "add", "remove"):
+            if e.get("op") in ("setRow", "add", "remove", "setType"):
                 rows.append(e)
                 continue
             unsupported.append(e.get("op"))
@@ -2671,6 +2684,18 @@ class Handler(BaseHTTPRequestHandler):
         lines = []
         for e in rows:
             op = e.get("op")
+            if op == "setType":
+                disp = e.get("display")
+                layout = LAYOUT_ID.get(str(e.get("type", "")).strip().lower())
+                if disp is None or layout is None:
+                    unsupported.append(f"setType:{e.get('type')}")
+                    continue
+                lines.append(f"{mode_idx}|display-set-type|{int(disp)}:{layout}")
+                # ...then the layout's default row values, so the result matches both
+                # SuuntoLink's own behaviour and the preview the UI already staged.
+                for ri, field in enumerate(LAYOUT_DEFAULT_ROWS.get(layout, [])):
+                    lines.append(f"{mode_idx}|row|{int(disp)}:{ri}:0:{int(field)}")
+                continue
             if op == "add":
                 layout = LAYOUT_ID.get(str(e.get("type", "")).strip().lower())
                 if layout is None:

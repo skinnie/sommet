@@ -504,6 +504,44 @@ static void print_displays_json(FILE *f, const uint8_t *body, uint32_t len, int 
     fputs("]", f);
 }
 
+/* Writes a previously dumped region back verbatim. The safety net for every experiment in
+ * this file: any edit can be undone by restoring the dump taken before it. Refuses a size
+ * that is not exactly the region length, so a truncated or foreign file cannot be written. */
+int ambit1_cmd_restore(ambit_object_t *dev, const ambit_device_info_t *info,
+                        const char *path, int dry_run) {
+    if (!ambit1_guard_ok(info)) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"not an Ambit1 (product_id 0x0010)\"}\n");
+        return 1;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"cannot open the region file\"}\n");
+        return 1;
+    }
+    static uint8_t img[A1_REGION_MAX];
+    size_t nread = fread(img, 1, A1_REGION_MAX, f);
+    int extra = fgetc(f) != EOF;
+    fclose(f);
+    if (nread != A1_REGION_MAX || extra) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"region file must be exactly %d bytes\"}\n",
+               A1_REGION_MAX);
+        return 1;
+    }
+    if (rd16(img, 0) != TAG_ROOT) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"file does not start with the root TLV\"}\n");
+        return 1;
+    }
+    int rc = dry_run ? 0 : ambit1_write_region(dev, img, A1_REGION_MAX);
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": %s, \"dryRun\": %s, \"bytes\": %d, \"writeRc\": %d}\n",
+           rc == 0 ? "true" : "false", dry_run ? "true" : "false", A1_REGION_MAX, rc);
+    return rc == 0 ? 0 : 1;
+}
+
 int ambit1_cmd_read(ambit_object_t *dev, const ambit_device_info_t *info) {
     if (!ambit1_guard_ok(info)) {
         fputs("@@JSON@@\n", stdout);
@@ -620,6 +658,67 @@ int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
         int idx = atoi(a);
         if (idx < 0 || idx >= n) { rejected++; continue; }
         uint8_t *blob = buf + offs[idx];
+
+        /* `IDX|display-set-type|DISPIDX:LAYOUT` - change an existing display's layout.
+         *
+         * Done as replace-with-a-clone rather than surgery on the rows: a layout change
+         * alters the row COUNT (3-row vs 2-row vs 1-row vs graph), so the record has to be
+         * rebuilt anyway. Splicing in a real display of the target layout keeps every byte
+         * watch-produced and structurally consistent, exactly like display-add.
+         *
+         * The row data comes from the donor, i.e. the rows reset to that layout's defaults.
+         * That is the same behaviour SportModesPage already models for a layout change
+         * (its stagedDisplays() rebuilds the display from displayTypes' own default rows),
+         * so the UI and the watch agree on what a setType means. */
+        if (strcmp(b, "display-set-type") == 0) {
+            int di = -1, layout = -1;
+            if (sscanf(c, "%d:%d", &di, &layout) != 2 || di < 0 || layout < 0) {
+                rejected++; continue;
+            }
+            uint32_t disp_c = a1_displays_container(buf + boff[idx], blen[idx]);
+            uint32_t doff, dlen;
+            if (disp_c == 0
+                || !a1_user_display_bounds(buf + boff[idx], blen[idx], keep[idx], di,
+                                            &doff, &dlen)) { rejected++; continue; }
+            uint32_t soff, slen;
+            if (!a1_find_donor(buf, (uint32_t)got, (uint16_t)layout, &soff, &slen)) {
+                rejected++; continue;
+            }
+            uint32_t abs = boff[idx] + doff;
+            uint32_t used = 4 + rd16(buf, 2);
+            if (used + slen - dlen > (uint32_t)got) { rejected++; continue; }
+
+            uint8_t *clone = malloc(slen);
+            if (!clone) { rejected++; continue; }
+            memcpy(clone, buf + soff, slen);           /* copy BEFORE anything shifts */
+            /* drop the old record, then make room for the new one */
+            memmove(buf + abs, buf + abs + dlen, (uint32_t)got - (abs + dlen));
+            memset(buf + (uint32_t)got - dlen, 0xff, dlen);
+            memmove(buf + abs + slen, buf + abs, (uint32_t)got - (abs + slen));
+            memcpy(buf + abs, clone, slen);
+            free(clone);
+            a1_fix_lengths(buf, boff[idx], disp_c, (int)slen - (int)dlen);
+
+            n = ambit1_find_modes_ex(buf, (uint32_t)got, offs, boff, blen, 32);
+            for (int i = 0; i < n; i++)
+                lay_n[i] = a1_collect_layouts(buf + boff[i], blen[i], lay[i], 64);
+            tail = 0;
+            if (n > 1) {
+                int shortest = lay_n[0];
+                for (int i = 1; i < n; i++) if (lay_n[i] < shortest) shortest = lay_n[i];
+                while (tail < shortest) {
+                    uint16_t v = lay[0][lay_n[0] - tail - 1];
+                    int same = 1;
+                    for (int i = 1; i < n; i++)
+                        if (lay[i][lay_n[i] - tail - 1] != v) { same = 0; break; }
+                    if (!same) break;
+                    tail++;
+                }
+            }
+            for (int i = 0; i < n; i++) { keep[i] = lay_n[i] - tail; if (keep[i] < 0) keep[i] = 0; }
+            applied++;
+            continue;
+        }
 
         /* `IDX|display-remove|DISPIDX` and `IDX|display-add|LAYOUT` - STRUCTURAL edits.
          * These resize the record, so offsets for every later patch line change; the loop

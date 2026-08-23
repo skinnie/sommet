@@ -889,6 +889,24 @@ int main(int argc, char **argv) {
         bool dry_run = (argc >= 3 && strcmp(argv[2], "--dry-run") == 0);
         return cmd_sport_mode_write_presets(dry_run);
     }
+    if (strcmp(argv[1], "ambit1-sport-mode-restore") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: %s ambit1-sport-mode-restore FILE [--dry-run]\n", argv[0]);
+            return 2;
+        }
+        ambit_device_info_t *devices, *info;
+        ambit_object_t *dev = open_selected_device(&devices, &info);
+        if (!dev) {
+            fputs("@@JSON@@\n", stdout);
+            printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
+            return 1;
+        }
+        int dry = (argc >= 4 && strcmp(argv[3], "--dry-run") == 0);
+        int rc = ambit1_cmd_restore(dev, info, argv[2], dry);
+        libambit_close(dev);
+        libambit_free_enumeration(devices);
+        return rc;
+    }
     if (strcmp(argv[1], "ambit1-sport-mode-read") == 0
         || strcmp(argv[1], "ambit1-sport-mode-patch") == 0) {
         ambit_device_info_t *devices, *info;

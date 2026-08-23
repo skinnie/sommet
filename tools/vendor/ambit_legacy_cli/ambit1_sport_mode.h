@@ -28,4 +28,8 @@ int ambit1_cmd_read(ambit_object_t *dev, const ambit_device_info_t *info);
 int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
                       const char *patch_path, int dry_run, const char *dump_path);
 
+/* `sport-mode-restore`: write a previously dumped 8192-byte region back verbatim. */
+int ambit1_cmd_restore(ambit_object_t *dev, const ambit_device_info_t *info,
+                        const char *path, int dry_run);
+
 #endif /* AMBIT1_SPORT_MODE_H */
