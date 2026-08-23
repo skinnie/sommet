@@ -120,22 +120,30 @@ Low 6:30 → 390).
 its default repetitions, versus modes still carrying their original Movescount-era bytes
 (all-zero tail).
 
-## 5a. A real SuuntoLink bug: interval-timer settings are clobbered on re-save
+## 5a. Interval-timer unit encoding, confirmed both ways
 
-Tracked across SuuntoLink's own successive writes to `Running` in one session (pcap run index):
+**Correction:** an earlier revision of this document claimed SuuntoLink "clobbers" the interval
+timer on re-save. That was wrong — it was over-read from the byte sequence without checking the
+matching screenshot. André had deliberately exercised each option in turn, and every write
+faithfully reflects what he entered. No SuuntoLink bug here.
 
-| run | use_interval_timer | reps | max | min | |
-|---|---|---|---|---|---|
-| 0 | 0 | 0 | 0 | 0 | original Movescount-era bytes |
-| 7 | 0 | 99 | 0 | 0 | SuuntoLink rewrites, injects default reps |
-| **53** | **1** | **5** | **150** | **390** | the user's real input, written correctly |
-| 55 | 1 | 99 | 100 | 10000 | **reset to defaults, unit flipped** |
-| 57 | 0 | 99 | 0 | 0 | **timer disabled entirely** |
+The sequence across successive writes to `Running` in one session (pcap run index) is a clean
+input→output table, and pins the unit encoding in both directions:
 
-SuuntoLink writes the user's interval timer correctly, then destroys it on the next save of the
-same mode. The values are valid on the wire and the watch stores what it is given — this is a
-host-side bug, not a device limitation, and it is **not** the same cause as the HR-limits issue
-below. Don't replicate it: see the ambit-app-suuntolink-bugs-dont-replicate memory.
+| run | use | reps | max_unit | max | min_unit | min | what the user did (screenshot-confirmed) |
+|---|---|---|---|---|---|---|---|
+| 52 | 0 | 99 | 0x0000 | 0 | 0x0000 | 0 | timer off |
+| **53** | 1 | **5** | **0x0100** | **150** | **0x0100** | **390** | time mode: High 2:30, Low 6:30, reps 5 |
+| **55** | 1 | **99** | **0x0000** | **100** | **0x0000** | **10000** | distance mode: High 0.1 km, Low 10.0 km, reps 99 |
+| 57 | 0 | 99 | 0x0000 | 0 | 0x0000 | 0 | timer unchecked again |
+
+So:
+
+- `interval_timer_*_unit` = **0x0100 → time, value in seconds**; **0x0000 → distance, value in
+  metres** (0.1 km → 100, 10.0 km → 10000). This matches openambit's own
+  `interval1time ? 0x0100 : 0` exactly, now confirmed against real hardware traffic in both
+  modes.
+- the watch stores precisely what it is handed; nothing is silently altered.
 
 ## 5. Real data captured off the watch
 
