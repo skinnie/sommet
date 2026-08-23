@@ -1692,8 +1692,14 @@ class Handler(BaseHTTPRequestHandler):
          [[0,"24h"],[1,"12h"]], None),
         ("date_format",          "Date format",           "general",  "dropdown",
          [[0,"dd.mm.yy"],[1,"mm/dd/yy"],[2,"yy-mm-dd"]], None),
-        ("alarm_enable",         "Alarm",                 "general",  "checkbox",
-         [[0,"Off"],[1,"On"]], None),
+        # alarm_enable / alarm hour+minute are NOT listed. André: "I see alarm on watch
+        # settings...never seen on suunto link..I believe it is only on the watch no?" -
+        # correct. SuuntoLink has no clock-alarm control at all: its only "alarm" strings are
+        # getSunriseAlarmTime / createSunAlertInput (sunrise-sunset alerts) and
+        # TXT_STORM_ALARM. And across both captures it never wrote bytes 26-28. So the alarm
+        # is set on the watch itself; offering a bare On/Off here - with no time, and with a
+        # write nothing has ever demonstrated - would be inventing a control.
+        # Same for dual_time (@31-32), never written either.
         # --- Units ---------------------------------------------------------------------
         ("units_mode",           "Units",                 "units",    "radio",
          [[0,"Metric"],[1,"Imperial"],[2,"Advanced"]], None),
@@ -1706,10 +1712,15 @@ class Handler(BaseHTTPRequestHandler):
         ("max_hr",               "Max HR",                "personal", "number", None, "bpm"),
         ("rest_hr",              "Rest HR",               "personal", "number", None, "bpm"),
         ("fitness_level",        "Activity level",        "personal", "number", None, None),
-        # Bike POD calibration factors. Stored x10000 on the wire; the UI shows the factor
-        # itself (1.0), and LEGACY_WRITE_SCALE converts on the way back.
-        ("bikepod_calibration",  "Bike POD 1 calibration","general",  "number", None, None),
-        ("bikepod_calibration2", "Bike POD 2 calibration","general",  "number", None, None),
+        # Bike POD calibration. The wire stores a FACTOR x10000; SuuntoLink shows the wheel
+        # circumference in mm and prints the factor underneath (André's own screenshot:
+        # "2050 mm" with "1.000" below it). 2050 never appears in any settings write, so the
+        # mm figure is derived: mm = factor * 2050. His min/max probes land exactly on the
+        # ends of SuuntoLink's own input range - factor 0.02 -> 41 mm, factor 2.0 -> 4100 mm.
+        # Shown in mm here for the same reason SuuntoLink does: a circumference is meaningful,
+        # a bare 1.0 is not.
+        ("bikepod_calibration",  "Bike POD 1 calibration","general",  "number", None, "mm"),
+        ("bikepod_calibration2", "Bike POD 2 calibration","general",  "number", None, "mm"),
     ]
     # The per-unit choices only apply when units_mode is Advanced - same rule as the Ambit3.
     LEGACY_UNIT_SPECS = [
@@ -1731,8 +1742,8 @@ class Handler(BaseHTTPRequestHandler):
     LEGACY_WRITABLE = {
         "language", "backlight_mode", "backlight_brightness", "display_brightness",
         "display_is_negative", "tones_mode", "timemode_button_lock", "sportmode_button_lock",
-        "sync_time_w_gps", "gps_position_format", "alti_baro_mode", "storm_alarm",
-        "fused_alti_disabled", "time_format", "date_format", "alarm_enable", "units_mode",
+        "sync_time_w_gps", "gps_position_format", "alti_baro_mode",
+        "time_format", "date_format", "units_mode",
         "birthyear", "max_hr", "rest_hr", "fitness_level", "is_male", "length_cm",
         "compass_declination_dir", "compass_declination_deg", "navigation_style",
         # Scaled fields - editable now that the conversion is known and confirmed against the
@@ -1743,8 +1754,11 @@ class Handler(BaseHTTPRequestHandler):
     # UI key -> the CLI's own field name where they differ.
     LEGACY_WRITE_KEY = {"length_cm": "length", "weight_kg": "weight"}
     # UI value -> wire value. The watch stores these scaled; the UI edits the real quantity.
-    LEGACY_WRITE_SCALE = {"weight_kg": 100,
-                          "bikepod_calibration": 10000, "bikepod_calibration2": 10000}
+    LEGACY_WRITE_SCALE = {"weight_kg": 100}
+    # Wheel circumference that corresponds to a calibration factor of exactly 1.000, taken
+    # from SuuntoLink's own display. Used only to convert between the mm the user edits and
+    # the factor the watch stores.
+    BIKEPOD_REFERENCE_MM = 2050
 
     def _handle_settings_write_ambit1(self, body):
         """The Ambit1 half of POST /api/settings - one field per call, read-modify-write."""
@@ -1773,6 +1787,9 @@ class Handler(BaseHTTPRequestHandler):
                     scale = self.LEGACY_WRITE_SCALE.get(key)
                     if scale:
                         value = int(round(float(value) * scale))
+                    elif key.startswith("bikepod_calibration"):
+                        # mm back to the stored factor x10000
+                        value = int(round(float(value) / self.BIKEPOD_REFERENCE_MM * 10000))
                     with WATCH_LOCK:
                         r = legacy_link.settings_write(cli_key, value,
                                                         dry_run=not confirm)
@@ -1820,6 +1837,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, raw)
             return
 
+        # Calibration factor -> the circumference SuuntoLink shows.
+        for ck in ("bikepod_calibration", "bikepod_calibration2"):
+            if ck in raw:
+                raw[ck] = round(float(raw[ck]) * self.BIKEPOD_REFERENCE_MM)
+
         # Split the declination u16 back into the two bytes the watch really stores.
         if "compass_declination" in raw:
             v = int(raw["compass_declination"] or 0)
@@ -1840,7 +1862,12 @@ class Handler(BaseHTTPRequestHandler):
             if key == "weight_kg":
                 entry["decimals"] = 2
             if key.startswith("bikepod_calibration"):
-                entry["decimals"] = 4
+                entry["decimals"] = 0
+            # Declination degrees only mean anything once a direction is chosen - André:
+            # "if compass declination if off, no declination degrees, if west or east then
+            # this menu can appear down it". Same dependency SuuntoLink's own control has.
+            if key == "compass_declination_deg":
+                entry["showWhen"] = {"field": "compass_declination_dir", "notValue": 0}
             out[key] = entry
 
         units = raw.get("units") or {}

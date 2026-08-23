@@ -294,8 +294,24 @@ PageFlickable {
                             parts[0] = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
                             return parts.join(" ");
                         }
-                        visible: !isHomeCoordPartner
-                        height: isHomeCoordPartner ? 0 : implicitHeight
+                        // A field can declare a dependency on another via `showWhen`
+                        // {field, notValue} - it appears only while that other field's live
+                        // value differs from notValue. Used for the Ambit1's declination
+                        // degrees, which SuuntoLink only reveals once a direction (East/West)
+                        // is chosen (André: "if compass declination off, no declination
+                        // degrees, if west or east then this menu can appear down it").
+                        readonly property bool shownByDependency: {
+                            if (!item.showWhen)
+                                return true;
+                            for (var i = 0; i < SettingsWriteService.settings.length; i++) {
+                                var o = SettingsWriteService.settings[i];
+                                if (o.key === item.showWhen.field)
+                                    return o.value !== item.showWhen.notValue;
+                            }
+                            return true;
+                        }
+                        visible: !isHomeCoordPartner && shownByDependency
+                        height: (isHomeCoordPartner || !shownByDependency) ? 0 : implicitHeight
                         readonly property string control: {
                             if (item.control)
                                 return item.control;
