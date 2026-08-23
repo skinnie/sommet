@@ -267,9 +267,15 @@ Verified against André's own SuuntoLink screenshots: `alti_baro_mode=1` (Alti),
 
 **The units question, resolved:** every `units.*` field plus `gps_position_format`,
 `time_format` and `date_format` read 0, which looked wrong because the watch had been set to
-Advanced with ft/lbs/miles/degF/inHg during the capture session. Two candidate explanations -
-a parser reading Ambit3 offsets against an Ambit1 reply, or settings that never persisted.
-André checked the watch itself: **it is on metric**. So the read is CORRECT and there is no
-parser bug; the Advanced/imperial change simply did not stick, the same pattern as HR limits
-(§6a) - SuuntoLink offers controls this device cannot store. Worth remembering before
-"fixing" a zero that is actually true.
+Advanced with ft/lbs/miles/degF/inHg during the capture session. It is not a parser bug and
+not a persistence problem: **André had simply set the watch back to metric afterwards**, so 0
+is the watch's true current state and the read is correct.
+
+Worth separating from §6a: HR limits genuinely cannot stick on this device (no `usehrlimits`
+field to store the flag, per Devices.xml). Units have no such capability gap, and every other
+settings field we can cross-check - backlight, brightness, language, alti/baro, pod
+calibration - reads back exactly what SuuntoLink set. There is no evidence units behave any
+differently.
+
+The lesson, earned three times in one session: a zero that contradicts an expectation is at
+least as likely to be the truth as a bug. Check the device before "fixing" it.
