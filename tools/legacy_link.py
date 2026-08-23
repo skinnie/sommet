@@ -110,7 +110,23 @@ def poi_clear():
     return run(["poi-clear"])
 
 
-_COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear")
+def sport_mode_write_presets(dry_run=False):
+    """Blind-overwrites the watch's sport modes with the first 10 of openambit2's own 19
+    factory presets (Running/Trail Running/.../Ski Touring) - capped to 10 in
+    ambit_legacy_cli.c because that's this family's real capacity (SuuntoLink's own
+    getMaxSportModes(AMBIT/AMBIT2*) == 10), caught live 2026-08-23 before any write reached
+    hardware. See ambit_legacy_cli.c's own header comment for why there's no readback/backup:
+    this family's driver has no sport-mode read function in openambit OR openambit2, so there
+    is nothing to preserve first. dry_run builds the payload and reports its shape without
+    touching the watch."""
+    args = ["sport-mode-write-presets"]
+    if dry_run:
+        args.append("--dry-run")
+    return run(args)
+
+
+_COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear",
+             "sport-mode-write-presets")
 
 
 def main():
@@ -126,6 +142,8 @@ def main():
             if len(sys.argv) < 5:
                 sys.exit(f"usage: {sys.argv[0]} poi-add NAME LAT LON")
             result = poi_add(sys.argv[2], sys.argv[3], sys.argv[4])
+        elif cmd == "sport-mode-write-presets":
+            result = sport_mode_write_presets(dry_run="--dry-run" in sys.argv[2:])
         else:
             result = run([cmd])
     except RuntimeError as exc:

@@ -351,15 +351,152 @@ PageFlickable {
         text: qsTr("Sport Modes isn't available on Kailash - it has no CustomModes region on this watch at all.")
     }
 
-    Text {
+    // Real, 2026-08-23 (André: "do like them", after confirming openambit2's own "Sport mode
+    // editor: full read/write to watch" claim is marketing - its "read" is a local JSON file/
+    // hardcoded factoryDefaults(), never the device; this family's driver (ours AND theirs)
+    // has no sport-mode READ function at all, only write. So there is genuinely nothing to
+    // preserve before writing - every write here is a blind, one-way REPLACE of whatever sport
+    // modes are on the watch, same risk profile as openambit2's own feature. Ships the first
+    // 10 of openambit2's own 19 factory presets (Running/Trail Running/.../Ski Touring) via
+    // ambit_legacy_cli's sport-mode-write-presets - capped there, not here, to 10: André caught
+    // live (before any write reached hardware) that this family's real capacity, per
+    // SuuntoLink's own getMaxSportModes(AMBIT/AMBIT2*), is 10 modes, not 19 - openambit2's list
+    // has no per-model cap at all, a gap of theirs this project should not inherit. Unlike the
+    // read-only legacy cards on WatchSettings/Routes/POIs, this one is a REAL, destructive
+    // write - gated behind an explicit confirm dialog, not a single click.
+    Card {
+        id: legacySportModeCard
         visible: HomeViewModel.connected && !HomeViewModel.isKailash && !DeviceCapabilities.supportsSportModes
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Theme.spacingLarge
         width: 560
-        wrapMode: Text.WordWrap
-        color: Theme.mutedText
-        text: qsTr("%1 doesn't support Sport Modes on this app yet.").arg(HomeViewModel.deviceDisplayName)
+
+        property bool working: false
+        property string resultText: ""
+        property bool resultOk: false
+
+        function post(confirm) {
+            legacySportModeCard.working = true
+            legacySportModeCard.resultText = ""
+            const xhr = new XMLHttpRequest()
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return
+                legacySportModeCard.working = false
+                let d = null
+                try { d = JSON.parse(xhr.responseText) } catch (e) {}
+                if (!d || !d.ok) {
+                    legacySportModeCard.resultOk = false
+                    legacySportModeCard.resultText = (d && d.error)
+                        ? d.error : qsTr("Couldn't write sport modes to the watch.")
+                    return
+                }
+                legacySportModeCard.resultOk = true
+                legacySportModeCard.resultText = confirm
+                    ? qsTr("Wrote %1 factory sport modes to the watch.").arg(d.mode_count)
+                    : qsTr("Ready: %1 factory sport modes (%2).").arg(d.mode_count)
+                        .arg((d.names || []).join(", "))
+            }
+            xhr.open("POST", "http://127.0.0.1:8766/api/legacy/sport-modes/write-presets")
+            xhr.setRequestHeader("Content-Type", "application/json")
+            xhr.send(JSON.stringify({ confirm: confirm }))
+        }
+
+        Column {
+            width: parent.width
+            spacing: Theme.spacingSmall
+
+            Text {
+                text: qsTr("%1 doesn't support Sport Modes on this app yet.")
+                    .arg(HomeViewModel.deviceDisplayName)
+                font.bold: true
+                color: Theme.text
+                width: parent.width
+                wrapMode: Text.WordWrap
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeLabel
+                text: qsTr("This watch's protocol has no way to read sport modes back off the "
+                            + "device - not in this app, not in any open-source tool. You can "
+                            + "still write a starter set of 10 factory sport modes (Running, "
+                            + "Cycling, Hiking, Skiing, and more) - this watch's own real "
+                            + "capacity, per Suunto's own SuuntoLink software. This REPLACES "
+                            + "whatever sport modes are currently on the watch - there is no "
+                            + "way to read them first, so there is nothing to restore "
+                            + "afterwards.")
+            }
+
+            RoundedButton {
+                text: legacySportModeCard.working ? qsTr("Working…")
+                                                    : qsTr("Write factory sport modes…")
+                enabled: !legacySportModeCard.working
+                onClicked: {
+                    legacySportModeCard.post(false)
+                    confirmSportModeWrite.open()
+                }
+            }
+
+            Text {
+                visible: legacySportModeCard.resultText.length > 0
+                width: parent.width
+                wrapMode: Text.WordWrap
+                font.pixelSize: Theme.fontSizeCaption
+                color: legacySportModeCard.resultOk ? Theme.success : Theme.error
+                text: legacySportModeCard.resultText
+            }
+        }
+    }
+
+    ThemedDialog {
+        id: confirmSportModeWrite
+        title: qsTr("Replace sport modes on the watch?")
+        anchors.centerIn: Overlay.overlay
+        contentItem: Column {
+            spacing: Theme.spacingSmall
+            width: 420
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                text: qsTr("This will overwrite ALL sport modes currently on %1 with 19 "
+                            + "factory presets. This watch's protocol has no way to read what "
+                            + "is there now, so this cannot be undone or previewed against the "
+                            + "current contents.").arg(HomeViewModel.deviceDisplayName)
+            }
+            Text {
+                visible: legacySportModeCard.resultText.length > 0 && !legacySportModeCard.working
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeCaption
+                text: legacySportModeCard.resultText
+            }
+        }
+        footer: Item {
+            implicitHeight: confirmRow.implicitHeight + Theme.spacingMedium
+            Row {
+                id: confirmRow
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.rightMargin: Theme.spacingMedium
+                spacing: Theme.spacingSmall
+                RoundedButton {
+                    text: qsTr("Cancel")
+                    onClicked: confirmSportModeWrite.close()
+                }
+                RoundedButton {
+                    text: legacySportModeCard.working ? qsTr("Writing…") : qsTr("Write to watch")
+                    enabled: !legacySportModeCard.working
+                    onClicked: {
+                        legacySportModeCard.post(true)
+                        confirmSportModeWrite.close()
+                    }
+                }
+            }
+        }
     }
 
     // ============================== LIST VIEW ==============================

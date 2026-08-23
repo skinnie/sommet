@@ -491,6 +491,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_trainingprogram_delete(body)
         elif self.path == "/api/trainingprogram/install":
             self._handle_trainingprogram_install(body)
+        elif self.path == "/api/legacy/sport-modes/write-presets":
+            self._handle_legacy_sport_mode_write_presets(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -642,6 +644,31 @@ class Handler(BaseHTTPRequestHandler):
         if info is None:
             self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_legacy_sport_mode_write_presets(self, body):
+        """POST /api/legacy/sport-modes/write-presets - Ambit1/2 only. Blind-overwrites the
+        watch's sport modes with the same 19 factory presets openambit2 ships (see
+        ambit_legacy_cli.c's own header comment: this family's driver has no sport-mode READ
+        function in openambit OR openambit2, so there is nothing to preserve first - every
+        write here replaces whatever is currently on the watch, no undo). body:
+        {"confirm": true} required for a real write; omitted/false runs --dry-run instead,
+        which reports the payload shape without touching the watch - same confirm-gate
+        convention as /api/trainingprogram/install."""
+        if not selected_is_legacy():
+            self._send_json(409, {"ok": False, "error": "the selected/connected watch is "
+                                   "not an Ambit1/2"})
+            return
+        confirm = bool((body or {}).get("confirm", False))
+        code, out, err = run_tool(
+            "legacy_link.py",
+            ["sport-mode-write-presets"] + ([] if confirm else ["--dry-run"]))
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {
+                "ok": False, "error": "legacy_link.py sport-mode-write-presets produced no "
+                "parseable JSON", "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
