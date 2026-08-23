@@ -894,7 +894,12 @@ static const struct { const char *name; int off; int width; } A1_SETTING_FIELDS[
     {"weight", 48, 2}, {"birthyear", 50, 2},
     {"max_hr", 52, 1}, {"rest_hr", 53, 1}, {"fitness_level", 54, 1},
     {"is_male", 55, 1}, {"length", 56, 1},
-    {"alti_baro_mode", 60, 1}, {"storm_alarm", 61, 1}, {"fused_alti_disabled", 62, 1},
+    {"alti_baro_mode", 60, 1},
+    /* Bike POD calibration factors, stored x10000 (1.0 = 10000). Offsets from personal.c's
+     * own 0x80 block. Only these TWO exist here: calibration 3, the foot pod and the
+     * auto-calibration flags all sit behind that file's `datalen >= 137` check, whose comment
+     * reads "Only Ambit 2 got this!" - and this device's blob is 132 bytes. */
+    {"bikepod_calibration", 128, 2}, {"bikepod_calibration2", 130, 2},
 };
 #define A1_SETTINGS_BLOB 132
 

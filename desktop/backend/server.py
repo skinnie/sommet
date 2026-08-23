@@ -1706,6 +1706,10 @@ class Handler(BaseHTTPRequestHandler):
         ("max_hr",               "Max HR",                "personal", "number", None, "bpm"),
         ("rest_hr",              "Rest HR",               "personal", "number", None, "bpm"),
         ("fitness_level",        "Activity level",        "personal", "number", None, None),
+        # Bike POD calibration factors. Stored x10000 on the wire; the UI shows the factor
+        # itself (1.0), and LEGACY_WRITE_SCALE converts on the way back.
+        ("bikepod_calibration",  "Bike POD 1 calibration","general",  "number", None, None),
+        ("bikepod_calibration2", "Bike POD 2 calibration","general",  "number", None, None),
     ]
     # The per-unit choices only apply when units_mode is Advanced - same rule as the Ambit3.
     LEGACY_UNIT_SPECS = [
@@ -1731,9 +1735,16 @@ class Handler(BaseHTTPRequestHandler):
         "fused_alti_disabled", "time_format", "date_format", "alarm_enable", "units_mode",
         "birthyear", "max_hr", "rest_hr", "fitness_level", "is_male", "length_cm",
         "compass_declination_dir", "compass_declination_deg", "navigation_style",
+        # Scaled fields - editable now that the conversion is known and confirmed against the
+        # capture (weight x100: a real write of 25000 read back as 250.0 kg; calibration
+        # x10000: 10000/200/20000 in the capture are the factors 1.0 / 0.02 / 2.0).
+        "weight_kg", "bikepod_calibration", "bikepod_calibration2",
     }
     # UI key -> the CLI's own field name where they differ.
-    LEGACY_WRITE_KEY = {"length_cm": "length"}
+    LEGACY_WRITE_KEY = {"length_cm": "length", "weight_kg": "weight"}
+    # UI value -> wire value. The watch stores these scaled; the UI edits the real quantity.
+    LEGACY_WRITE_SCALE = {"weight_kg": 100,
+                          "bikepod_calibration": 10000, "bikepod_calibration2": 10000}
 
     def _handle_settings_write_ambit1(self, body):
         """The Ambit1 half of POST /api/settings - one field per call, read-modify-write."""
@@ -1758,8 +1769,12 @@ class Handler(BaseHTTPRequestHandler):
                                      "error": "not writable on this watch"})
                     continue
                 try:
+                    value = f.get("value")
+                    scale = self.LEGACY_WRITE_SCALE.get(key)
+                    if scale:
+                        value = int(round(float(value) * scale))
                     with WATCH_LOCK:
-                        r = legacy_link.settings_write(cli_key, f.get("value"),
+                        r = legacy_link.settings_write(cli_key, value,
                                                         dry_run=not confirm)
                     r["field"] = key
                     results.append(r)
@@ -1781,8 +1796,8 @@ class Handler(BaseHTTPRequestHandler):
         Writable as of 2026-08-23: the settings WRITE format was solved from André's own USB
         capture (command 0x0b01 carrying the same 132-byte struct the read returns - see
         ambit_legacy_cli.c's cmd_settings_write). Only the fields whose meaning is confirmed
-        are marked writable; `weight_kg` is excluded because the UI edits it in kg while the
-        wire field is a scaled u16, and that conversion is not worth guessing at."""
+        are marked writable. Scaled fields (weight x100, bike POD calibration x10000) are
+        converted by LEGACY_WRITE_SCALE on the way out, so the UI edits the real quantity."""
         sys.path.insert(0, str(TOOLS_DIR))
         import legacy_link                                      # noqa: PLC0415
         env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
@@ -1824,6 +1839,8 @@ class Handler(BaseHTTPRequestHandler):
                 entry["unit"] = unit
             if key == "weight_kg":
                 entry["decimals"] = 2
+            if key.startswith("bikepod_calibration"):
+                entry["decimals"] = 4
             out[key] = entry
 
         units = raw.get("units") or {}
