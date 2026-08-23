@@ -38,6 +38,8 @@
 #define A1_CHUNK            512
 #define A1_REGION_MAX       8192
 #define A1_SETTINGS_LEN     76
+/* SuuntoLink's own getMaxDisplays() for this watch family. */
+#define A1_MAX_DISPLAYS     8
 
 #define TAG_ROOT        0x0003
 #define TAG_MODES       0x0100
@@ -239,6 +241,88 @@ static uint32_t a1_find_row_value(const uint8_t *body, uint32_t len, int keep,
         return views[value_idx];
     }
     return (value_idx == 0) ? row_item_off : 0;
+}
+
+
+/* ---- structural display edits: add / remove -------------------------------------------
+ *
+ * Unlike a row-value change, these RESIZE the record, so four nested length fields have to be
+ * corrected together: the mode's DISPLAYS container, the MODE itself, the MODES container and
+ * the root. Everything after the edit point shifts, and the region's 0xFF tail absorbs the
+ * difference - the region length on the wire never changes, only its used extent.
+ *
+ * A new display is CLONED from a real one already on the watch with the requested layout,
+ * rather than synthesised. That guarantees a structurally valid record (correct row count for
+ * the layout, correct row numbering, valid field ids) built only from bytes the watch itself
+ * produced - the same "use real data, don't invent it" rule the rest of this project follows.
+ */
+
+/* Bounds of the Nth USER display inside a mode body. Returns 1 on success. */
+static int a1_user_display_bounds(const uint8_t *body, uint32_t len, int keep, int idx,
+                                   uint32_t *out_off, uint32_t *out_len) {
+    uint32_t p = 0; int cur = -1;
+    while (p + 4 <= len) {
+        uint16_t tag = rd16(body, p), ln = rd16(body, p + 2);
+        if (tag == TAG_DISPLAYS) { p += 4; continue; }
+        if (tag == TAG_DISPLAY) {
+            cur++;
+            if (cur == idx) {
+                if (cur >= keep) return 0;          /* inside the built-in tail */
+                *out_off = p; *out_len = 4 + ln;
+                return 1;
+            }
+            p += 4 + ln; continue;
+        }
+        p += 4 + ln;
+    }
+    return 0;
+}
+
+/* Offset of a mode's DISPLAYS container within its body, or 0 if absent. */
+static uint32_t a1_displays_container(const uint8_t *body, uint32_t len) {
+    uint32_t p = 0;
+    while (p + 4 <= len) {
+        uint16_t tag = rd16(body, p), ln = rd16(body, p + 2);
+        if (tag == TAG_DISPLAYS) return p;
+        p += 4 + ln;
+    }
+    return 0;
+}
+
+/* Adds `delta` to the four nested length fields that span a mode body edit. `body_off` is the
+ * mode body's absolute offset (its SETTINGS header), `disp_off` the DISPLAYS container's
+ * offset within that body. mode_hdr is the MODE TLV header, 4 bytes before body_off. */
+static void a1_fix_lengths(uint8_t *buf, uint32_t body_off, uint32_t disp_off, int delta) {
+    uint32_t mode_hdr = body_off - 4;
+    wr16(buf, (int)(disp_off + body_off + 2), (uint16_t)(rd16(buf, disp_off + body_off + 2) + delta));
+    wr16(buf, (int)(mode_hdr + 2),            (uint16_t)(rd16(buf, mode_hdr + 2) + delta));
+    wr16(buf, 6,                              (uint16_t)(rd16(buf, 6) + delta));   /* MODES */
+    wr16(buf, 2,                              (uint16_t)(rd16(buf, 2) + delta));   /* root  */
+}
+
+/* Finds any user display anywhere in the region whose layout matches, to clone. */
+static int a1_find_donor(const uint8_t *buf, uint32_t region_len, uint16_t layout,
+                          uint32_t *out_off, uint32_t *out_len) {
+    uint32_t offs[32], boff[32], blen[32];
+    int n = ambit1_find_modes_ex(buf, region_len, offs, boff, blen, 32);
+    for (int i = 0; i < n; i++) {
+        uint32_t p = 0;
+        const uint8_t *body = buf + boff[i];
+        while (p + 4 <= blen[i]) {
+            uint16_t tag = rd16(body, p), ln = rd16(body, p + 2);
+            if (tag == TAG_DISPLAYS) { p += 4; continue; }
+            if (tag == TAG_DISPLAY) {
+                if (p + 8 <= blen[i] && rd16(body, p + 4) == TAG_LAYOUT
+                    && rd16(body, p + 8) == layout) {
+                    *out_off = boff[i] + p; *out_len = 4 + ln;
+                    return 1;
+                }
+                p += 4 + ln; continue;
+            }
+            p += 4 + ln;
+        }
+    }
+    return 0;
 }
 
 /* Walks the TLV and records where each mode's settings blob starts. Returns mode count. */
@@ -536,6 +620,70 @@ int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
         int idx = atoi(a);
         if (idx < 0 || idx >= n) { rejected++; continue; }
         uint8_t *blob = buf + offs[idx];
+
+        /* `IDX|display-remove|DISPIDX` and `IDX|display-add|LAYOUT` - STRUCTURAL edits.
+         * These resize the record, so offsets for every later patch line change; the loop
+         * re-derives mode spans and the system tail immediately afterwards. */
+        if (strcmp(b, "display-remove") == 0 || strcmp(b, "display-add") == 0) {
+            int arg = atoi(c);
+            uint32_t disp_c = a1_displays_container(buf + boff[idx], blen[idx]);
+            if (disp_c == 0) { rejected++; continue; }
+
+            if (strcmp(b, "display-remove") == 0) {
+                uint32_t doff, dlen;
+                if (!a1_user_display_bounds(buf + boff[idx], blen[idx], keep[idx], arg,
+                                             &doff, &dlen)) { rejected++; continue; }
+                if (keep[idx] <= 1) { rejected++; continue; }   /* never leave a mode with none */
+                uint32_t abs = boff[idx] + doff;
+                memmove(buf + abs, buf + abs + dlen, (uint32_t)got - (abs + dlen));
+                memset(buf + (uint32_t)got - dlen, 0xff, dlen);
+                a1_fix_lengths(buf, boff[idx], disp_c, -(int)dlen);
+            } else {
+                if (keep[idx] >= A1_MAX_DISPLAYS) { rejected++; continue; }
+                uint32_t soff, slen;
+                if (!a1_find_donor(buf, (uint32_t)got, (uint16_t)arg, &soff, &slen)) {
+                    rejected++; continue;               /* no real display of that layout to clone */
+                }
+                /* insert after the LAST user display, i.e. before the built-in tail */
+                uint32_t last_off, last_len;
+                if (!a1_user_display_bounds(buf + boff[idx], blen[idx], keep[idx],
+                                             keep[idx] - 1, &last_off, &last_len)) {
+                    rejected++; continue;
+                }
+                uint32_t abs = boff[idx] + last_off + last_len;
+                /* the region must still fit once everything shifts right */
+                uint32_t used = 4 + rd16(buf, 2);
+                if (used + slen > (uint32_t)got) { rejected++; continue; }
+                uint8_t *clone = malloc(slen);
+                if (!clone) { rejected++; continue; }
+                memcpy(clone, buf + soff, slen);        /* copy BEFORE shifting */
+                memmove(buf + abs + slen, buf + abs, (uint32_t)got - (abs + slen));
+                memcpy(buf + abs, clone, slen);
+                free(clone);
+                a1_fix_lengths(buf, boff[idx], disp_c, (int)slen);
+            }
+
+            /* re-derive spans + tail: the region just changed shape */
+            n = ambit1_find_modes_ex(buf, (uint32_t)got, offs, boff, blen, 32);
+            for (int i = 0; i < n; i++)
+                lay_n[i] = a1_collect_layouts(buf + boff[i], blen[i], lay[i], 64);
+            tail = 0;
+            if (n > 1) {
+                int shortest = lay_n[0];
+                for (int i = 1; i < n; i++) if (lay_n[i] < shortest) shortest = lay_n[i];
+                while (tail < shortest) {
+                    uint16_t v = lay[0][lay_n[0] - tail - 1];
+                    int same = 1;
+                    for (int i = 1; i < n; i++)
+                        if (lay[i][lay_n[i] - tail - 1] != v) { same = 0; break; }
+                    if (!same) break;
+                    tail++;
+                }
+            }
+            for (int i = 0; i < n; i++) { keep[i] = lay_n[i] - tail; if (keep[i] < 0) keep[i] = 0; }
+            applied++;
+            continue;
+        }
 
         /* `IDX|row|DISP:ROW:VALUE:FIELDID` - change WHICH data a display row shows.
          * Fixed-size: patches the ROW's own item, or the VIEW at VALUE for a multi-value

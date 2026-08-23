@@ -2609,30 +2609,33 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_customodes_displays_ambit1(self, mode, edits, confirm):
         """The Ambit1 half of POST /api/customodes/displays.
 
-        Only `setRow` is supported, and that is a real limit rather than an unfinished one:
-        changing WHICH data a row shows is a fixed-size edit (a ROW's payload is
-        [u16 row_nbr][u16 item], a VIEW's is [u16 item]), so it patches in place and every TLV
-        length stays valid. Adding or removing a display, or changing a layout's row count,
-        would resize the record and cascade through every parent length - not attempted, and
-        reported as rejected rather than silently dropped.
+        Supports `setRow`, `add` and `remove`. setRow is a fixed-size, in-place patch; add
+        and remove RESIZE the record, so the patcher corrects the four nested lengths
+        (DISPLAYS / MODE / MODES / root) and re-derives every offset afterwards. `setType`
+        (changing a layout's row count) is still not supported and is reported back as an
+        unsupported op rather than silently dropped.
 
         Row addressing matches what the reader emitted: display indices count USER displays
         only, with the computed built-in tail excluded on both sides."""
+        # Layout key -> the template id the watch stores, matching SportModesPage's own
+        # displayTypes table (the Ambit1 uses the same ids as the Ambit3).
+        LAYOUT_ID = {"3-row": 260, "2-row": 261, "1-row": 262, "graph": 257}
         rows = []
         unsupported = []
         for e in edits:
             if not isinstance(e, dict):
                 continue
-            if e.get("op") != "setRow":
-                unsupported.append(e.get("op"))
+            if e.get("op") in ("setRow", "add", "remove"):
+                rows.append(e)
                 continue
-            rows.append(e)
+            unsupported.append(e.get("op"))
         if not rows:
             self._send_json(400, {
                 "ok": False,
-                "error": "this watch supports changing a display row's data; "
-                         f"{sorted(set(unsupported))} would resize the region and is not "
-                         "supported here"})
+                "error": "this watch supports changing a display row's data, and adding or "
+                         f"removing a display; {sorted(set(unsupported))} is not supported "
+                         "here (it would change a layout's row count, which resizes the "
+                         "record differently)"})
             return
 
         # mode name -> index, from the watch's own current order
@@ -2667,6 +2670,24 @@ class Handler(BaseHTTPRequestHandler):
 
         lines = []
         for e in rows:
+            op = e.get("op")
+            if op == "add":
+                layout = LAYOUT_ID.get(str(e.get("type", "")).strip().lower())
+                if layout is None:
+                    unsupported.append(f"add:{e.get('type')}")
+                    continue
+                # A new display is cloned from a real one on the watch with this layout, so
+                # the added record is always structurally valid - see the patcher's own
+                # comment. If the watch has no display of that layout to clone, the patcher
+                # rejects it rather than synthesising one.
+                lines.append(f"{mode_idx}|display-add|{layout}")
+                continue
+            if op == "remove":
+                disp = e.get("display")
+                if disp is None:
+                    continue
+                lines.append(f"{mode_idx}|display-remove|{int(disp)}")
+                continue
             disp = e.get("display")
             row = ROW_INDEX.get(str(e.get("row", "")).strip().lower())
             values = e.get("values") or []
