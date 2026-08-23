@@ -37,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import struct
 import tempfile
 import threading
 import time
@@ -1896,6 +1897,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, info)
             return
 
+        app_names = self._ambit1_app_names()
         modes = []
         for i, m in enumerate(info.get("modes") or []):
             hr_high, hr_low = m.get("hrMax", 0), m.get("hrMin", 0)
@@ -1933,16 +1935,87 @@ class Handler(BaseHTTPRequestHandler):
                 # system screens are already stripped there, so this count matches what the
                 # Ambit3 page shows for its own watch - and stays inside the device's own
                 # 8-display maximum.
-                "displays": self._ambit1_label_displays(m.get("displays") or []),
+                "displays": self._ambit1_label_displays(m.get("displays") or [],
+                                                        app_names),
                 "rules": [],
             })
         self._send_json(200, {
             "ok": True, "formatType": "ambit1",
             "exerciseModes": modes, "sportModes": []})
 
+    # Ambit1 Apps region. Base/size come from SuuntoLink's own Devices.xml per-device record
+    # (rulestorelocation / rulestoresize), NOT libambit's PMEM20_APP_START - that constant is
+    # the Ambit3's 600000 and reads back nothing at all on an Ambit1.
+    LEGACY_APPS_ADDR = 160000
+    LEGACY_APPS_SIZE = 20000
+
+    def _ambit1_app_names(self):
+        """Names of the Suunto Apps installed on an Ambit1, in slot order.
+
+        Why this exists: a display row that holds an app shows "Suunto App Slot 1" because on
+        this device the Apps directory has NO per-entry header - unlike the Ambit3, whose
+        entry block carries the name, the Ambit1's IAMRULE binary starts directly at the
+        entry offset. So the name has to come out of the binary itself.
+
+        Directory: [u16 count][u8 count^2][u32 entry_offset x (count+1)], header_len =
+        3 + 4*(count+1); the last table entry is the used extent. (The Ambit3 stores that
+        second field as a u16, which is why tools/apps.py's directory check rejects this
+        region rather than mis-parsing it.)
+
+        Inside a binary, a u16 table at +28 (0-terminated) lists that app's symbol-name
+        offsets - the name sits at value+1 for '?'-prefixed symbols and value+2 otherwise.
+        Every other printable run is a data constant, and the app's title is the first of
+        them. Verified against the real region: "Storm alarm" and "Sunrise/Sunset", each
+        matching a real SuuntoLink catalogue entry by name.
+
+        Best-effort by design: any parse failure returns {} and the UI falls back to the
+        generic slot label rather than showing a guess."""
+        import re                                              # noqa: PLC0415
+        try:
+            sys.path.insert(0, str(TOOLS_DIR))
+            import legacy_link                                  # noqa: PLC0415
+            with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+                path = f.name
+            try:
+                with WATCH_LOCK:
+                    info = legacy_link.run(["region-dump", hex(self.LEGACY_APPS_ADDR),
+                                             path, str(self.LEGACY_APPS_SIZE)])
+                if not info.get("ok"):
+                    return {}
+                data = Path(path).read_bytes()
+            finally:
+                Path(path).unlink(missing_ok=True)
+
+            count = struct.unpack_from("<H", data, 0)[0]
+            if count == 0 or count > 64:
+                return {}
+            table = struct.unpack_from(f"<{count + 1}I", data, 3)
+            if table[0] != 3 + 4 * (count + 1):
+                return {}                                        # not this format
+            names = {}
+            for i in range(count):
+                blob = data[table[i]:table[i + 1]]
+                if blob[:7] != b"IAMRULE":
+                    continue
+                sym, p = set(), 28
+                while p + 2 <= len(blob):
+                    v = struct.unpack_from("<H", blob, p)[0]
+                    p += 2
+                    if v == 0:
+                        break
+                    sym.update((v + 1, v + 2))
+                consts = [(m.start(), m.group().decode("latin-1"))
+                          for m in re.finditer(rb"[\x20-\x7e]{3,}", blob)
+                          if m.start() not in sym and m.start() != 0]
+                if consts:
+                    names[i] = consts[0][1]
+            return names
+        except Exception:                                        # noqa: BLE001 - best effort
+            return {}
+
     _FIELD_LABELS = None
 
-    def _ambit1_label_displays(self, displays):
+    def _ambit1_label_displays(self, displays, app_names=None):
         """Attach a `label` to every display-row value.
 
         The page renders a row as `values.map(v => v.label)`, and the Ambit3 decoder already
@@ -1962,7 +2035,13 @@ class Handler(BaseHTTPRequestHandler):
             for field in disp.get("fields") or []:
                 for v in field.get("values") or []:
                     t = v.get("type")
-                    v["label"] = labels.get(t, "0x%x" % t if isinstance(t, int) else "")
+                    label = labels.get(t, "0x%x" % t if isinstance(t, int) else "")
+                    # An app-slot row: name the app rather than saying "Suunto App Slot N".
+                    if app_names and isinstance(label, str) and "Suunto App Slot" in label:
+                        slot = label.rsplit(" ", 1)[-1]
+                        if slot.isdigit() and (int(slot) - 1) in app_names:
+                            label = app_names[int(slot) - 1]
+                    v["label"] = label
         return displays
 
     def _handle_customodes_field_types(self):
