@@ -4,20 +4,20 @@ following this project's established convention (build_route.py/write_nav.py: a 
 reference encoder, cross-verified before any C port or real write is attempted).
 
 **Scope, stated precisely**: this covers the BXml tag tree - EXERCISE_MODES (settings,
-displays, rules) and SPORT_MODES - which docs/custom_modes_andre.md fully decoded and byte-verified
+displays, rules) and SPORT_MODES - which custom_modes_andre.md fully decoded and byte-verified
 against a real dump. It does NOT cover the remaining bytes of the 12288-byte CustomModes
 region beyond the ~10240-byte BXml body (BXmlConverter::convertBinaryToTree was seen parsing
-exactly 0x2800 bytes out of the region, see docs/custom_modes_andre.md's "Traced further" section) -
+exactly 0x2800 bytes out of the region, see custom_modes_andre.md's "Traced further" section) -
 that tail is presumed header/checksum by analogy with Routes/Waypoints' own closing-hash
 layout, but that has NOT been confirmed, and this file does not claim to reproduce it. Building
 that closing structure - or confirming the region needs none - is real work still open before
-any encoder here is write-ready; see docs/V3_CHANGELOG.md.
+any encoder here is write-ready; see V3_CHANGELOG.md.
 
 Every build_* function is the direct inverse of the matching decode_* function in
 custom_modes.py: build_x(decode_x(data, offset, length)) reproduces the original content
 bytes exactly for every field this project's decoder understands. Verified by
 `--selftest`: round-trips a synthetic mode through encode -> decode -> compare, using field
-values copied from docs/custom_modes_andre.md's real, byte-verified examples (Openwater swim's
+values copied from custom_modes_andre.md's real, byte-verified examples (Openwater swim's
 ActivityID/CustomModeID/UseHw/AltiBaroMode, the EXERCISE_MODES_TYPE=2 marker, and the exact
 tag/length header bytes documented there), not arbitrary numbers.
 
@@ -50,7 +50,12 @@ def tag(tag_id, content):
 def build_settings(settings):
     """Inverse of decode_settings(). `settings` is a dict shaped exactly like decode_settings's
     return value (Name, ActivityID, CustomModeID, UseHw, ..., IntervalSlots)."""
-    name = settings["Name"].encode("iso-8859-15", "replace")[:SETTINGS_NAME_SIZE]
+    # CORRECTED 2026-08-22: was iso-8859-15 - real hardware (André's French Ambit3 Sport)
+    # proved the watch sends/expects UTF-8 for name fields, see ambit_format.py's
+    # encode_name() header comment. Truncation re-decoded with "ignore" so a multi-byte
+    # character never gets cut in half at the byte boundary (same fix as encode_name()).
+    name = settings["Name"].encode("utf-8", "replace")[:SETTINGS_NAME_SIZE]
+    name = name.decode("utf-8", "ignore").encode("utf-8")
     body = name.ljust(SETTINGS_NAME_SIZE, b"\0")
 
     custom_mode_id = settings["CustomModeID"]
@@ -98,7 +103,7 @@ def build_rule(rule):
 
 def build_mode(mode):
     """Inverse of decode_exercise_mode(). `mode` = {"Settings", "Displays", "Rules",
-    "AppMeta"}. Tag order matches docs/training_program_andre.md's confirmed-real ordering
+    "AppMeta"}. Tag order matches training_program_andre.md's confirmed-real ordering
     (SETTINGS, APP_META, DISPLAYS, RULES) - NOT append-everything-at-the-end, which
     workout_install.py's own writeup already found and fixed once for the app-install path."""
     body = build_settings(mode["Settings"])
@@ -133,12 +138,20 @@ def build_sport_mode_slot(slot):
     confirmed 0/1/2/1/3 swim/T1/bike/T2/run example. Tag order (NAME, ACTIVITY_ID, EXERCISE*N,
     ORDER, then AppMeta if present) matches the real order observed on every slot of a live
     dump, 2026-08-07 - see SPORT_MODE_ORDER/SPORT_MODE_APP_META's own docstrings in
-    custom_modes.py. `Order` is EMITTED ONLY WHEN PRESENT: it was thought mandatory (every slot
-    of the 2026-08-07 dump had one), but this project's own reference Ambit3 Peak decodes all 9
-    slots with no SPORT_MODE_ORDER tag at all (Order=None) - 2026-08-19. Forcing a 0 there both
-    crashed (struct.pack of None) and would corrupt the round-trip; the faithful inverse of a
-    decoder that records None-when-absent is to omit the tag, exactly as for AppMeta below."""
-    name = slot["Name"].encode("iso-8859-15", "replace")[:64].ljust(64, b"\0")
+    custom_modes.py.
+
+    CORRECTED 2026-08-22: "`Order` is required - every real slot has one" was wrong - real,
+    live hardware (André's Ambit3 Sport AND Run, both) has the SPORT_MODE_ORDER tag on
+    NONE of their real sport-mode slots (confirmed by grepping the raw tag bytes directly
+    in the flash dump, not just the decoder - 0 occurrences on either watch). The earlier
+    "every real slot has one" claim was true only of whatever dump it was confirmed
+    against (likely the Peak) - a genuine per-model difference, not a bug in those watches.
+    `Order` is now optional, same as `AppMeta` already was, so the byte-exact re-encode
+    safety check (this function's caller) can pass on Sport/Run instead of always
+    REFUSING with a TypeError."""
+    # CORRECTED 2026-08-22: was iso-8859-15, see build_settings()'s own comment above.
+    name = slot["Name"].encode("utf-8", "replace")[:64]
+    name = name.decode("utf-8", "ignore").encode("utf-8").ljust(64, b"\0")
     body = tag(SPORT_MODE_SETTING_NAME_LEN64, name)
     body += tag(SPORT_MODE_ACTIVITY_ID, struct.pack("<H", slot["ActivityID"]))
     for exercise in slot["Exercises"]:
@@ -167,11 +180,11 @@ def build_custom_modes_body(result, format_type=2):
 
 def _selftest():
     """Round-trips a synthetic mode through build_* -> decode_* and checks equality, using
-    field values taken verbatim from docs/custom_modes_andre.md's real, byte-verified "Openwater
+    field values taken verbatim from custom_modes_andre.md's real, byte-verified "Openwater
     swim" example (ActivityID=0x53, CustomModeID=60596, UseHw=0x0003, AltiBaroMode=1) - not
     arbitrary numbers. Also checks the exact tag/length header bytes the doc transcribed
     directly from the real dump, byte for byte."""
-    # From docs/custom_modes_andre.md: "offset 8: 0b 01 02 00 -> tag=0x010b length=2 value=2"
+    # From custom_modes_andre.md: "offset 8: 0b 01 02 00 -> tag=0x010b length=2 value=2"
     type_tag = tag(EXERCISE_MODES_TYPE, struct.pack("<H", 2))
     expected = bytes.fromhex("0b0102000200")
     assert type_tag == expected, f"EXERCISE_MODES_TYPE mismatch: {type_tag.hex()} != {expected.hex()}"
@@ -226,7 +239,7 @@ def _selftest():
                  "Order": 10, "AppMeta": None}
     tri_bytes = build_sport_mode_slot(triathlon)
     tag_id, length = struct.unpack_from("<HH", tri_bytes, 0)
-    # docs/custom_modes_andre.md originally confirmed 104 bytes for Triathlon's 5-leg encoding -
+    # custom_modes_andre.md originally confirmed 104 bytes for Triathlon's 5-leg encoding -
     # that was before SPORT_MODE_ORDER (0x2fe) was found (2026-08-07); 112 = 104 + the 8-byte
     # ORDER tag every real slot carries.
     assert length == 112, length

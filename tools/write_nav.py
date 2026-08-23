@@ -45,6 +45,31 @@ PRODUCT_IDS = {
     # missing here meant Link.open() raised "no Ambit3 on the USB bus" even with the real
     # device plugged in, since hid.enumerate() only ever looked at the product IDs above.
     0x002A: "Kailash (Hoopoe)",
+    # Real, 2026-08-22: confirmed live against André's actual Ambit1 (serial
+    # 1614984607001600, fw 2.5.7.0) - CMD_DEVICE_INFO (0x0000) and CMD_STATUS (0x0306) are
+    # byte-for-byte openambit's shared device_driver_common.c commands (device_info.py's own
+    # header already said so), common to the WHOLE family including the pre-SBEM Ambit1/2,
+    # not just Ambit3+ - only PRODUCT_IDS was missing these, hid.enumerate() never looked for
+    # them. Confirmed the SBEM object-model commands (settings 0x1100, memory map 0x0b21,
+    # POIs 0x0b24) do NOT extend to Ambit1: they return a 0-byte reply, not an error - real
+    # ambit1/2 settings/waypoints/logs need the legacy PMEM 2.0 protocol instead, which this
+    # file does not implement (see tools/legacy_link.py). Ambit2 product IDs are added
+    # alongside Bluebird on the same evidence (shared device_driver_ambit driver, device_support.c).
+    0x0010: "Ambit (Bluebird)", 0x0019: "Ambit2 (Duck)",
+    0x001A: "Ambit2 S (Colibri)", 0x001D: "Ambit2 R (Greentit)",
+    # Real, 2026-08-22, live on André's own Ambit1: unlike the Ambit3/Kailash family (BSL
+    # keeps the app's own product_id, only the 0x0000 model STRING flips to "BSL"),
+    # Bluebird's bootloader re-enumerates under its OWN distinct product_id - real lsusb
+    # output: "ID 1493:0011 Suunto AmbitBSL". Needed here (not just firmware_write.py's own
+    # LEGACY_BSL_PID map) because Link.open() looks up any explicit product_id in this table
+    # unconditionally for its display label - see firmware_write.py's poll_pid_reopen().
+    # Deliberately no "bluebird" substring anywhere in this label - resolve_product_id()'s
+    # --device matching is a plain case-insensitive substring test, and anything containing
+    # "bluebird" makes "--device Bluebird" ambiguous against 0x0010 above the instant a
+    # watch is (however briefly) sitting in its bootloader. codename_for_pid() isn't used
+    # for this pid by anything real, so the mismatch with the "(codename)" convention here
+    # is deliberate, not an oversight.
+    0x0011: "Ambit Bootloader (AmbitBSL)",
 }
 
 
@@ -849,8 +874,13 @@ def read_memory_map(link):
     # ExerciseLog is not at the Peak's 0x27ac40 at all. Resolving it from the watch, the same
     # discipline the nav regions already use, is the fix. A watch that doesn't declare a given
     # region simply yields no entry, which callers must handle rather than assume.
+    # TrainingProgram added 2026-08-19: the watch declares it (Ambit3 Peak: base 0x001000
+    # size 3072) but it was missing from this regex, so check_memory_map silently SKIPPED
+    # verifying it - training_program.py wrote to the hardcoded base with no declared-region
+    # confirmation (it happened to be correct, but that's the exact "verify region before
+    # write" discipline the other regions already follow).
     for match in re.finditer(
-            rb"(Waypoints|Routes|GpsSGEE|GlonassSGEE|CustomModes|Apps|ExerciseLog|EventLog|TrackLog)\x00",
+            rb"(Waypoints|Routes|GpsSGEE|GlonassSGEE|CustomModes|Apps|TrainingProgram|ExerciseLog|EventLog|TrackLog)\x00",
             reply):
         cursor = match.end()
         end = reply.index(b"\0", cursor)          # hash in hexadecimal

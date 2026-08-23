@@ -168,9 +168,25 @@ def region_hash(flash, base):
     return hashlib.sha256(buf).hexdigest().upper()
 
 
-def encode_name(name, encoding="iso-8859-15"):
-    """15 useful bytes + NUL, truncated on bytes and not on characters."""
+def encode_name(name, encoding="utf-8"):
+    """15 useful bytes + NUL, truncated on bytes and not on characters.
+
+    CORRECTED 2026-08-22: was "iso-8859-15" here (mismatched with decode_name's own "utf-8"
+    right below - an encode/decode round-trip was never actually identity for non-ASCII).
+    Confirmed wrong against real hardware: André's real Ambit3 Sport, set to French, has
+    real sport-mode names ("Entraîn. salle", "Course itinér.") - reading them through the
+    OLD iso-8859-15 decode (custom_modes.py, same bug, fixed alongside this) produced visible
+    mojibake ("EntraÃ®n. salle") - the unmistakable signature of UTF-8 bytes misread as
+    Latin-1/-15. The watch's firmware sends/expects UTF-8; every sibling encoder/decoder
+    across tools/ that used iso-8859-15 for a watch NAME field was fixed the same session.
+
+    Truncation is now also UTF-8-safe: cutting a multi-byte character in half (e.g. a name
+    with an accented character sitting right at the 15-byte boundary) used to leave a
+    dangling lead byte, decoded back as U+FFFD on read - real for any long enough French/
+    accented name, not hypothetical."""
     raw = name.encode(encoding, "replace")[:MAX_NAME_BYTES]
+    if encoding.lower() in ("utf-8", "utf8"):
+        raw = raw.decode("utf-8", "ignore").encode("utf-8")
     return raw + b"\0" * (16 - len(raw))
 
 
@@ -234,7 +250,7 @@ class RouteDescriptor:
         v = ROUTE_DESCRIPTOR.unpack(blob)
         return cls(**dict(zip(cls.FIELDS, (decode_name(v[0]),) + v[1:])))
 
-    def build(self, encoding="iso-8859-15"):
+    def build(self, encoding="utf-8"):
         return ROUTE_DESCRIPTOR.pack(
             encode_name(self.name, encoding), self.start_index, self.point_count,
             self.distance, self.mid_lat, self.mid_lon, self.max_x, self.max_y,

@@ -507,17 +507,23 @@ def describe(decoded, rows, variant=DEFAULT_VARIANT):
     names = exercise_names(decoded)
     lines = [f"Sport modes {used}/{limits['maxSportModes']} used, "
              f"multisport {multi}/{limits['maxMultisportModes']} used"]
-    for s in sorted(decoded["sport_modes"], key=lambda e: e["Order"]):
+    # Order is optional (2026-08-22 fix: real hardware, André's Sport/Run, neither has the
+    # tag on any real slot - see build_sport_mode_slot()'s own comment). Sort key falls back
+    # to a stable "keep decode order" when it's None rather than crashing on None-vs-None
+    # comparison; the display column falls back to "-" instead of printing "None."
+    for idx, s in sorted(enumerate(decoded["sport_modes"]),
+                          key=lambda pair: (pair[1]["Order"] is None, pair[1]["Order"] or 0, pair[0])):
+        order_label = f"{s['Order']:>2}" if s["Order"] is not None else " -"
         activity = activities.get(s["ActivityID"], {}).get("name", f"activity {s['ActivityID']}")
         if is_multisport(s):
             legs = " -> ".join(names[i] for i in s["Exercises"])
-            lines.append(f"  {s['Order']:>2}. {s['Name']}  [{activity}]  {legs}")
+            lines.append(f"  {order_label}. {s['Name']}  [{activity}]  {legs}")
         else:
             blocking = users_of(decoded, s["Exercises"][0])
             screens = sum(1 for d in decoded["exercise_modes"][s["Exercises"][0]]["Displays"]
                           if d["Type"] == 10)
             note = f"  (used by {', '.join(blocking)})" if blocking else ""
-            lines.append(f"  {s['Order']:>2}. {s['Name']}  [{activity}], "
+            lines.append(f"  {order_label}. {s['Name']}  [{activity}], "
                          f"{screens} screen{'s' if screens != 1 else ''}{note}")
     hidden = [n for i, n in enumerate(names)
               if not any(i in s["Exercises"] for s in decoded["sport_modes"])]
@@ -670,11 +676,27 @@ def main():
         link = None
     else:
         from write_nav import Link, read_flash, read_memory_map, resolve_product_id
-        link = Link(args.device)
+        # FIXED 2026-08-22, real bug, caught live with two watches connected at once
+        # (never exercised before - every prior live test had exactly one watch plugged
+        # and never passed --device, so `Link(args.device)` with args.device=None happened
+        # to accidentally land on dry_run=False by luck of None being falsy). Link's first
+        # positional arg is dry_run, not a device name/product_id - passing a device NAME
+        # string there made it truthy, silently forcing dry-run regardless of --write, and
+        # never actually selected the named watch either.
+        # dry_run=False unconditionally, not tied to --write: the read below (and the plan
+        # this script computes and PRINTS from it) must always be real - args.write only
+        # gates the actual send_plan() mutation much further down (see the `if not
+        # args.write: ... return 0` right before it). Tying it here as well as there meant
+        # a plain --list needed a bogus --write just to read at all.
+        product_id = resolve_product_id(args.device) if args.device else None
+        link = Link(dry_run=False, product_id=product_id)
         link.open()
         region = read_memory_map(link).get("CustomModes")
-        base = region["base"] if region else F.CUSTOM_MODES_BASE
-        size = region["size"] if region else F.CUSTOM_MODES_REGION_SIZE
+        # FIXED alongside the above: read_memory_map() returns {name: (base, size)}
+        # tuples (see its own docstring/write_nav.py), not a {"base":..., "size":...}
+        # dict - ["base"]/["size"] would always raise TypeError once `region` was ever
+        # non-None, which it never had been before this same live-two-watch test.
+        base, size = region if region else (F.CUSTOM_MODES_BASE, F.CUSTOM_MODES_REGION_SIZE)
         blob = read_flash(link, base, size)
 
     decoded = custom_modes.decode(blob)
@@ -682,7 +704,18 @@ def main():
     # THE SAFETY RULE: refuse to modify what we cannot reproduce.
     rebuilt = custom_modes_write.build_custom_modes_body(
         decoded, format_type=decoded.get("format_type", 2))
-    if blob[:len(rebuilt)] != rebuilt or any(b != 0xFF for b in blob[len(rebuilt):]):
+    # FIXED 2026-08-22, real finding on André's Ambit3 Run: this used to require
+    # blob[len(rebuilt):] to be all 0xFF, i.e. the ENTIRE padded region past our rebuild -
+    # REFUSING on every real watch with any write history, since the firmware only ever
+    # writes/hashes the USED EXTENT (used_extent(), same discipline custom_modes_write.py's
+    # own send path already follows - see that function's docstring, training_program_andre.md
+    # Finding 28). Confirmed directly on the Run: bytes past the used extent are real,
+    # structured leftover data (an old deleted sport mode, still in Cyrillic even), not
+    # blank padding - completely normal and inert, the firmware never reads past its own
+    # declared root-tag length. The real safety property is "re-encodes byte-exact up to
+    # the used extent", not "the whole padded region is pristine".
+    used = custom_modes.used_extent(blob)
+    if blob[:used] != rebuilt:
         print("REFUSING: this watch's CustomModes region does not re-encode byte-exact, "
               "so no modified version of it may be written.", file=sys.stderr)
         return 3
@@ -732,13 +765,26 @@ def main():
         print("--write needs a real watch, not --from", file=sys.stderr)
         return 5
 
-    from write_nav import send_plan
+    # FIXED 2026-08-22, real bug caught live on André's Ambit3 Run: `custom_modes_write`
+    # has no `write_plan` - this call has never actually reached a real watch before (the
+    # crash happens while evaluating the argument, before send_plan() itself is even
+    # called, so nothing was sent - confirmed by re-reading the watch immediately after,
+    # still exactly the pre-existing 7 modes). Real working pattern taken from
+    # custom_modes_edit.py's own `send()` helper (base, payload) -> FlashImage ->
+    # `[("CustomModes", base, payload), ("tail", base, None)]`, the same one already
+    # proven on real hardware there.
+    from write_nav import send_plan, read_memory_map
+    from ambit_pcap import FlashImage
+    cm_base, _ = read_memory_map(link).get("CustomModes", (F.CUSTOM_MODES_BASE, None))
     bodies = [custom_modes_write.build_custom_modes_body(
         s, format_type=s.get("format_type", 2)) for s in plan]
     for n, body in enumerate(bodies, 1):
         if n > 1:
             time.sleep(STAMP_GAP_SECONDS)
-        send_plan(link, custom_modes_write.write_plan(body))
+        flash = FlashImage()
+        flash.write(cm_base, body)
+        send_plan(link, flash, [("CustomModes", cm_base, body), ("tail", cm_base, None)],
+                  commit=True)
         print(f"  wrote {n}/{len(bodies)} ({len(body)} bytes)")
     print("Done.")
     return 0

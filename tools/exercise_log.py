@@ -162,7 +162,9 @@ def parse_log_header(data, offset, datalen, unknown2_padding_48=FLAGS_UNKNOWN2_P
     h["peak_training_effect"] = c.u8()
     h["activity_type"] = c.u8()
     name_bytes = c.bytes(16)
-    h["activity_name"] = name_bytes.split(b"\0")[0].decode("iso-8859-15", "replace")
+    # CORRECTED 2026-08-22: was iso-8859-15 - real hardware (André's French Ambit3 Sport)
+    # proved the watch sends UTF-8 for name fields, see ambit_format.py's encode_name().
+    h["activity_name"] = name_bytes.split(b"\0")[0].decode("utf-8", "replace")
     h["heartrate_min"] = c.u8()
     h["unknown2"] = c.u8()
     if unknown2_padding_48:

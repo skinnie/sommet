@@ -75,7 +75,7 @@ def find_field_setting_offset(data, mode_name, display_index, field_index):
                 name_tag = CM.read_tag(data, sub_content)
                 if name_tag and name_tag[0] == CM.EXERCISE_MODES_SETTING_NAME_LEN64:
                     name = data[sub_content + 4:sub_content + 4 + 64].rstrip(b"\0").decode(
-                        "iso-8859-15", "replace")
+                        "utf-8", "replace")
                     if name == mode_name:
                         return _find_in_mode(data, sub_content, sub_len, display_index, field_index)
             sub_cursor = sub_content + sub_len

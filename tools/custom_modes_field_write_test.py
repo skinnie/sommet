@@ -78,7 +78,7 @@ def find_settings_base(data, mode_name):
                     name_tag = CM.read_tag(data, sub_content)
                     if name_tag and name_tag[0] == CM.EXERCISE_MODES_SETTING_NAME_LEN64:
                         base = sub_content + 4
-                        current = data[base:base + 64].rstrip(b"\0").decode("iso-8859-15", "replace")
+                        current = data[base:base + 64].rstrip(b"\0").decode("utf-8", "replace")
                         if current == mode_name:
                             return base
                 sub_cursor = sub_content + sub_len

@@ -86,6 +86,18 @@ PLANS_DIR = Path.home() / "AmbitAppPlans"
 # diagnostic log bundles both land here, same "a real place in the user's home" reasoning as
 # BACKUP_DIR/PLANS_DIR above. See tools/gps_track_pod.py's own module docstring for why this
 # whole feature is marked experimental: built without a real device to test against.
+# Legacy (Ambit1/2) sport modes (2026-08-23). This family's protocol has NO sport-mode read -
+# not in this project, not in openambit, not in openambit2 (verified exhaustively: the driver
+# struct has no read slot, sport_mode_serialize has serialize but no deserialize, and
+# PMEM20_SPORT_MODE_START is referenced only by the write). So the watch cannot be the source
+# of truth for these - the HOST has to hold the master copy, which is exactly how the real
+# thing always worked: openambit pulled the authoritative set from the Movescount cloud
+# (syncGET /userdevices/<serial>) and wrote it wholesale; openambit2, post-shutdown, swapped
+# that cloud for a local ~/.openambit/sport_modes.json. Same architecture here, same "a real
+# place in the user's home" reasoning as PLANS_DIR above: this file IS the user's sport modes,
+# editable offline, pushed to the watch on demand.
+LEGACY_SPORT_MODES_FILE = Path.home() / "AmbitAppPlans" / "legacy_sport_modes.json"
+
 GPSTRACKPOD_DIR = Path.home() / "AmbitAppBackups" / "gpstrackpod"
 
 # Suunto T6 (2026-08-14, "implement Suunto t6 ... only as experimental") - exported heart-rate
@@ -252,6 +264,30 @@ def catalog_entry_binary(rule_id):
 # so two plugged watches raced and pages loaded inconsistently).
 SELECTED_PRODUCT_ID = None
 
+# Real, 2026-08-22 (André's Ambit1, serial 1614984607001600): these product IDs speak the
+# older, pre-SBEM PMEM 2.0 protocol - write_nav.py's own SBEM queries (settings 0x1100,
+# memory map 0x0b21, POIs 0x0b24) come back empty on them, not an error, confirmed live. Only
+# device identity/battery (0x0000/0x0306) are common to the whole family - /api/device and
+# /api/devices already work for these unmodified. Settings/waypoints/training-logs route
+# through tools/legacy_link.py instead - see that file and tools/vendor/ambit_legacy_cli/.
+LEGACY_PRODUCT_IDS = {0x0010, 0x0019, 0x001A, 0x001D}  # Bluebird, Duck, Colibri, Greentit
+
+
+def selected_is_legacy():
+    """True when the pinned watch (or, with none pinned, whichever is plugged) is an
+    Ambit1/2. Falls back to a real device_info.py query when nothing is pinned - cheap (one
+    0x0000/0x0306 round trip, already needed for /api/device) and correct even with the
+    default "whichever is plugged" selection, unlike guessing from SELECTED_PRODUCT_ID alone."""
+    if SELECTED_PRODUCT_ID is not None:
+        return SELECTED_PRODUCT_ID in LEGACY_PRODUCT_IDS
+    code, out, err = run_tool("device_info.py", ["--json"])
+    info = None
+    try:
+        info = json.loads(out.strip().splitlines()[-1]) if out.strip() else None
+    except Exception:  # noqa: BLE001 - not parseable means "don't know", not legacy
+        info = None
+    return bool(info) and info.get("model") in ("Bluebird", "Duck", "Colibri", "Greentit")
+
 
 def run_tool(script, args, timeout=180):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
@@ -341,6 +377,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_kailash_tracklog()
         elif self.path == "/api/settings" or self.path.startswith("/api/settings?"):
             self._handle_settings_read()
+        elif self.path == "/api/legacy/settings":
+            self._handle_legacy_settings()
         elif self.path == "/api/customodes":
             self._handle_customodes_read()
         elif self.path == "/api/customodes/field-types":
@@ -387,6 +425,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_legacymerge_devices()
         elif self.path == "/api/smartsensor/status":
             self._handle_smartsensor_status()
+        elif self.path == "/api/trainingprogram":
+            self._handle_trainingprogram_list()
+        elif self.path == "/api/legacy/sport-modes":
+            self._handle_legacy_sport_modes_read()
         else:
             self.send_response(404)
             self.end_headers()
@@ -466,6 +508,18 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_legacymerge_live(body)
         elif self.path == "/api/smartsensor/forget":
             self._handle_smartsensor_forget()
+        elif self.path == "/api/trainingprogram":
+            self._handle_trainingprogram_save(body)
+        elif self.path == "/api/trainingprogram/delete":
+            self._handle_trainingprogram_delete(body)
+        elif self.path == "/api/trainingprogram/install":
+            self._handle_trainingprogram_install(body)
+        elif self.path == "/api/legacy/sport-modes/write-presets":
+            self._handle_legacy_sport_mode_write_presets(body)
+        elif self.path == "/api/legacy/sport-modes":
+            self._handle_legacy_sport_modes_save(body)
+        elif self.path == "/api/legacy/sport-modes/write":
+            self._handle_legacy_sport_modes_write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -538,6 +592,9 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_activities_ble(int(known_count), mark_synced=mark_synced)
             return
+        if selected_is_legacy():
+            self._handle_activities_legacy()
+            return
         with tempfile.TemporaryDirectory() as tmpdir:
             tool_args = ["--gpx-out", tmpdir, "--fit-out", tmpdir, "--known-count", known_count]
             if mark_synced:
@@ -562,6 +619,201 @@ class Handler(BaseHTTPRequestHandler):
                               if master_path.exists() else len(activities))
             self._send_json(200, {"ok": True, "activities": activities,
                                    "total_entries": total_entries, "raw_output": out})
+
+    def _handle_activities_legacy(self):
+        """The Ambit1/2 path for GET /api/activities - tools/legacy_link.py's `logs`
+        (openambit's PMEM 2.0 log read, the only implementation of this older protocol in
+        the project - see tools/vendor/ambit_legacy_cli/). Real, hardware-tested 2026-08-22
+        against André's Ambit1 (0 logs currently on that watch - the code path runs clean,
+        content itself is unverified beyond that). GPX only for now: no FIT encoder exists
+        yet for this family's log format, so fit_base64 is always null - same "real GPS
+        track, no FIT" shape ActivityService already tolerates from tools/gps_track_pod.py.
+        known_count/mark_synced (query params on the SBEM path above) don't apply here: the
+        legacy log read has no partial-skip or synced-flag mechanism in this project yet."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            code, out, err = run_tool("legacy_link.py", ["logs", tmpdir])
+            if code != 0:
+                self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
+                return
+            info = self._parse_last_json_line(out)
+            if info is None or not info.get("ok"):
+                self._send_json(502, {"ok": False, "error": "legacy_link.py logs produced "
+                                       "no parseable JSON", "raw_output": out, "stderr": err})
+                return
+            activities = []
+            for entry in info.get("logs", []):
+                gpx_path = Path(entry["gpx_file"])
+                activities.append({
+                    "index": entry["index"],
+                    "gpx": gpx_path.read_text() if gpx_path.exists() else "",
+                    "fit_base64": None,
+                })
+            self._send_json(200, {"ok": True, "activities": activities,
+                                   "total_entries": info.get("total_entries", len(activities)),
+                                   "raw_output": out})
+
+    def _handle_legacy_settings(self):
+        """GET /api/legacy/settings - Ambit1/2 personal settings + waypoints, real read via
+        tools/legacy_link.py's `settings` (openambit's PMEM 2.0 personal_settings_get).
+        Deliberately a separate endpoint from /api/settings, not a branch inside it: that
+        endpoint's schema (settings_write.py's Ambit3/Kailash field tables) doesn't apply to
+        this much smaller, differently-shaped struct, and this family has no write path yet
+        either (see the ambit-app-ambit12-settings-write memory) - hijacking the existing
+        read+write Settings page would invite a write UI this protocol can't back up.
+        Real, hardware-tested 2026-08-22 against André's Ambit1 (weight/birthyear/HR/etc
+        all read correctly; 0 waypoints/routes currently on that watch)."""
+        if not selected_is_legacy():
+            self._send_json(409, {"ok": False, "error": "the selected/connected watch is "
+                                   "not an Ambit1/2 - use /api/settings instead"})
+            return
+        code, out, err = run_tool("legacy_link.py", ["settings"])
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
+                                   "no parseable JSON", "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_legacy_sport_mode_write_presets(self, body):
+        """POST /api/legacy/sport-modes/write-presets - Ambit1/2 only. Blind-overwrites the
+        watch's sport modes with the same 19 factory presets openambit2 ships (see
+        ambit_legacy_cli.c's own header comment: this family's driver has no sport-mode READ
+        function in openambit OR openambit2, so there is nothing to preserve first - every
+        write here replaces whatever is currently on the watch, no undo). body:
+        {"confirm": true} required for a real write; omitted/false runs --dry-run instead,
+        which reports the payload shape without touching the watch - same confirm-gate
+        convention as /api/trainingprogram/install."""
+        if not selected_is_legacy():
+            self._send_json(409, {"ok": False, "error": "the selected/connected watch is "
+                                   "not an Ambit1/2"})
+            return
+        confirm = bool((body or {}).get("confirm", False))
+        code, out, err = run_tool(
+            "legacy_link.py",
+            ["sport-mode-write-presets"] + ([] if confirm else ["--dry-run"]))
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {
+                "ok": False, "error": "legacy_link.py sport-mode-write-presets produced no "
+                "parseable JSON", "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    # The factory starting point, offered when the user has no master copy yet. Same 10 the
+    # CLI's own preset table ships (openambit2's first 10, capped to this family's real
+    # getMaxSportModes()) - kept here too so the UI can show/seed them without a watch present.
+    LEGACY_FACTORY_SPORT_MODES = [
+        {"name": "Running", "activityId": 10, "modeId": 1, "gpsInterval": 1,
+         "recordingInterval": 1, "altiBaroMode": 0, "hrBelt": True, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 1000},
+        {"name": "Trail Running", "activityId": 13, "modeId": 2, "gpsInterval": 1,
+         "recordingInterval": 1, "altiBaroMode": 1, "hrBelt": True, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 5000},
+        {"name": "Cycling", "activityId": 11, "modeId": 3, "gpsInterval": 1,
+         "recordingInterval": 1, "altiBaroMode": 0, "hrBelt": True, "footPod": False,
+         "bikePod": True, "cadencePod": True, "autolapM": 5000},
+        {"name": "Mountain Biking", "activityId": 3, "modeId": 4, "gpsInterval": 1,
+         "recordingInterval": 1, "altiBaroMode": 1, "hrBelt": True, "footPod": False,
+         "bikePod": True, "cadencePod": False, "autolapM": 0},
+        {"name": "Hiking", "activityId": 8, "modeId": 5, "gpsInterval": 5,
+         "recordingInterval": 5, "altiBaroMode": 1, "hrBelt": False, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+        {"name": "Trekking", "activityId": 9, "modeId": 6, "gpsInterval": 10,
+         "recordingInterval": 10, "altiBaroMode": 1, "hrBelt": False, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+        {"name": "Nordic Walking", "activityId": 14, "modeId": 7, "gpsInterval": 5,
+         "recordingInterval": 5, "altiBaroMode": 0, "hrBelt": True, "footPod": True,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+        {"name": "Rock Climbing", "activityId": 25, "modeId": 8, "gpsInterval": 30,
+         "recordingInterval": 15, "altiBaroMode": 1, "hrBelt": True, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+        {"name": "Ski (Downhill)", "activityId": 26, "modeId": 9, "gpsInterval": 2,
+         "recordingInterval": 2, "altiBaroMode": 1, "hrBelt": True, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+        {"name": "Ski Touring", "activityId": 27, "modeId": 10, "gpsInterval": 5,
+         "recordingInterval": 5, "altiBaroMode": 1, "hrBelt": True, "footPod": False,
+         "bikePod": False, "cadencePod": False, "autolapM": 0},
+    ]
+    LEGACY_MAX_SPORT_MODES = 10   # SuuntoLink's own getMaxSportModes(AMBIT/AMBIT2*) - verified
+
+    def _handle_legacy_sport_modes_read(self):
+        """GET /api/legacy/sport-modes - the HOST's master copy of the user's Ambit1/2 sport
+        modes, plus whether it has ever been saved. This family's protocol has no sport-mode
+        read (verified against openambit AND openambit2 - see LEGACY_SPORT_MODES_FILE's own
+        comment), so this file is the source of truth, exactly as the Movescount cloud was for
+        the real thing. Never touches the watch - it is a plain local read."""
+        modes, saved = None, True
+        try:
+            modes = json.loads(LEGACY_SPORT_MODES_FILE.read_text())
+        except (OSError, json.JSONDecodeError):
+            modes, saved = None, False
+        if not isinstance(modes, list):
+            modes, saved = None, False
+        self._send_json(200, {
+            "ok": True, "saved": saved,
+            "maxModes": self.LEGACY_MAX_SPORT_MODES,
+            "modes": modes if saved else self.LEGACY_FACTORY_SPORT_MODES})
+
+    def _handle_legacy_sport_modes_save(self, body):
+        """POST /api/legacy/sport-modes - replaces the host master copy. Local only; writing to
+        the watch is the separate /write below, so editing and pushing stay distinct actions
+        (the same split openambit2 has between its editor's Save and Write to Watch)."""
+        modes = (body or {}).get("modes")
+        if not isinstance(modes, list) or not modes:
+            self._send_json(400, {"ok": False, "error": "body needs a non-empty \"modes\" list"})
+            return
+        if len(modes) > self.LEGACY_MAX_SPORT_MODES:
+            self._send_json(400, {
+                "ok": False,
+                "error": f"this watch holds at most {self.LEGACY_MAX_SPORT_MODES} sport modes"})
+            return
+        LEGACY_SPORT_MODES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LEGACY_SPORT_MODES_FILE.write_text(json.dumps(modes, indent=2))
+        self._send_json(200, {"ok": True, "count": len(modes)})
+
+    def _handle_legacy_sport_modes_write(self, body):
+        """POST /api/legacy/sport-modes/write - pushes the host master copy to the watch.
+        Ambit1/2 only. body {"confirm": true} for a real write; otherwise --dry-run. Writes
+        whatever is in the request's own "modes" if given (so the UI can push unsaved edits),
+        else the saved master copy, else the factory set."""
+        if not selected_is_legacy():
+            self._send_json(409, {"ok": False, "error": "the selected/connected watch is "
+                                   "not an Ambit1/2"})
+            return
+        modes = (body or {}).get("modes")
+        if not isinstance(modes, list) or not modes:
+            try:
+                modes = json.loads(LEGACY_SPORT_MODES_FILE.read_text())
+            except (OSError, json.JSONDecodeError):
+                modes = None
+            if not isinstance(modes, list) or not modes:
+                modes = self.LEGACY_FACTORY_SPORT_MODES
+        if len(modes) > self.LEGACY_MAX_SPORT_MODES:
+            self._send_json(400, {
+                "ok": False,
+                "error": f"this watch holds at most {self.LEGACY_MAX_SPORT_MODES} sport modes"})
+            return
+
+        confirm = bool((body or {}).get("confirm", False))
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_link                                    # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            with WATCH_LOCK:
+                info = legacy_link.sport_mode_write(modes, dry_run=not confirm)
+        except RuntimeError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            if env_pid:
+                if old is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old
+        self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_activities_ble(self, known_count, mark_synced=False):
         """The BLE path for GET /api/activities - tools/ble_activities.py. Same real
@@ -698,6 +950,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_poi_add_ble(name, lat, lon)
+            return
+
+        if selected_is_legacy():
+            # Real write, 2026-08-22: openambit's libambit_navigation_write, preserves
+            # existing waypoints (read-append-write, same discipline as write_nav.py's own
+            # addpoi above) - see tools/legacy_link.py and the ambit-app-hardware-fleet-check
+            # memory for the live test this was validated against before being wired here.
+            code, out, err = run_tool("legacy_link.py", ["poi-add", name, str(lat), str(lon)])
+            info = self._parse_last_json_line(out)
+            if info is None or not info.get("ok"):
+                self._send_json(502, {"ok": False, "error": (info or {}).get(
+                    "error", "legacy_link.py poi-add produced no parseable JSON"),
+                    "raw_output": out, "stderr": err})
+                return
+            self._send_json(200, {"ok": True, "raw_output": out})
             return
 
         # POI type (icon) - optional; default "Waypoint" (17) if omitted. addpoi validates
@@ -1338,9 +1605,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_settings_read(self):
-        """GET /api/settings[?device=kailash] - Ambit3 (and Traverse/Ambit2, same schema
-        family) by default; pass ?device=kailash for Kailash's own smaller, separately-
-        curated table (added 2026-08-08, same day as the Ambit3 one - see
+        """GET /api/settings[?device=kailash] - Ambit3/Traverse by default; pass
+        ?device=kailash for Kailash's own smaller, separately-curated table (added
+        2026-08-08, same day as the Ambit3 one - see
         tools/settings_write.py's own docstring for both tables' real sources: SuuntoLink's
         screenshots for the Ambit3, the real 7R iOS app's own screenshots for Kailash).
         Real, read-only 0x1100 DeviceSettings query - see custom_modes_andre.md for how

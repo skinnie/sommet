@@ -108,7 +108,10 @@ def decode(data):
             continue
         reserved, activity_id, marker = data[off], data[off + 1], data[off + 2]
         name_field = data[off + ENTRY_HEADER_LEN:off + ENTRY_BLOCK_LEN]
-        name = name_field.split(b"\0", 1)[0].decode("iso-8859-15", "replace")
+        # CORRECTED 2026-08-22: was iso-8859-15 - real hardware (André's French Ambit3
+        # Sport) proved the watch sends UTF-8 for name fields, see ambit_format.py's own
+        # encode_name() header comment for the mojibake evidence.
+        name = name_field.split(b"\0", 1)[0].decode("utf-8", "replace")
         bin_start = magic_off + len(MAGIC)
         bin_end = table[i + 1] if i + 1 < num_entries else total_length
         entries.append({

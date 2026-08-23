@@ -76,6 +76,17 @@ def pid_for_model(model):
     return None
 
 
+# Real, 2026-08-22, live on André's own Ambit1 (Bluebird): unlike the Ambit3/Kailash family
+# (where entering BSL keeps the same USB product_id and only the 0x0000 model STRING flips
+# to "BSL"), Bluebird's bootloader re-enumerates under a DIFFERENT product_id (0x0011,
+# "Suunto AmbitBSL") and its 0x0000 model string stays "Bluebird" - it never becomes "BSL"
+# at all. poll_model_reopen()'s "wait for model=='BSL'" would spin forever on this family.
+# Only Bluebird (0x0010) is confirmed; not yet verified for the Ambit2 product IDs - if one
+# of those turns out to behave the same way (own product_id+1 for BSL), add it here rather
+# than assuming.
+LEGACY_BSL_PID = {0x0010: 0x0011}
+
+
 # Seconds to wait between the HID reports of one multi-report message. The BSL bootloader
 # is minimal firmware and drops interrupt-OUT reports that arrive back-to-back (unlike the
 # full application, where fast multi-report writes like 0x0b16 work). SuuntoLink paces the
@@ -242,14 +253,56 @@ def poll_model_reopen(link, want, tries=30, delay=0.5):
                        f"(last seen {last!r})")
 
 
+def poll_pid_reopen(want_pid, tries=30, delay=0.5):
+    """Legacy-family counterpart to poll_model_reopen(): waits for `want_pid` itself to
+    enumerate (see LEGACY_BSL_PID) instead of waiting for a model string that never
+    changes on this family. Builds a fresh Link at want_pid each attempt rather than
+    reopen()'s reuse of the OLD link's pinned product_id, which would keep looking for the
+    pid that just disappeared. Returns (link, info)."""
+    import hid
+    for _ in range(tries):
+        if hid.enumerate(0x1493, want_pid):
+            try:
+                fresh = Link(dry_run=False, verbose=False, product_id=want_pid)
+                fresh.open()
+                return fresh, read_device_info(fresh)
+            except Exception:
+                pass
+        time.sleep(delay)
+    raise RuntimeError(f"device never enumerated as product_id 0x{want_pid:04x} across a "
+                       "re-enumeration")
+
+
+def initial_pid_for_flash(app_pid):
+    """Which product_id to open at, when a legacy-family watch (Bluebird, so far) might
+    already be sitting in BSL from an earlier interrupted attempt - its BSL pid (see
+    LEGACY_BSL_PID) is on the bus INSTEAD of the app pid, not alongside it, so Link's own
+    "try every known pid" fallback (product_id=None) would never find it: LEGACY_BSL_PID's
+    values aren't in the general PRODUCT_IDS table (a BSL identity has no business showing
+    up in the normal watch-switcher). Checked directly with hid.enumerate rather than
+    guessed - real, 2026-08-22, live on André's own Ambit1 mid-resume."""
+    bsl_pid = LEGACY_BSL_PID.get(app_pid)
+    if bsl_pid is None:
+        return app_pid
+    import hid
+    if not hid.enumerate(0x1493, app_pid) and hid.enumerate(0x1493, bsl_pid):
+        return bsl_pid
+    return app_pid
+
+
 def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=False):
     header, payload = parse_container(path)
     n_chunks = (len(payload) + CHUNK - 1) // CHUNK
 
-    link = Link(dry_run=False, verbose=False, product_id=pid_for_model(expect_model))
+    app_pid = pid_for_model(expect_model)
+    link = Link(dry_run=False, verbose=False, product_id=initial_pid_for_flash(app_pid))
     link.open()
     info = read_device_info(link)
-    in_bsl = info["model"] == "BSL"
+    # Real, 2026-08-22: Bluebird's BSL never reports model=="BSL" the Ambit3/Kailash way -
+    # it keeps reporting its own real model name ("Bluebird") and signals bootloader mode
+    # purely via the product_id switch (see LEGACY_BSL_PID's own comment). Detect via
+    # whichever pid actually answered, not the model string, for a legacy-family watch.
+    in_bsl = (info["model"] == "BSL") or (link.opened_product_id in LEGACY_BSL_PID.values())
     battery = None if in_bsl else read_battery(link)  # 0x0306 is not answered in BSL
     event("connected",
           f"  connected: model {info['model']}  serial {info['serial']}  "
@@ -306,7 +359,11 @@ def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=Fa
         # --- enter the bootloader (device re-enumerates; reopen the handle) ---
         event("enter_bsl", "\n  0x0202 -> enter bootloader", already=False)
         expect_empty(raw_command(link, CMD_FW_BOOTLOADER), "0x0202 bootloader-enter ack")
-        link, _ = poll_model_reopen(link, "BSL")
+        bsl_pid = LEGACY_BSL_PID.get(app_pid)
+        if bsl_pid is not None:
+            link, _ = poll_pid_reopen(bsl_pid)
+        else:
+            link, _ = poll_model_reopen(link, "BSL")
         print(f"  watch now in BSL (was {info['model']}), handle reopened")
 
         if probe_enter:
@@ -353,7 +410,13 @@ def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=Fa
     expect_empty(raw_command(link, CMD_FW_REBOOT, ack_timeout=60.0), "0x0200 reboot ack")
     event("rebooting", "  committed. waiting for the watch to reboot into the application...")
     time.sleep(3)
-    link, after = poll_model_reopen(link, expect_model, tries=60, delay=0.5)
+    # Legacy family: reopen() would keep reusing the BSL pid (0x0011) the link is still
+    # pinned to, but the reboot re-enumerates back to the APP pid (0x0010) - same
+    # product_id-not-model-string distinction as entering BSL, see LEGACY_BSL_PID.
+    if app_pid in LEGACY_BSL_PID:
+        link, after = poll_pid_reopen(app_pid, tries=60, delay=0.5)
+    else:
+        link, after = poll_model_reopen(link, expect_model, tries=60, delay=0.5)
     event("done", f"\n  DONE: back in application. model {after['model']}  "
           f"fw {after['fw_version']}  hw {after['hw_version']}",
           model=after["model"], fw=after["fw_version"], hw=after["hw_version"])

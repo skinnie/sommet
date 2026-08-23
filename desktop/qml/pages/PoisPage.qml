@@ -15,7 +15,11 @@ PageFlickable {
     property string saveError: ""
 
     Component.onCompleted: {
-        PoiService.refresh()
+        // Real, 2026-08-22: Ambit1/2 predate the SBEM POI database PoiService reads - same
+        // fix as Watch Settings/Sport Modes/Routes. Real waypoints for this family are
+        // shown below instead, via /api/legacy/settings.
+        if (DeviceCapabilities.supportsPOIs)
+            PoiService.refresh()
         GarminService.refreshDeviceGpx()
     }
 
@@ -482,9 +486,88 @@ PageFlickable {
         // PoiService::parseOnWatchPois's own comment). A thumbnail per POI costs nothing
         // extra over what refresh() already fetched - lat/lon come straight from the same
         // parsed record, no per-POI network/USB round trip. ---
+        // Real, 2026-08-22: Ambit1/2 waypoints via /api/legacy/settings' own waypoints[]
+        // (tools/legacy_link.py -> openambit's libambit_navigation_read). Read-only: write
+        // is openambit's libambit_navigation_write, real but never hardware-tested here for
+        // this family - see the ambit-app-hardware-fleet-check memory.
+        Card {
+            id: legacyPoiCard
+            width: parent.width
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsPOIs
+
+            property bool loading: false
+            property string error: ""
+            property var waypoints: []
+
+            // Real write now (2026-08-22, openambit's libambit_navigation_write, see the
+            // "Add a POI" card above which already posts to /api/pois - the backend routes
+            // that to the legacy path itself). Re-read after a successful add so the new
+            // POI shows up here without a manual page reload.
+            Connections {
+                target: PoiService
+                function onAddOkChanged() {
+                    if (legacyPoiCard.visible && PoiService.addOk) legacyPoiCard.refresh()
+                }
+            }
+
+            function refresh() {
+                legacyPoiCard.loading = true
+                legacyPoiCard.error = ""
+                const xhr = new XMLHttpRequest()
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    legacyPoiCard.loading = false
+                    let d = null
+                    try { d = JSON.parse(xhr.responseText) } catch (e) {}
+                    if (!d || !d.ok) {
+                        legacyPoiCard.waypoints = []
+                        legacyPoiCard.error = (d && d.error) ? d.error : qsTr("Couldn't read POIs from the watch.")
+                        return
+                    }
+                    legacyPoiCard.waypoints = d.waypoints || []
+                }
+                xhr.open("GET", "http://127.0.0.1:8766/api/legacy/settings")
+                xhr.send()
+            }
+            onVisibleChanged: if (visible && waypoints.length === 0 && error === "" && !loading) refresh()
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Text { text: qsTr("On the watch"); font.bold: true; color: Theme.text }
+                Text { visible: legacyPoiCard.loading; color: Theme.mutedText; text: qsTr("Reading POIs off the watch...") }
+                ErrorBanner {
+                    width: parent.width
+                    detail: legacyPoiCard.error
+                    context: qsTr("reading legacy POIs")
+                    canRetry: true
+                    onRetry: legacyPoiCard.refresh()
+                }
+                Text {
+                    visible: !legacyPoiCard.loading && legacyPoiCard.error === "" && legacyPoiCard.waypoints.length === 0
+                    color: Theme.mutedText
+                    text: qsTr("No POIs on this watch.")
+                }
+                Repeater {
+                    model: legacyPoiCard.waypoints
+                    delegate: Column {
+                        width: parent.width
+                        spacing: 2
+                        Text { color: Theme.text; font.bold: true; text: modelData.name }
+                        Text {
+                            color: Theme.mutedText
+                            text: qsTr("%1, %2  (%3 m)")
+                                .arg(modelData.lat.toFixed(5)).arg(modelData.lon.toFixed(5)).arg(modelData.altitude_m)
+                        }
+                    }
+                }
+            }
+        }
+
         Card {
             id: onDevicePoiCard
             width: parent.width
+            visible: HomeViewModel.isGarmin || DeviceCapabilities.supportsPOIs
             readonly property bool loading:
                 HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading
             readonly property var onDevicePois:

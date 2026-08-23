@@ -103,7 +103,11 @@ def build_apps_region(existing_entries, compiled, entry_type=0):
         binary = binary[len(apps.MAGIC):]
     activity_id = compiled.get("activityId", 0) & 0xFF
     marker = apps.entry_checksum(binary)
-    name = compiled.get("name", "App").encode("iso-8859-15", "replace")[:apps.NAME_LEN - 1]
+    # CORRECTED 2026-08-22: was iso-8859-15 - real hardware (André's French Ambit3 Sport)
+    # proved the watch sends/expects UTF-8 for name fields, see ambit_format.py's
+    # encode_name() header comment and apps.py's own decode fix.
+    name = compiled.get("name", "App").encode("utf-8", "replace")[:apps.NAME_LEN - 1]
+    name = name.decode("utf-8", "ignore").encode("utf-8")
     name_field = name + b"\0" * (apps.NAME_LEN - len(name))
     # Entry header byte 0 = the rule TYPE, from BinaryAreaAppsConverter::typeMapping in the
     # Movescount Android app's libkomposti (init(): map["generic"]=0, map["guidance"]=1).

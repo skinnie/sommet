@@ -68,14 +68,24 @@ CHUNK = 512
 # per-attempt go-ahead (see the module docstring and the never-touch-firmware rule).
 
 
+KNOWN_CONTAINER_MAGICS = (b"SFI2ST", b"SFI1")
+# SFI1 added 2026-08-22: a real Ambit1 firmware file (Bluebird-fw_2.5.7-69.1.18948.zip,
+# André's own SuuntoLink cache) starts "SFI1\x00\x01\x02\x05..." not "SFI2ST" - a related
+# but distinct container tag for the legacy family. Verified --compare-clean against a real
+# USBPcap capture of André's own Ambit1 firmware update before this was trusted (see
+# ambit_app_ambit1_firmware memory) - the command sequence (0x0202/0x0e00/0x0e01.../0x0e03/
+# 0x0200) and chunking are otherwise identical to the Ambit3 family already proven here.
+
+
 def parse_container(path):
     """[32-byte header][raw payload] - see this module's docstring. Despite the
     filename, do not treat this as a zip: `unzip -l` fails on it for real."""
     data = pathlib.Path(path).read_bytes()
     header, payload = data[:HEADER_LEN], data[HEADER_LEN:]
-    if not header.startswith(b"SFI2ST"):
-        raise ValueError(f"{path}: does not start with the known 'SFI2ST..' magic - "
-                          "not a firmware container this tool recognizes")
+    if not header.startswith(KNOWN_CONTAINER_MAGICS):
+        raise ValueError(f"{path}: does not start with a known firmware-container magic "
+                          f"({b', '.join(KNOWN_CONTAINER_MAGICS)!r}) - not a firmware "
+                          "container this tool recognizes")
     return header, payload
 
 

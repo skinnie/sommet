@@ -14,7 +14,11 @@ PageFlickable {
     clip: true
 
     Component.onCompleted: {
-        RouteService.refresh()
+        // Real, 2026-08-22: Ambit1/2 predate the SBEM nav database RouteService reads -
+        // calling it against a connected Ambit1 got a real "ok: false" (correct - that
+        // family doesn't have this mechanism), same fix as Watch Settings/Sport Modes.
+        if (DeviceCapabilities.supportsRoutes)
+            RouteService.refresh()
         GarminService.refreshDeviceGpx()
     }
 
@@ -238,8 +242,79 @@ PageFlickable {
         // step: its route objects already carry gpxText straight from the local file
         // that's already been read, unlike Ambit's own routes which need a real backend/USB
         // round trip per Export tap (see RouteService.exportRoute()). ---
+        // Real, 2026-08-22: Ambit1/2 routes read via /api/legacy/settings' own routes[]
+        // (tools/legacy_link.py -> openambit's libambit_navigation_read - see
+        // tools/vendor/openambit_libambit/README.md). Read-only: writing a route back is
+        // openambit's libambit_navigation_write, real but never hardware-tested by this
+        // project for this device family - see the ambit-app-hardware-fleet-check memory.
+        Card {
+            id: legacyRoutesCard
+            width: 560
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
+
+            property bool loading: false
+            property string error: ""
+            property var routes: []
+
+            function refresh() {
+                legacyRoutesCard.loading = true
+                legacyRoutesCard.error = ""
+                const xhr = new XMLHttpRequest()
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    legacyRoutesCard.loading = false
+                    let d = null
+                    try { d = JSON.parse(xhr.responseText) } catch (e) {}
+                    if (!d || !d.ok) {
+                        legacyRoutesCard.routes = []
+                        legacyRoutesCard.error = (d && d.error) ? d.error : qsTr("Couldn't read routes from the watch.")
+                        return
+                    }
+                    legacyRoutesCard.routes = d.routes || []
+                }
+                xhr.open("GET", "http://127.0.0.1:8766/api/legacy/settings")
+                xhr.send()
+            }
+            onVisibleChanged: if (visible && routes.length === 0 && error === "" && !loading) refresh()
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("On the watch"); font.bold: true; color: Theme.text }
+                Text { visible: legacyRoutesCard.loading; color: Theme.mutedText; text: qsTr("Reading routes off the watch...") }
+                ErrorBanner {
+                    width: parent.width
+                    detail: legacyRoutesCard.error
+                    context: qsTr("reading legacy routes")
+                    canRetry: true
+                    onRetry: legacyRoutesCard.refresh()
+                }
+                Text {
+                    visible: !legacyRoutesCard.loading && legacyRoutesCard.error === "" && legacyRoutesCard.routes.length === 0
+                    color: Theme.mutedText
+                    text: qsTr("No routes on this watch.")
+                }
+                Repeater {
+                    model: legacyRoutesCard.routes
+                    delegate: Column {
+                        width: parent.width
+                        spacing: 2
+                        Text { color: Theme.text; font.bold: true; text: modelData.name }
+                        Text {
+                            color: Theme.mutedText
+                            text: qsTr("%1 points, %2 m, +%3/-%4 m")
+                                .arg(modelData.points_count).arg(modelData.distance_m)
+                                .arg(modelData.altitude_asc_m).arg(modelData.altitude_dec_m)
+                        }
+                    }
+                }
+            }
+        }
+
         Card {
             id: onDeviceCard
+            visible: HomeViewModel.isGarmin || DeviceCapabilities.supportsRoutes
             width: parent.width
             readonly property bool loading:
                 HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : RouteService.loading

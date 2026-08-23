@@ -459,16 +459,20 @@ PageFlickable {
                 Text { text: qsTr("Download firmware for backup"); font.bold: true; color: Theme.text }
 
                 Text {
+                    // CORRECTED 2026-08-22: this claim was stale - the backend's own
+                    // _handle_firmware_download() docstring says plainly "the image is a
+                    // real SFI2ST firmware container, flashed by firmware_write.py" - it's
+                    // the exact same file the "Reinstall firmware" flasher above already
+                    // uses, not a separate backup-only format. Real flashing IS supported
+                    // by this app (hardware-proven on Ambit3 Peak and, 2026-08-22, Ambit1)
+                    // - this download just saves an extra local copy in case Suunto's own
+                    // server ever stops serving this version, it's not the only path.
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    color: Theme.error
+                    color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
-                    font.bold: true
-                    text: qsTr("For backup only - this cannot be used to flash the watch. " +
-                                "There is no known way to install firmware over this " +
-                                "protocol; the only supported way to update the watch is " +
-                                "Suunto's own official app. Saved purely as a local copy in " +
-                                "case Suunto's server ever stops serving this version.")
+                    text: qsTr("Saves a local copy of the same firmware file the flasher above " +
+                                "uses, in case Suunto's server ever stops serving this version.")
                 }
 
                 Text {
@@ -511,16 +515,19 @@ PageFlickable {
             }
         }
 
-        // Honest coverage note - fully tested on the Ambit3 Peak; the rest of the Ambit3
-        // generation share the identical firmware process (verified for Kailash and
-        // Traverse from captures), Ambit1/Ambit2 are a different, unsupported generation.
+        // Honest coverage note - fully tested (real hardware flash) on the Ambit3 Peak and,
+        // 2026-08-22, the Ambit1 (Bluebird) - same command sequence, real per-family BSL
+        // difference found and handled (see LEGACY_BSL_PID in firmware_write.py). The rest
+        // of the Ambit3 generation share the identical process (verified for Kailash and
+        // Traverse from captures). Ambit2 not yet confirmed - same legacy family as Ambit1,
+        // untested hardware.
         Text {
             width: parent.width
             wrapMode: Text.WordWrap
             color: Theme.mutedText
             font.pixelSize: Theme.fontSizeCaption
-            text: qsTr("Fully tested on the Ambit3 Peak. The other Ambit3-family, Traverse "
-                       + "and Kailash watches use the same firmware process.")
+            text: qsTr("Hardware-tested on the Ambit3 Peak and the Ambit1. The other Ambit3-family, "
+                       + "Traverse and Kailash watches use the same firmware process. Ambit2 not yet confirmed.")
         }
     }
 }

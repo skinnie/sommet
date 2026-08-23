@@ -14,15 +14,24 @@ watch's own screen that it visibly changed - the first real, independently-verif
 confirmation in this project that a cable settings write (`0x1101`) actually takes live
 effect, not just an accepted-and-echoed-but-inert write.
 
-Two curated tables, one per real schema family - `AMBIT3_SETTINGS` (Ambit3/Traverse/
-Ambit2) only includes fields visible in SuuntoLink's own real "General Settings" screen
-(`assets/ambit3 pcap/v2/general ambit settings/`); `KAILASH_SETTINGS` only includes fields
-visible in the real 7R iOS app's own settings screen (`assets/APK/kailash/IMG_2741.png`,
-`IMG_2742.png` - a real screenshot pair, not the Ambit3's). `settings_table()` picks the
-right one from a product_id, defaulting to the Ambit3 table for every non-Kailash ID (the
-whole family shares that schema shape). Each field's real type/enum comes directly from the
-schema itself (`<FRM>` tag), not hand-mapped - `describe_field()` turns that into a
-JSON-friendly shape (enum choices, or a numeric range) for a UI to render generically.
+Two curated tables, one per real schema family - `AMBIT3_SETTINGS` (Ambit3/Traverse) only
+includes fields visible in SuuntoLink's own real "General Settings" screen (`assets/ambit3
+pcap/v2/general ambit settings/`); `KAILASH_SETTINGS` only includes fields visible in the
+real 7R iOS app's own settings screen (`assets/APK/kailash/IMG_2741.png`, `IMG_2742.png` - a
+real screenshot pair, not the Ambit3's). `settings_table()` picks the right one from a
+product_id, defaulting to the Ambit3 table for every non-Kailash ID. Each field's real
+type/enum comes directly from the schema itself (`<FRM>` tag), not hand-mapped -
+`describe_field()` turns that into a JSON-friendly shape (enum choices, or a numeric range)
+for a UI to render generically.
+
+CORRECTION, 2026-08-22, real Ambit1 hardware: this whole file only applies to the SBEM-era
+family. Live-tested the 0x1100 query (`settings`, no `--write`) against a real Ambit1 -
+0-byte reply, not an error. Ambit1/2 predate SBEM and speak the older PMEM 2.0 protocol
+instead (see tools/legacy_link.py, tools/vendor/ambit_legacy_cli/) - "Traverse/Ambit2 share
+that same schema shape" above was never actually verified on real Ambit2 hardware and is now
+known wrong for Ambit1; `settings_table()` raises rather than silently defaulting to
+`AMBIT3_SETTINGS` for any of write_nav.PRODUCT_IDS' legacy entries, on the same "silently
+wrote to a completely different field" reasoning this file already documents above.
 
     ./tools/settings_write.py                                    # read every known setting
     ./tools/settings_write.py --json                              # same, as one JSON line
@@ -44,6 +53,23 @@ from write_nav import CMD_SETTINGS_READ, Link, descriptor_for_product_id
 
 CMD_SETTINGS_WRITE = 0x1101
 KAILASH_PRODUCT_ID = 0x002A
+
+# Real, 2026-08-22, decoded straight from SuuntoLink's own ambit/sport_mode.js
+# `supports*(variant)` functions (node, stubbed `electron`) - the real per-model capability
+# gate, not guessed from a spec sheet. Ran EVERY `supports*` function for Emu(Peak)/
+# Finch(Sport)/Ibisbill(Run): only altiBaroProfile differs among the fields this file's
+# AMBIT3_SETTINGS table covers (Sport/Run have no barometer - `supportsAltiBaroProfile` is
+# false for both, true only for Peak) - audio mode, compass units, GPS position format,
+# language, backlight, interval timer, HR limits, autoscroll, display all identical.
+# supportsMultisportModes/supportsBikePod/supportsPowerPod are also false on the Run
+# (no multisport combos, no bike/power pod pairing) but those aren't DeviceSettings fields
+# this file reads/writes - they gate sport_mode_manage.py's own create/multisport path
+# instead, not yet threaded through there.
+AMBIT3_SPORT_PRODUCT_ID = 0x001C
+AMBIT3_RUN_PRODUCT_ID = 0x001E
+_UNSUPPORTED_ON_MODEL = {
+    "alti_baro_profile": {AMBIT3_SPORT_PRODUCT_ID, AMBIT3_RUN_PRODUCT_ID},
+}
 
 # key -> a unique suffix of the real schema path (matched via .endswith(), so
 # "Display.Invert" only ever matches sml.DeviceSettings.Display.Invert, not some other
@@ -540,10 +566,23 @@ def _from_display(key, value):
     return value
 
 
+# Ambit1/2 - write_nav.PRODUCT_IDS' legacy entries (0x0010 Bluebird, 0x0019 Duck, 0x001A
+# Colibri, 0x001D Greentit). Real, 2026-08-22: confirmed live against an Ambit1 that 0x1100
+# comes back empty, not an error - these do not share AMBIT3_SETTINGS' schema. See this
+# file's own module docstring "CORRECTION" paragraph.
+LEGACY_PRODUCT_IDS = (0x0010, 0x0019, 0x001A, 0x001D)
+
+
 def settings_table(product_id):
     """Which curated table applies to `product_id` - Kailash's own smaller one for its real
-    product ID, the Ambit3's table for everything else (Traverse/Ambit2 share that same
-    schema family)."""
+    product ID, the Ambit3's table for everything else. Raises for an Ambit1/2 product_id
+    rather than silently defaulting to the Ambit3 table - real, hardware-confirmed 2026-08-22
+    that they don't share its schema (see tools/legacy_link.py instead)."""
+    if product_id in LEGACY_PRODUCT_IDS:
+        raise ValueError(
+            f"product_id 0x{product_id:04x} is an Ambit1/2 - it doesn't speak SBEM/0x1100 "
+            "(confirmed empty reply on real hardware, 2026-08-22). Use tools/legacy_link.py "
+            "instead.")
     return KAILASH_SETTINGS if product_id == KAILASH_PRODUCT_ID else AMBIT3_SETTINGS
 
 _ENUM_RE = re.compile(r"^enum:(.+)$")
@@ -710,6 +749,16 @@ def read_all(payload, descriptor, product_id=None):
         # derives (backlight brightness is 5..100, not 0..255).
         writable = (key not in KAILASH_READ_ONLY) if product_id == KAILASH_PRODUCT_ID \
             else (key in AMBIT3_KEY_TEMPLATE)
+        # Real, 2026-08-22: André pushed back on "settings are identical across Peak/Sport/
+        # Run" being surprising, correctly - ran SuuntoLink's own compiled sport_mode.js
+        # (node, stubbed `electron`) rather than guessed, and `supportsAltiBaroProfile(variant)`
+        # is false for both Sport(Finch)/Run(Ibisbill), true for Peak(Emu) - SuuntoLink hides
+        # this control ENTIRELY on those two models (no barometer), not merely one of its
+        # choices. An earlier version of this fix only dropped the "Automatic" choice - real
+        # but incomplete, since the field itself should show read-only (or not at all), same
+        # as any other field this watch's own firmware doesn't back.
+        if key in _UNSUPPORTED_ON_MODEL and product_id in _UNSUPPORTED_ON_MODEL[key]:
+            writable = False
         if product_id != KAILASH_PRODUCT_ID and _display_range(key) is not None:
             desc = dict(desc)
             desc["min"], desc["max"] = _display_range(key)
@@ -1184,6 +1233,14 @@ def write_one(link, descriptor, key, new_value, product_id=None):
     refusal = _refuse_forced_unit(schema, key, before)
     if refusal:
         return {"ok": False, "error": refusal}
+    # Symmetric with read_all()'s own `writable: False` for this same case (see its
+    # _UNSUPPORTED_ON_MODEL comment) - real, 2026-08-22: write_one() never checked this on
+    # its own read_all() only marked the field non-writable in the DESCRIPTION, this
+    # function had no matching refusal, so a real write would have gone out anyway.
+    if key in _UNSUPPORTED_ON_MODEL and product_id in _UNSUPPORTED_ON_MODEL[key]:
+        return {"ok": False, "error": f"{key} is not supported on this watch model "
+                "(SuuntoLink's own supports*(variant) reports it unavailable - no "
+                "barometer on Sport/Run)"}
 
     # Real, 2026-08-10 - the Ambit3 family goes through SuuntoLink's own per-screen
     # template (see AMBIT3_WRITE_TEMPLATES for why that matters: the old path below

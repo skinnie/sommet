@@ -437,8 +437,14 @@ def read_tag(data, offset):
 
 
 def decode_settings(data, offset, length):
-    """Decodes one EXERCISE_MODES_SETTING_NAME_LEN64 content block (name + fixed fields)."""
-    name = data[offset:offset + 64].rstrip(b"\0").decode("iso-8859-15", "replace")
+    """Decodes one EXERCISE_MODES_SETTING_NAME_LEN64 content block (name + fixed fields).
+
+    CORRECTED 2026-08-22: name decode was iso-8859-15 - live-caught on real hardware,
+    André's French Ambit3 Sport: "Entraîn. salle"/"Course itinér." came back as visible
+    mojibake ("EntraÃ®n. salle") under iso-8859-15, the classic UTF-8-misread-as-Latin-1
+    signature. The watch sends UTF-8 - see ambit_format.py's encode_name() for the same fix
+    on the write side."""
+    name = data[offset:offset + 64].rstrip(b"\0").decode("utf-8", "replace")
     cursor = offset + 64
     out = {"Name": name}
     for field, fmt in SETTING_FIELDS:
@@ -619,8 +625,9 @@ def decode_sport_mode_slot(data, offset, length):
         tag_id, tag_len = tag
         content = cursor + 4
         if tag_id == SPORT_MODE_SETTING_NAME_LEN64:
+            # CORRECTED 2026-08-22: same iso-8859-15 -> utf-8 fix as decode_settings() above.
             slot["Name"] = data[content:content + tag_len].rstrip(b"\0").decode(
-                "iso-8859-15", "replace")
+                "utf-8", "replace")
         elif tag_id == SPORT_MODE_ACTIVITY_ID:
             slot["ActivityID"] = struct.unpack_from("<H", data, content)[0]
         elif tag_id == SPORT_MODE_EXERCISE:

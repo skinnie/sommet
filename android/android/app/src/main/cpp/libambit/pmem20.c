@@ -525,8 +525,15 @@ int libambit_pmem20_log_parse_header(uint8_t *data, size_t datalen, ambit_log_he
     if (log_header->activity_name) {
         free(log_header->activity_name);
     }
+    // CORRECTED 2026-08-22: was "ISO-8859-15", inherited from upstream openambit - real
+    // hardware (André's French Ambit3 Sport) proved this project's own watch name fields
+    // are UTF-8, not Latin-1/-15 (visible mojibake under the old assumption; see
+    // ambit_format.py's encode_name() and tools/custom_modes.py's decode_settings() for the
+    // desktop-side fix + evidence). device_driver_ambit3.c's own activity_name decode
+    // already uses "UTF-8" for the same field - this brought the legacy PMEM 2.0 path (this
+    // file) in line with it. Not independently hardware-verified on Android this session.
     log_header->activity_name = utf8memconv((char *)data + offset, 16,
-                                            "ISO-8859-15");
+                                            "UTF-8");
     offset += 16;
     log_header->heartrate_min = read8inc(data, &offset);
 

@@ -18,7 +18,12 @@ PageFlickable {
 
     property bool _wasConnected: false
     function autoRead() {
-        if (!HomeViewModel.isGarmin && DeviceService.deviceInfoOk) {
+        // Real, 2026-08-22: this page's SettingsWriteService only speaks the Ambit3 SBEM
+        // path - calling it against a connected Ambit1/2 got a real, correct "ok: false"
+        // (that family predates SBEM entirely) that showed as a scary generic error banner
+        // instead of the simple "not available on this watch" it actually is. Guard it the
+        // same way Garmin already is, rather than ever firing a request known to fail.
+        if (!HomeViewModel.isGarmin && DeviceService.deviceInfoOk && DeviceCapabilities.supportsWatchSettings) {
             SettingsWriteService.device = HomeViewModel.isKailash ? "kailash" : "";
             SettingsWriteService.refresh();
         }
@@ -87,9 +92,107 @@ PageFlickable {
         width: 480
         spacing: Theme.spacingLarge
 
+        // Real, 2026-08-22 (Ambit1/2): read-only personal settings via /api/legacy/settings
+        // (tools/legacy_link.py -> the vendored openambit driver - see
+        // tools/vendor/openambit_libambit/README.md). No write UI here: the wire format for
+        // writing these has never been captured against real hardware in this project (see
+        // the ambit-app-ambit12-settings-write memory) - showing an editable field that
+        // can't actually be saved would be worse than this being read-only for now.
+        Card {
+            id: legacySettingsCard
+            width: parent.width
+            visible: HomeViewModel.connected && !DeviceCapabilities.supportsWatchSettings
+
+            property bool loading: false
+            property string error: ""
+            property var data: null
+
+            function refresh() {
+                legacySettingsCard.loading = true
+                legacySettingsCard.error = ""
+                const xhr = new XMLHttpRequest()
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    legacySettingsCard.loading = false
+                    let d = null
+                    try { d = JSON.parse(xhr.responseText) } catch (e) {}
+                    if (!d || !d.ok) {
+                        legacySettingsCard.data = null
+                        legacySettingsCard.error = (d && d.error) ? d.error : qsTr("Couldn't read settings from the watch.")
+                        return
+                    }
+                    legacySettingsCard.data = d
+                }
+                xhr.open("GET", "http://127.0.0.1:8766/api/legacy/settings")
+                xhr.send()
+            }
+
+            Connections {
+                target: DeviceService
+                function onDeviceInfoChanged() {
+                    if (legacySettingsCard.visible && DeviceService.deviceInfoOk && legacySettingsCard.data === null && !legacySettingsCard.loading)
+                        legacySettingsCard.refresh()
+                }
+            }
+            onVisibleChanged: if (visible && data === null && !loading) refresh()
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingMedium
+
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.watch; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text {
+                        text: qsTr("%1 Settings").arg(HomeViewModel.deviceDisplayName)
+                        font.bold: true
+                        font.pixelSize: Theme.fontSizeBodyLarge
+                        color: Theme.text
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                Text {
+                    visible: legacySettingsCard.loading
+                    color: Theme.mutedText
+                    text: qsTr("Reading settings off the watch...")
+                }
+
+                ErrorBanner {
+                    width: parent.width
+                    detail: legacySettingsCard.error
+                    context: qsTr("reading legacy watch settings")
+                    canRetry: true
+                    onRetry: legacySettingsCard.refresh()
+                }
+
+                Grid {
+                    visible: legacySettingsCard.data !== null
+                    width: parent.width
+                    columns: 2
+                    columnSpacing: Theme.spacingLarge
+                    rowSpacing: Theme.spacingSmall
+                    readonly property var d: legacySettingsCard.data || {}
+
+                    Text { color: Theme.mutedText; text: qsTr("Weight") }
+                    Text { color: Theme.text; text: parent.d.weight_kg !== undefined ? qsTr("%1 kg").arg(parent.d.weight_kg) : "-" }
+                    Text { color: Theme.mutedText; text: qsTr("Height") }
+                    Text { color: Theme.text; text: parent.d.length_cm !== undefined ? qsTr("%1 cm").arg(parent.d.length_cm) : "-" }
+                    Text { color: Theme.mutedText; text: qsTr("Birth year") }
+                    Text { color: Theme.text; text: parent.d.birthyear !== undefined ? String(parent.d.birthyear) : "-" }
+                    Text { color: Theme.mutedText; text: qsTr("Max HR") }
+                    Text { color: Theme.text; text: parent.d.max_hr !== undefined ? qsTr("%1 bpm").arg(parent.d.max_hr) : "-" }
+                    Text { color: Theme.mutedText; text: qsTr("Rest HR") }
+                    Text { color: Theme.text; text: parent.d.rest_hr !== undefined ? qsTr("%1 bpm").arg(parent.d.rest_hr) : "-" }
+                    Text { color: Theme.mutedText; text: qsTr("Gender") }
+                    Text { color: Theme.text; text: parent.d.is_male === undefined ? "-" : (parent.d.is_male ? qsTr("Male") : qsTr("Female")) }
+                }
+            }
+        }
+
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchSettings
             Column {
                 id: settingsColumn
                 width: parent.width

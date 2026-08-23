@@ -89,7 +89,7 @@ def find_name_offsets(data, name):
                     if name_tag and name_tag[0] == CM.EXERCISE_MODES_SETTING_NAME_LEN64:
                         name_off = sub_content + 4
                         current = data[name_off:name_off + NAME_FIELD_WIDTH].rstrip(b"\0").decode(
-                            "iso-8859-15", "replace")
+                            "utf-8", "replace")
                         if current == target:
                             offsets.append(name_off)
                 sub_cursor = sub_content + sub_len
@@ -112,7 +112,7 @@ def find_name_offsets(data, name):
                         inner_content = slot_cursor + 4
                         if inner_id == CM.SPORT_MODE_SETTING_NAME_LEN64:
                             current = data[inner_content:inner_content + inner_len].rstrip(b"\0").decode(
-                                "iso-8859-15", "replace")
+                                "utf-8", "replace")
                             if current == target:
                                 offsets.append(inner_content)
                         slot_cursor = inner_content + inner_len
@@ -149,7 +149,7 @@ def main():
             print(json.dumps(payload))
         return code
 
-    new_bytes = args.to_name.encode("iso-8859-15") + b"\0"
+    new_bytes = args.to_name.encode("utf-8") + b"\0"
     if len(new_bytes) > NAME_FIELD_WIDTH:
         msg = f"{args.to_name!r} is {len(new_bytes)} bytes encoded, doesn't fit in the {NAME_FIELD_WIDTH}-byte field."
         out(f"ABORT: {msg}")
