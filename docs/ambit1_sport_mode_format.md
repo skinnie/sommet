@@ -218,14 +218,27 @@ a path shared by both families. That is correct for the Ambit3 and **wrong for t
 making it device-dependent is an open TODO. `ambit1_sport_mode.c` handles its own names
 correctly (transcoded to `\uXXXX`, so JSON output stays pure ASCII and cannot be mis-decoded).
 
-Two things that are NOT established, deliberately:
-- **How the Portuguese name got there.** André reports never seeing SuuntoLink or the watch
-  translate mode names. The same slot previously held "Adventure Racing", so something produced
-  it, but the bytes cannot distinguish a SuuntoLink catalogue localisation from a manual rename.
-  The encoding conclusion does not depend on the answer.
-- **Whether the Ambit3 uses the same sport-mode container.** `ambit3language.pcap` contains
-  **zero** sport-mode writes — SuuntoLink errored out on that language and never wrote any,
-  which matches what André observed on screen.
+Two follow-ups, one now closed:
+
+- **How the Portuguese name got there: RESOLVED — André typed it manually**, with SuuntoLink's
+  own UI in English. So sport-mode names are **never** auto-translated: not by the watch
+  language, not by SuuntoLink's UI language. They are plain user strings that whatever
+  configured the watch last wrote verbatim. (A watch that ships with localised names got them
+  from its factory/first-run setup in that language, which is why André's French units had
+  French modes and nothing he does now re-triggers it.)
+
+  This makes the encoding result *more* load-bearing, not less: since accented names reach the
+  watch by a user typing them, any app that lets users name sport modes must get Ambit1
+  encoding right or it will corrupt them.
+
+  Note what it proves precisely: **SuuntoLink chose single-byte ISO-8859 when writing to this
+  device**, which is exactly the `supportsUtf8Encoding` per-device switch. Strictly, confirming
+  the *watch* also decodes it that way needs one look at the watch screen showing
+  "Corrida de Acção" rendered correctly — not yet done, and cheap if the watch is still around.
+
+- **Whether the Ambit3 uses the same sport-mode container** is still unknown here.
+  `ambit3language.pcap` contains **zero** sport-mode writes — SuuntoLink errored out on that
+  language and never wrote any, matching what André observed on screen.
 
 ## 6. Writing
 
