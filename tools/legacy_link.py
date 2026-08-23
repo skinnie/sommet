@@ -76,19 +76,27 @@ def run(args):
     env_pid = os.environ.get("AMBIT_PRODUCT_ID")
     if env_pid:
         device_args = ["--device", env_pid]
+    # bytes, not text=True. libambit prints a few debug lines of its own ahead of the JSON,
+    # and on this family those can carry ISO-8859 text (watch/waypoint names) - decoding the
+    # pipe as UTF-8 raised a real UnicodeDecodeError that surfaced as the Watch settings page
+    # hanging forever on "Reading settings off the watch...". The JSON payload itself is pure
+    # ASCII by construction (ambit_legacy_cli.c's json_str escapes every byte >= 0x80), so
+    # only this surrounding chatter needs the tolerant decode.
     proc = subprocess.run([str(binary), *device_args, *args],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, timeout=120)
+    proc_stdout = proc.stdout.decode("utf-8", "replace")
+    proc_stderr = proc.stderr.decode("utf-8", "replace")
     try:
         # libambit itself prints a couple of unconditional debug lines to stdout ahead of
         # the real payload (vendored, unmodified - see openambit_libambit/README.md), and
         # the JSON payload can itself contain embedded newlines (the `logs` index is
         # pretty-printed) - splitlines()[-1] would grab a fragment. ambit_legacy_cli.c
         # prints a "@@JSON@@" marker on its own line right before the real payload instead.
-        return json.loads(proc.stdout.rsplit("@@JSON@@\n", 1)[-1].strip())
+        return json.loads(proc_stdout.rsplit("@@JSON@@\n", 1)[-1].strip())
     except Exception as exc:  # noqa: BLE001 - report the real process output, never mask
         raise RuntimeError(
             f"ambit_legacy_cli {' '.join(args)} produced no parseable JSON "
-            f"(exit {proc.returncode}): {exc}\nstdout: {proc.stdout!r}\nstderr: {proc.stderr!r}")
+            f"(exit {proc.returncode}): {exc}\nstdout: {proc_stdout!r}\nstderr: {proc_stderr!r}")
 
 
 def device_info():

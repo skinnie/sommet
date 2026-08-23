@@ -1839,6 +1839,16 @@ class Handler(BaseHTTPRequestHandler):
         tools/custom_modes.py's own to_json() - field names there already match what the
         write endpoints below expect (SETTING_FIELDS' own names, FIELD_TYPES' own names),
         so this needs no separate name-mapping layer."""
+        # Ambit1: same endpoint, same JSON shape, different decoder. André, 2026-08-23:
+        # "all watches should look like ambit 3, but for sure with adapted features" - so the
+        # Ambit1 feeds the SAME list/detail page instead of getting a bespoke screen of its
+        # own. Its region is a different format entirely (76-byte blob, pre-SBEM - see
+        # docs/ambit1_sport_mode_format.md), so ONLY the decoder differs; every consumer
+        # above this line is shared.
+        if selected_is_legacy():
+            self._handle_customodes_read_ambit1()
+            return
+
         # Testing mode decodes the fixture through the SAME tool, via its own --from, so
         # this path is the real one minus the USB read.
         args = ["--json"] + (["--from", demo_custom_modes_path()] if demo_ambit() else [])
@@ -1849,6 +1859,111 @@ class Handler(BaseHTTPRequestHandler):
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_customodes_read_ambit1(self):
+        """The Ambit1 half of GET /api/customodes - its real modes, mapped onto exactly the
+        shape tools/custom_modes.py's to_json() emits so CustomModesService and
+        SportModesPage need no per-device branch.
+
+        Fields the Ambit1 genuinely does not have are reported honestly rather than faked:
+          displays  - decoded as of 2026-08-23, built-in system screens stripped.
+          rules     - one app per mode on this device, not decoded here either.
+          hrLimitsUse - the Ambit1 has NO use_heartrate_limits field at all (that is the
+                      `usehrlimits` capability Devices.xml reports missing). The limits
+                      themselves are real and stored; only the on/off flag has nowhere to
+                      live, which is why SuuntoLink's own checkbox never sticks. Derived
+                      from whether a limit is actually set."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_link                                      # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            with WATCH_LOCK:
+                info = legacy_link.ambit1_sport_mode_read()
+        except RuntimeError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            if env_pid:
+                if old is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old
+
+        if not info.get("ok"):
+            self._send_json(502, info)
+            return
+
+        modes = []
+        for i, m in enumerate(info.get("modes") or []):
+            hr_high, hr_low = m.get("hrMax", 0), m.get("hrMin", 0)
+            modes.append({
+                "name": m.get("name", ""),
+                "activityId": m.get("activityId", 0),
+                "appCount": 0,
+                "customModeId": i,
+                "useHw": m.get("pods", 0),
+                "altiBaroMode": m.get("altiBaroMode", 0),
+                "recordingInterval": m.get("recordingInterval", 0),
+                "gpsInterval": m.get("gpsInterval", 0),
+                "autolap": m.get("autolapM", 0),
+                "hrHigh": hr_high,
+                "hrLow": hr_low,
+                "hrLimitsUse": 1 if (hr_high or hr_low) else 0,
+                "autoStart": 0,
+                "autoPause": m.get("autoPause", 0),
+                "autoScrolling": 0,
+                "intTimerFlags": m.get("useIntervalTimer", 0),
+                "intTimerCount": m.get("intervalRepetitions", 0),
+                "intervalTimer": {
+                    "enabled": m.get("useIntervalTimer", 0) == 1,
+                    # 0x0100 = time (seconds), 0x0000 = distance (metres) - confirmed both
+                    # ways against SuuntoLink's own writes, see the format doc.
+                    "type": "time" if m.get("intervalMaxUnit") == 0x0100 else "distance",
+                    "high": m.get("intervalMax", 0),
+                    "low": m.get("intervalMin", 0),
+                    "repetitions": m.get("intervalRepetitions", 0),
+                },
+                "backlightMode": 0,
+                "displayMode": 0,
+                "quickNavigation": 0,
+                # Real displays, decoded off the watch (ambit1_sport_mode.c). The built-in
+                # system screens are already stripped there, so this count matches what the
+                # Ambit3 page shows for its own watch - and stays inside the device's own
+                # 8-display maximum.
+                "displays": self._ambit1_label_displays(m.get("displays") or []),
+                "rules": [],
+            })
+        self._send_json(200, {
+            "ok": True, "formatType": "ambit1",
+            "exerciseModes": modes, "sportModes": []})
+
+    _FIELD_LABELS = None
+
+    def _ambit1_label_displays(self, displays):
+        """Attach a `label` to every display-row value.
+
+        The page renders a row as `values.map(v => v.label)`, and the Ambit3 decoder already
+        supplies those. The Ambit1 decoder emits only the numeric field id, so without this
+        every data row rendered BLANK - caught on screen, not in the JSON, since the ids
+        themselves were correct all along. Labels come from the SAME FIELD_TYPES catalog the
+        field-types endpoint serves, so both devices name a field identically. Cached: it is
+        a static dict, and this runs per display row."""
+        if Handler._FIELD_LABELS is None:
+            code, out, err = run_tool("custom_modes.py", ["--list-field-types"])
+            info = self._parse_last_json_line(out) or {}
+            Handler._FIELD_LABELS = {
+                int(f["value"]): f.get("label", "")
+                for f in (info.get("fieldTypes") or []) if "value" in f}
+        labels = Handler._FIELD_LABELS
+        for disp in displays:
+            for field in disp.get("fields") or []:
+                for v in field.get("values") or []:
+                    t = v.get("type")
+                    v["label"] = labels.get(t, "0x%x" % t if isinstance(t, int) else "")
+        return displays
 
     def _handle_customodes_field_types(self):
         """GET /api/customodes/field-types - the real FIELD_TYPES catalog (95 entries),

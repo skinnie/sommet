@@ -37,7 +37,16 @@ QtObject {
     // Display-slot assignment within a sport mode is proven on real Ambit3 hardware
     // (custom_modes_andre.md); full sport-mode *settings* writing (autolap thresholds,
     // sensor pods, intervals, etc.) is not - see unresolved_questions_for_devs.md #1.
-    property bool supportsSportModes: !_isLegacy
+    // Sport modes now work on the legacy family too: the Ambit1's region is decoded
+    // (docs/ambit1_sport_mode_format.md) and GET /api/customodes serves it in the SAME
+    // shape as the Ambit3's, so one page renders both. André, 2026-08-23: "all watches
+    // should look like ambit 3, but for sure with adapted features".
+    property bool supportsSportModes: true
+    // ...the "adapted features" part. Displays ARE decoded on the Ambit1 now
+    // (ambit1_sport_mode.c, built-in system screens stripped), so the Displays card shows
+    // real screens for it too. Multisport it genuinely does not have at all.
+    property bool supportsSportModeDisplays: true
+    property bool supportsMultisport: !_isLegacy
     property bool supportsApps: !_isLegacy
     property bool supportsNavigation: !_isLegacy
     property bool supportsBluetooth: !_isLegacy

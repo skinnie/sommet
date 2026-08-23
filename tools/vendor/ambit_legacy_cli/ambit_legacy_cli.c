@@ -67,11 +67,20 @@
 #include "protocol.h"   /* libambit_protocol_command - raw 0x0b17 flash read, see cmd_sport_mode_dump */
 #include "ambit1_sport_mode.h"  /* Ambit1-only 76-byte layout, hard-guarded to pid 0x0010 */
 
+/* Emits a JSON string that is always pure ASCII.
+ *
+ * Every byte >= 0x80 is escaped, not passed through. This family stores text in ISO-8859
+ * (single-byte - see docs/ambit1_sport_mode_format.md), so a name like "Corrida de Acção" or
+ * a waypoint with an umlaut would otherwise put raw 0xe7/0xe4 bytes into the output. That is
+ * not valid UTF-8, and the Python caller reads this pipe with text=True: it died with
+ * `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4`, which is what made the Watch
+ * settings page hang on "Reading settings off the watch...". ISO-8859-1 maps 1:1 onto
+ * U+0080..U+00FF, so \uXXXX of the byte value is the correct character. */
 static void json_str(FILE *f, const char *s) {
     fputc('"', f);
     for (const unsigned char *p = (const unsigned char *)s; s && *p; p++) {
         if (*p == '"' || *p == '\\') fputc('\\', f);
-        if (*p < 0x20) { fprintf(f, "\\u%04x", *p); continue; }
+        if (*p < 0x20 || *p >= 0x80) { fprintf(f, "\\u%04x", *p); continue; }
         fputc(*p, f);
     }
     fputc('"', f);
@@ -258,7 +267,16 @@ static int cmd_settings(void) {
     for (uint16_t i = 0; i < ps->waypoints.count; i++) {
         ambit_waypoint_t *w = &ps->waypoints.data[i];
         printf("    {\"name\": ");
-        json_str(stdout, w->name);
+        /* libambit fills these with strncpy(dst, src, 15), which does NOT NUL-terminate
+         * when the source is exactly 15 characters - a real waypoint like "Arras Town Hall"
+         * then ran on into whatever followed in the struct ("Arras Town Hall\x14 <garbage>").
+         * Bound it here rather than trusting the terminator. */
+        {
+            char wname[16];
+            memcpy(wname, w->name, 15);
+            wname[15] = '\0';
+            json_str(stdout, wname);
+        }
         printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": %u, \"type\": %u}%s\n",
                w->latitude / 10000000.0, w->longitude / 10000000.0, w->altitude, w->type,
                (i + 1 < ps->waypoints.count) ? "," : "");
