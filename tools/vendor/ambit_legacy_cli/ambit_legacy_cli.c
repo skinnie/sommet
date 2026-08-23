@@ -258,12 +258,54 @@ static int cmd_settings(void) {
         return 1;
     }
 
-    fputs("@@JSON@@\n", stdout); printf("{\"ok\": true, \"weight_kg\": %.2f, \"birthyear\": %u, \"max_hr\": %u, "
+    /* Everything ambit_personal_settings_t actually carries, not just the personal block.
+     * André, 2026-08-23: "on those settings guess we miss stuff no? all the units like the
+     * ambit 3" - correct: libambit already reads the whole struct (per-unit choices, GPS
+     * position format, time/date format, alarm, backlight, tones, alti/baro, pod
+     * calibrations...), this only ever printed nine of them, so the Watch settings page had
+     * nothing else to show. Nothing new is read off the watch here; the same one read is
+     * simply reported in full. */
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": true, \"weight_kg\": %.2f, \"birthyear\": %u, \"max_hr\": %u, "
            "\"rest_hr\": %u, \"fitness_level\": %u, \"is_male\": %u, \"length_cm\": %u, "
-           "\"language\": %u, \"units_mode\": %u, \"navigation_read_rc\": %d, "
+           "\"language\": %u, \"units_mode\": %u, "
+           "\"gps_position_format\": %u, \"navigation_style\": %u, "
+           "\"sync_time_w_gps\": %u, \"time_format\": %u, \"date_format\": %u, "
+           "\"alarm_enable\": %u, \"alarm_hour\": %u, \"alarm_minute\": %u, "
+           "\"dual_time_hour\": %u, \"dual_time_minute\": %u, "
+           "\"tones_mode\": %u, \"backlight_mode\": %u, \"backlight_brightness\": %u, "
+           "\"display_brightness\": %u, \"display_is_negative\": %u, "
+           "\"alti_baro_mode\": %u, \"storm_alarm\": %u, \"fused_alti_disabled\": %u, "
+           "\"compass_declination\": %u, "
+           "\"sportmode_button_lock\": %u, \"timemode_button_lock\": %u, "
+           "\"bikepod_calibration\": %.4f, \"bikepod_calibration2\": %.4f, "
+           "\"bikepod_calibration3\": %.4f, \"footpod_calibration\": %.4f, "
+           "\"automatic_bikepower_calib\": %u, \"automatic_footpod_calib\": %u, "
+           "\"training_program\": %u, "
+           "\"units\": {\"pressure\": %u, \"altitude\": %u, \"distance\": %u, "
+           "\"height\": %u, \"temperature\": %u, \"verticalspeed\": %u, "
+           "\"weight\": %u, \"compass\": %u, \"heartrate\": %u, \"speed\": %u}, "
+           "\"navigation_read_rc\": %d, "
            "\"waypoints_count\": %u, \"waypoints\": [\n",
            ps->weight / 100.0, ps->birthyear, ps->max_hr, ps->rest_hr, ps->fitness_level,
-           ps->is_male, ps->length, ps->language, ps->units_mode, nav_rc, ps->waypoints.count);
+           ps->is_male, ps->length, ps->language, ps->units_mode,
+           ps->gps_position_format, ps->navigation_style,
+           ps->sync_time_w_gps, ps->time_format, ps->date_format,
+           ps->alarm_enable, ps->alarm.hour, ps->alarm.minute,
+           ps->dual_time.hour, ps->dual_time.minute,
+           ps->tones_mode, ps->backlight_mode, ps->backlight_brightness,
+           ps->display_brightness, ps->display_is_negative,
+           ps->alti_baro_mode, ps->storm_alarm, ps->fused_alti_disabled,
+           ps->compass_declination,
+           ps->sportmode_button_lock, ps->timemode_button_lock,
+           ps->bikepod_calibration / 10000.0, ps->bikepod_calibration2 / 10000.0,
+           ps->bikepod_calibration3 / 10000.0, ps->footpod_calibration / 10000.0,
+           ps->automatic_bikepower_calib, ps->automatic_footpod_calib,
+           ps->training_program,
+           ps->units.pressure, ps->units.altitude, ps->units.distance,
+           ps->units.height, ps->units.temperature, ps->units.verticalspeed,
+           ps->units.weight, ps->units.compass, ps->units.heartrate, ps->units.speed,
+           nav_rc, ps->waypoints.count);
     for (uint16_t i = 0; i < ps->waypoints.count; i++) {
         ambit_waypoint_t *w = &ps->waypoints.data[i];
         printf("    {\"name\": ");
