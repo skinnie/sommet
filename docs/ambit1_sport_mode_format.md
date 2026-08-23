@@ -83,10 +83,10 @@ exactly.
 | 22 | 2 | `gps_interval` s | Indoor training=0 (GPS off), Mountaineering/Trekking=60 |
 | 24 | 2 | `recording_interval` s | 1 s for run/bike, 10 s for hike |
 | 26 | 2 | `autolap` m | Running=1000 |
-| 28 | 2 | `heartrate_max` | not observed non-zero (no `usehrlimits` capability) |
-| 30 | 2 | `heartrate_min` | not observed non-zero (no `usehrlimits` capability) |
-| 32 | 2 | `unknown2` | |
-| 34 | 2 | `auto_pause` | not observed non-zero |
+| 28 | 2 | `heartrate_max` | **observed = 239** |
+| 30 | 2 | `heartrate_min` | **observed = 30** |
+| 32 | 2 | `unknown2` | never observed non-zero |
+| 34 | 2 | `auto_pause` | **observed = 56** — speed ×100, matching openambit's `autoPauseSpeed * 100` |
 | 36 | 2 | `use_interval_timer` | **observed = 1** when enabled |
 | 38 | 2 | `interval_repetitions` | **observed = 5** (user-entered); 99 = SuuntoLink default |
 | 40 | 2 | `interval_timer_max_unit` | **observed = 0x0100** (time). Matches openambit's own `interval1time ? 0x0100 : 0` |
@@ -108,13 +108,13 @@ Relative to openambit's 90-byte struct the Ambit1 drops, in order: `sport_mode_i
 `quick_navigation` (6) at the tail. 8 + 6 = 14 = 90 − 76.
 
 ### Still unpinned
-Only `heartrate_max` (28), `heartrate_min` (30), `unknown2` (32) and `auto_pause` (34). The two
-HR fields cannot be pinned on an Ambit1 at all — the device has no `usehrlimits` capability, so
-no value ever reaches them (see §6 below).
+Only `unknown2` (32). Every other field in the table is observed in real traffic.
 
-Everything else is observed, not inferred: the interval-timer block was confirmed from
-SuuntoLink's own writes in the pcap carrying André's real input (reps 5, High 2:30 → 150,
-Low 6:30 → 390).
+**Correction:** an earlier revision claimed `heartrate_max`/`heartrate_min` were "unpinnable on
+an Ambit1 by definition" because the device lacks the `usehrlimits` capability. That was wrong,
+and the Suunto Ambit manual §6.3 says so plainly — a custom mode can carry "sports-specific
+heart rate limits". The pcap agrees: SuuntoLink really does write `hr_max = 239`, `hr_min = 30`
+to this watch. See §6a for what the missing capability flag actually means.
 
 `0x63` (99) at offset 38 is a useful tell: it marks modes this SuuntoLink version rewrote with
 its default repetitions, versus modes still carrying their original Movescount-era bytes
@@ -162,6 +162,38 @@ Baseline, before any SuuntoLink edits — 8 modes:
 
 After the SuuntoLink session: 10 modes (the device maximum — `getMaxSportModes` = 10 for this
 whole family), with Yoga (10), Adventure Racing (61) and Alpine Skiing (20) added.
+
+## 6a. What the missing `usehrlimits` capability actually means
+
+The Ambit1 **does** support sports-specific HR limits. The Suunto Ambit manual §6.3 states a
+custom mode lets you customise "sports-specific heart rate limits, autolap distance, or the
+recording rate", and the pcap confirms SuuntoLink writing `hr_max = 239` / `hr_min = 30` to
+this watch.
+
+What the Ambit1 lacks is the separate **`use_heartrate_limits` toggle field** — present at
+offset 36 in the 90-byte struct, absent from the 76-byte one. The limit *values* exist; the
+stored *enabled/disabled flag* does not.
+
+That is consistent with the observed behaviour rather than contradicting it. Across successive
+saves to `Running` the limits oscillate `239/30 -> 0/0 -> 239/30 -> 0/0`. **Most likely
+mechanism** (inference, not proof): with nowhere to persist "limits are on", SuuntoLink cannot
+round-trip the checkbox state, so it reloads unchecked and the next save writes zeros — which
+is exactly the "HR limits don't stick" symptom André reported. On the original Movescount this
+presumably never surfaced, because the cloud held the enabled flag host-side.
+
+Stated as a hypothesis deliberately: two earlier readings of this same byte trajectory (the
+interval timer) were called bugs and both turned out to be the user deliberately changing
+settings. The bytes alone cannot distinguish "SuuntoLink reverted it" from "the user unchecked
+it".
+
+## 6b. One app per sport mode
+
+André, from using the device: **on the Ambit1 each sport mode can hold only one app**, though
+different sport modes can each have a different app. (Ambit3 allows 5 per mode — Finding 11.)
+
+`Devices.xml` is consistent with this: the Ambit1's `<custommodeconfig>` declares
+`rulestoresize` **20000** and `rulestorelocation` 160000, against **200000** / 600000 for the
+Ambit3 family — a 10x smaller rule store.
 
 ## 6. Writing
 
