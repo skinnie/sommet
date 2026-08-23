@@ -33,7 +33,12 @@ QtObject {
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see
     // [[ambit_app_ambit12_settings_write]]) - that's a real follow-up, not done here.
-    property bool supportsWatchSettings: !_isLegacy
+    // Watch settings work on the legacy family too now: GET /api/settings device-dispatches
+    // and serves the Ambit1's own fields in the same schema (35 of them, grouped
+    // General/Units/Personal). They come back writable:false - this project has never
+    // captured the settings WRITE format for this family - and the shared field renderer
+    // already draws a non-writable row read-only, so one page serves both.
+    property bool supportsWatchSettings: true
     // Display-slot assignment within a sport mode is proven on real Ambit3 hardware
     // (custom_modes_andre.md); full sport-mode *settings* writing (autolap thresholds,
     // sensor pods, intervals, etc.) is not - see unresolved_questions_for_devs.md #1.

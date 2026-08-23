@@ -1646,6 +1646,130 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    # Ambit1 settings, mapped onto the SAME schema the Ambit3 page consumes so one Watch
+    # settings screen serves both. André, 2026-08-23: "ambit setting just show like before,
+    # not at all like ambit 3...please solve it, matching device capabilities".
+    #
+    # (key, label, screen, control, choices, unit) - labels/controls/screens deliberately
+    # reuse settings_write.py's own AMBIT3_DISPLAY wording so a field is named identically on
+    # both watches. Only fields the Ambit1 actually reports are listed; anything the device
+    # has no field for is simply absent rather than shown greyed or faked.
+    LEGACY_SETTING_SPECS = [
+        # --- General -------------------------------------------------------------------
+        ("language",             "Language",              "general",  "dropdown",
+         [[0,"Dansk"],[1,"Deutsch"],[2,"English"],[3,"Espanol"],[4,"Francais"],[5,"Italiano"],
+          [6,"Nederlands"],[7,"Norsk"],[8,"Portugues"],[9,"Suomi"],[10,"Svenska"],
+          [11,"Chinese"],[12,"Japanese"],[13,"Korean"],[14,"Cestina"],[15,"Polski"],
+          [16,"Russian"]], None),
+        ("backlight_mode",       "Backlight mode",        "general",  "dropdown",
+         [[0,"Normal"],[1,"Off"],[2,"Night"],[3,"Toggle"]], None),
+        ("backlight_brightness", "Backlight brightness",  "general",  "slider", None, "%"),
+        ("display_brightness",   "Display contrast",      "general",  "slider", None, "%"),
+        ("display_is_negative",  "Display",               "general",  "radio",
+         [[0,"Light"],[1,"Dark"]], None),
+        ("tones_mode",           "Tones",                 "general",  "radio",
+         [[0,"Off"],[1,"On"]], None),
+        ("timemode_button_lock", "Button lock, time mode","general",  "radio",
+         [[0,"Actions only"],[1,"All buttons"]], None),
+        ("sportmode_button_lock","Button lock, sport mode","general", "radio",
+         [[0,"Actions only"],[1,"All buttons"]], None),
+        ("sync_time_w_gps",      "GPS time keeping",      "general",  "radio",
+         [[0,"Off"],[1,"On"]], None),
+        ("gps_position_format",  "GPS position format",   "general",  "dropdown",
+         [[0,"WGS84 hd.d"],[1,"WGS84 hd m.m"],[2,"WGS84 hd m s.s"],[3,"UTM"],[4,"MGRS"]], None),
+        ("alti_baro_mode",       "Alti-baro profile",     "general",  "radio",
+         [[0,"Automatic"],[1,"Altimeter"],[2,"Barometer"]], None),
+        ("storm_alarm",          "Storm alarm",           "general",  "checkbox",
+         [[0,"Off"],[1,"On"]], None),
+        ("fused_alti_disabled",  "FusedAlti disabled",    "general",  "checkbox",
+         [[0,"No"],[1,"Yes"]], None),
+        ("compass_declination",  "Compass declination",   "general",  "number", None, None),
+        ("time_format",          "Time format",           "general",  "radio",
+         [[0,"24h"],[1,"12h"]], None),
+        ("date_format",          "Date format",           "general",  "dropdown",
+         [[0,"dd.mm.yy"],[1,"mm/dd/yy"],[2,"yy-mm-dd"]], None),
+        ("alarm_enable",         "Alarm",                 "general",  "checkbox",
+         [[0,"Off"],[1,"On"]], None),
+        # --- Units ---------------------------------------------------------------------
+        ("units_mode",           "Units",                 "units",    "radio",
+         [[0,"Metric"],[1,"Imperial"],[2,"Advanced"]], None),
+        # --- Personal ------------------------------------------------------------------
+        ("weight_kg",            "Weight",                "personal", "number", None, "kg"),
+        ("length_cm",            "Height",                "personal", "number", None, "cm"),
+        ("birthyear",            "Birth year",            "personal", "number", None, None),
+        ("is_male",              "Gender",                "personal", "radio",
+         [[0,"Female"],[1,"Male"]], None),
+        ("max_hr",               "Max HR",                "personal", "number", None, "bpm"),
+        ("rest_hr",              "Rest HR",               "personal", "number", None, "bpm"),
+        ("fitness_level",        "Activity level",        "personal", "number", None, None),
+    ]
+    # The per-unit choices only apply when units_mode is Advanced - same rule as the Ambit3.
+    LEGACY_UNIT_SPECS = [
+        ("distance",     "Distance",      [[0,"km"],[1,"mi"]]),
+        ("altitude",     "Altitude",      [[0,"m"],[1,"ft"]]),
+        ("height",       "Height",        [[0,"cm"],[1,"ft"]]),
+        ("weight",       "Weight",        [[0,"kg"],[1,"lbs"]]),
+        ("temperature",  "Temperature",   [[0,"C"],[1,"F"]]),
+        ("pressure",     "Air pressure",  [[0,"hPa"],[1,"inHg"]]),
+        ("speed",        "Speed",         [[0,"km/h"],[1,"mph"]]),
+        ("verticalspeed","Vertical speed",[[0,"m/s"],[1,"ft/min"]]),
+        ("heartrate",    "Heart rate",    [[0,"bpm"],[1,"%"]]),
+        ("compass",      "Compass",       [[0,"degrees"],[1,"mils"]]),
+    ]
+
+    def _handle_settings_read_ambit1(self):
+        """The Ambit1 half of GET /api/settings - its real settings in the Ambit3's schema.
+
+        Every field is reported `writable: false`. That is honest rather than cautious: this
+        family's settings WRITE wire format has never been captured in this project (see the
+        ambit-app-ambit12-settings-write memory), so offering an editable control would
+        promise something the app cannot do."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_link                                      # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old_env = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            with WATCH_LOCK:
+                raw = legacy_link.settings()
+        except RuntimeError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            if env_pid:
+                if old_env is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old_env
+        if not raw.get("ok"):
+            self._send_json(502, raw)
+            return
+
+        out = {}
+        for key, label, screen, control, choices, unit in self.LEGACY_SETTING_SPECS:
+            if key not in raw:
+                continue
+            entry = {"ok": True, "value": raw[key], "path": key, "writable": False,
+                     "screen": screen, "label": label, "control": control}
+            if choices:
+                entry["choices"] = choices
+            if unit:
+                entry["unit"] = unit
+            if key == "weight_kg":
+                entry["decimals"] = 2
+            out[key] = entry
+
+        units = raw.get("units") or {}
+        for key, label, choices in self.LEGACY_UNIT_SPECS:
+            if key not in units:
+                continue
+            out[f"unit_{key}"] = {
+                "ok": True, "value": units[key], "path": f"units.{key}", "writable": False,
+                "screen": "units", "label": label, "control": "radio", "choices": choices}
+
+        self._send_json(200, {"ok": True, "variant": "Bluebird", "settings": out})
+
     def _handle_settings_read(self):
         """GET /api/settings[?device=kailash] - Ambit3/Traverse by default; pass
         ?device=kailash for Kailash's own smaller, separately-curated table (added
@@ -1661,6 +1785,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_settings_read_ble()
+            return
+        # Ambit1: same endpoint and same schema, different reader - settings_write.py speaks
+        # SBEM/0x1100, which this family predates.
+        if selected_is_legacy():
+            self._handle_settings_read_ambit1()
             return
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         device = query.get("device", [None])[0]
