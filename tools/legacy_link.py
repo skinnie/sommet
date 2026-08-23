@@ -35,6 +35,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -123,6 +124,45 @@ def sport_mode_write_presets(dry_run=False):
     if dry_run:
         args.append("--dry-run")
     return run(args)
+
+
+# The field order ambit_legacy_cli's own sport-mode-write parser expects, after the name.
+_SPORT_MODE_FIELDS = ("activityId", "modeId", "gpsInterval", "recordingInterval",
+                      "altiBaroMode", "hrBelt", "footPod", "bikePod", "cadencePod",
+                      "autolapM")
+
+
+def sport_modes_to_cli_lines(modes):
+    """The host master copy (a list of dicts - see server.py's LEGACY_SPORT_MODES_FILE) ->
+    ambit_legacy_cli's pipe-separated one-mode-per-line input. Names are sanitised here (the
+    parser splits on '|', and a newline would split the record itself) and truncated to the
+    watch's own 16-byte activity_name field, so what's written is what was shown."""
+    lines = []
+    for m in modes:
+        name = str(m.get("name", "")).replace("|", " ").replace("\n", " ").strip()[:15]
+        vals = []
+        for key in _SPORT_MODE_FIELDS:
+            v = m.get(key, 0)
+            vals.append(str(int(bool(v)) if isinstance(v, bool) else int(v or 0)))
+        lines.append("|".join([name, *vals]))
+    return "\n".join(lines) + "\n"
+
+
+def sport_mode_write(modes, dry_run=False):
+    """Writes the host's master copy of the user's sport modes to the watch. Same blind,
+    one-way REPLACE as sport_mode_write_presets() (this family has no sport-mode read at all -
+    see that function's docstring); the difference is only WHOSE set gets written - the user's
+    own saved+edited one instead of the factory presets."""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(sport_modes_to_cli_lines(modes))
+        path = f.name
+    try:
+        args = ["sport-mode-write", path]
+        if dry_run:
+            args.append("--dry-run")
+        return run(args)
+    finally:
+        pathlib.Path(path).unlink(missing_ok=True)
 
 
 _COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear",

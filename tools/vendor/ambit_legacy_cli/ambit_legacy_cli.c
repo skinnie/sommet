@@ -48,6 +48,7 @@
  *   ambit_legacy_cli poi-add NAME LAT LON     # preserves existing waypoints
  *   ambit_legacy_cli poi-clear                # writes back 0 waypoints
  *   ambit_legacy_cli sport-mode-write-presets [--dry-run]   # blind REPLACE, no readback
+ *   ambit_legacy_cli sport-mode-write FILE [--dry-run]      # same, from the host master copy
  *
  * Build: see build.sh in this directory (links against ../openambit_libambit's libambit).
  */
@@ -573,21 +574,87 @@ static ambit_sport_mode_device_settings_t *build_preset_sport_modes(void) {
     return settings;
 }
 
-static int cmd_sport_mode_write_presets(bool dry_run) {
-    ambit_sport_mode_device_settings_t *settings = build_preset_sport_modes();
-    if (!settings) {
-        fputs("@@JSON@@\n", stdout);
-        printf("{\"ok\": false, \"error\": \"failed to allocate preset sport modes\"}\n");
-        return 1;
-    }
+/* Reads the host's master copy of the user's sport modes. One mode per line, pipe-separated,
+ * in the same field order as preset_t:
+ *
+ *   name|activity_id|mode_id|gps_interval|recording_interval|alti_baro_mode|
+ *   hr_belt|foot_pod|bike_pod|cadence_pod|autolap_m
+ *
+ * Deliberately NOT JSON: the master copy itself IS json, but it lives on the Python side
+ * (legacy_sport_modes.json - see server.py's LEGACY_SPORT_MODES_FILE), which converts to this
+ * trivially-parseable form for the one hop into C. Keeps a hand-rolled JSON parser out of this
+ * file entirely - same "don't reimplement what the other side already does well" reasoning as
+ * the rest of this CLI. Names are sanitised host-side (no '|', no newline).
+ *
+ * Blank lines and lines starting with '#' are skipped. Reads at most
+ * LEGACY_SPORT_MODE_WRITE_COUNT modes - the real per-device capacity (see PRESET_COUNT's own
+ * comment above); anything past that is ignored rather than written past what the watch holds. */
+static ambit_sport_mode_device_settings_t *load_sport_modes_file(const char *path,
+                                                                  char names[][32],
+                                                                  size_t *out_count) {
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
 
+    preset_t parsed[LEGACY_SPORT_MODE_WRITE_COUNT];
+    char namebuf[LEGACY_SPORT_MODE_WRITE_COUNT][32];
+    size_t n = 0;
+    char line[512];
+
+    while (n < LEGACY_SPORT_MODE_WRITE_COUNT && fgets(line, sizeof(line), f)) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        if (line[0] == '\0' || line[0] == '#') continue;
+
+        char *save = NULL;
+        char *tok = strtok_r(line, "|", &save);
+        if (!tok) continue;
+        snprintf(namebuf[n], sizeof(namebuf[n]), "%s", tok);
+
+        unsigned int v[10];
+        size_t got = 0;
+        while (got < 10 && (tok = strtok_r(NULL, "|", &save)) != NULL)
+            v[got++] = (unsigned int)strtoul(tok, NULL, 10);
+        if (got < 10) continue;   /* malformed line - skip rather than write garbage */
+
+        parsed[n].name = namebuf[n];
+        parsed[n].activity_id       = (uint16_t)v[0];
+        parsed[n].mode_id           = (uint16_t)v[1];
+        parsed[n].gps_interval      = (uint16_t)v[2];
+        parsed[n].recording_interval= (uint16_t)v[3];
+        parsed[n].alti_baro_mode    = (uint16_t)v[4];
+        parsed[n].hr_belt           = v[5] != 0;
+        parsed[n].foot_pod          = v[6] != 0;
+        parsed[n].bike_pod          = v[7] != 0;
+        parsed[n].cadence_pod       = v[8] != 0;
+        parsed[n].autolap_m         = (uint16_t)v[9];
+        n++;
+    }
+    fclose(f);
+    if (n == 0) return NULL;
+
+    ambit_sport_mode_device_settings_t *settings = libambit_malloc_sport_mode_device_settings();
+    if (!settings) return NULL;
+    if (!libambit_malloc_sport_modes(n, settings)) {
+        libambit_sport_mode_device_settings_free(settings);
+        return NULL;
+    }
+    for (size_t i = 0; i < n; i++) {
+        fill_preset_settings(&settings->sport_modes[i].settings, &parsed[i]);
+        snprintf(names[i], 32, "%s", namebuf[i]);
+    }
+    *out_count = n;
+    return settings;
+}
+
+/* Shared tail for both write commands - `settings` is consumed (freed) either way. */
+static int write_sport_modes(ambit_sport_mode_device_settings_t *settings, size_t count,
+                              char names[][32], bool dry_run) {
     if (dry_run) {
         fputs("@@JSON@@\n", stdout);
-        printf("{\"ok\": true, \"dry_run\": true, \"mode_count\": %zu, \"names\": [",
-               PRESET_COUNT);
-        for (size_t i = 0; i < PRESET_COUNT; i++) {
-            json_str(stdout, PRESETS[i].name);
-            if (i + 1 < PRESET_COUNT) fputs(", ", stdout);
+        printf("{\"ok\": true, \"dry_run\": true, \"mode_count\": %zu, \"names\": [", count);
+        for (size_t i = 0; i < count; i++) {
+            json_str(stdout, names[i]);
+            if (i + 1 < count) fputs(", ", stdout);
         }
         printf("]}\n");
         libambit_sport_mode_device_settings_free(settings);
@@ -608,11 +675,39 @@ static int cmd_sport_mode_write_presets(bool dry_run) {
 
     fputs("@@JSON@@\n", stdout);
     printf("{\"ok\": %s, \"write_rc\": %d, \"mode_count\": %zu}\n",
-           rc == 0 ? "true" : "false", rc, PRESET_COUNT);
+           rc == 0 ? "true" : "false", rc, count);
 
     libambit_close(dev);
     libambit_free_enumeration(devices);
     return rc == 0 ? 0 : 1;
+}
+
+static int cmd_sport_mode_write_presets(bool dry_run) {
+    ambit_sport_mode_device_settings_t *settings = build_preset_sport_modes();
+    if (!settings) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"failed to allocate preset sport modes\"}\n");
+        return 1;
+    }
+    char names[LEGACY_SPORT_MODE_WRITE_COUNT][32];
+    for (size_t i = 0; i < PRESET_COUNT; i++)
+        snprintf(names[i], sizeof(names[i]), "%s", PRESETS[i].name);
+    return write_sport_modes(settings, PRESET_COUNT, names, dry_run);
+}
+
+static int cmd_sport_mode_write_file(const char *path, bool dry_run) {
+    char names[LEGACY_SPORT_MODE_WRITE_COUNT][32];
+    size_t count = 0;
+    ambit_sport_mode_device_settings_t *settings =
+        load_sport_modes_file(path, names, &count);
+    if (!settings) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"could not read any sport modes from ");
+        json_str(stdout, path);
+        printf("\"}\n");
+        return 1;
+    }
+    return write_sport_modes(settings, count, names, dry_run);
 }
 
 int main(int argc, char **argv) {
@@ -647,6 +742,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "sport-mode-write-presets") == 0) {
         bool dry_run = (argc >= 3 && strcmp(argv[2], "--dry-run") == 0);
         return cmd_sport_mode_write_presets(dry_run);
+    }
+    if (strcmp(argv[1], "sport-mode-write") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: %s sport-mode-write FILE [--dry-run]\n", argv[0]);
+            return 2;
+        }
+        bool dry_run = (argc >= 4 && strcmp(argv[3], "--dry-run") == 0);
+        return cmd_sport_mode_write_file(argv[2], dry_run);
     }
     fprintf(stderr, "unknown command %s\n", argv[1]);
     return 2;
