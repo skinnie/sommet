@@ -252,3 +252,24 @@ Not attempted on hardware. Two things must hold:
 
 A byte-exact restore of `Bluebird-1614984607001600-20260823-111839.bin` is the safest possible
 first write test, and the saved dump makes any experiment reversible.
+
+## 8. Personal settings: the whole struct, and a units question that resolved cleanly
+
+`libambit_personal_settings_parse()` fills the entire `ambit_personal_settings_t` on this
+family - per-unit choices, GPS position format, time/date format, alarm, dual time, tones,
+backlight, display brightness, alti/baro, storm alarm, pod calibrations, compass declination,
+button locks. The CLI originally printed nine of those fields; it now reports all 44, from the
+same single read (no extra watch traffic).
+
+Verified against André's own SuuntoLink screenshots: `alti_baro_mode=1` (Alti),
+`bikepod_calibration=1.0` (the 2050 mm / 1.000 screen), `backlight_brightness=50`,
+`display_brightness=65`, `language=4` (Francais), `tones_mode=1`.
+
+**The units question, resolved:** every `units.*` field plus `gps_position_format`,
+`time_format` and `date_format` read 0, which looked wrong because the watch had been set to
+Advanced with ft/lbs/miles/degF/inHg during the capture session. Two candidate explanations -
+a parser reading Ambit3 offsets against an Ambit1 reply, or settings that never persisted.
+André checked the watch itself: **it is on metric**. So the read is CORRECT and there is no
+parser bug; the Advanced/imperial change simply did not stick, the same pattern as HR limits
+(§6a) - SuuntoLink offers controls this device cannot store. Worth remembering before
+"fixing" a zero that is actually true.
