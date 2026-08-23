@@ -34,4 +34,8 @@ public:
     // the title pre-filled (e.g. "Running_24_08"), the scheduled-workout "workaround". Empty
     // (the default) just opens the builder as before.
     Q_INVOKABLE QString launch(const QString &workoutName = QString());
+
+    // The Calendar planner's "Create workout": hands the builder a WHOLE workout (name +
+    // steps) already built, as a JSON string. Empty falls back to launch() above.
+    Q_INVOKABLE QString launchWithWorkout(const QString &workoutJson);
 };

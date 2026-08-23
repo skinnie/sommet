@@ -45,9 +45,16 @@ Item {
         "Hiking", "Trekking", "Swimming", "Other"
     ]
     property int plannerDay: 0
+    property var dayActivities: []
     function openPlanner(day) {
         plannerDay = day
         plannerDialog.open()
+    }
+    // Left click: show what was recorded that day, in a themed window.
+    function openDay(day) {
+        plannerDay = day
+        dayActivities = root.byDay[day] || []
+        dayDialog.open()
     }
     // "<Activity>_dd_MM" for the chosen sport and the day being viewed - the format André asked
     // for (%activity_dd_MM). Month is the viewed month, 1-based, zero-padded.
@@ -55,6 +62,27 @@ Item {
         const dd = String(root.plannerDay).padStart(2, "0")
         const mm = String(root.viewMonth + 1).padStart(2, "0")
         return activity.replace(/[^A-Za-z0-9]/g, "") + "_" + dd + "_" + mm
+    }
+    // Builds the workout.py-schema object the Workout Builder loads. "Simple" = one block of a
+    // duration at an optional target; "Intervals" = warmup + N×(work/recovery) + cooldown.
+    // The builder is where it gets fine-tuned and installed - this just seeds it.
+    function buildWorkout(activity, complex, params) {
+        const mins = (m) => ({ durationName: "time", value: Math.max(1, Math.round(m)) * 60,
+                               unit: "seconds" })
+        const steps = []
+        if (!complex) {
+            steps.push({ type: { typeName: "interval" }, duration: mins(params.duration) })
+        } else {
+            if (params.warmup > 0)
+                steps.push({ type: { typeName: "warmup" }, duration: mins(params.warmup) })
+            steps.push({ type: { typeName: "repeatStart", value: Math.max(1, params.repeats) } })
+            steps.push({ type: { typeName: "interval" }, duration: mins(params.work) })
+            steps.push({ type: { typeName: "recovery" }, duration: mins(params.recovery) })
+            steps.push({ type: { typeName: "repeatEnd" } })
+            if (params.cooldown > 0)
+                steps.push({ type: { typeName: "cooldown" }, duration: mins(params.cooldown) })
+        }
+        return JSON.stringify({ name: root.plannerTitle(activity), steps: steps })
     }
 
     function goPrevMonth() {
@@ -282,18 +310,29 @@ Item {
                                         // sport, then the Workout Builder opens with the title
                                         // pre-filled "<Activity>_dd_MM". Suunto-only, like the
                                         // builder it launches; a null padding cell does nothing.
+                                        //
+                                        // André, 2026-08-23: LEFT click opens the day's recorded
+                                        // activities; RIGHT click plans a workout for it. The
+                                        // planner (right click) is Suunto-only, since it drives
+                                        // the App-Zone workout builder; viewing activities has no
+                                        // such restriction.
+                                        readonly property bool canPlan:
+                                            dayCell.modelData !== null
+                                            && DeviceService.intervalsEnabled
+                                            && !HomeViewModel.isGarmin
+                                            && !HomeViewModel.isKailash
                                         HoverHandler {
                                             enabled: dayCell.modelData !== null
-                                                     && DeviceService.intervalsEnabled
-                                                     && !HomeViewModel.isGarmin
-                                                     && !HomeViewModel.isKailash
                                             cursorShape: Qt.PointingHandCursor
                                         }
                                         TapHandler {
+                                            acceptedButtons: Qt.LeftButton
                                             enabled: dayCell.modelData !== null
-                                                     && DeviceService.intervalsEnabled
-                                                     && !HomeViewModel.isGarmin
-                                                     && !HomeViewModel.isKailash
+                                            onTapped: root.openDay(dayCell.modelData.day)
+                                        }
+                                        TapHandler {
+                                            acceptedButtons: Qt.RightButton
+                                            enabled: dayCell.canPlan
                                             onTapped: root.openPlanner(dayCell.modelData.day)
                                         }
 
@@ -384,16 +423,42 @@ Item {
                                                        : Theme.mutedText
                                                 opacity: parent.parent.activityCount > 0 ? 1 : 0.25
 
+                                                // Themed hover card (André, 2026-08-23: the
+                                                // default ToolTip "doesn't match at all our
+                                                // design"). Same card surface/typography as the
+                                                // rest of the app instead of the Fusion tooltip.
                                                 HoverHandler { id: dotHover }
-                                                ToolTip.visible: dotHover.hovered
-                                                                 && parent.parent.activityCount > 0
-                                                ToolTip.text: parent.parent.activityCount > 0
-                                                    ? modelData.activities.map(function(a) {
-                                                          return a.name + " - " +
-                                                              ActivityViewModel.formatDuration(a.durationSeconds)
-                                                      }).join("\n")
-                                                    : ""
-                                                ToolTip.delay: 300
+                                                Popup {
+                                                    id: dayTip
+                                                    visible: dotHover.hovered
+                                                             && parent.parent.activityCount > 0
+                                                    x: parent.width / 2 - width / 2
+                                                    y: -height - 6
+                                                    padding: Theme.spacingSmall
+                                                    closePolicy: Popup.NoAutoClose
+                                                    background: Rectangle {
+                                                        color: Theme.card
+                                                        radius: Theme.radiusSmall
+                                                        border.width: 1
+                                                        border.color: Qt.rgba(Theme.mutedText.r,
+                                                            Theme.mutedText.g, Theme.mutedText.b, 0.3)
+                                                    }
+                                                    contentItem: Column {
+                                                        spacing: 2
+                                                        Repeater {
+                                                            model: dayCell.modelData
+                                                                   ? dayCell.modelData.activities : []
+                                                            delegate: Text {
+                                                                required property var modelData
+                                                                text: modelData.name + " · " +
+                                                                    ActivityViewModel.formatDuration(
+                                                                        modelData.durationSeconds)
+                                                                color: Theme.text
+                                                                font.pixelSize: Theme.fontSizeCaption
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             Text {
@@ -421,40 +486,163 @@ Item {
         }
     }
 
+    // Left click: the day's recorded activities, themed to match the app.
+    ThemedDialog {
+        id: dayDialog
+        title: root.plannerDay > 0
+               ? Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
+                               Qt.locale(), Locale.LongFormat)
+               : qsTr("Day")
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.Close
+        contentItem: Column {
+            spacing: Theme.spacingSmall
+            width: 360
+
+            Text {
+                visible: root.dayActivities.length === 0
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                text: qsTr("No activities recorded on this day.")
+            }
+            Repeater {
+                model: root.dayActivities
+                delegate: Row {
+                    required property var modelData
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    ActivityBadge {
+                        anchors.verticalCenter: parent.verticalCenter
+                        activityId: ActivityTypes.forName(modelData.name).id
+                        size: 30
+                    }
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { text: modelData.name; color: Theme.text; font.bold: true }
+                        Text {
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            text: ActivityViewModel.formatDuration(modelData.durationSeconds)
+                                  + (modelData.distanceMeters > 0
+                                     ? "  ·  " + (modelData.distanceMeters / 1000).toFixed(1) + " km"
+                                     : "")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Right click: plan a workout. One window - activity dropdown, Simple/Intervals, the data,
+    // then "Create workout" hands the whole thing to the browser builder pre-built.
     ThemedDialog {
         id: plannerDialog
         title: qsTr("Plan a workout")
         anchors.centerIn: Overlay.overlay
         standardButtons: Dialog.Cancel
+
+        property int activityIndex: 0
+        property bool complex: false
+
         contentItem: Column {
             spacing: Theme.spacingMedium
-            width: 360
+            width: 400
 
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
-                text: qsTr("Pick a sport for %1. The Workout Builder opens with the name "
-                            + "already filled in - build the steps there and install it to the "
-                            + "watch's WORKOUT menu.")
+                text: qsTr("For %1. Choose the sport and shape; \"Create workout\" opens the "
+                            + "builder with it ready to fine-tune and install.")
                     .arg(Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
                                         Qt.locale(), Locale.LongFormat))
             }
 
+            // Activity dropdown
             Column {
                 width: parent.width
-                spacing: Theme.spacingSmall
-                Repeater {
+                spacing: 2
+                Text { text: qsTr("Activity"); color: Theme.mutedText
+                       font.pixelSize: Theme.fontSizeLabel }
+                RoundedComboBox {
+                    id: actBox
+                    width: parent.width
                     model: root.plannerActivities
-                    delegate: RoundedButton {
-                        required property string modelData
-                        width: parent.width
-                        text: modelData + "  →  " + root.plannerTitle(modelData)
-                        onClicked: {
-                            IntervalsService.launch(root.plannerTitle(modelData))
-                            plannerDialog.close()
-                        }
-                    }
+                    currentIndex: plannerDialog.activityIndex
+                    onActivated: (i) => plannerDialog.activityIndex = i
+                }
+            }
+
+            // Simple vs Intervals
+            Row {
+                spacing: Theme.spacingLarge
+                RoundedRadioButton {
+                    text: qsTr("Simple")
+                    checked: !plannerDialog.complex
+                    onClicked: plannerDialog.complex = false
+                }
+                RoundedRadioButton {
+                    text: qsTr("Intervals")
+                    checked: plannerDialog.complex
+                    onClicked: plannerDialog.complex = true
+                }
+            }
+
+            // Simple: one duration
+            Column {
+                visible: !plannerDialog.complex
+                width: parent.width
+                spacing: 2
+                Text { text: qsTr("Duration (min)"); color: Theme.mutedText
+                       font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField {
+                    id: simpleDuration
+                    width: 100
+                    text: "45"
+                    validator: IntValidator { bottom: 1; top: 999 }
+                }
+            }
+
+            // Intervals: warmup / repeats × (work/recovery) / cooldown
+            Grid {
+                visible: plannerDialog.complex
+                columns: 2
+                columnSpacing: Theme.spacingMedium
+                rowSpacing: Theme.spacingSmall
+                Text { text: qsTr("Warm-up (min)"); color: Theme.mutedText
+                       height: 34; verticalAlignment: Text.AlignVCenter
+                       font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField { id: wuField; width: 80; text: "10"
+                                   validator: IntValidator { bottom: 0; top: 999 } }
+                Text { text: qsTr("Repeats"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField { id: repField; width: 80; text: "5"
+                                   validator: IntValidator { bottom: 1; top: 99 } }
+                Text { text: qsTr("Work (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField { id: workField; width: 80; text: "3"
+                                   validator: IntValidator { bottom: 1; top: 999 } }
+                Text { text: qsTr("Recovery (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField { id: recField; width: 80; text: "2"
+                                   validator: IntValidator { bottom: 0; top: 999 } }
+                Text { text: qsTr("Cool-down (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
+                RoundedTextField { id: cdField; width: 80; text: "5"
+                                   validator: IntValidator { bottom: 0; top: 999 } }
+            }
+
+            RoundedButton {
+                text: qsTr("Create workout")
+                onClicked: {
+                    const act = root.plannerActivities[plannerDialog.activityIndex]
+                    const params = plannerDialog.complex
+                        ? { warmup: parseInt(wuField.text || "0"),
+                            repeats: parseInt(repField.text || "1"),
+                            work: parseInt(workField.text || "1"),
+                            recovery: parseInt(recField.text || "0"),
+                            cooldown: parseInt(cdField.text || "0") }
+                        : { duration: parseInt(simpleDuration.text || "1") }
+                    IntervalsService.launchWithWorkout(
+                        root.buildWorkout(act, plannerDialog.complex, params))
+                    plannerDialog.close()
                 }
             }
         }

@@ -76,6 +76,7 @@ def save_compiled(name, compiled):
 # Default workout name shown in the builder. Overridable per-launch by the ?name= query (the
 # desktop Calendar's pre-filled scheduled workout) or the --name CLI flag.
 INITIAL_WORKOUT_NAME = "My workout"
+INITIAL_WORKOUT_JSON = None  # base64 JSON, set by --workout-b64
 
 
 def _html_attr(value):
@@ -595,6 +596,27 @@ function deleteFromHistory(i) {
   renderHistory();
 }
 
+// A full workout handed in by the desktop Calendar planner ("Create workout"): name,
+// description and steps, all pre-built. Injected server-side as __INITIAL_WORKOUT_JSON__.
+// Falls back to just the name field the server already set when no workout is passed.
+(function () {
+  try {
+    var initial = __INITIAL_WORKOUT_JSON__;
+    if (initial && typeof initial === "object") {
+      if (initial.name) document.getElementById("wname").value = initial.name;
+      if (initial.workoutDescription)
+        document.getElementById("wdesc").value = initial.workoutDescription;
+      if (Array.isArray(initial.steps) && initial.steps.length) {
+        steps = initial.steps.map(function (st) {
+          if (st.duration && st.duration.durationName && !st.duration.unit)
+            st.duration.unit = defaultUnit(st.duration.durationName);
+          return st;
+        });
+      }
+    }
+  } catch (e) { /* no/blank initial workout - leave the empty builder */ }
+})();
+
 render();
 renderHistory();
 </script>
@@ -633,6 +655,20 @@ class Handler(BaseHTTPRequestHandler):
         initial = q.get("name", [INITIAL_WORKOUT_NAME])[0][:64]
         page = HTML_PAGE.replace('id="wname" value="My workout"',
                                  'id="wname" value="%s"' % _html_attr(initial))
+        # A full pre-built workout from the Calendar planner - ?workout=<base64 of JSON>.
+        # Decoded and validated here so a malformed value just yields the empty builder rather
+        # than injecting anything unsafe; only json.dumps output reaches the page.
+        initial_workout = "null"
+        raw_w = q.get("workout", [None])[0] or INITIAL_WORKOUT_JSON
+        if raw_w:
+            try:
+                import base64                                  # noqa: PLC0415
+                obj = json.loads(base64.urlsafe_b64decode(raw_w.encode()).decode("utf-8"))
+                if isinstance(obj, dict):
+                    initial_workout = json.dumps(obj)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                initial_workout = "null"
+        page = page.replace("__INITIAL_WORKOUT_JSON__", initial_workout)
         body = page.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -754,10 +790,14 @@ def main():
                      help="don't open a browser automatically (default: open one)")
     ap.add_argument("--name", default=None,
                      help="pre-fill the workout name (the Calendar passes e.g. Running_24_08)")
+    ap.add_argument("--workout-b64", default=None,
+                     help="pre-fill the WHOLE workout: base64 of its JSON (Calendar planner)")
     args = ap.parse_args()
-    global INITIAL_WORKOUT_NAME
+    global INITIAL_WORKOUT_NAME, INITIAL_WORKOUT_JSON
     if args.name:
         INITIAL_WORKOUT_NAME = args.name
+    if args.workout_b64:
+        INITIAL_WORKOUT_JSON = args.workout_b64
     # A --name launch opens the browser straight at that name, so the query and the default
     # agree even before any typing.
     name_q = ("?name=" + _url_quote(args.name)) if args.name else ""

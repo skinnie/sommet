@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
+#include <QByteArray>
 
 // Baked in at configure time (CMakeLists.txt) - this is a personal dev-checkout tool tied to
 // one repo layout, not something installed separately from it (same "fixed convention, not
@@ -38,13 +39,8 @@ IntervalsService::IntervalsService(QObject *parent) : QObject(parent)
 {
 }
 
-QString IntervalsService::launch(const QString &workoutName)
+static QString launchBuilder(const QStringList &nameArgs)
 {
-    // The builder pre-fills its name field from --name (see workout_gui.py). Passed through
-    // for the Calendar's scheduled-workout flow; empty for a plain launch.
-    QStringList nameArgs;
-    if (!workoutName.isEmpty())
-        nameArgs << QStringLiteral("--name") << workoutName;
 
     // Packaged download: the bundled helper carries the Workout Builder - just launch it.
     const QString bundled = QFileInfo(bundledBackendPath()).absoluteFilePath();
@@ -81,4 +77,26 @@ QString IntervalsService::launch(const QString &workoutName)
 
     return QStringLiteral("Couldn't find the Workout Builder - expected it at %1")
         .arg(fallbackScript);
+}
+
+QString IntervalsService::launch(const QString &workoutName)
+{
+    // The builder pre-fills its name field from --name (see workout_gui.py). Empty = a plain
+    // launch, unchanged.
+    QStringList args;
+    if (!workoutName.isEmpty())
+        args << QStringLiteral("--name") << workoutName;
+    return launchBuilder(args);
+}
+
+QString IntervalsService::launchWithWorkout(const QString &workoutJson)
+{
+    // The planner's "Create workout" hands over a whole workout as JSON. It goes to the
+    // builder base64'd (--workout-b64), the same value the page also accepts as ?workout=,
+    // so a shell/URL never has to carry raw JSON. Empty JSON = a plain launch.
+    if (workoutJson.isEmpty())
+        return launchBuilder(QStringList{});
+    const QString b64 = QString::fromLatin1(
+        workoutJson.toUtf8().toBase64(QByteArray::Base64UrlEncoding));
+    return launchBuilder(QStringList{QStringLiteral("--workout-b64"), b64});
 }
