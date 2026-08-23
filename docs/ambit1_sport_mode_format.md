@@ -64,9 +64,10 @@ The Ambit1 is missing five capabilities the rest of the family has, and the miss
 exactly the 14-byte difference. **This is Ambit1-only — Ambit2 has the full capability set and
 therefore almost certainly uses the standard 90-byte layout openambit already implements.**
 
-Practical consequence, confirmed live: SuuntoLink shows an HR-limits control for the Ambit1 but
-the values never stick, because the watch has no `usehrlimits` capability. That is a device
-limitation surfaced as a SuuntoLink UI bug, not a watch fault.
+Read these flags carefully: they name **fields**, not features. `usehrlimits` is the separate
+`use_heartrate_limits` *toggle field*, not HR limits as a capability — the Ambit1 supports
+sports-specific HR limits (manual §6.3, and confirmed in the pcap), it just has nowhere to
+store the enabled/disabled flag. See §6a.
 
 ## 4. Ambit1 76-byte settings layout
 
