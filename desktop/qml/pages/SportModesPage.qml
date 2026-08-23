@@ -60,13 +60,22 @@ PageFlickable {
     // the HR belt). A Traverse reports supportsFootPod/BikePod/PowerPod=false, so only the HR
     // belt shows for it - it has no ANT+ pod support at all. André, 2026-08-17.
     // Cadence (0x0080) is what makes Cycling's real 0x08C3 add up (0x0800 bike | 0x0080 cadence
-    // | 0x0040 power | 0x0003); gated with the bike pod so it shows on ANT+ watches only.
+    // | 0x0040 power | 0x0003).
+    // CORRECTED 2026-08-23: it was gated on supportsBikePod, which showed a Cadence checkbox on
+    // an Ambit3 - SuuntoLink does not. Its own supportsCadencePod() is true for Ambit1/Ambit2/
+    // Ambit2 S and FALSE for every Ambit3, Traverse and Ambit2 R (run live from
+    // ambit/sport_mode.js), and this app's own capability record already carried that correctly;
+    // only this gate was wrong.
+    // Read the flag for what it is: a separate cadence POD to search for, NOT whether the watch
+    // can measure cadence. The Ambit1/Ambit2 are ANT+, where a standalone cadence pod is its own
+    // device; the Ambit3 is BLE, where cadence normally arrives from a combo speed/cadence or
+    // bike sensor - so there is no separate entry to list, which is exactly what SuuntoLink does.
     // 0x0004 is deliberately absent - it is UseAccelerometer, which SuuntoLink derives from the
     // sport itself and never offers as a checkbox.
     readonly property var podBits: [
         { bit: 0x0001, label: qsTr("HR belt"),   cap: "" },
         { bit: 0x0040, label: qsTr("Power pod"), cap: "supportsPowerPod" },
-        { bit: 0x0080, label: qsTr("Cadence"),   cap: "supportsBikePod" },
+        { bit: 0x0080, label: qsTr("Cadence"),   cap: "supportsCadencePod" },
         { bit: 0x0100, label: qsTr("Foot pod"),  cap: "supportsFootPod" },
         { bit: 0x0800, label: qsTr("Bike pod"),  cap: "supportsBikePod" },
     ]
