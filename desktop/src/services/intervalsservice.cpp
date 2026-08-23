@@ -47,33 +47,23 @@ QString IntervalsService::launch()
             return QString();
     }
 
-    // Source checkout: fall back to the standalone Workout Builder (a packaged dist/ build if
-    // present, otherwise run tools/workout_gui.py with the system Python).
+    // Source checkout: run tools/workout_gui.py with the system Python.
+    //
+    // The tools/*.py is now the ONLY source-checkout path - the dist/ build was dropped here
+    // 2026-08-23. A stale dist/linux/Ambit3 Workout Builder (frozen 2026-08-19) was actually
+    // serving the App Zone builder, so "Open Workout Builder" opened the app builder - exactly
+    // the bug André hit ("workout link opens apps link"). The .py in the tree is the source of
+    // truth and always current; a hand-built dist/ binary can silently drift or be mislabeled,
+    // so it must not shadow it. dist/ matters only for the real packaged download, where
+    // bundledBackendPath() above is what runs.
     const QString repoRoot = QDir(QStringLiteral(AMBITAPP_REPO_ROOT)).absolutePath();
     const QString fallbackScript = repoRoot + QStringLiteral("/tools/workout_gui.py");
 
 #if defined(Q_OS_WIN)
-    const QString packaged =
-        repoRoot + QStringLiteral("/dist/windows/Ambit3 Workout Builder.exe");
     const QString pythonCommand = QStringLiteral("python");
-#elif defined(Q_OS_MACOS)
-    const QString packaged = repoRoot + QStringLiteral("/dist/mac/Ambit3 Workout Builder.app");
-    const QString pythonCommand = QStringLiteral("python3");
 #else
-    const QString packaged = repoRoot + QStringLiteral("/dist/linux/Ambit3 Workout Builder");
     const QString pythonCommand = QStringLiteral("python3");
 #endif
-
-    if (QFileInfo::exists(packaged)) {
-#if defined(Q_OS_MACOS)
-        // .app bundles need to go through `open`, not be exec'd directly.
-        if (QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-a"), packaged}))
-            return QString();
-#else
-        if (QProcess::startDetached(packaged, {}))
-            return QString();
-#endif
-    }
 
     if (QFileInfo::exists(fallbackScript)) {
         if (QProcess::startDetached(pythonCommand, {fallbackScript}))
@@ -82,6 +72,6 @@ QString IntervalsService::launch()
             .arg(fallbackScript, pythonCommand);
     }
 
-    return QStringLiteral("Couldn't find the Workout Builder - expected it at %1 or %2")
-        .arg(packaged, fallbackScript);
+    return QStringLiteral("Couldn't find the Workout Builder - expected it at %1")
+        .arg(fallbackScript);
 }
