@@ -39,7 +39,8 @@ hardware, and they carry the watch serial number.
 | `custom_modes_write.py` | encodes CustomModes' BXml body (inverse of `custom_modes.py`), verified byte-for-byte against real live watch data - see `V3_CHANGELOG.md` |
 | `custom_modes_writeback_test.py` | real-hardware-confirmed write of the CustomModes region (chunk writes + padded hash + commit) - see `V3_CHANGELOG.md` |
 | `apps.py` | decodes the Apps flash region (installed Suunto App bytecode), IDs against SuuntoLink's catalog |
-| `exercise_log.py` | decodes ExerciseLog (recorded moves) to GPX and FIT |
+| `exercise_log.py` | decodes ExerciseLog (recorded moves) to GPX and FIT; reports each move's logged Suunto App outputs (ruleoutput1..5) |
+| `app_logging.py` | turns a Suunto App's logging on/off (EXERCISE_MODES_RULE `LogRule`) - revives the Movescount feature of recording an app's output into the Move; a single-byte CustomModes edit, dry-run by default. Firmware emission of ruleoutput still needs a real recorded-move confirmation |
 | `sgee.py` | writes GPS/GLONASS orbital data (AGPS) to GpsSGEE |
 | `device_info.py` | model/serial/firmware/hardware version + live battery charge, verified on real hardware - see `V3_CHANGELOG.md` |
 | `firmware_check.py` | asks Suunto's real device-info service for the latest firmware + a real download link, given a model/hw version (or read live) - see `V3_CHANGELOG.md` |

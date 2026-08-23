@@ -238,11 +238,15 @@ def _bump(data, len_offset, delta):
     struct.pack_into("<H", data, len_offset, old + delta)
 
 
-def add_rule_to_mode(data, mode_index, rule_idx):
-    """Append an EXERCISE_MODES_RULE {RuleIdx, UseRule=1, LogRule=0} to the mode - creating the
+def add_rule_to_mode(data, mode_index, rule_idx, log_rule=False):
+    """Append an EXERCISE_MODES_RULE {RuleIdx, UseRule=1, LogRule} to the mode - creating the
     mode's EXERCISE_MODES_RULES container if it has none yet. RuleIdx is the app's 0-based
-    position in the Apps region (see next_rule_idx)."""
-    rule = _tag(cm.EXERCISE_MODES_RULE, struct.pack("<HHH", rule_idx, 1, 0))
+    position in the Apps region (see next_rule_idx).
+
+    log_rule=True revives the Movescount behaviour where the app's per-sample output is
+    recorded into the Move (it surfaces as ruleoutput1..5 in the log - see app_logging.py).
+    Default False, matching every real SuuntoLink install capture."""
+    rule = _tag(cm.EXERCISE_MODES_RULE, struct.pack("<HHH", rule_idx, 1, 1 if log_rule else 0))
     loc = _find_mode(data, mode_index)
     mc, ml = loc["mode_content"], loc["mode_len"]
     existing = [c for c in _walk_children(data, mc, mc + ml) if c[0] == cm.EXERCISE_MODES_RULES]
@@ -352,7 +356,7 @@ def add_app_shortcut_to_field(data, mode_index, display_index, field_index, shor
 
 
 def install_app_into_mode(custom_modes_bytes, mode_index, display_index, field_index, rule_idx,
-                          as_workout=False):
+                          as_workout=False, log_rule=False):
     """Returns new CustomModes region bytes with the app wired into
     (mode_index, display_index, field_index) the way SuuntoLink really does it (Finding 44):
     add the RULE, stamp APP_META, and APPEND the app's engine slot as a DISP_FIELD_SHORTCUT on
@@ -369,7 +373,7 @@ def install_app_into_mode(custom_modes_bytes, mode_index, display_index, field_i
     decoded = cm.decode(bytes(data))
     n_existing = len(decoded["exercise_modes"][mode_index]["Rules"])
 
-    add_rule_to_mode(data, mode_index, rule_idx)
+    add_rule_to_mode(data, mode_index, rule_idx, log_rule=log_rule)
     set_app_meta(data, mode_index)
 
     # Place the engine-slot shortcut on a data field when a field is given. For a guidance
@@ -416,6 +420,11 @@ def main():
                           " do NOT pin it to a display field - testing whether an unwired"
                           " guidance rule appears in the browsable WORKOUT options menu."
                           " --display/--field not required with this.")
+    ap.add_argument("--log", action="store_true",
+                     help="record this app's output into the Move (LogRule=1) so it can appear"
+                          " as a graph in analysis - reviving the Movescount app-logging"
+                          " feature. Default off, matching SuuntoLink. See app_logging.py to"
+                          " toggle logging on an app that is already installed.")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--json", action="store_true",
                      help="print one final JSON line summarizing the result - for"
@@ -537,7 +546,7 @@ def main():
 
         new_custom_modes = install_app_into_mode(
             current_custom_modes, args.mode, args.display, args.field, rule_idx,
-            as_workout=args.as_workout)
+            as_workout=args.as_workout, log_rule=args.log)
 
         # Refuse to send anything violating the Type/Shortcut invariant (Finding 53's
         # "connect to Moveslink" root cause) - checked here, on the actual bytes about to be

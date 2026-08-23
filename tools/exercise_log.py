@@ -68,6 +68,30 @@ PERIODIC_TYPE_FORMATS = {
     0x17: "<B", 0x1a: "<B",                           # noofsatellites, cadence (u8)
 }
 
+# Suunto App logged outputs. ruleoutput1..5 (periodic types 0x64-0x68) carry the per-sample
+# value of each *logged* Suunto App (a mode's rules with LogRule=1 - see app_logging.py). Slot
+# N here = the Nth logged rule in the mode. libambit documents 0x80000000 as the "absent" fill
+# for a slot with no live value that sample, so it's filtered out below.
+RULEOUTPUT_TYPES = (0x64, 0x65, 0x66, 0x67, 0x68)
+RULEOUTPUT_ABSENT = -0x80000000  # 0x80000000 read as a signed i32
+
+
+def ruleoutput_series(samples):
+    """Per-slot lists of a logged Suunto App's raw values across an entry, sentinel filtered.
+
+    Returns {name: [values...]} for each ruleoutput slot that has at least one real value -
+    e.g. {"ruleoutput1": [123, 124, ...]}. Values are the raw device int32s: their real-world
+    scaling (decimals / units) is set by the app itself and isn't known here until we can
+    calibrate against a move recorded with a known app. Empty dict when nothing was logged."""
+    series = {}
+    for s in samples:
+        if s.get("type") != "periodic":
+            continue
+        for v in s.get("values", []):
+            if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
+                series.setdefault(v["name"], []).append(v["value"])
+    return series
+
 
 def read8(data, offset):
     return data[offset]
@@ -932,6 +956,13 @@ def main():
         gps_samples = sum(1 for s in samples if s["type"] in
                            ("gps_base", "gps_small", "gps_tiny"))
         print(f"  {gps_samples} GPS-position sample(s)")
+        # Logged Suunto App outputs (LogRule=1). Report them so a move recorded with app
+        # logging on can be confirmed here, and the raw range read off to calibrate scaling.
+        rules = ruleoutput_series(samples)
+        for name in sorted(rules):
+            vals = rules[name]
+            print(f"  {name}: {len(vals)} logged sample(s), raw range "
+                  f"{min(vals)}..{max(vals)} (Suunto App output - raw i32, scaling TBD)")
         if args.gpx_out:
             import os
             os.makedirs(args.gpx_out, exist_ok=True)
