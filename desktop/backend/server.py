@@ -1679,11 +1679,15 @@ class Handler(BaseHTTPRequestHandler):
          [[0,"WGS84 hd.d"],[1,"WGS84 hd m.m"],[2,"WGS84 hd m s.s"],[3,"UTM"],[4,"MGRS"]], None),
         ("alti_baro_mode",       "Alti-baro profile",     "general",  "radio",
          [[0,"Automatic"],[1,"Altimeter"],[2,"Barometer"]], None),
-        ("storm_alarm",          "Storm alarm",           "general",  "checkbox",
-         [[0,"Off"],[1,"On"]], None),
-        ("fused_alti_disabled",  "FusedAlti disabled",    "general",  "checkbox",
-         [[0,"No"],[1,"Yes"]], None),
-        ("compass_declination",  "Compass declination",   "general",  "number", None, None),
+        # storm_alarm / fused_alti_disabled are NOT listed on purpose. They exist in
+        # libambit's shared struct, but across BOTH of André's captures - in which he
+        # deliberately exercised every settings control - SuuntoLink never wrote either byte
+        # (@61, @62). Neither appears in the Ambit1's Devices.xml options. The "Storm alarm"
+        # on this watch is an installed App, not a built-in setting. Showing them would be
+        # exposing struct padding as features.
+        ("compass_declination_dir", "Compass declination", "general", "dropdown",
+         [[0,"Off"],[1,"East"],[2,"West"]], None),
+        ("compass_declination_deg", "Declination degrees", "general", "number", None, "deg"),
         ("time_format",          "Time format",           "general",  "radio",
          [[0,"24h"],[1,"12h"]], None),
         ("date_format",          "Date format",           "general",  "dropdown",
@@ -1726,6 +1730,7 @@ class Handler(BaseHTTPRequestHandler):
         "sync_time_w_gps", "gps_position_format", "alti_baro_mode", "storm_alarm",
         "fused_alti_disabled", "time_format", "date_format", "alarm_enable", "units_mode",
         "birthyear", "max_hr", "rest_hr", "fitness_level", "is_male", "length_cm",
+        "compass_declination_dir", "compass_declination_deg", "navigation_style",
     }
     # UI key -> the CLI's own field name where they differ.
     LEGACY_WRITE_KEY = {"length_cm": "length"}
@@ -1799,6 +1804,12 @@ class Handler(BaseHTTPRequestHandler):
         if not raw.get("ok"):
             self._send_json(502, raw)
             return
+
+        # Split the declination u16 back into the two bytes the watch really stores.
+        if "compass_declination" in raw:
+            v = int(raw["compass_declination"] or 0)
+            raw["compass_declination_dir"] = v & 0xff
+            raw["compass_declination_deg"] = (v >> 8) & 0xff
 
         out = {}
         for key, label, screen, control, choices, unit in self.LEGACY_SETTING_SPECS:

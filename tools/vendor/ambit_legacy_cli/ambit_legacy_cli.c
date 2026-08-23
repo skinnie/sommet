@@ -874,7 +874,11 @@ static int cmd_sport_mode_write_file(const char *path, bool dry_run) {
  * u16 field is written little-endian like everything else here. */
 static const struct { const char *name; int off; int width; } A1_SETTING_FIELDS[] = {
     {"sportmode_button_lock", 1, 1}, {"timemode_button_lock", 2, 1},
-    {"compass_declination", 4, 2},
+    /* NOT one u16, whatever libambit's parser suggests. The capture shows byte 4 taking
+     * 0/1/2 and byte 5 taking 0/1/180 as André walked SuuntoLink's declination control:
+     * off -> W 180 -> W 1 -> E 1 -> E 180 -> off. So byte 4 is the direction and byte 5 the
+     * magnitude in degrees; reading them as a little-endian u16 yields nonsense like 46082. */
+    {"compass_declination_dir", 4, 1}, {"compass_declination_deg", 5, 1},
     {"units_mode", 8, 1},
     {"units.pressure", 9, 1},  {"units.altitude", 10, 1}, {"units.distance", 11, 1},
     {"units.height", 12, 1},   {"units.temperature", 13, 1}, {"units.verticalspeed", 14, 1},
