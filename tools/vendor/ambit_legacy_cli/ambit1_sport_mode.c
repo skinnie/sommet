@@ -174,6 +174,73 @@ static int ambit1_write_region(ambit_object_t *dev, const uint8_t *data, uint32_
     return 0;
 }
 
+
+/* Locates the byte position of one display-row VALUE inside a mode body, so it can be patched
+ * in place.
+ *
+ * Why in place is enough for the edit the UI actually offers: a ROW's payload is
+ * [u16 row_nbr][u16 item] and a VIEW's is [u16 item], so changing WHICH data a row shows is a
+ * fixed-size, 2-byte write. No TLV length changes, nothing shifts, and the parent length
+ * fields stay correct - the same property that makes the settings patcher safe. (Adding or
+ * removing a display, or changing a layout's row count, WOULD resize the record and cascade
+ * through every parent length; that is deliberately not attempted here.)
+ *
+ * `disp_idx` counts USER displays only and must match what the reader emitted, so `keep` (the
+ * mode's user-display count, system tail already excluded) is passed in and enforced.
+ * `value_idx` selects among a multi-value row's VIEW entries; for a single-value row it is 0
+ * and the ROW's own item is targeted.
+ *
+ * Returns the absolute offset of the u16 to write, or 0 if the address does not resolve. */
+static uint32_t a1_find_row_value(const uint8_t *body, uint32_t len, int keep,
+                                   int disp_idx, int row_idx, int value_idx) {
+    uint32_t p = 0;
+    int cur_disp = -1, cur_row = -1;
+    uint32_t row_item_off = 0;          /* the target ROW's own item field */
+    uint32_t views[32];                 /* and any VIEW items that follow it */
+    int view_count = 0;
+    int in_target_row = 0;
+
+    while (p + 4 <= len) {
+        uint16_t tag = rd16(body, p), ln = rd16(body, p + 2);
+
+        if (tag == TAG_DISPLAYS || tag == TAG_ROWS) { p += 4; continue; }
+
+        if (tag == TAG_DISPLAY) {
+            if (row_item_off) break;    /* target row already captured; stop here */
+            cur_disp++; cur_row = -1; in_target_row = 0;
+            if (cur_disp > disp_idx) break;
+            p += 4; continue;
+        }
+        if (tag == TAG_ROW) {
+            if (row_item_off) break;
+            cur_row++;
+            in_target_row = (cur_disp == disp_idx && cur_row == row_idx);
+            if (in_target_row) {
+                if (ln < 4) return 0;
+                row_item_off = p + 6;   /* [hdr 4][u16 row_nbr][u16 item] */
+            }
+            p += 4 + ln; continue;
+        }
+        if (tag == TAG_VIEW) {
+            /* VIEWs belong to the row most recently seen */
+            if (in_target_row && view_count < 32 && ln >= 2) views[view_count++] = p + 4;
+            p += 4 + ln; continue;
+        }
+        p += 4 + ln;
+    }
+
+    if (cur_disp >= keep) return 0;     /* refuse anything in the built-in tail */
+    if (!row_item_off) return 0;
+
+    /* A row with VIEWs is the watch's multi-value row: its values ARE the VIEW items, and the
+     * ROW's own item is 0. Otherwise the single value lives in the ROW itself. */
+    if (view_count > 0) {
+        if (value_idx >= view_count) return 0;
+        return views[value_idx];
+    }
+    return (value_idx == 0) ? row_item_off : 0;
+}
+
 /* Walks the TLV and records where each mode's settings blob starts. Returns mode count. */
 int ambit1_find_modes_ex(const uint8_t *buf, uint32_t len, uint32_t *offsets,
                           uint32_t *body_off, uint32_t *body_len, int max_modes) {
@@ -421,13 +488,34 @@ int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
         printf("{\"ok\": false, \"error\": \"region read failed; nothing written\"}\n");
         return 1;
     }
-    uint32_t offs[32];
-    int n = ambit1_find_modes(buf, (uint32_t)got, offs, 32);
+    uint32_t offs[32], boff[32], blen[32];
+    int n = ambit1_find_modes_ex(buf, (uint32_t)got, offs, boff, blen, 32);
     if (n == 0) {
         fputs("@@JSON@@\n", stdout);
         printf("{\"ok\": false, \"error\": \"no sport modes parsed; nothing written\"}\n");
         return 1;
     }
+
+    /* Same computed system tail as the reader (a1_collect_layouts' comment explains why it
+     * is derived, not listed) - display indices in a patch MUST mean the same thing they did
+     * in the JSON the UI was drawn from. */
+    uint16_t lay[32][64];
+    int lay_n[32], keep[32];
+    for (int i = 0; i < n; i++) lay_n[i] = a1_collect_layouts(buf + boff[i], blen[i], lay[i], 64);
+    int tail = 0;
+    if (n > 1) {
+        int shortest = lay_n[0];
+        for (int i = 1; i < n; i++) if (lay_n[i] < shortest) shortest = lay_n[i];
+        while (tail < shortest) {
+            uint16_t v = lay[0][lay_n[0] - tail - 1];
+            int same = 1;
+            for (int i = 1; i < n; i++)
+                if (lay[i][lay_n[i] - tail - 1] != v) { same = 0; break; }
+            if (!same) break;
+            tail++;
+        }
+    }
+    for (int i = 0; i < n; i++) { keep[i] = lay_n[i] - tail; if (keep[i] < 0) keep[i] = 0; }
 
     FILE *pf = fopen(patch_path, "r");
     if (!pf) {
@@ -448,6 +536,22 @@ int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
         int idx = atoi(a);
         if (idx < 0 || idx >= n) { rejected++; continue; }
         uint8_t *blob = buf + offs[idx];
+
+        /* `IDX|row|DISP:ROW:VALUE:FIELDID` - change WHICH data a display row shows.
+         * Fixed-size: patches the ROW's own item, or the VIEW at VALUE for a multi-value
+         * row. Display indices count user displays only, matching the reader's output. */
+        if (strcmp(b, "row") == 0) {
+            int di = -1, ri = -1, vi = -1, field = -1;
+            if (sscanf(c, "%d:%d:%d:%d", &di, &ri, &vi, &field) != 4
+                || di < 0 || ri < 0 || vi < 0 || field < 0 || field > 65535) {
+                rejected++; continue;
+            }
+            uint32_t at = a1_find_row_value(buf + boff[idx], blen[idx], keep[idx], di, ri, vi);
+            if (at == 0) { rejected++; continue; }
+            wr16(buf + boff[idx], (int)at, (uint16_t)field);
+            applied++;
+            continue;
+        }
 
         if (strcmp(b, "name") == 0) {
             memset(blob + OFF_NAME, 0, 16);

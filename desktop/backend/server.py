@@ -2606,6 +2606,107 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "results": results})
 
+    def _handle_customodes_displays_ambit1(self, mode, edits, confirm):
+        """The Ambit1 half of POST /api/customodes/displays.
+
+        Only `setRow` is supported, and that is a real limit rather than an unfinished one:
+        changing WHICH data a row shows is a fixed-size edit (a ROW's payload is
+        [u16 row_nbr][u16 item], a VIEW's is [u16 item]), so it patches in place and every TLV
+        length stays valid. Adding or removing a display, or changing a layout's row count,
+        would resize the record and cascade through every parent length - not attempted, and
+        reported as rejected rather than silently dropped.
+
+        Row addressing matches what the reader emitted: display indices count USER displays
+        only, with the computed built-in tail excluded on both sides."""
+        rows = []
+        unsupported = []
+        for e in edits:
+            if not isinstance(e, dict):
+                continue
+            if e.get("op") != "setRow":
+                unsupported.append(e.get("op"))
+                continue
+            rows.append(e)
+        if not rows:
+            self._send_json(400, {
+                "ok": False,
+                "error": "this watch supports changing a display row's data; "
+                         f"{sorted(set(unsupported))} would resize the region and is not "
+                         "supported here"})
+            return
+
+        # mode name -> index, from the watch's own current order
+        try:
+            sys.path.insert(0, str(TOOLS_DIR))
+            import legacy_link                                  # noqa: PLC0415
+            env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+            old_env = os.environ.get("AMBIT_PRODUCT_ID")
+            if env_pid:
+                os.environ["AMBIT_PRODUCT_ID"] = env_pid
+            try:
+                with WATCH_LOCK:
+                    info = legacy_link.ambit1_sport_mode_read()
+            finally:
+                if env_pid:
+                    if old_env is None:
+                        os.environ.pop("AMBIT_PRODUCT_ID", None)
+                    else:
+                        os.environ["AMBIT_PRODUCT_ID"] = old_env
+        except RuntimeError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        if not info.get("ok"):
+            self._send_json(502, info)
+            return
+        names = [m.get("name", "") for m in info.get("modes") or []]
+        if mode not in names:
+            self._send_json(404, {"ok": False, "error": f"no sport mode named {mode!r}"})
+            return
+        mode_idx = names.index(mode)
+        ROW_INDEX = {"top": 0, "center": 1, "bottom": 2}
+
+        lines = []
+        for e in rows:
+            disp = e.get("display")
+            row = ROW_INDEX.get(str(e.get("row", "")).strip().lower())
+            values = e.get("values") or []
+            if disp is None or row is None:
+                continue
+            for vi, field in enumerate(values):
+                lines.append(f"{mode_idx}|row|{int(disp)}:{row}:{vi}:{int(field)}")
+        if not lines:
+            self._send_json(400, {"ok": False, "error": "no usable row edits in the request"})
+            return
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("\n".join(lines) + "\n")
+            patch_path = f.name
+        try:
+            args = ["ambit1-sport-mode-patch", patch_path]
+            if not confirm:
+                args.append("--dry-run")
+            env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+            old_env = os.environ.get("AMBIT_PRODUCT_ID")
+            if env_pid:
+                os.environ["AMBIT_PRODUCT_ID"] = env_pid
+            try:
+                with WATCH_LOCK:
+                    result = legacy_link.run(args)
+            finally:
+                if env_pid:
+                    if old_env is None:
+                        os.environ.pop("AMBIT_PRODUCT_ID", None)
+                    else:
+                        os.environ["AMBIT_PRODUCT_ID"] = old_env
+        except RuntimeError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            Path(patch_path).unlink(missing_ok=True)
+
+        result["unsupportedOps"] = sorted(set(o for o in unsupported if o))
+        self._send_json(200 if result.get("ok") else 502, result)
+
     def _handle_customodes_displays(self, body):
         """POST /api/customodes/displays - structural display edits, applied as ONE write.
 
@@ -2627,6 +2728,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False,
                                    "error": "need a mode name and a non-empty edits list"})
             return
+        # Ambit1: its own patcher and its own region format (76-byte settings, displays as
+        # in-place TLV). custom_modes_edit.py is the SBEM/CustomModes tool and does not apply.
+        if selected_is_legacy():
+            self._handle_customodes_displays_ambit1(mode, edits,
+                                                     bool((body or {}).get("confirm")))
+            return
+
         args = ["--mode", mode, "--edits", json.dumps(edits), "--json"]
         if (body or {}).get("confirm"):
             args.append("--write")
