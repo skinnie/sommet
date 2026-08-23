@@ -119,6 +119,18 @@ def poi_clear():
     return run(["poi-clear"])
 
 
+def settings_write(key, value, dry_run=False):
+    """Writes ONE personal-settings field on an Ambit1.
+
+    Command 0x0b01, solved from André's own capture: SuuntoLink sends back the same 132-byte
+    structure the 0x0b00 read returns, with the changed field patched in place. The CLI does
+    the read-modify-write, so every field the caller did not name is preserved exactly."""
+    args = ["settings-write", str(key), str(int(value))]
+    if dry_run:
+        args.append("--dry-run")
+    return run(args)
+
+
 def ambit1_sport_mode_read():
     """The REAL sport modes currently on an Ambit1, decoded off the watch.
 

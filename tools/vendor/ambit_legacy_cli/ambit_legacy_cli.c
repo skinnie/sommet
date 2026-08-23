@@ -856,6 +856,116 @@ static int cmd_sport_mode_write_file(const char *path, bool dry_run) {
     return write_sport_modes(settings, count, names, dry_run);
 }
 
+
+/* Personal-settings WRITE - command 0x0b01, solved 2026-08-23 from André's own USB capture
+ * (assets/pcap/2026-08-23-ambit1-suuntolink/ambit1languages.pcap).
+ *
+ * The format needed no reverse-engineering in the end: SuuntoLink sends back the SAME
+ * 132-byte structure the 0x0b00 read returns, with the changed field patched in place. In the
+ * capture, 26 consecutive writes differ by exactly ONE byte each - byte 20 stepping through
+ * the language enum and ending on 4 (Francais), byte 19 cycling the GPS position format, byte
+ * 24 toggling GPS time keeping - which is precisely what André reported doing on the watch.
+ * Those offsets are the same ones personal.c's own parser reads, so read and write share one
+ * layout.
+ *
+ * So this is read-modify-write, exactly like the sport-mode patcher: fetch the live 132
+ * bytes, patch the requested field, send them back. Nothing is invented and every byte the
+ * caller did not ask to change is preserved. Field names/offsets are the parser's own, and a
+ * u16 field is written little-endian like everything else here. */
+static const struct { const char *name; int off; int width; } A1_SETTING_FIELDS[] = {
+    {"sportmode_button_lock", 1, 1}, {"timemode_button_lock", 2, 1},
+    {"compass_declination", 4, 2},
+    {"units_mode", 8, 1},
+    {"units.pressure", 9, 1},  {"units.altitude", 10, 1}, {"units.distance", 11, 1},
+    {"units.height", 12, 1},   {"units.temperature", 13, 1}, {"units.verticalspeed", 14, 1},
+    {"units.weight", 15, 1},   {"units.compass", 16, 1}, {"units.heartrate", 17, 1},
+    {"units.speed", 18, 1},
+    {"gps_position_format", 19, 1}, {"language", 20, 1}, {"navigation_style", 21, 1},
+    {"sync_time_w_gps", 24, 1}, {"time_format", 25, 1},
+    {"alarm_hour", 26, 1}, {"alarm_minute", 27, 1}, {"alarm_enable", 28, 1},
+    {"dual_time_hour", 31, 1}, {"dual_time_minute", 32, 1},
+    {"date_format", 36, 1}, {"tones_mode", 40, 1},
+    {"backlight_mode", 44, 1}, {"backlight_brightness", 45, 1},
+    {"display_brightness", 46, 1}, {"display_is_negative", 47, 1},
+    {"weight", 48, 2}, {"birthyear", 50, 2},
+    {"max_hr", 52, 1}, {"rest_hr", 53, 1}, {"fitness_level", 54, 1},
+    {"is_male", 55, 1}, {"length", 56, 1},
+    {"alti_baro_mode", 60, 1}, {"storm_alarm", 61, 1}, {"fused_alti_disabled", 62, 1},
+};
+#define A1_SETTINGS_BLOB 132
+
+static int cmd_settings_write(const char *key, long value, int dry_run) {
+    const int nfields = (int)(sizeof(A1_SETTING_FIELDS) / sizeof(A1_SETTING_FIELDS[0]));
+    int idx = -1;
+    for (int i = 0; i < nfields; i++)
+        if (strcmp(A1_SETTING_FIELDS[i].name, key) == 0) { idx = i; break; }
+    if (idx < 0) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"unknown setting \"}\n");
+        return 1;
+    }
+    long maxv = (A1_SETTING_FIELDS[idx].width == 2) ? 65535 : 255;
+    if (value < 0 || value > maxv) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"value out of range for this field\"}\n");
+        return 1;
+    }
+
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
+        return 1;
+    }
+    if (info->product_id != 0x0010) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"this settings layout is the Ambit1's only\"}\n");
+        libambit_close(dev); libambit_free_enumeration(devices);
+        return 1;
+    }
+
+    uint8_t *reply = NULL; size_t replylen = 0;
+    if (libambit_protocol_command(dev, 0x0b00, NULL, 0, &reply, &replylen, 0) != 0
+        || replylen < A1_SETTINGS_BLOB) {
+        libambit_protocol_free(reply);
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"could not read current settings; nothing written\"}\n");
+        libambit_close(dev); libambit_free_enumeration(devices);
+        return 1;
+    }
+    uint8_t blob[A1_SETTINGS_BLOB];
+    memcpy(blob, reply, A1_SETTINGS_BLOB);
+    libambit_protocol_free(reply);
+
+    int off = A1_SETTING_FIELDS[idx].off;
+    unsigned old = (A1_SETTING_FIELDS[idx].width == 2)
+                     ? (unsigned)(blob[off] | (blob[off + 1] << 8)) : blob[off];
+    if (A1_SETTING_FIELDS[idx].width == 2) {
+        blob[off] = value & 0xff; blob[off + 1] = (value >> 8) & 0xff;
+    } else {
+        blob[off] = (uint8_t)value;
+    }
+
+    int rc = 0;
+    if (!dry_run) {
+        uint8_t *wreply = NULL; size_t wlen = 0;
+        rc = libambit_protocol_command(dev, 0x0b01, blob, A1_SETTINGS_BLOB, &wreply, &wlen, 0);
+        libambit_protocol_free(wreply);
+    }
+
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": %s, \"dryRun\": %s, \"field\": ", rc == 0 ? "true" : "false",
+           dry_run ? "true" : "false");
+    json_str(stdout, key);
+    printf(", \"offset\": %d, \"was\": %u, \"now\": %ld, \"writeRc\": %d}\n",
+           off, old, value, rc);
+
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return rc == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     /* Optional leading "--device PID" (decimal or 0x-hex) picks which connected Suunto
      * device this invocation talks to - required whenever more than one might be on the
@@ -885,6 +995,14 @@ int main(int argc, char **argv) {
         return cmd_poi_add(argv[2], atof(argv[3]), atof(argv[4]));
     }
     if (strcmp(argv[1], "poi-clear") == 0) return cmd_poi_clear();
+    if (strcmp(argv[1], "settings-write") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "usage: %s settings-write KEY VALUE [--dry-run]\n", argv[0]);
+            return 2;
+        }
+        int dry = (argc >= 5 && strcmp(argv[4], "--dry-run") == 0);
+        return cmd_settings_write(argv[2], strtol(argv[3], NULL, 10), dry);
+    }
     if (strcmp(argv[1], "sport-mode-write-presets") == 0) {
         bool dry_run = (argc >= 3 && strcmp(argv[2], "--dry-run") == 0);
         return cmd_sport_mode_write_presets(dry_run);

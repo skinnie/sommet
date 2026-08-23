@@ -1717,13 +1717,67 @@ class Handler(BaseHTTPRequestHandler):
         ("compass",      "Compass",       [[0,"degrees"],[1,"mils"]]),
     ]
 
+    # Fields safe to offer as editable: their wire meaning is confirmed and the UI value maps
+    # 1:1 onto the stored byte. weight_kg is deliberately absent - the UI shows kg while the
+    # wire field is a scaled u16.
+    LEGACY_WRITABLE = {
+        "language", "backlight_mode", "backlight_brightness", "display_brightness",
+        "display_is_negative", "tones_mode", "timemode_button_lock", "sportmode_button_lock",
+        "sync_time_w_gps", "gps_position_format", "alti_baro_mode", "storm_alarm",
+        "fused_alti_disabled", "time_format", "date_format", "alarm_enable", "units_mode",
+        "birthyear", "max_hr", "rest_hr", "fitness_level", "is_male", "length_cm",
+    }
+    # UI key -> the CLI's own field name where they differ.
+    LEGACY_WRITE_KEY = {"length_cm": "length"}
+
+    def _handle_settings_write_ambit1(self, body):
+        """The Ambit1 half of POST /api/settings - one field per call, read-modify-write."""
+        fields = (body or {}).get("fields") or []
+        confirm = bool((body or {}).get("confirm", False))
+        results = []
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_link                                      # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old_env = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            for f in fields:
+                key = f.get("field")
+                if key and key.startswith("unit_"):
+                    cli_key = "units." + key[len("unit_"):]
+                elif key in self.LEGACY_WRITABLE:
+                    cli_key = self.LEGACY_WRITE_KEY.get(key, key)
+                else:
+                    results.append({"field": key, "ok": False,
+                                     "error": "not writable on this watch"})
+                    continue
+                try:
+                    with WATCH_LOCK:
+                        r = legacy_link.settings_write(cli_key, f.get("value"),
+                                                        dry_run=not confirm)
+                    r["field"] = key
+                    results.append(r)
+                except (RuntimeError, ValueError, TypeError) as exc:
+                    results.append({"field": key, "ok": False, "error": str(exc)})
+        finally:
+            if env_pid:
+                if old_env is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old_env
+        ok = all(r.get("ok") for r in results) and bool(results)
+        self._send_json(200 if ok else 502,
+                        {"ok": ok, "wrote": confirm and ok, "fields": results})
+
     def _handle_settings_read_ambit1(self):
         """The Ambit1 half of GET /api/settings - its real settings in the Ambit3's schema.
 
-        Every field is reported `writable: false`. That is honest rather than cautious: this
-        family's settings WRITE wire format has never been captured in this project (see the
-        ambit-app-ambit12-settings-write memory), so offering an editable control would
-        promise something the app cannot do."""
+        Writable as of 2026-08-23: the settings WRITE format was solved from André's own USB
+        capture (command 0x0b01 carrying the same 132-byte struct the read returns - see
+        ambit_legacy_cli.c's cmd_settings_write). Only the fields whose meaning is confirmed
+        are marked writable; `weight_kg` is excluded because the UI edits it in kg while the
+        wire field is a scaled u16, and that conversion is not worth guessing at."""
         sys.path.insert(0, str(TOOLS_DIR))
         import legacy_link                                      # noqa: PLC0415
         env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
@@ -1750,8 +1804,9 @@ class Handler(BaseHTTPRequestHandler):
         for key, label, screen, control, choices, unit in self.LEGACY_SETTING_SPECS:
             if key not in raw:
                 continue
-            entry = {"ok": True, "value": raw[key], "path": key, "writable": False,
-                     "screen": screen, "label": label, "control": control}
+            entry = {"ok": True, "value": raw[key], "path": key,
+                     "writable": key in self.LEGACY_WRITABLE, "screen": screen,
+                     "label": label, "control": control}
             if choices:
                 entry["choices"] = choices
             if unit:
@@ -1765,7 +1820,7 @@ class Handler(BaseHTTPRequestHandler):
             if key not in units:
                 continue
             out[f"unit_{key}"] = {
-                "ok": True, "value": units[key], "path": f"units.{key}", "writable": False,
+                "ok": True, "value": units[key], "path": f"units.{key}", "writable": True,
                 "screen": "units", "label": label, "control": "radio", "choices": choices}
 
         self._send_json(200, {"ok": True, "variant": "Bluebird", "settings": out})
@@ -1878,6 +1933,11 @@ class Handler(BaseHTTPRequestHandler):
                                   "dry_run": True, "transport": "ble"})
 
     def _handle_settings_write(self, body):
+        # Ambit1: its own 0x0b01 read-modify-write, not the SBEM 0x1101 path.
+        if selected_is_legacy():
+            self._handle_settings_write_ambit1(body)
+            return
+
         """POST /api/settings. Body: {"key": str, "value": number, "confirm": bool,
         "device": str (optional, e.g. "kailash")}. Same rehearsal-first pattern as every
         other write in this backend: without confirm:true, runs settings_write.py's own
