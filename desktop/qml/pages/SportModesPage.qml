@@ -67,9 +67,12 @@ PageFlickable {
     // ambit/sport_mode.js), and this app's own capability record already carried that correctly;
     // only this gate was wrong.
     // Read the flag for what it is: a separate cadence POD to search for, NOT whether the watch
-    // can measure cadence. The Ambit1/Ambit2 are ANT+, where a standalone cadence pod is its own
-    // device; the Ambit3 is BLE, where cadence normally arrives from a combo speed/cadence or
-    // bike sensor - so there is no separate entry to list, which is exactly what SuuntoLink does.
+    // can measure cadence. CONFIRMED by Suunto's own Ambit3 Sport support page (André found it,
+    // 2026-08-23): the Ambit3 takes "three bike POD, which could be speed, distance or cadence
+    // sensors, but with the ability to connect only one of these sensors at a time", over
+    // Bluetooth Smart. So the Ambit3 absolutely does cadence - it just arrives AS a bike POD,
+    // which is why there is no separate entry to list. A nomenclature change from the ANT+
+    // Ambit1/Ambit2, where a standalone cadence pod was its own device.
     // 0x0004 is deliberately absent - it is UseAccelerometer, which SuuntoLink derives from the
     // sport itself and never offers as a checkbox.
     readonly property var podBits: [
