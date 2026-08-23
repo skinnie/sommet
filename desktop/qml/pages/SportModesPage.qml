@@ -278,6 +278,7 @@ PageFlickable {
         // that family doesn't have this mechanism), same fix as Watch Settings/Routes.
         if (!DeviceCapabilities.supportsSportModes) return
         CustomModesService.refreshFieldTypes()
+        CustomModesService.refreshActivities()
         CustomModesService.refresh()
         // Ask what THIS watch can hold rather than assuming the reference watch's numbers.
         CustomModesService.refreshCapabilities(DeviceService.model)
@@ -884,6 +885,20 @@ PageFlickable {
                 color: CustomModesService.modes.length >= root.deviceMaxSportModes
                        ? Theme.error : Theme.mutedText
                 font.pixelSize: Theme.fontSizeBody
+            }
+            RoundedButton {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Create")
+                enabled: CustomModesService.modes.length < root.deviceMaxSportModes
+                         && !CustomModesService.writingMode
+                onClicked: createModeDialog.open()
+            }
+            RoundedButton {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.deviceMaxMultisport > 0
+                text: qsTr("Multisport")
+                enabled: !CustomModesService.writingMode
+                onClicked: multisportEditor.open()
             }
         }
 
@@ -1828,6 +1843,36 @@ PageFlickable {
             wrapMode: Text.WordWrap
             color: Theme.text
             font.pixelSize: Theme.fontSizeBody
+        }
+    }
+
+    // --- create / delete / multisport ---------------------------------------------------
+    // Restored 2026-08-23 from the pre-scrub history line (the `appzone-compiler` worktree),
+    // which is a wholly separate history - no common ancestor with main, so these never came
+    // across in any merge. main already had the backend for all three
+    // (/api/customodes/mode, /api/customodes/multisport, tools/sport_mode_manage.py, all
+    // byte-exact and hardware-proven) but no UI to reach them - dead endpoints, the same
+    // class of gap as the Training Program routes found earlier today. The dialogs and the
+    // CustomModesService properties they need are ported verbatim; only the page wiring is
+    // new, kept minimal so main's own newer page work is untouched.
+    CreateSportModeDialog {
+        id: createModeDialog
+        anchors.centerIn: Overlay.overlay
+        onCreateRequested: (name, activityId) =>
+            CustomModesService.createMode(name, activityId, DeviceService.model)
+    }
+
+    MultisportEditorDialog {
+        id: multisportEditor
+        anchors.centerIn: Overlay.overlay
+        onSaveRequested: (action, originalName, name, activityId, legs) => {
+            // Editing sends the combo's ORIGINAL name as the one to find and the new one as a
+            // rename, since a rename and a leg change arrive together from one Save.
+            if (action === "edit")
+                CustomModesService.saveMultisport("edit", originalName, activityId, legs,
+                                                   originalName === name ? "" : name)
+            else
+                CustomModesService.saveMultisport("create", name, activityId, legs)
         }
     }
 

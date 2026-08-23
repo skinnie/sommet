@@ -109,6 +109,8 @@ qt_add_qml_module(ambitapp
         qml/components/ErrorBanner.qml
         qml/components/MapWindow.qml
         qml/components/LayoutPickerDialog.qml
+        qml/components/CreateSportModeDialog.qml
+        qml/components/MultisportEditorDialog.qml
         qml/components/ThemedDialog.qml
         qml/components/ClockSyncDialog.qml
         qml/components/ActivityRow.qml

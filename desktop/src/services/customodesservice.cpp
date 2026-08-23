@@ -74,6 +74,11 @@ void CustomModesService::refresh()
             // nothing.
             row[QStringLiteral("usedByMultisport")] =
                 mode.value(QStringLiteral("usedByMultisport")).toBool();
+            // Whether this mode has a menu entry of its own on the watch. The factory
+            // "Transition" has none - which is why the list can be one longer than the
+            // "N/10 used" beside it, and the card says so rather than leaving it a puzzle.
+            row[QStringLiteral("inWatchMenu")] =
+                mode.value(QStringLiteral("inWatchMenu")).toBool();
             row[QStringLiteral("useHw")] = mode.value(QStringLiteral("useHw")).toInt();
             row[QStringLiteral("autolap")] = mode.value(QStringLiteral("autolap")).toInt();
             row[QStringLiteral("hrHigh")] = mode.value(QStringLiteral("hrHigh")).toInt();
@@ -162,6 +167,9 @@ void CustomModesService::refresh()
             multisport.append(row);
         }
         m_multisportModes = multisport;
+        // Every SPORT_MODES entry costs one of the watch's slots, singles and combos
+        // alike - SuuntoLink's own countSportModes(). See this class's header.
+        m_sportModesUsed = obj.value(QStringLiteral("sportModes")).toArray().size();
 
         setLastError(QString());
         emit modesChanged();
@@ -261,6 +269,118 @@ void CustomModesService::refreshCapabilities(const QString &variant)
         m_capabilities = obj.toVariantMap();
         emit capabilitiesChanged();
     });
+}
+
+void CustomModesService::refreshActivities()
+{
+    QNetworkReply *reply = m_network.get(
+        QNetworkRequest(backendUrl(QStringLiteral("/api/customodes/activities"))));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError
+            || !obj.value(QStringLiteral("ok")).toBool())
+            return;  // non-fatal - the activity picker just has nothing to offer yet
+
+        QVariantList list;
+        for (const auto &a : obj.value(QStringLiteral("activities")).toArray()) {
+            const auto entry = a.toObject();
+            QVariantMap row;
+            row[QStringLiteral("id")] = entry.value(QStringLiteral("id")).toInt();
+            row[QStringLiteral("name")] = entry.value(QStringLiteral("name")).toString();
+            row[QStringLiteral("color")] = entry.value(QStringLiteral("color")).toString();
+            row[QStringLiteral("isMultisport")] =
+                entry.value(QStringLiteral("isMultisport")).toBool();
+            list.append(row);
+        }
+        m_activities = list;
+        m_minMultisportLegs = obj.value(QStringLiteral("minLegs")).toInt(2);
+        m_maxMultisportLegs = obj.value(QStringLiteral("maxLegs")).toInt(6);
+        emit activitiesChanged();
+    });
+}
+
+void CustomModesService::postManage(const QString &path, const QJsonObject &body,
+                                     const QString &busyName)
+{
+    setWritingMode(busyName);
+
+    QNetworkRequest request(backendUrl(path));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply =
+        m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path, busyName] {
+        reply->deleteLater();
+        if (m_writingMode == busyName)
+            setWritingMode(QString());
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool writeOk = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+        // A refusal is a real answer with the tool's own wording ("10/10 sport modes
+        // already used...", "'Transition' is a leg of Ironman..."), not a fault - it goes
+        // to the UI as-is rather than into the error banner, which is for things that
+        // broke rather than things the watch does not allow.
+        const QString message = writeOk
+            ? QString()
+            : (reply->error() != QNetworkReply::NoError
+                ? QStringLiteral("POST %1: %2").arg(path, reply->errorString())
+                : obj.value(QStringLiteral("error")).toString(
+                    QStringLiteral("the write was not confirmed")));
+        emit manageResult(writeOk, message);
+        // Re-read either way, so what the UI shows is always the watch's own state rather
+        // than what we hoped it would become.
+        refresh();
+    });
+}
+
+void CustomModesService::createMode(const QString &name, int activityId, const QString &variant)
+{
+    QJsonObject body;
+    body[QStringLiteral("action")] = QStringLiteral("create");
+    body[QStringLiteral("name")] = name;
+    body[QStringLiteral("activityId")] = activityId;
+    if (!variant.isEmpty())
+        body[QStringLiteral("variant")] = variant;
+    body[QStringLiteral("confirm")] = true;
+    postManage(QStringLiteral("/api/customodes/mode"), body, name);
+}
+
+void CustomModesService::deleteMode(const QString &name)
+{
+    QJsonObject body;
+    body[QStringLiteral("action")] = QStringLiteral("delete");
+    body[QStringLiteral("name")] = name;
+    body[QStringLiteral("confirm")] = true;
+    postManage(QStringLiteral("/api/customodes/mode"), body, name);
+}
+
+void CustomModesService::saveMultisport(const QString &action, const QString &name,
+                                         int activityId, const QStringList &legs,
+                                         const QString &rename)
+{
+    QJsonArray legArray;
+    for (const QString &leg : legs)
+        legArray.append(leg);
+
+    QJsonObject body;
+    body[QStringLiteral("action")] = action;          // "create" or "edit"
+    body[QStringLiteral("name")] = name;
+    body[QStringLiteral("activityId")] = activityId;
+    body[QStringLiteral("legs")] = legArray;
+    if (!rename.isEmpty())
+        body[QStringLiteral("rename")] = rename;
+    body[QStringLiteral("confirm")] = true;
+    postManage(QStringLiteral("/api/customodes/multisport"), body, name);
+}
+
+void CustomModesService::deleteMultisport(const QString &name)
+{
+    QJsonObject body;
+    body[QStringLiteral("action")] = QStringLiteral("delete");
+    body[QStringLiteral("name")] = name;
+    body[QStringLiteral("confirm")] = true;
+    postManage(QStringLiteral("/api/customodes/multisport"), body, name);
 }
 
 void CustomModesService::renameMode(const QString &fromName, const QString &toName)
