@@ -231,10 +231,10 @@ Two follow-ups, one now closed:
   watch by a user typing them, any app that lets users name sport modes must get Ambit1
   encoding right or it will corrupt them.
 
-  Note what it proves precisely: **SuuntoLink chose single-byte ISO-8859 when writing to this
-  device**, which is exactly the `supportsUtf8Encoding` per-device switch. Strictly, confirming
-  the *watch* also decodes it that way needs one look at the watch screen showing
-  "Corrida de Acção" rendered correctly — not yet done, and cheap if the watch is still around.
+  **Confirmed end to end.** SuuntoLink writes single-byte ISO-8859 to this device (the
+  `supportsUtf8Encoding` per-device switch), and André confirmed the watch itself renders
+  "Corrida de Acção" correctly on screen. So the Ambit1 is ISO-8859 on both sides of the wire —
+  written and decoded — not merely a host-side choice. No caveat remains.
 
 - **Whether the Ambit3 uses the same sport-mode container** is still unknown here.
   `ambit3language.pcap` contains **zero** sport-mode writes — SuuntoLink errored out on that
