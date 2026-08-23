@@ -221,8 +221,21 @@ def main():
                     help="keep existing apps and add this workout to the mode's WORKOUT menu "
                          "(default: reset the Apps region to just this one workout)")
     ap.add_argument("--json", action="store_true", help="print a one-line JSON result (for the GUI)")
+    ap.add_argument("--compile-only", action="store_true",
+                    help="just compile the workout JSON and report the binary (no watch needed)")
     ap.add_argument("--write", action="store_true", help="actually write (else dry-run)")
     args = ap.parse_args()
+
+    # --compile-only needs no watch at all: compile the JSON on the community compiler and report
+    # the resulting guidance binary. Lets a UI show "compiled, N bytes" before an install.
+    if args.compile_only:
+        if not args.workout:
+            ap.error("--compile-only needs a workout JSON file")
+        compiled = compile_workout(json.load(open(args.workout)))
+        print(json.dumps({"ok": True, "name": compiled["name"],
+                          "activityId": compiled.get("activityId"),
+                          "binaryBytes": len(compiled["binary"])}))
+        return 0
 
     # Always a live link: we must READ the watch's current regions to build/list/restore. Only
     # the WRITES (send_plan, below) are gated on --write, so a no --write run is a real dry-run.

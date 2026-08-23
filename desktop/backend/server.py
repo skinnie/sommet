@@ -492,6 +492,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_apps_install(body)
         elif self.path == "/api/apps/import":
             self._handle_apps_import(body)
+        elif self.path == "/api/workout/compile":
+            self._handle_workout_compile(body)
+        elif self.path == "/api/workout/install":
+            self._handle_workout_install(body)
         elif self.path == "/api/pois":
             self._handle_poi_add(body)
         elif self.path == "/api/gpstrackpod/retrieve":
@@ -2408,6 +2412,56 @@ class Handler(BaseHTTPRequestHandler):
                                    "raw_output": out, "stderr": err})
             return
         self._send_json(200 if parsed.get("ok") else 502, parsed)
+
+    def _handle_workout_compile(self, body):
+        """POST /api/workout/compile. Body: {"workout": {...}}. Compiles the workout JSON into
+        the native guidance binary via tools/guided_workout.py --compile-only (no watch needed),
+        so the UI can show "compiled, N bytes" before an install."""
+        workout = body.get("workout")
+        if not workout:
+            self._send_json(400, {"ok": False, "error": 'missing "workout"'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(workout, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("guided_workout.py", [path, "--compile-only"], timeout=60)
+        finally:
+            os.unlink(path)
+        info = self._parse_last_json_line(out)
+        if info is None or not info.get("ok"):
+            self._send_json(502, {"ok": False, "error": "couldn't compile the workout "
+                                   "(community compiler / network?)", "raw_output": out,
+                                   "stderr": err})
+            return
+        self._send_json(200, info)
+
+    def _handle_workout_install(self, body):
+        """POST /api/workout/install. Body: {"workout": {...}, "mode": "<mode name>"}. Installs
+        the workout as a native guided workout into the named sport mode's WORKOUT menu via
+        tools/guided_workout.py --append --write (Apps entry byte0=1 + guidance display 295, no
+        rule - dormant until picked from [Next]->WORKOUT). Not slotted onto a display field."""
+        workout = body.get("workout")
+        mode = body.get("mode")
+        if not workout or not mode:
+            self._send_json(400, {"ok": False, "error": 'need "workout" and "mode"'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(workout, f)
+            path = f.name
+        try:
+            code, out, err = run_tool(
+                "guided_workout.py",
+                [path, "--mode", str(mode), "--append", "--json", "--write"], timeout=180)
+        finally:
+            os.unlink(path)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": "guided_workout.py produced no "
+                                   "parseable JSON - is the watch connected and on the time "
+                                   "screen?", "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_apps_install(self, body):
         """POST /api/apps/install. Body: {"mode": int, "display": int, "field": int,
