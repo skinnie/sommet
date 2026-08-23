@@ -32,11 +32,14 @@
  * matching their own factoryDefaults() exactly (an empty QVariantList there too) - the watch
  * falls back to its own default display layout for a mode with no custom one, same as any
  * fresh Movescount-authored mode before a user customizes its screens. `--dry-run` builds the
- * full payload and reports its shape without touching the watch - no raw pre-write backup was
- * added (a symmetric raw-pmem-read-at-address command was never RE'd here or in openambit2 -
- * NOT the same as the log_read/personal_settings_get paths, which are separate, structured
- * mechanisms, not a generic "read N bytes at address"), so this is exactly openambit2's own
- * risk profile: real, but no readback safety net.
+ * full payload and reports its shape without touching the watch.
+ *
+ * SUPERSEDED for the Ambit1 (2026-08-23, same day): the "no raw read exists" premise above
+ * turned out to be FALSE. pmem20.c's read_log_chunk() is a generic flash read (0x0b17 at any
+ * address), so the region CAN be read - see `sport-mode-dump` below and, better,
+ * ambit1_sport_mode.c, which reads the real modes and does READ-MODIFY-WRITE instead of a
+ * blind replace. Prefer `ambit1-sport-mode-read` / `ambit1-sport-mode-patch` on an Ambit1;
+ * these preset commands write the 90-byte libambit layout, which is WRONG for that device.
  *
  * One JSON object printed to stdout per invocation - same "--json" convention as every
  * other tools py CLI that backend/server.py's run_tool() already parses.
@@ -49,6 +52,9 @@
  *   ambit_legacy_cli poi-clear                # writes back 0 waypoints
  *   ambit_legacy_cli sport-mode-write-presets [--dry-run]   # blind REPLACE, no readback
  *   ambit_legacy_cli sport-mode-write FILE [--dry-run]      # same, from the host master copy
+ *   ambit_legacy_cli sport-mode-dump FILE [BYTES]           # raw 0x2000 region read
+ *   ambit_legacy_cli ambit1-sport-mode-read                 # Ambit1 ONLY: decode real modes
+ *   ambit_legacy_cli ambit1-sport-mode-patch FILE [--dry-run] [--dump OUT]   # Ambit1 RMW
  *
  * Build: see build.sh in this directory (links against ../openambit_libambit's libambit).
  */
@@ -59,6 +65,7 @@
 #include <math.h>
 #include "libambit.h"
 #include "protocol.h"   /* libambit_protocol_command - raw 0x0b17 flash read, see cmd_sport_mode_dump */
+#include "ambit1_sport_mode.h"  /* Ambit1-only 76-byte layout, hard-guarded to pid 0x0010 */
 
 static void json_str(FILE *f, const char *s) {
     fputc('"', f);
@@ -821,6 +828,35 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "sport-mode-write-presets") == 0) {
         bool dry_run = (argc >= 3 && strcmp(argv[2], "--dry-run") == 0);
         return cmd_sport_mode_write_presets(dry_run);
+    }
+    if (strcmp(argv[1], "ambit1-sport-mode-read") == 0
+        || strcmp(argv[1], "ambit1-sport-mode-patch") == 0) {
+        ambit_device_info_t *devices, *info;
+        ambit_object_t *dev = open_selected_device(&devices, &info);
+        if (!dev) {
+            fputs("@@JSON@@\n", stdout);
+            printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
+            return 1;
+        }
+        int rc;
+        if (strcmp(argv[1], "ambit1-sport-mode-read") == 0) {
+            rc = ambit1_cmd_read(dev, info);
+        } else {
+            if (argc < 3) {
+                fprintf(stderr, "usage: %s ambit1-sport-mode-patch FILE [--dry-run] [--dump OUT]\n", argv[0]);
+                libambit_close(dev); libambit_free_enumeration(devices);
+                return 2;
+            }
+            int dry = 0; const char *dump = NULL;
+            for (int i = 3; i < argc; i++) {
+                if (strcmp(argv[i], "--dry-run") == 0) dry = 1;
+                else if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc) dump = argv[++i];
+            }
+            rc = ambit1_cmd_patch(dev, info, argv[2], dry, dump);
+        }
+        libambit_close(dev);
+        libambit_free_enumeration(devices);
+        return rc;
     }
     if (strcmp(argv[1], "sport-mode-dump") == 0) {
         if (argc < 3) {
