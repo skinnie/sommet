@@ -83,36 +83,59 @@ exactly.
 | 22 | 2 | `gps_interval` s | Indoor training=0 (GPS off), Mountaineering/Trekking=60 |
 | 24 | 2 | `recording_interval` s | 1 s for run/bike, 10 s for hike |
 | 26 | 2 | `autolap` m | Running=1000 |
-| 28 | 2 | `heartrate_max` | not yet observed non-zero |
-| 30 | 2 | `heartrate_min` | not yet observed non-zero |
+| 28 | 2 | `heartrate_max` | not observed non-zero (no `usehrlimits` capability) |
+| 30 | 2 | `heartrate_min` | not observed non-zero (no `usehrlimits` capability) |
 | 32 | 2 | `unknown2` | |
-| 34 | 2 | `auto_pause` | not yet observed non-zero |
-| 36 | 2 | `use_interval_timer` | |
-| 38 | 2 | `interval_repetitions` | **observed = 99 (0x63)** on every mode SuuntoLink rewrote |
-| 40 | 2 | `interval_timer_max_unit` | |
+| 34 | 2 | `auto_pause` | not observed non-zero |
+| 36 | 2 | `use_interval_timer` | **observed = 1** when enabled |
+| 38 | 2 | `interval_repetitions` | **observed = 5** (user-entered); 99 = SuuntoLink default |
+| 40 | 2 | `interval_timer_max_unit` | **observed = 0x0100** (time). Matches openambit's own `interval1time ? 0x0100 : 0` |
 | 42 | 6 | `unknown3` | |
-| 48 | 2 | `interval_timer_max` | |
+| 48 | 2 | `interval_timer_max` | **observed = 150** = the UI's "High" 2:30, in seconds |
 | 50 | 2 | `unknown4` | |
-| 52 | 2 | `interval_timer_min_unit` | |
+| 52 | 2 | `interval_timer_min_unit` | **observed = 0x0100** (time) |
 | 54 | 6 | `unknown5` | |
-| 60 | 2 | `interval_timer_min` | |
+| 60 | 2 | `interval_timer_min` | **observed = 390** = the UI's "Low" 6:30, in seconds |
 | 62 | 14 | `unknown6` | |
+
+Note the UI-to-field mapping: the interval timer's **"High"** (high-intensity leg) is
+`interval_timer_max`, and **"Low"** (recovery leg) is `interval_timer_min` — they are
+intensity labels, not magnitude, so "High" 2:30 is the *smaller* number.
 
 Relative to openambit's 90-byte struct the Ambit1 drops, in order: `sport_mode_id` (2),
 `unknown1` (2), `use_heartrate_limits` (2), `auto_scroll` (2) — which is why
 `interval_repetitions` lands at 38 instead of 46 — plus `backlight_mode`, `display_mode` and
 `quick_navigation` (6) at the tail. 8 + 6 = 14 = 90 − 76.
 
-### Not yet pinned
-Offsets 28–36 and the interval-timer value fields (40–61) were **all zero on this watch**, so
-their positions are inferred from the capability-diff, not observed. André did enable the
-interval timer in SuuntoLink, but left High/Low as empty `mm ' ss` placeholders, so SuuntoLink
-stored only the default `repetitions = 99` and nothing else. Pinning the rest needs one more
-SuuntoLink pass with real High/Low values entered.
+### Still unpinned
+Only `heartrate_max` (28), `heartrate_min` (30), `unknown2` (32) and `auto_pause` (34). The two
+HR fields cannot be pinned on an Ambit1 at all — the device has no `usehrlimits` capability, so
+no value ever reaches them (see §6 below).
 
-`0x63` at offset 38 is a useful tell: it marks the modes this SuuntoLink version rewrote
-(Cycling, Running, Yoga, Adventure Racing, Alpine Skiing) versus the ones still carrying their
-original Movescount-era bytes (all-zero tail).
+Everything else is observed, not inferred: the interval-timer block was confirmed from
+SuuntoLink's own writes in the pcap carrying André's real input (reps 5, High 2:30 → 150,
+Low 6:30 → 390).
+
+`0x63` (99) at offset 38 is a useful tell: it marks modes this SuuntoLink version rewrote with
+its default repetitions, versus modes still carrying their original Movescount-era bytes
+(all-zero tail).
+
+## 5a. A real SuuntoLink bug: interval-timer settings are clobbered on re-save
+
+Tracked across SuuntoLink's own successive writes to `Running` in one session (pcap run index):
+
+| run | use_interval_timer | reps | max | min | |
+|---|---|---|---|---|---|
+| 0 | 0 | 0 | 0 | 0 | original Movescount-era bytes |
+| 7 | 0 | 99 | 0 | 0 | SuuntoLink rewrites, injects default reps |
+| **53** | **1** | **5** | **150** | **390** | the user's real input, written correctly |
+| 55 | 1 | 99 | 100 | 10000 | **reset to defaults, unit flipped** |
+| 57 | 0 | 99 | 0 | 0 | **timer disabled entirely** |
+
+SuuntoLink writes the user's interval timer correctly, then destroys it on the next save of the
+same mode. The values are valid on the wire and the watch stores what it is given — this is a
+host-side bug, not a device limitation, and it is **not** the same cause as the HR-limits issue
+below. Don't replicate it: see the ambit-app-suuntolink-bugs-dont-replicate memory.
 
 ## 5. Real data captured off the watch
 
