@@ -279,3 +279,53 @@ differently.
 
 The lesson, earned three times in one session: a zero that contradicts an expectation is at
 least as likely to be the truth as a bug. Check the device before "fixing" it.
+
+## 9. Writing: VALIDATED ON HARDWARE (2026-08-23)
+
+First successful sport-mode write to an Ambit1 by anything other than Suunto's own software.
+Sequence, each step verified before the next:
+
+1. **No-op RMW, dry run** - patch file with no field lines; the bytes the writer would send
+   were dumped and compared to the live region: **byte-identical**. Proves read-modify-write
+   preserves displays, apps and every unparsed byte.
+2. **Targeted change, dry run** - `7|autolapM|500` (mode 7 = Yoga). Exactly **2 bytes**
+   changed, `0x01f4` little-endian at offset 4710, confirmed to be Yoga's blob + 26
+   (`OFF_AUTOLAP`). Nothing else moved.
+3. **Real write** - `writeRc: 0`. Read back off the watch: Yoga autolap = 500, every other
+   mode untouched, and the region **identical to the intended bytes**.
+4. **Revert** - `7|autolapM|0` written back; the region is **byte-identical to the pre-write
+   dump**. The watch was left exactly as found.
+
+So the 76-byte layout, the RMW approach and the raw 0x0b16 write path are all confirmed
+correct on real hardware.
+
+## 10. Apps: same binaries as the Ambit3, slightly different directory
+
+André, 2026-08-23: *"it is the same file for apps for the ambit 3...they are cross"* - correct
+about the payloads, with one wrinkle in the container.
+
+**Region location comes from Devices.xml, not from libambit.** `PMEM20_APP_START` (600000) is
+the *Ambit3* value and reads back nothing at all on an Ambit1. The Ambit1's own
+`<custommodeconfig>` declares `rulestorelocation` **160000** and `rulestoresize` **20000**
+(against 600000 / 200000 for the Ambit3), and reading there works immediately. Same lesson as
+the exercise-log region: take per-device bases from the device's own record.
+
+**Directory header** (differs from the Ambit3 by one byte):
+
+```
+[u16 count][u8 count^2][u32 entry_offset x (count+1)]      header_len = 3 + 4*(count+1)
+```
+
+The Ambit3 stores that second field as a **u16**, the Ambit1 as a **u8**, so the whole offset
+table shifts by one and `apps.py`'s directory check correctly refuses the region rather than
+mis-parsing it. The final table entry is the used extent. Verified on real contents:
+`count=2, table=(15, 1148, 2673)`, `header_len == table[0]`, and 2673 is exactly where the
+0xFF padding starts.
+
+**Entries have no per-entry header block.** On the Ambit3 the `IAMRULE` magic sits at
+`offset + ENTRY_BLOCK_LEN`, after a header carrying activity id, marker and a name field. On
+the Ambit1 the binary starts *at* the offset - so there is no name in the directory, which is
+why a display row can only say "Suunto App Slot 1". The app's name lives **inside** the
+compiled binary: the real region decodes to **"Storm alarm"** and **"Sunrise/Sunset"**.
+
+The `IAMRULE` payload itself is byte-compatible, which is what makes apps cross-device.

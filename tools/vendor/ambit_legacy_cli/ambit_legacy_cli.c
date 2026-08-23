@@ -770,7 +770,7 @@ static int write_sport_modes(ambit_sport_mode_device_settings_t *settings, size_
 #define LEGACY_SPORT_MODE_ADDR  0x00002000
 #define LEGACY_READ_CHUNK       512
 
-static int cmd_sport_mode_dump(const char *path, uint32_t total) {
+static int cmd_region_dump(const char *path, uint32_t total, uint32_t base) {
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) {
@@ -795,7 +795,7 @@ static int cmd_sport_mode_dump(const char *path, uint32_t total) {
         if (want > LEGACY_READ_CHUNK) want = LEGACY_READ_CHUNK;
 
         uint8_t send[8];
-        uint32_t addr = LEGACY_SPORT_MODE_ADDR + got;
+        uint32_t addr = base + got;
         send[0] = addr & 0xff; send[1] = (addr >> 8) & 0xff;
         send[2] = (addr >> 16) & 0xff; send[3] = (addr >> 24) & 0xff;
         send[4] = want & 0xff; send[5] = (want >> 8) & 0xff;
@@ -818,7 +818,7 @@ static int cmd_sport_mode_dump(const char *path, uint32_t total) {
 
     fputs("@@JSON@@\n", stdout);
     printf("{\"ok\": %s, \"bytes\": %u, \"address\": %u, \"truncated\": %s, \"path\": ",
-           got > 0 ? "true" : "false", got, LEGACY_SPORT_MODE_ADDR,
+           got > 0 ? "true" : "false", got, base,
            failed ? "true" : "false");
     json_str(stdout, path);
     printf("}\n");
@@ -924,7 +924,20 @@ int main(int argc, char **argv) {
             return 2;
         }
         uint32_t n = (argc >= 4) ? (uint32_t)strtoul(argv[3], NULL, 0) : 8192;
-        return cmd_sport_mode_dump(argv[2], n);
+        return cmd_region_dump(argv[2], n, LEGACY_SPORT_MODE_ADDR);
+    }
+    /* Any flash region, read-only. The Apps region (0x000927c0, PMEM20_APP_START) is the
+     * reason this exists: André, 2026-08-23 - "it is the same file for apps for the ambit 3
+     * ...they are cross" - so once the bytes are off the watch, tools/apps.py --from decodes
+     * them with no Ambit1-specific code at all. */
+    if (strcmp(argv[1], "region-dump") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "usage: %s region-dump ADDR FILE [BYTES]\n", argv[0]);
+            return 2;
+        }
+        uint32_t base = (uint32_t)strtoul(argv[2], NULL, 0);
+        uint32_t n = (argc >= 5) ? (uint32_t)strtoul(argv[4], NULL, 0) : 8192;
+        return cmd_region_dump(argv[3], n, base);
     }
     if (strcmp(argv[1], "sport-mode-write") == 0) {
         if (argc < 3) {
