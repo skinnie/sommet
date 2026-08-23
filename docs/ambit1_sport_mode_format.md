@@ -196,6 +196,37 @@ different sport modes can each have a different app. (Ambit3 allows 5 per mode �
 `rulestoresize` **20000** and `rulestorelocation` 160000, against **200000** / 600000 for the
 Ambit3 family — a 10x smaller rule store.
 
+
+## 7. Text encoding: ISO-8859 on Ambit1, UTF-8 on Ambit3 — per DEVICE
+
+Settled 2026-08-23 from `ambit1languages.pcap`. SuuntoLink wrote the Portuguese mode name
+**"Corrida de Acção"**, and on the wire it is:
+
+```
+43 6f 72 72 69 64 61 20 64 65 20 41 63 e7 e3 6f      "Corrida de Ac ç ã o"
+                                        ^^ ^^
+```
+
+One byte per accent → **ISO-8859-1/15**. UTF-8 would require `c3 a7` / `c3 a3`.
+
+The Ambit3 family is genuinely UTF-8, proven separately on a French Ambit3 Sport whose activity
+name `Entraîn. salle` was mojibake until decoded as UTF-8. So this is **per-device**, matching
+Suunto's own `supportsUtf8Encoding` capability — do **not** unify the two.
+
+Consequence for this project: `pmem20.c`'s log-header name decode is hardcoded to `"UTF-8"` on
+a path shared by both families. That is correct for the Ambit3 and **wrong for the Ambit1**;
+making it device-dependent is an open TODO. `ambit1_sport_mode.c` handles its own names
+correctly (transcoded to `\uXXXX`, so JSON output stays pure ASCII and cannot be mis-decoded).
+
+Two things that are NOT established, deliberately:
+- **How the Portuguese name got there.** André reports never seeing SuuntoLink or the watch
+  translate mode names. The same slot previously held "Adventure Racing", so something produced
+  it, but the bytes cannot distinguish a SuuntoLink catalogue localisation from a manual rename.
+  The encoding conclusion does not depend on the answer.
+- **Whether the Ambit3 uses the same sport-mode container.** `ambit3language.pcap` contains
+  **zero** sport-mode writes — SuuntoLink errored out on that language and never wrote any,
+  which matches what André observed on screen.
+
 ## 6. Writing
 
 Not attempted on hardware. Two things must hold:
