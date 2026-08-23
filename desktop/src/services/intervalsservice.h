@@ -30,5 +30,8 @@ public:
     // double-clicked app would) - "" on success, a friendly error otherwise. Nothing more
     // for this app to do afterward: the tool opens its own browser tab once its local
     // server is up.
-    Q_INVOKABLE QString launch();
+    // `workoutName`, 2026-08-23: the Calendar opens this builder for a chosen day+sport with
+    // the title pre-filled (e.g. "Running_24_08"), the scheduled-workout "workaround". Empty
+    // (the default) just opens the builder as before.
+    Q_INVOKABLE QString launch(const QString &workoutName = QString());
 };

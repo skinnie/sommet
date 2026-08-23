@@ -38,12 +38,19 @@ IntervalsService::IntervalsService(QObject *parent) : QObject(parent)
 {
 }
 
-QString IntervalsService::launch()
+QString IntervalsService::launch(const QString &workoutName)
 {
+    // The builder pre-fills its name field from --name (see workout_gui.py). Passed through
+    // for the Calendar's scheduled-workout flow; empty for a plain launch.
+    QStringList nameArgs;
+    if (!workoutName.isEmpty())
+        nameArgs << QStringLiteral("--name") << workoutName;
+
     // Packaged download: the bundled helper carries the Workout Builder - just launch it.
     const QString bundled = QFileInfo(bundledBackendPath()).absoluteFilePath();
     if (QFileInfo::exists(bundled)) {
-        if (QProcess::startDetached(bundled, {QStringLiteral("--workout-builder")}))
+        if (QProcess::startDetached(bundled,
+                QStringList{QStringLiteral("--workout-builder")} + nameArgs))
             return QString();
     }
 
@@ -66,7 +73,7 @@ QString IntervalsService::launch()
 #endif
 
     if (QFileInfo::exists(fallbackScript)) {
-        if (QProcess::startDetached(pythonCommand, {fallbackScript}))
+        if (QProcess::startDetached(pythonCommand, QStringList{fallbackScript} + nameArgs))
             return QString();
         return QStringLiteral("Found %1 but couldn't start %2 - is Python installed and on PATH?")
             .arg(fallbackScript, pythonCommand);

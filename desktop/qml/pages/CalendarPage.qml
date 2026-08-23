@@ -36,6 +36,27 @@ Item {
     property int viewYear: today.getFullYear()
     property int viewMonth: today.getMonth()  // 0-11
 
+    // --- plan-a-workout-for-a-day (André's scheduled-workout "workaround") ----------------
+    // A short list of the sports someone actually schedules, each with the activity name that
+    // goes into the pre-filled title. Kept deliberately short rather than all 84 ActivityTypes -
+    // this is a title seed, not the sport-mode picker.
+    readonly property var plannerActivities: [
+        "Running", "Trail running", "Cycling", "Mountain biking",
+        "Hiking", "Trekking", "Swimming", "Other"
+    ]
+    property int plannerDay: 0
+    function openPlanner(day) {
+        plannerDay = day
+        plannerDialog.open()
+    }
+    // "<Activity>_dd_MM" for the chosen sport and the day being viewed - the format André asked
+    // for (%activity_dd_MM). Month is the viewed month, 1-based, zero-padded.
+    function plannerTitle(activity) {
+        const dd = String(root.plannerDay).padStart(2, "0")
+        const mm = String(root.viewMonth + 1).padStart(2, "0")
+        return activity.replace(/[^A-Za-z0-9]/g, "") + "_" + dd + "_" + mm
+    }
+
     function goPrevMonth() {
         if (viewMonth === 0) { viewMonth = 11; viewYear -= 1 } else { viewMonth -= 1 }
     }
@@ -249,11 +270,32 @@ Item {
                                 Repeater {
                                     model: modelData
                                     delegate: Item {
+                                        id: dayCell
                                         required property var modelData
                                         readonly property int activityCount:
                                             modelData ? modelData.activities.length : 0
                                         width: parent.width / 7
                                         height: 62
+
+                                        // Click a day to plan a workout for it, 2026-08-23
+                                        // (André's "workaround" for scheduled workouts): pick a
+                                        // sport, then the Workout Builder opens with the title
+                                        // pre-filled "<Activity>_dd_MM". Suunto-only, like the
+                                        // builder it launches; a null padding cell does nothing.
+                                        HoverHandler {
+                                            enabled: dayCell.modelData !== null
+                                                     && DeviceService.intervalsEnabled
+                                                     && !HomeViewModel.isGarmin
+                                                     && !HomeViewModel.isKailash
+                                            cursorShape: Qt.PointingHandCursor
+                                        }
+                                        TapHandler {
+                                            enabled: dayCell.modelData !== null
+                                                     && DeviceService.intervalsEnabled
+                                                     && !HomeViewModel.isGarmin
+                                                     && !HomeViewModel.isKailash
+                                            onTapped: root.openPlanner(dayCell.modelData.day)
+                                        }
 
                                         // Test, 2026-08-11 (André: "circles being on the day,
                                         // without for sure opaquing the day, instead of
@@ -378,4 +420,44 @@ Item {
             }
         }
     }
+
+    ThemedDialog {
+        id: plannerDialog
+        title: qsTr("Plan a workout")
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.Cancel
+        contentItem: Column {
+            spacing: Theme.spacingMedium
+            width: 360
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                text: qsTr("Pick a sport for %1. The Workout Builder opens with the name "
+                            + "already filled in - build the steps there and install it to the "
+                            + "watch's WORKOUT menu.")
+                    .arg(Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
+                                        Qt.locale(), Locale.LongFormat))
+            }
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Repeater {
+                    model: root.plannerActivities
+                    delegate: RoundedButton {
+                        required property string modelData
+                        width: parent.width
+                        text: modelData + "  →  " + root.plannerTitle(modelData)
+                        onClicked: {
+                            IntervalsService.launch(root.plannerTitle(modelData))
+                            plannerDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }

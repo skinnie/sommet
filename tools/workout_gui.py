@@ -16,6 +16,8 @@ own WORKOUT menu, not in SuuntoLink's app catalog).
 """
 
 import argparse
+import html as _html_mod
+from urllib.parse import quote as _url_quote
 import json
 import re
 import subprocess
@@ -69,6 +71,16 @@ def save_compiled(name, compiled):
     path = SAVE_DIR / f"{safe_name}_{int(time.time())}.json"
     path.write_text(json.dumps(compiled, indent=2))
     return path
+
+
+# Default workout name shown in the builder. Overridable per-launch by the ?name= query (the
+# desktop Calendar's pre-filled scheduled workout) or the --name CLI flag.
+INITIAL_WORKOUT_NAME = "My workout"
+
+
+def _html_attr(value):
+    """Escape a string for safe use inside an HTML double-quoted attribute."""
+    return _html_mod.escape(str(value), quote=True)
 
 
 HTML_PAGE = r"""<!doctype html>
@@ -607,11 +619,21 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/modes":
             self._handle_list_modes()
             return
-        if self.path != "/":
+        from urllib.parse import urlparse, parse_qs, unquote  # noqa: PLC0415
+        parsed = urlparse(self.path)
+        if parsed.path != "/":
             self.send_response(404)
             self.end_headers()
             return
-        body = HTML_PAGE.encode("utf-8")
+        # Pre-filled workout name, 2026-08-23: the desktop Calendar can open this builder for a
+        # chosen day+sport with the title already set (e.g. "Running_24_08"), the "workaround"
+        # for scheduled workouts. Passed as ?name=... ; falls back to the page's own default.
+        # A CLI --name (see main) becomes the process-wide default the query still overrides.
+        q = parse_qs(parsed.query)
+        initial = q.get("name", [INITIAL_WORKOUT_NAME])[0][:64]
+        page = HTML_PAGE.replace('id="wname" value="My workout"',
+                                 'id="wname" value="%s"' % _html_attr(initial))
+        body = page.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -730,8 +752,16 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true",
                      help="don't open a browser automatically (default: open one)")
+    ap.add_argument("--name", default=None,
+                     help="pre-fill the workout name (the Calendar passes e.g. Running_24_08)")
     args = ap.parse_args()
-    url = f"http://{args.host}:{args.port}/"
+    global INITIAL_WORKOUT_NAME
+    if args.name:
+        INITIAL_WORKOUT_NAME = args.name
+    # A --name launch opens the browser straight at that name, so the query and the default
+    # agree even before any typing.
+    name_q = ("?name=" + _url_quote(args.name)) if args.name else ""
+    url = f"http://{args.host}:{args.port}/{name_q}"
 
     try:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
