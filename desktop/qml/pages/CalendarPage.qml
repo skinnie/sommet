@@ -555,10 +555,19 @@ Item {
         property int activityIndex: 0
         property bool complex: false
 
+        // Fixed content width, driven from one property (same pattern as MultisportEditorDialog):
+        // Dialog sizes from contentItem while the Column sizes children from its own width, which
+        // Qt flags as a "Binding loop detected for property implicitWidth" and left the dialog
+        // collapsed - so the Duration row overflowed and the unit box ran to the card edge
+        // (André: "iso spacing between the end of window on both sides"). Setting implicitWidth
+        // explicitly breaks the loop and gives even left/right margins.
+        readonly property real dialogWidth: 320
+        implicitWidth: dialogWidth + padding * 2
+
         contentItem: Column {
             id: plannerCol
             spacing: Theme.spacingMedium
-            width: 400
+            width: plannerDialog.dialogWidth
 
             Text {
                 width: parent.width
@@ -619,7 +628,7 @@ Item {
                     }
                     RoundedComboBox {
                         id: simpleUnit
-                        width: 120
+                        width: 110
                         boundsItem: plannerCol
                         // Values match the builder's TIME_UNITS keys.
                         model: [qsTr("Minutes"), qsTr("Hours")]
