@@ -366,7 +366,7 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("Suunto T6 log")
                 }
-                ComboBox {
+                RoundedComboBox {
                     width: parent.width
                     visible: root.devPodPresent && root.devT6Logs.length > 0
                     model: root.devT6Logs.map(l => qsTr("#%1 - %2 - %3 samples")
@@ -388,7 +388,7 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("GPS Track Pod track")
                 }
-                ComboBox {
+                RoundedComboBox {
                     width: parent.width
                     visible: root.devPodPresent && root.devPodTracks.length > 0
                     model: root.devPodTracks.map(t => qsTr("#%1 - %2 samples")
@@ -422,14 +422,14 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("Or merge previously saved files")
                 }
-                ComboBox {
+                RoundedComboBox {
                     width: parent.width
                     visible: root.podSources.length > 0 && root.t6Sources.length > 0
                     model: root.podSources.map(s => s.name)
                     currentIndex: root.podChoice
                     onActivated: root.podChoice = currentIndex
                 }
-                ComboBox {
+                RoundedComboBox {
                     width: parent.width
                     visible: root.podSources.length > 0 && root.t6Sources.length > 0
                     model: root.t6Sources.map(s => s.name)

@@ -48,11 +48,10 @@ ComboBox {
         height: 34
         highlighted: control.highlightedIndex === index
         contentItem: Text {
-            text: control.textRole
-                  ? (Array.isArray(control.model)
-                        ? modelData[control.textRole]
-                        : model[control.textRole])
-                  : modelData
+            // textAt() is the ComboBox's own display-text lookup: it honours textRole and works
+            // for both string arrays and object arrays. The hand-rolled modelData[textRole]
+            // version rendered blank items for object models (Gear's default-gear pickers).
+            text: control.textAt(index)
             color: highlighted ? Theme.card : Theme.text
             font: control.font
             verticalAlignment: Text.AlignVCenter
