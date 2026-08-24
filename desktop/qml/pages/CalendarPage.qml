@@ -46,6 +46,15 @@ Item {
     ]
     property int plannerDay: 0
     property var dayActivities: []
+    // A day strictly before today can't be planned - you don't schedule a workout for the
+    // past (André, 2026-08-24). Date-only compare, ignoring time of day.
+    function isPastDay(day) {
+        if (day === null || day === undefined)
+            return false
+        const d = new Date(root.viewYear, root.viewMonth, day)
+        const t = new Date(root.today.getFullYear(), root.today.getMonth(), root.today.getDate())
+        return d < t
+    }
     function openPlanner(day) {
         plannerDay = day
         plannerDialog.open()
@@ -312,6 +321,7 @@ Item {
                                         // such restriction.
                                         readonly property bool canPlan:
                                             dayCell.modelData !== null
+                                            && !root.isPastDay(dayCell.modelData.day)
                                             && DeviceService.intervalsEnabled
                                             && !HomeViewModel.isGarmin
                                             && !HomeViewModel.isKailash
@@ -598,26 +608,13 @@ Item {
                 }
             }
 
-            // Intervals: open the full builder to design them. André, 2026-08-24: "for
-            // intervals guess you can just open the website, since people may want to do more
-            // complex stuff" - so we don't seed steps here, we just open the builder (title
-            // pre-filled) and let them build it there.
-            Text {
-                visible: plannerDialog.complex
-                width: parent.width
-                wrapMode: Text.WordWrap
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeLabel
-                text: qsTr("Opens the full Workout Builder in your browser with the title ready, "
-                            + "so you can design the intervals - warm-up, repeats, targets, "
-                            + "everything - and install to the watch from there.")
-            }
-
+            // Intervals: nothing to enter here (André, 2026-08-24: "on the UI of intervals
+            // take out those numbers/intervals out, just a button 'open workout builder'") -
+            // complex structure is designed on the full site, which the button opens.
             RoundedButton {
-                // Simple: seed the whole one-block workout into the builder. Intervals: open the
-                // builder with just the title (see the note above) - complex structure is built
-                // on the site.
-                text: plannerDialog.complex ? qsTr("Open builder") : qsTr("Create workout")
+                // Simple: seed the whole one-block workout into the builder. Intervals: just
+                // open the builder (title pre-filled) - everything is built on the site.
+                text: plannerDialog.complex ? qsTr("Open Workout Builder") : qsTr("Create workout")
                 onClicked: {
                     const act = root.plannerActivities[plannerDialog.activityIndex]
                     if (plannerDialog.complex) {
