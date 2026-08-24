@@ -79,6 +79,49 @@ PageFlickable {
         xhr.send(JSON.stringify({ path: fileUrl.toString() }));
     }
 
+    // --- intervals.icu "Sync now" (André, 2026-08-18): run the enabled toggles. Each flow
+    // reports its own line into syncStatus as it finishes; the read-only pull (activity level)
+    // and the watch write (profile) go through their backend endpoints, gear through its
+    // service. Manual, one-shot - not background.
+    function syncAppend(label, ok, detail) {
+        var line = (ok ? "\u2713 " : "\u2717 ") + label + (detail ? " \u2014 " + detail : "");
+        syncStatus.color = Theme.text;
+        syncStatus.text = (syncStatus.text.length > 0 ? syncStatus.text + "\n" : "") + line;
+    }
+    function intervalsPost(path, label) {
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            var ok = false, detail = "";
+            try {
+                var r = JSON.parse(xhr.responseText);
+                ok = (xhr.status === 200) && !!r.ok;
+                if (!ok && r.error) detail = String(r.error);
+            } catch (e) { detail = qsTr("no response"); }
+            root.syncAppend(label, ok, detail);
+        };
+        xhr.open("POST", apiBase + path);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ athlete_id: ConnectionsService.intervalsIcuAthleteId,
+                                  api_key: ConnectionsService.intervalsIcuApiKey(),
+                                  confirm: true }));
+    }
+    function intervalsSyncNow() {
+        syncStatus.color = Theme.mutedText;
+        syncStatus.text = "";
+        var any = false;
+        if (ConnectionsService.syncImportGear) { any = true; GearService.importFromIntervals(); }
+        if (ConnectionsService.syncActivityLevel) {
+            any = true; root.intervalsPost("/api/intervals/activity-level", qsTr("Activity level"));
+        }
+        if (ConnectionsService.syncStatsToWatch) {
+            any = true; root.intervalsPost("/api/intervals/stats-to-watch", qsTr("Profile to watch"));
+        }
+        if (!any)
+            syncStatus.text = qsTr("Nothing selected - turn on what you want to sync above.");
+    }
+
     FileDialog {
         id: catalogFileDialog
         title: qsTr("Select suunto-apps/index.json")
@@ -1002,40 +1045,85 @@ PageFlickable {
                         }
                     }
                 }
-                // Gear import lives here in the intervals.icu connection (André, 2026-08-18:
-                // "that options regarding intervals.icu should be on settings, when you connect
-                // to intervals.icu"), shown once connected. Pulls bikes/shoes/parts down; the
-                // Gear page just shows and edits them.
-                RoundedButton {
-                    width: parent.width
+                // --- Sync options (André, 2026-08-18): the intervals.icu "sync menu" - pick
+                // what to import/export per data type, then "Sync now" runs the enabled ones.
+                // Manual + toggles, not background. Shown once connected.
+                Column {
                     visible: ConnectionsService.intervalsIcuConnected
-                    enabled: !GearService.loading
-                    text: GearService.loading ? qsTr("Importing…")
-                                              : qsTr("Import gear from Intervals.icu")
-                    onClicked: { gearImportStatus.text = ""; GearService.importFromIntervals() }
-                }
-                // Completion message (André, 2026-08-18: "when finished importing we should have
-                // a message saying done") - GearService.importFinished(count) fires when the pull
-                // lands; lastError covers a failure. Shown inline under the button.
-                Text {
-                    id: gearImportStatus
                     width: parent.width
-                    visible: text.length > 0
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: ""
-                }
-                Connections {
-                    target: GearService
-                    function onImportFinished(count) {
-                        gearImportStatus.color = Theme.mutedText
-                        gearImportStatus.text = qsTr("Done — imported %1 gear item(s).").arg(count)
+                    spacing: Theme.spacingSmall
+
+                    Rectangle { width: parent.width; height: 1; color: Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.25) }
+
+                    Text {
+                        text: qsTr("Sync options")
+                        font.bold: true
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeLabel
                     }
-                    function onLastErrorChanged() {
-                        if (GearService.lastError.length > 0) {
-                            gearImportStatus.color = Theme.error
-                            gearImportStatus.text = GearService.lastError
+
+                    // One reusable toggle row (label + switch).
+                    component SyncToggle: Row {
+                        width: parent.width
+                        property alias label: rowLabel.text
+                        property bool value: false
+                        signal toggled(bool checked)
+                        Text {
+                            id: rowLabel
+                            width: parent.width - sw.width - Theme.spacingSmall
+                            wrapMode: Text.WordWrap
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeCaption
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        RoundedSwitch {
+                            id: sw
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: parent.value
+                            onToggled: parent.toggled(checked)
+                        }
+                    }
+
+                    SyncToggle {
+                        label: qsTr("Import gear (bikes, shoes, parts)")
+                        value: ConnectionsService.syncImportGear
+                        onToggled: (checked) => ConnectionsService.syncImportGear = checked
+                    }
+                    SyncToggle {
+                        label: qsTr("Keep the watch's activity level in sync")
+                        value: ConnectionsService.syncActivityLevel
+                        onToggled: (checked) => ConnectionsService.syncActivityLevel = checked
+                    }
+                    SyncToggle {
+                        label: qsTr("Write my profile to the watch (weight, height, HR, class) — cable only")
+                        value: ConnectionsService.syncStatsToWatch
+                        onToggled: (checked) => ConnectionsService.syncStatsToWatch = checked
+                    }
+
+                    RoundedButton {
+                        width: parent.width
+                        enabled: !GearService.loading
+                        text: GearService.loading ? qsTr("Syncing…") : qsTr("Sync now")
+                        onClicked: root.intervalsSyncNow()
+                    }
+
+                    Text {
+                        id: syncStatus
+                        width: parent.width
+                        visible: text.length > 0
+                        wrapMode: Text.WordWrap
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        text: ""
+                    }
+                    Connections {
+                        target: GearService
+                        function onImportFinished(count) {
+                            root.syncAppend(qsTr("Gear"), true, qsTr("%1 item(s)").arg(count))
+                        }
+                        function onLastErrorChanged() {
+                            if (GearService.lastError.length > 0)
+                                root.syncAppend(qsTr("Gear"), false, GearService.lastError)
                         }
                     }
                 }

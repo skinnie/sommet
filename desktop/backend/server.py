@@ -469,6 +469,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_settings_write(body)
         elif self.path == "/api/intervals/activity-level":
             self._handle_intervals_activity_level(body)
+        elif self.path == "/api/intervals/stats-to-watch":
+            self._handle_intervals_stats_to_watch(body)
         elif self.path == "/api/device/select":
             self._handle_device_select(body)
         elif self.path == "/api/time/sync":
@@ -604,6 +606,13 @@ class Handler(BaseHTTPRequestHandler):
             tool_args = ["--gpx-out", tmpdir, "--fit-out", tmpdir, "--known-count", known_count]
             if mark_synced:
                 tool_args.append("--mark-synced")
+            # Optional per-app native-stream mapping for logged Suunto App outputs (off by
+            # default). The desktop sends ?map=APP=STREAM (repeatable); pass each straight to
+            # exercise_log.py's own --map. Values are user-chosen app names + a fixed stream
+            # allowlist enforced by the tool, so this is safe to forward verbatim.
+            for m in query.get("map", []):
+                if "=" in m:
+                    tool_args += ["--map", m]
             code, out, err = run_tool("exercise_log.py", tool_args)
             if code != 0:
                 self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
@@ -613,11 +622,17 @@ class Handler(BaseHTTPRequestHandler):
             for gpx_path in sorted(tmp.glob("move*.gpx")):
                 n = gpx_path.stem[len("move"):]
                 fit_path = tmp / f"move{n}.fit"
+                # Logged Suunto App outputs (LogRule=1), if this move has any: exercise_log.py
+                # writes a per-move move{n}.rules.json sidecar {slot: {label, times, values}}.
+                rules_path = tmp / f"move{n}.rules.json"
+                rule_outputs = (json.loads(rules_path.read_text())
+                                if rules_path.exists() else None)
                 activities.append({
                     "index": int(n),
                     "gpx": gpx_path.read_text(),
                     "fit_base64": (base64.b64encode(fit_path.read_bytes()).decode("ascii")
                                    if fit_path.exists() else None),
+                    "rule_outputs": rule_outputs,
                 })
             master_path = tmp / "master.json"
             total_entries = (json.loads(master_path.read_text())["total_entries"]
@@ -1986,6 +2001,44 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send_json(200, {"ok": True, "activity_class": cls_val, "wrote": False,
                                   "dry_run": True, "transport": "ble"})
+
+    def _handle_intervals_stats_to_watch(self, body):
+        """POST /api/intervals/stats-to-watch. Body: {athlete_id, api_key, confirm, device?}.
+        Write the FULL personal profile (weight, height, gender, max/rest HR, and the derived
+        activity class) from intervals.icu to the watch - the "Import my stats -> watch" sync
+        toggle (André, 2026-08-18). USB only for now: it reuses stats_to_watch.py's proven
+        Personal.* write path (idempotent, dry-run without confirm). BLE writes only the
+        activity class today (see /api/intervals/activity-level); the static fields need the
+        per-field BLE settings path wired before this can run over Bluetooth, so we say so
+        rather than half-writing."""
+        athlete_id = body.get("athlete_id")
+        api_key = body.get("api_key")
+        if not athlete_id or not api_key:
+            self._send_json(400, {"ok": False, "error": "missing athlete_id/api_key"})
+            return
+        if demo_ambit():
+            self._send_json(200, {"ok": True, "wrote": False, "demo": True})
+            return
+        if ble_bridge.bridge.status().get("handshake_done"):
+            self._send_json(501, {"ok": False, "error": "Writing the full profile over Bluetooth "
+                                  "isn't supported yet - connect the watch by cable for this. "
+                                  "(Activity level does sync over Bluetooth.)"})
+            return
+        confirm = bool(body.get("confirm", False))
+        # No --only: stats_to_watch considers every mapped field and writes just the ones that
+        # differ from the watch. --json gives the app the machine-readable preview/result.
+        args = [str(athlete_id), str(api_key), "--json"]
+        if body.get("device"):
+            args += ["--device", body["device"]]
+        if confirm:
+            args.append("--write")
+        code, out, err = run_tool("stats_to_watch.py", args)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": ("stats_to_watch produced no JSON: "
+                                   + (err or out or "")).strip()[:200]})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_settings_write(self, body):
         # Ambit1: its own 0x0b01 read-modify-write, not the SBEM 0x1101 path.

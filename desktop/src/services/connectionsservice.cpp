@@ -70,6 +70,21 @@ QString ConnectionsService::intervalsIcuApiKey() const
     return m_settings.value(kIntervalsGroup + QStringLiteral("/apiKey")).toString();
 }
 
+bool ConnectionsService::syncFlag(const char *name, bool def) const
+{
+    return m_settings.value(kIntervalsGroup + QStringLiteral("/sync_") + QLatin1String(name),
+                            def).toBool();
+}
+
+void ConnectionsService::setSyncFlag(const char *name, bool v)
+{
+    const QString key = kIntervalsGroup + QStringLiteral("/sync_") + QLatin1String(name);
+    if (m_settings.value(key, v).toBool() == v && m_settings.contains(key))
+        return;
+    m_settings.setValue(key, v);
+    emit syncFlagsChanged();
+}
+
 void ConnectionsService::saveRunalyze(const QString &apiKey)
 {
     m_settings.setValue(kRunalyzeGroup + QStringLiteral("/apiKey"), apiKey.trimmed());

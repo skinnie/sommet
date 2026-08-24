@@ -61,6 +61,13 @@ class ConnectionsService : public QObject
 
     Q_PROPERTY(bool intervalsIcuConnected READ intervalsIcuConnected NOTIFY intervalsIcuChanged)
     Q_PROPERTY(QString intervalsIcuAthleteId READ intervalsIcuAthleteId NOTIFY intervalsIcuChanged)
+
+    // intervals.icu sync-menu toggles (Andre, 2026-08-18): the user picks what "Sync now"
+    // runs. Manual, not background - each is a plain persisted on/off. Defaults keep the
+    // watch-writing one off (opt-in) and the read-only pulls on.
+    Q_PROPERTY(bool syncImportGear READ syncImportGear WRITE setSyncImportGear NOTIFY syncFlagsChanged)
+    Q_PROPERTY(bool syncStatsToWatch READ syncStatsToWatch WRITE setSyncStatsToWatch NOTIFY syncFlagsChanged)
+    Q_PROPERTY(bool syncActivityLevel READ syncActivityLevel WRITE setSyncActivityLevel NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool runalyzeConnected READ runalyzeConnected NOTIFY runalyzeChanged)
     Q_PROPERTY(bool stravaConnected READ stravaConnected NOTIFY stravaChanged)
     Q_PROPERTY(bool stravaConnecting READ stravaConnecting NOTIFY stravaConnectingChanged)
@@ -87,6 +94,13 @@ public:
 
     bool intervalsIcuConnected() const { return !m_intervalsIcuAthleteId.isEmpty(); }
     QString intervalsIcuAthleteId() const { return m_intervalsIcuAthleteId; }
+
+    bool syncImportGear() const { return syncFlag("importGear", true); }
+    void setSyncImportGear(bool v) { setSyncFlag("importGear", v); }
+    bool syncStatsToWatch() const { return syncFlag("statsToWatch", false); }
+    void setSyncStatsToWatch(bool v) { setSyncFlag("statsToWatch", v); }
+    bool syncActivityLevel() const { return syncFlag("activityLevel", true); }
+    void setSyncActivityLevel(bool v) { setSyncFlag("activityLevel", v); }
     bool runalyzeConnected() const { return m_runalyzeConnected; }
     bool stravaConnected() const { return !m_stravaRefreshToken.isEmpty(); }
     bool stravaConnecting() const { return m_stravaConnecting; }
@@ -152,6 +166,7 @@ public:
 
 signals:
     void intervalsIcuChanged();
+    void syncFlagsChanged();
     void runalyzeChanged();
     void stravaChanged();
     void stravaConnectingChanged();
@@ -195,6 +210,8 @@ private:
 
     QSettings m_settings;
     QString m_intervalsIcuAthleteId;
+    bool syncFlag(const char *name, bool def) const;
+    void setSyncFlag(const char *name, bool v);
     bool m_runalyzeConnected = false;
 
     QNetworkAccessManager m_network;
