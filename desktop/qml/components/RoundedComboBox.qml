@@ -82,14 +82,19 @@ ComboBox {
             var wanted = Math.min(control.count * itemH + 8, 240);
             var ctlTop = control.mapToItem(null, 0, 0).y;
             var winH = control.Window ? control.Window.height : Screen.height;
-            var bTop = control.boundsItem ? control.boundsItem.mapToItem(null, 0, 0).y : 0;
-            var bBottom = control.boundsItem
-                          ? control.boundsItem.mapToItem(null, 0, 0).y + control.boundsItem.height
-                          : winH;
-            var roomBelow = bBottom - (ctlTop + control.height) - gap - margin;
-            var roomAbove = (ctlTop - bTop) - gap - margin;
+            // The window is ALWAYS the outer bound (the rule: nothing may pass beyond the
+            // window). A boundsItem (e.g. a dialog card) only ever tightens it further, never
+            // loosens it - so take the stricter of the two on each side.
+            var bTop = Math.max(margin,
+                                control.boundsItem ? control.boundsItem.mapToItem(null, 0, 0).y : 0);
+            var bBottom = Math.min(winH - margin,
+                                   control.boundsItem
+                                   ? control.boundsItem.mapToItem(null, 0, 0).y + control.boundsItem.height
+                                   : winH);
+            var roomBelow = bBottom - (ctlTop + control.height) - gap;
+            var roomAbove = (ctlTop - bTop) - gap;
             openUp = (roomBelow < wanted) && (roomAbove > roomBelow);
-            var room = openUp ? roomAbove : roomBelow;
+            var room = Math.max(openUp ? roomAbove : roomBelow, 0);
             popH = Math.max(itemH + 8, Math.min(wanted, room));
         }
 

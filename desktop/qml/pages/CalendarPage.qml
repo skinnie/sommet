@@ -548,7 +548,9 @@ Item {
         id: plannerDialog
         title: qsTr("Plan a workout")
         anchors.centerIn: Overlay.overlay
-        standardButtons: Dialog.Cancel
+        // No footer - the actions live in the content Row below, so Cancel sits right next to
+        // "Create workout" (André, 2026-08-24) instead of alone at the dialog's bottom.
+        standardButtons: Dialog.NoButton
 
         property int activityIndex: 0
         property bool complex: false
@@ -630,20 +632,27 @@ Item {
             // Intervals: nothing to enter here (André, 2026-08-24: "on the UI of intervals
             // take out those numbers/intervals out, just a button 'open workout builder'") -
             // complex structure is designed on the full site, which the button opens.
-            RoundedButton {
-                // Simple: seed the whole one-block workout into the builder. Intervals: just
-                // open the builder (title pre-filled) - everything is built on the site.
-                text: plannerDialog.complex ? qsTr("Open Workout Builder") : qsTr("Create workout")
-                onClicked: {
-                    const act = root.plannerActivities[plannerDialog.activityIndex]
-                    if (plannerDialog.complex) {
-                        IntervalsService.launch(root.plannerTitle(act))
-                    } else {
-                        IntervalsService.launchWithWorkout(
-                            root.buildWorkout(act, parseInt(simpleDuration.text || "1"),
-                                              simpleUnit.unitKey))
+            Row {
+                spacing: Theme.spacingSmall
+                RoundedButton {
+                    // Simple: seed the whole one-block workout into the builder. Intervals: just
+                    // open the builder (title pre-filled) - everything is built on the site.
+                    text: plannerDialog.complex ? qsTr("Open Workout Builder") : qsTr("Create workout")
+                    onClicked: {
+                        const act = root.plannerActivities[plannerDialog.activityIndex]
+                        if (plannerDialog.complex) {
+                            IntervalsService.launch(root.plannerTitle(act))
+                        } else {
+                            IntervalsService.launchWithWorkout(
+                                root.buildWorkout(act, parseInt(simpleDuration.text || "1"),
+                                                  simpleUnit.unitKey))
+                        }
+                        plannerDialog.close()
                     }
-                    plannerDialog.close()
+                }
+                RoundedButton {
+                    text: qsTr("Cancel")
+                    onClicked: plannerDialog.close()
                 }
             }
         }
