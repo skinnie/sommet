@@ -23,11 +23,25 @@ Item {
     // Default gear per decoded sport (D2-c/D2-a). Sport names match ActivityTypes' decoded names.
     readonly property var sportList: ["Running", "Trail running", "Cycling", "Mountain biking",
                                       "Indoor cycling", "Walking", "Trekking", "Orienteering"]
-    function gearChoices() {
+    // A cycling sport takes bikes; every other (foot) sport takes shoes. André, 2026-08-24:
+    // trail/trekking/orienteering were offering bikes.
+    function isBikeSport(sport) {
+        var l = String(sport).toLowerCase()
+        return l.indexOf("cycling") >= 0 || l.indexOf("biking") >= 0 || l.indexOf("bike") >= 0
+    }
+    // Gear to offer for a sport: only the matching type (bikes for cycling, shoes otherwise).
+    // No sport given = every top-level item (used where the picker isn't sport-specific).
+    function gearChoices(sport) {
+        var wantBike = (sport !== undefined) ? root.isBikeSport(sport) : null
         var out = [{ text: qsTr("None"), id: "" }]
         for (var i = 0; i < allGear.length; ++i) {
             var g = allGear[i]
-            if (!g.parentId && !g.retired) out.push({ text: g.name, id: g.id })
+            if (g.parentId || g.retired) continue
+            if (wantBike !== null) {
+                var isBike = g.type.toLowerCase().indexOf("bike") === 0
+                if (isBike !== wantBike) continue
+            }
+            out.push({ text: g.name, id: g.id })
         }
         return out
     }
@@ -118,7 +132,7 @@ Item {
             if (ex) for (var i = 0; i < cs.length; i++) if (cs[i].name === ex.country) { ci = i; break }
             exCountry.currentIndex = ci
             exRadius.value = ex ? ex.radiusKm : 250
-            var choices = root.gearChoices()
+            var choices = root.gearChoices(sport)
             exGear.model = choices
             var gi = 0
             if (ex) for (var j = 0; j < choices.length; j++) if (choices[j].id === ex.gearId) { gi = j; break }
@@ -251,7 +265,7 @@ Item {
                             delegate: RowLayout {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                readonly property var choices: root.gearChoices()
+                                readonly property var choices: root.gearChoices(modelData)
                                 Text { Layout.fillWidth: true; text: modelData; color: Theme.text; font.pixelSize: Theme.fontSizeBody }
                                 RoundedComboBox {
                                     Layout.preferredWidth: 200
