@@ -263,7 +263,7 @@ const TARGET_NAMES = ["none", "hr", "pace", "speed", "vertical_speed", "power"];
 
 // value/unit -> base units (seconds for time, meters for distance/ascent) this project's
 // generator expects (SUUNTO_DURATION is seconds, SUUNTO_DISTANCE/SUUNTO_ASCENT are meters).
-const TIME_UNITS = {seconds: 1, minutes: 60};
+const TIME_UNITS = {seconds: 1, minutes: 60, hours: 3600};
 const DISTANCE_UNITS = {meters: 1, kilometers: 1000};
 
 function unitsFor(durationName) {

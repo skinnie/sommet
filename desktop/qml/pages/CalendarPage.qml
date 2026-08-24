@@ -78,13 +78,15 @@ Item {
     // A duration step MUST carry target + notify: the builder's render() reads s.target.targetName
     // on every step, so omitting it threw and nothing filled in (André: "numbers don't get
     // filled up when I open the site").
-    function buildWorkout(activity, durationMin) {
-        // value is seconds (the builder's canonical unit) but unit:"minutes" so it renders as
-        // the minutes the user typed - not 2700s. displayValue = value / TIME_UNITS[unit].
+    function buildWorkout(activity, durationValue, unitKey) {
+        // value is always seconds (the builder's canonical unit); unitKey ("minutes"/"hours")
+        // is passed through so the builder opens on the unit the user picked. displayValue =
+        // value / TIME_UNITS[unit], so e.g. 45 minutes -> value 2700, shown as 45.
+        const factor = unitKey === "hours" ? 3600 : 60
         const step = { type: { typeName: "interval" },
                        duration: { durationName: "time",
-                                   value: Math.max(1, Math.round(durationMin)) * 60,
-                                   unit: "minutes" },
+                                   value: Math.max(1, Math.round(durationValue)) * factor,
+                                   unit: unitKey },
                        target: { targetName: "none" },
                        notify: { beep: true, light: true } }
         return JSON.stringify({ name: root.plannerTitle(activity), steps: [step] })
@@ -595,18 +597,30 @@ Item {
                 }
             }
 
-            // Simple: one duration
+            // Simple: one duration - a number plus a Minutes/Hours unit (André, 2026-08-24),
+            // passed through to the builder so it opens on the same unit.
             Column {
                 visible: !plannerDialog.complex
                 width: parent.width
                 spacing: 2
-                Text { text: qsTr("Duration (min)"); color: Theme.mutedText
+                Text { text: qsTr("Duration"); color: Theme.mutedText
                        font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField {
-                    id: simpleDuration
-                    width: 100
-                    text: "45"
-                    validator: IntValidator { bottom: 1; top: 999 }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedTextField {
+                        id: simpleDuration
+                        width: 90
+                        text: "45"
+                        validator: IntValidator { bottom: 1; top: 999 }
+                    }
+                    RoundedComboBox {
+                        id: simpleUnit
+                        width: 120
+                        // Values match the builder's TIME_UNITS keys.
+                        model: [qsTr("Minutes"), qsTr("Hours")]
+                        currentIndex: 0
+                        property string unitKey: currentIndex === 1 ? "hours" : "minutes"
+                    }
                 }
             }
 
@@ -623,7 +637,8 @@ Item {
                         IntervalsService.launch(root.plannerTitle(act))
                     } else {
                         IntervalsService.launchWithWorkout(
-                            root.buildWorkout(act, parseInt(simpleDuration.text || "1")))
+                            root.buildWorkout(act, parseInt(simpleDuration.text || "1"),
+                                              simpleUnit.unitKey))
                     }
                     plannerDialog.close()
                 }
