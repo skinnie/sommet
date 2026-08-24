@@ -578,8 +578,8 @@ Item {
                 width: plannerCol.boxWidth
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
-                text: qsTr("Choose the sport and shape for %1. \"Create workout\" opens the "
-                            + "builder, ready to fine-tune and install.")
+                text: qsTr("Choose the sport and shape for %1.\n\n\"Create workout\" opens "
+                            + "the builder, ready to fine-tune and install.")
                     .arg(Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
                                         Qt.locale(), Locale.LongFormat))
             }
@@ -648,12 +648,20 @@ Item {
             // Intervals: nothing to enter here (André, 2026-08-24: "on the UI of intervals
             // take out those numbers/intervals out, just a button 'open workout builder'") -
             // complex structure is designed on the full site, which the button opens.
-            Row {
-                spacing: Theme.spacingSmall
+            // Action + Cancel across the box width, so Cancel's right edge lines up with the
+            // right edge of the Activity and unit boxes above it (André: "align the cancel
+            // button with minutes and running on the right edge").
+            Item {
+                width: plannerCol.boxWidth
+                height: actionBtn.height
                 RoundedButton {
+                    id: actionBtn
+                    anchors.left: parent.left
                     // Simple: seed the whole one-block workout into the builder. Intervals: just
                     // open the builder (title pre-filled) - everything is built on the site.
-                    text: plannerDialog.complex ? qsTr("Open Workout Builder") : qsTr("Create workout")
+                    // "Open builder" (not "...Workout Builder") so it fits next to Cancel within
+                    // the box width.
+                    text: plannerDialog.complex ? qsTr("Open builder") : qsTr("Create workout")
                     onClicked: {
                         const act = root.plannerActivities[plannerDialog.activityIndex]
                         if (plannerDialog.complex) {
@@ -667,6 +675,7 @@ Item {
                     }
                 }
                 RoundedButton {
+                    anchors.right: parent.right
                     text: qsTr("Cancel")
                     onClicked: plannerDialog.close()
                 }
