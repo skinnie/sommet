@@ -591,6 +591,12 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         const double distance = o.value(QStringLiteral("distance")).toDouble();
         const double ascent = o.value(QStringLiteral("total_elevation_gain")).toDouble();
         const int calories = o.value(QStringLiteral("calories")).toInt();
+        // Skip junk/test entries - under a minute AND under 100 m (planned/manual/test uploads
+        // with no real recorded activity, André 2026-08-24: "it was tests for our app"). An
+        // activity needs at least ~1 min OR ~100 m to count; these live on intervals.icu so the
+        // filter has to run on every import, not just a one-off local delete.
+        if (duration < 60 && distance < 100.0)
+            continue;
         // Prefer the real device name; fall back to a friendly form of the source connector.
         QString device = o.value(QStringLiteral("device_name")).toString();
         if (device.isEmpty())
