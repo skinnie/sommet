@@ -19,6 +19,13 @@ ComboBox {
     implicitHeight: 36
     font.pixelSize: Theme.fontSizeBody
 
+    // Optional: the item the popup must stay inside (2026-08-24, André: the Minutes popup ran
+    // out of the "Plan a workout" card even though the window had room below - "it has no reason
+    // to"). When set, the flip/height decision is made against THIS item's bounds instead of the
+    // whole window, so a box near the bottom of a dialog opens upward to stay in the card. Leave
+    // null for a plain page combo, which is then bounded by the window as before.
+    property Item boundsItem: null
+
     background: Rectangle {
         radius: Theme.radiusSmall
         color: Theme.card
@@ -65,22 +72,31 @@ ComboBox {
     // scrolls inside.
     popup: Popup {
         id: pop
-        readonly property real gap: 4
-        readonly property real margin: 8            // keep a little breathing room from the edge
-        readonly property real itemH: 34
-        readonly property real wanted: Math.min(control.count * itemH + 8, 240)
-        // Control's top edge in window coordinates, and the space above/below it in the window.
-        readonly property real ctlTop: control.mapToItem(null, 0, 0).y
-        readonly property real winH: control.Window ? control.Window.height : Screen.height
-        readonly property real roomBelow: winH - (ctlTop + control.height) - gap - margin
-        readonly property real roomAbove: ctlTop - gap - margin
-        readonly property bool openUp: (roomBelow < wanted) && (roomAbove > roomBelow)
-        readonly property real room: openUp ? roomAbove : roomBelow
+        // Computed fresh each time it opens (onAboutToShow) rather than via bindings: mapToItem
+        // in a binding isn't reactive and evaluates before layout settles, so the flip decision
+        // came out wrong (the popup stayed downward even with no room). Read live geometry here.
+        property bool openUp: false
+        property real popH: 84
+        onAboutToShow: {
+            var itemH = 34, gap = 4, margin = 8;
+            var wanted = Math.min(control.count * itemH + 8, 240);
+            var ctlTop = control.mapToItem(null, 0, 0).y;
+            var winH = control.Window ? control.Window.height : Screen.height;
+            var bTop = control.boundsItem ? control.boundsItem.mapToItem(null, 0, 0).y : 0;
+            var bBottom = control.boundsItem
+                          ? control.boundsItem.mapToItem(null, 0, 0).y + control.boundsItem.height
+                          : winH;
+            var roomBelow = bBottom - (ctlTop + control.height) - gap - margin;
+            var roomAbove = (ctlTop - bTop) - gap - margin;
+            openUp = (roomBelow < wanted) && (roomAbove > roomBelow);
+            var room = openUp ? roomAbove : roomBelow;
+            popH = Math.max(itemH + 8, Math.min(wanted, room));
+        }
 
         width: control.width
         padding: 4
-        height: Math.max(itemH + 8, Math.min(wanted, room))
-        y: openUp ? -(height + gap) : (control.height + gap)
+        height: popH
+        y: openUp ? -(popH + 4) : (control.height + 4)
 
         contentItem: ListView {
             clip: true

@@ -554,6 +554,7 @@ Item {
         property bool complex: false
 
         contentItem: Column {
+            id: plannerCol
             spacing: Theme.spacingMedium
             width: 400
 
@@ -576,6 +577,7 @@ Item {
                 RoundedComboBox {
                     id: actBox
                     width: parent.width
+                    boundsItem: plannerCol
                     model: root.plannerActivities
                     currentIndex: plannerDialog.activityIndex
                     onActivated: (i) => plannerDialog.activityIndex = i
@@ -616,6 +618,7 @@ Item {
                     RoundedComboBox {
                         id: simpleUnit
                         width: 120
+                        boundsItem: plannerCol
                         // Values match the builder's TIME_UNITS keys.
                         model: [qsTr("Minutes"), qsTr("Hours")]
                         currentIndex: 0
