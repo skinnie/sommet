@@ -561,16 +561,21 @@ Item {
         // collapsed - so the Duration row overflowed and the unit box ran to the card edge
         // (André: "iso spacing between the end of window on both sides"). Setting implicitWidth
         // explicitly breaks the loop and gives even left/right margins.
-        readonly property real dialogWidth: 320
+        // Snug to the boxes (number 90 + gap + unit 110 = ~208) so there's no dead space on the
+        // right and the margins stay even (André: "adapt the text to fit the max width of boxes").
+        readonly property real dialogWidth: 210
         implicitWidth: dialogWidth + padding * 2
 
         contentItem: Column {
             id: plannerCol
             spacing: Theme.spacingMedium
             width: plannerDialog.dialogWidth
+            // One width for every box AND the intro text, so the whole dialog reads as a single
+            // aligned column (André: "adapt the text to fit on the max width of boxes").
+            readonly property real boxWidth: simpleDuration.width + Theme.spacingSmall + simpleUnit.width
 
             Text {
-                width: parent.width
+                width: plannerCol.boxWidth
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
                 text: qsTr("Choose the sport and shape for %1. \"Create workout\" opens the "
@@ -587,10 +592,9 @@ Item {
                        font.pixelSize: Theme.fontSizeLabel }
                 RoundedComboBox {
                     id: actBox
-                    // Match the Duration row width (number + unit) rather than stretching the
-                    // full card - a full-width box looked oversized next to everything else
-                    // (André, 2026-08-24: "running is enormous").
-                    width: simpleDuration.width + Theme.spacingSmall + simpleUnit.width
+                    // Match the shared box width (Duration row) rather than the full card -
+                    // a full-width box looked oversized (André: "running is enormous").
+                    width: plannerCol.boxWidth
                     boundsItem: plannerCol
                     model: root.plannerActivities
                     currentIndex: plannerDialog.activityIndex
