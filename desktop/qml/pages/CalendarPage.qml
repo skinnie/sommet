@@ -79,10 +79,12 @@ Item {
     // on every step, so omitting it threw and nothing filled in (André: "numbers don't get
     // filled up when I open the site").
     function buildWorkout(activity, durationMin) {
+        // value is seconds (the builder's canonical unit) but unit:"minutes" so it renders as
+        // the minutes the user typed - not 2700s. displayValue = value / TIME_UNITS[unit].
         const step = { type: { typeName: "interval" },
                        duration: { durationName: "time",
                                    value: Math.max(1, Math.round(durationMin)) * 60,
-                                   unit: "seconds" },
+                                   unit: "minutes" },
                        target: { targetName: "none" },
                        notify: { beep: true, light: true } }
         return JSON.stringify({ name: root.plannerTitle(activity), steps: [step] })
