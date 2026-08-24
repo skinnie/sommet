@@ -121,6 +121,9 @@ PageFlickable {
         if (ConnectionsService.syncImportActivities) {
             any = true; ActivityService.importFromIntervals(ConnectionsService.syncImportDays);
         }
+        if (ConnectionsService.syncExportActivities) {
+            any = true; ActivityService.exportToIntervals();
+        }
         if (!any)
             syncStatus.text = qsTr("Nothing selected - turn on what you want to sync above.");
     }
@@ -1132,6 +1135,12 @@ PageFlickable {
                         }
                     }
 
+                    SyncToggle {
+                        label: qsTr("Export the watch's activities to intervals.icu")
+                        value: ConnectionsService.syncExportActivities
+                        onToggled: (checked) => ConnectionsService.syncExportActivities = checked
+                    }
+
                     RoundedButton {
                         width: parent.width
                         enabled: !GearService.loading && !ActivityService.loading
@@ -1166,6 +1175,14 @@ PageFlickable {
                         }
                         function onImportError(message) {
                             root.syncAppend(qsTr("Activities"), false, message)
+                        }
+                        function onExportFinished(uploaded, failed) {
+                            root.syncAppend(qsTr("Export"), failed === 0,
+                                failed === 0 ? qsTr("%1 uploaded").arg(uploaded)
+                                             : qsTr("%1 uploaded, %2 failed").arg(uploaded).arg(failed))
+                        }
+                        function onExportError(message) {
+                            root.syncAppend(qsTr("Export"), false, message)
                         }
                     }
                 }

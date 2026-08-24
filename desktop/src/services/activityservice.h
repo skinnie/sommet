@@ -82,12 +82,32 @@ public:
     // the lists but stay tellable-apart, and they never touch the watch-sync known-count.
     Q_INVOKABLE void importFromIntervals(int oldestDays);
 
+    // Export (upload) the watch's own activities TO intervals.icu as FIT files (André,
+    // 2026-08-24). Only rows we haven't already uploaded; each is marked once it lands.
+    Q_INVOKABLE void exportToIntervals();
+
+    // Export-scope selector (André, 2026-08-24): which activities get pushed to intervals.icu.
+    // "manual" = per-activity only (nothing auto); "suunto" = watch moves; "etrex" = Garmin
+    // eTrex device moves (GPX); "all" = suunto+etrex. Never the intervals imports themselves.
+    // Persisted in QSettings intervals/exportScope. Auto-export (for suunto/all) runs after a
+    // sync; eTrex auto-export is driven from GarminService.
+    Q_INVOKABLE QString intervalsExportScope() const;
+    Q_INVOKABLE void setIntervalsExportScope(const QString &scope);
+
+    // Export one specific activity (the Upload tab's per-activity button) - works for any
+    // activity shown in the detail view: a watch move sends its FIT (carrying the logged-app
+    // streams), an eTrex move its GPX. idx<0 / no DB row is fine (nothing to mark).
+    Q_INVOKABLE void exportActivityToIntervals(const QString &name, const QString &fitBase64,
+                                               const QString &gpxText);
+
 signals:
     void loadingChanged();
     void activitiesChanged();
     void lastErrorChanged();
     void importFinished(int count);
     void importError(const QString &message);
+    void exportFinished(int uploaded, int failed);
+    void exportError(const QString &message);
 
 private:
     QNetworkAccessManager m_network;
@@ -109,6 +129,11 @@ private:
                   const QString &fitBase64, const QString &ruleOutputsJson);
     bool dbLoadAll();
     void importActivitiesInto(const QJsonArray &activities);
+    void uploadOneToIntervals(int idx, const QByteArray &fit,
+                              const QString &athlete, const QString &key);
+    int m_exportPending = 0;
+    int m_exportUploaded = 0;
+    int m_exportFailed = 0;
     void requestActivities(int knownCount, bool alreadyRetried);
     QVariantMap intervalsStreamMap() const;
 };

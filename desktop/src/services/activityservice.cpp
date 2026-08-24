@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QNetworkReply>
+#include <QHttpMultiPart>
 #include <QNetworkRequest>
 #include <QSettings>
 #include <QSqlError>
@@ -324,6 +325,9 @@ void ActivityService::openDatabase()
     // The device/app a move was recorded on (André, 2026-08-24) - meaningful for imports
     // (Garmin, Zwift, a phone app…); watch moves leave it empty (the watch is implied).
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN device TEXT"));
+    // Whether a watch activity has been uploaded to intervals.icu (export), so we don't
+    // re-upload it every sync. 1 = uploaded. Imports never set this.
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN exported INTEGER"));
 }
 
 int ActivityService::dbKnownCount()
@@ -624,4 +628,85 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     dbLoadAll();
     emit activitiesChanged();
     emit importFinished(count);
+}
+
+void ActivityService::exportToIntervals()
+{
+    const QSettings settings;
+    const QString athlete =
+        settings.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    const QString key =
+        settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    if (athlete.isEmpty() || key.isEmpty()) {
+        emit exportError(tr("Connect Intervals.icu in Settings first."));
+        return;
+    }
+    if (!m_db.isOpen()) {
+        emit exportError(tr("Local activity store isn't open."));
+        return;
+    }
+    // Watch activities with a FIT we haven't already uploaded. Imports (source='intervals')
+    // came FROM intervals.icu, so they're never pushed back.
+    QList<QPair<int, QByteArray>> items;
+    QSqlQuery q(QStringLiteral(
+        "SELECT idx, fit_base64 FROM activities "
+        "WHERE (source IS NULL OR source = 'watch') AND fit_base64 IS NOT NULL "
+        "AND fit_base64 <> '' AND (exported IS NULL OR exported = 0)"), m_db);
+    while (q.next()) {
+        const QByteArray fit = QByteArray::fromBase64(q.value(1).toString().toLatin1());
+        if (!fit.isEmpty())
+            items.append({q.value(0).toInt(), fit});
+    }
+    if (items.isEmpty()) {
+        emit exportFinished(0, 0);  // nothing new to push
+        return;
+    }
+    setLoading(true);
+    m_exportPending = items.size();
+    m_exportUploaded = 0;
+    m_exportFailed = 0;
+    for (const auto &item : items)
+        uploadOneToIntervals(item.first, item.second, athlete, key);
+}
+
+void ActivityService::uploadOneToIntervals(int idx, const QByteArray &fit,
+                                           const QString &athlete, const QString &key)
+{
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+    QHttpPart filePart;
+    filePart.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/fit"));
+    filePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                       QStringLiteral("form-data; name=\"file\"; filename=\"activity.fit\""));
+    filePart.setBody(fit);
+    multiPart->append(filePart);
+
+    QNetworkRequest req(QUrl(
+        QStringLiteral("https://intervals.icu/api/v1/athlete/%1/activities").arg(athlete)));
+    const QByteArray basic = QByteArrayLiteral("API_KEY:") + key.toUtf8();
+    req.setRawHeader("Authorization", "Basic " + basic.toBase64());
+    req.setRawHeader("User-Agent",
+                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
+
+    QNetworkReply *reply = m_network.post(req, multiPart);
+    multiPart->setParent(reply);  // freed with the reply
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError
+                        && (status == 200 || status == 201);
+        if (ok) {
+            ++m_exportUploaded;
+            QSqlQuery up(m_db);
+            up.prepare(QStringLiteral("UPDATE activities SET exported = 1 WHERE idx = ?"));
+            up.addBindValue(idx);
+            up.exec();
+        } else {
+            ++m_exportFailed;
+        }
+        if (--m_exportPending <= 0) {
+            setLoading(false);
+            emit exportFinished(m_exportUploaded, m_exportFailed);
+        }
+    });
 }
