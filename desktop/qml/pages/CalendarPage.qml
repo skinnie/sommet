@@ -573,8 +573,8 @@ Item {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
-                text: qsTr("For %1. Choose the sport and shape; \"Create workout\" opens the "
-                            + "builder with it ready to fine-tune and install.")
+                text: qsTr("Choose the sport and shape for %1. \"Create workout\" opens the "
+                            + "builder, ready to fine-tune and install.")
                     .arg(Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
                                         Qt.locale(), Locale.LongFormat))
             }
