@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, useWindowDimensions, ScrollView, Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
@@ -109,6 +110,7 @@ export default function HomeScreen() {
   // avoid a much larger diff below - every value it returns is v3Colors now.
   const theme = useV3Theme();
   const styles = createStyles(theme);
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const demo = useDemo();
   const { features: expFeatures } = useExperimental();  // gate Intervals / Smart Sensor menu items
@@ -799,7 +801,12 @@ export default function HomeScreen() {
     <NavShell items={navItems} selectedId="home">
     <ScrollView
       style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
+      // Home is the only screen with headerShown:false (App.tsx), so nothing else reserves
+      // the top safe area for it. On a notched/Dynamic-Island iPhone (e.g. the 13 mini,
+      // ~50pt top inset) the "Sommet" header would otherwise sit under the notch. Floor at
+      // the style's original 56pt so Android (insets.top ≈ status-bar height) is unchanged.
+      // 2026-08-24, André — iPhone layout pass.
+      contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(56, insets.top + 12) }]}
       showsVerticalScrollIndicator={false}
     >
 

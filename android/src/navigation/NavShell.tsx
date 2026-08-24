@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon, { IconName } from '../components/ui/Icon';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 
@@ -40,6 +41,7 @@ export function NavShell({
 }) {
   const t = useV3Theme();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isTablet = width >= TABLET_BREAKPOINT;
 
   if (isTablet) {
@@ -58,7 +60,12 @@ export function NavShell({
   return (
     <View style={styles.tabRoot}>
       <View style={styles.content}>{children}</View>
-      <View style={[styles.tabBar, { backgroundColor: t.card }]}>
+      {/* 2026-08-24 (André, iPhone layout pass). paddingBottom must clear the device's
+          bottom safe area (the iPhone home-indicator, ~34pt on a notched phone) so the tab
+          row isn't overlapped by it; on Android insets.bottom is 0 so the fixed 10pt still
+          applies. Kept as a Math.max floor rather than an additive so the padding never
+          shrinks below the original 10pt on hardware with no inset. */}
+      <View style={[styles.tabBar, { backgroundColor: t.card, paddingBottom: Math.max(10, insets.bottom) }]}>
         {items.map(item => (
           <NavShellButton key={item.id} item={item} selected={item.id === selectedId} vertical={false} t={t} />
         ))}
@@ -106,7 +113,9 @@ const styles = StyleSheet.create({
 
   tabRoot: { flex: 1 },
   tabBar: {
-    flexDirection: 'row', paddingVertical: 6, paddingBottom: 10,
+    // paddingBottom is applied inline from the safe-area inset (see render); paddingTop: 6
+    // keeps the row's top breathing room.
+    flexDirection: 'row', paddingTop: 6,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#00000022',
   },
   tabItem: { flex: 1, alignItems: 'center', paddingVertical: 4, borderRadius: 10 },
