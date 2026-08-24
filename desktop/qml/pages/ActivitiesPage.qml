@@ -131,6 +131,12 @@ Item {
         : ActivityService.activities
 
     Component.onCompleted: {
+        // Opened straight into an activity (from a Calendar day click) - honour the pending
+        // selection the NavBus carried, then clear it so a later plain visit shows the list.
+        if (NavBus.pendingActivity) {
+            root.selectedActivity = NavBus.pendingActivity
+            NavBus.pendingActivity = null
+        }
         ActivityService.refresh()
         GarminService.refreshActivities()
         KailashService.refreshHistory()

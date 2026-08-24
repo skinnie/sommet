@@ -10,4 +10,9 @@ import QtQuick
 // the single source of truth.
 QtObject {
     signal navigate(string pageId)
+
+    // Optional payload for navigate("activities"): the activity to open straight into its
+    // detail (André, 2026-08-24: click a Calendar day's activity to go to it). ActivitiesPage
+    // reads and clears this when it loads. null = just open the list.
+    property var pendingActivity: null
 }

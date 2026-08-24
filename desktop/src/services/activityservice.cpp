@@ -321,6 +321,9 @@ void ActivityService::openDatabase()
     // no-ops (ignored "duplicate column name") on an already-migrated DB.
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN source TEXT"));
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN external_id TEXT"));
+    // The device/app a move was recorded on (André, 2026-08-24) - meaningful for imports
+    // (Garmin, Zwift, a phone app…); watch moves leave it empty (the watch is implied).
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN device TEXT"));
 }
 
 int ActivityService::dbKnownCount()
@@ -381,7 +384,7 @@ bool ActivityService::dbLoadAll()
 
     QSqlQuery q(QStringLiteral(
         "SELECT idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-        "start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source "
+        "start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source, device "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -405,6 +408,7 @@ bool ActivityService::dbLoadAll()
         // imported ones so you can tell them apart while they blend into the same lists.
         parsed[QStringLiteral("source")] = q.value(12).toString().isEmpty()
             ? QStringLiteral("watch") : q.value(12).toString();
+        parsed[QStringLiteral("device")] = q.value(13).toString();
         // Logged Suunto App outputs (ruleoutput1..5) - {slot: {label, times, values}} - handed
         // to QML as `ruleOutputs` for the per-app graph. Absent on moves recorded without app
         // logging (older caches too, where the column is NULL): left unset.
@@ -487,6 +491,26 @@ void ActivityService::importFromIntervals(int oldestDays)
 // an imported move gets the right sport icon and reads consistently with watch moves (which put
 // the sport in the name too). Unknown types fall back to the raw type, then "Unspecified sport"
 // resolves a generic badge. André, 2026-08-24: "assign imported activities with the good icons".
+// A readable name for the intervals.icu upload source connector, when there's no device_name.
+static QString friendlySource(const QString &source)
+{
+    static const QHash<QString, QString> map = {
+        {QStringLiteral("GARMIN_CONNECT"), QStringLiteral("Garmin")},
+        {QStringLiteral("STRAVA"), QStringLiteral("Strava")},
+        {QStringLiteral("ZWIFT"), QStringLiteral("Zwift")},
+        {QStringLiteral("WAHOO"), QStringLiteral("Wahoo")},
+        {QStringLiteral("POLAR"), QStringLiteral("Polar")},
+        {QStringLiteral("SUUNTO"), QStringLiteral("Suunto")},
+        {QStringLiteral("COROS"), QStringLiteral("COROS")},
+        {QStringLiteral("UPLOAD"), QStringLiteral("Manual upload")},
+        {QStringLiteral("MANUAL"), QStringLiteral("Manual entry")},
+    };
+    const QString mapped = map.value(source);
+    if (!mapped.isEmpty())
+        return mapped;
+    return source;  // unknown connector: show it verbatim rather than nothing
+}
+
 static QString sportNameForIntervalsType(const QString &type)
 {
     static const QHash<QString, QString> map = {
@@ -565,13 +589,17 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         const double distance = o.value(QStringLiteral("distance")).toDouble();
         const double ascent = o.value(QStringLiteral("total_elevation_gain")).toDouble();
         const int calories = o.value(QStringLiteral("calories")).toInt();
+        // Prefer the real device name; fall back to a friendly form of the source connector.
+        QString device = o.value(QStringLiteral("device_name")).toString();
+        if (device.isEmpty())
+            device = friendlySource(o.value(QStringLiteral("source")).toString());
 
         QSqlQuery ins(m_db);
         ins.prepare(QStringLiteral(
             "INSERT INTO activities "
             "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-            " start_time, source, external_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'intervals', ?)"));
+            " start_time, source, external_id, device) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'intervals', ?, ?)"));
         ins.addBindValue(idx--);
         ins.addBindValue(name);
         ins.addBindValue(duration);
@@ -580,6 +608,7 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(calories);
         ins.addBindValue(start);
         ins.addBindValue(extId);
+        ins.addBindValue(device);
         ins.exec();
         ++count;
     }

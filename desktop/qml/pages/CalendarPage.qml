@@ -522,9 +522,20 @@ Item {
             Repeater {
                 model: root.dayActivities
                 delegate: Item {
+                    id: dayRow
                     required property var modelData
                     width: parent.width
-                    height: 42
+                    height: 44
+                    // Click through to the activity's detail (André, 2026-08-24). Carries the
+                    // activity on the NavBus and switches to the Activities page, which opens it.
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                    TapHandler {
+                        onTapped: {
+                            NavBus.pendingActivity = dayRow.modelData
+                            NavBus.navigate("activities")
+                            dayDialog.close()
+                        }
+                    }
                     ActivityBadge {
                         id: dayBadge
                         anchors.left: parent.left
@@ -574,6 +585,7 @@ Item {
                                   + (modelData.distanceMeters > 0
                                      ? "  ·  " + (modelData.distanceMeters / 1000).toFixed(1) + " km"
                                      : "")
+                                  + (modelData.device ? "  ·  " + modelData.device : "")
                         }
                     }
                 }
