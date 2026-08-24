@@ -568,7 +568,7 @@ Item {
 
         contentItem: Column {
             id: plannerCol
-            spacing: Theme.spacingMedium
+            spacing: Theme.spacingSmall
             width: plannerDialog.dialogWidth
             // One width for every box AND the intro text, so the whole dialog reads as a single
             // aligned column (André: "adapt the text to fit on the max width of boxes").
@@ -595,7 +595,8 @@ Item {
                     // Match the shared box width (Duration row) rather than the full card -
                     // a full-width box looked oversized (André: "running is enormous").
                     width: plannerCol.boxWidth
-                    boundsItem: plannerCol
+                    // No boundsItem here: the sport list is longer than the card, so let it use
+                    // the window and show every entry (André: "list instead of scrolling").
                     model: root.plannerActivities
                     currentIndex: plannerDialog.activityIndex
                     onActivated: (i) => plannerDialog.activityIndex = i

@@ -79,7 +79,9 @@ ComboBox {
         property real popH: 84
         onAboutToShow: {
             var itemH = 34, gap = 4, margin = 8;
-            var wanted = Math.min(control.count * itemH + 8, 240);
+            // Size to the whole list (no fixed cap) so short lists show every item instead of
+            // scrolling (André); room (below) still caps it so it never leaves the window.
+            var wanted = control.count * itemH + 8;
             var ctlTop = control.mapToItem(null, 0, 0).y;
             var winH = control.Window ? control.Window.height : Screen.height;
             // The window is ALWAYS the outer bound (the rule: nothing may pass beyond the
