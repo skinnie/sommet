@@ -587,7 +587,10 @@ Item {
                        font.pixelSize: Theme.fontSizeLabel }
                 RoundedComboBox {
                     id: actBox
-                    width: parent.width
+                    // Match the Duration row width (number + unit) rather than stretching the
+                    // full card - a full-width box looked oversized next to everything else
+                    // (André, 2026-08-24: "running is enormous").
+                    width: simpleDuration.width + Theme.spacingSmall + simpleUnit.width
                     boundsItem: plannerCol
                     model: root.plannerActivities
                     currentIndex: plannerDialog.activityIndex
