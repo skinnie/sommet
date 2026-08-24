@@ -118,6 +118,9 @@ PageFlickable {
         if (ConnectionsService.syncStatsToWatch) {
             any = true; root.intervalsPost("/api/intervals/stats-to-watch", qsTr("Profile to watch"));
         }
+        if (ConnectionsService.syncImportActivities) {
+            any = true; ActivityService.importFromIntervals(ConnectionsService.syncImportDays);
+        }
         if (!any)
             syncStatus.text = qsTr("Nothing selected - turn on what you want to sync above.");
     }
@@ -1100,10 +1103,40 @@ PageFlickable {
                         onToggled: (checked) => ConnectionsService.syncStatsToWatch = checked
                     }
 
+                    SyncToggle {
+                        label: qsTr("Import activities into the app (Zwift, manual, other devices)")
+                        value: ConnectionsService.syncImportActivities
+                        onToggled: (checked) => ConnectionsService.syncImportActivities = checked
+                    }
+                    // How far back the import reaches - the user's call (André: "let user decide").
+                    Row {
+                        width: parent.width
+                        visible: ConnectionsService.syncImportActivities
+                        spacing: Theme.spacingSmall
+                        Text {
+                            text: qsTr("Import range")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        RoundedComboBox {
+                            id: importRange
+                            width: 150
+                            anchors.verticalCenter: parent.verticalCenter
+                            model: [qsTr("Last 30 days"), qsTr("Last 90 days"), qsTr("Everything")]
+                            // Map selection <-> days (0 = everything).
+                            function daysFor(i) { return i === 0 ? 30 : (i === 1 ? 90 : 0) }
+                            function indexFor(d) { return d === 30 ? 0 : (d === 90 ? 1 : 2) }
+                            currentIndex: indexFor(ConnectionsService.syncImportDays)
+                            onActivated: (i) => ConnectionsService.syncImportDays = daysFor(i)
+                        }
+                    }
+
                     RoundedButton {
                         width: parent.width
-                        enabled: !GearService.loading
-                        text: GearService.loading ? qsTr("Syncing…") : qsTr("Sync now")
+                        enabled: !GearService.loading && !ActivityService.loading
+                        text: (GearService.loading || ActivityService.loading)
+                              ? qsTr("Syncing…") : qsTr("Sync now")
                         onClicked: root.intervalsSyncNow()
                     }
 
@@ -1124,6 +1157,15 @@ PageFlickable {
                         function onLastErrorChanged() {
                             if (GearService.lastError.length > 0)
                                 root.syncAppend(qsTr("Gear"), false, GearService.lastError)
+                        }
+                    }
+                    Connections {
+                        target: ActivityService
+                        function onImportFinished(count) {
+                            root.syncAppend(qsTr("Activities"), true, qsTr("%1 imported").arg(count))
+                        }
+                        function onImportError(message) {
+                            root.syncAppend(qsTr("Activities"), false, message)
                         }
                     }
                 }

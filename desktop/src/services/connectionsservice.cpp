@@ -85,6 +85,20 @@ void ConnectionsService::setSyncFlag(const char *name, bool v)
     emit syncFlagsChanged();
 }
 
+int ConnectionsService::syncImportDays() const
+{
+    return m_settings.value(kIntervalsGroup + QStringLiteral("/sync_importDays"), 90).toInt();
+}
+
+void ConnectionsService::setSyncImportDays(int v)
+{
+    const QString key = kIntervalsGroup + QStringLiteral("/sync_importDays");
+    if (m_settings.value(key, 90).toInt() == v && m_settings.contains(key))
+        return;
+    m_settings.setValue(key, v);
+    emit syncFlagsChanged();
+}
+
 void ConnectionsService::saveRunalyze(const QString &apiKey)
 {
     m_settings.setValue(kRunalyzeGroup + QStringLiteral("/apiKey"), apiKey.trimmed());

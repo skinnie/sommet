@@ -68,6 +68,11 @@ class ConnectionsService : public QObject
     Q_PROPERTY(bool syncImportGear READ syncImportGear WRITE setSyncImportGear NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool syncStatsToWatch READ syncStatsToWatch WRITE setSyncStatsToWatch NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool syncActivityLevel READ syncActivityLevel WRITE setSyncActivityLevel NOTIFY syncFlagsChanged)
+    Q_PROPERTY(bool syncImportActivities READ syncImportActivities WRITE setSyncImportActivities NOTIFY syncFlagsChanged)
+    Q_PROPERTY(bool syncExportActivities READ syncExportActivities WRITE setSyncExportActivities NOTIFY syncFlagsChanged)
+    // How far back the activity import pulls: 0 = everything, else the last N days (André: "let
+    // user decide").
+    Q_PROPERTY(int syncImportDays READ syncImportDays WRITE setSyncImportDays NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool runalyzeConnected READ runalyzeConnected NOTIFY runalyzeChanged)
     Q_PROPERTY(bool stravaConnected READ stravaConnected NOTIFY stravaChanged)
     Q_PROPERTY(bool stravaConnecting READ stravaConnecting NOTIFY stravaConnectingChanged)
@@ -101,6 +106,12 @@ public:
     void setSyncStatsToWatch(bool v) { setSyncFlag("statsToWatch", v); }
     bool syncActivityLevel() const { return syncFlag("activityLevel", true); }
     void setSyncActivityLevel(bool v) { setSyncFlag("activityLevel", v); }
+    bool syncImportActivities() const { return syncFlag("importActivities", false); }
+    void setSyncImportActivities(bool v) { setSyncFlag("importActivities", v); }
+    bool syncExportActivities() const { return syncFlag("exportActivities", false); }
+    void setSyncExportActivities(bool v) { setSyncFlag("exportActivities", v); }
+    int syncImportDays() const;
+    void setSyncImportDays(int v);
     bool runalyzeConnected() const { return m_runalyzeConnected; }
     bool stravaConnected() const { return !m_stravaRefreshToken.isEmpty(); }
     bool stravaConnecting() const { return m_stravaConnecting; }

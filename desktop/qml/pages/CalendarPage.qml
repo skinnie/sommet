@@ -503,9 +503,14 @@ Item {
                : qsTr("Day")
         anchors.centerIn: Overlay.overlay
         standardButtons: Dialog.Close
+        // Fixed width + explicit implicitWidth to break the Dialog<->contentItem implicitWidth
+        // binding loop that otherwise collapses the card (same fix as plannerDialog). Without
+        // it the row was crushed and names truncated to "Walki...".
+        readonly property real dialogWidth: 360
+        implicitWidth: dialogWidth + padding * 2
         contentItem: Column {
             spacing: Theme.spacingSmall
-            width: 360
+            width: dayDialog.dialogWidth
 
             Text {
                 visible: root.dayActivities.length === 0
@@ -516,19 +521,53 @@ Item {
             }
             Repeater {
                 model: root.dayActivities
-                delegate: Row {
+                delegate: Item {
                     required property var modelData
                     width: parent.width
-                    spacing: Theme.spacingSmall
+                    height: 42
                     ActivityBadge {
+                        id: dayBadge
+                        anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
                         activityId: ActivityTypes.forName(modelData.name).id
                         size: 30
                     }
-                    Column {
+                    // Marker for a move pulled from intervals.icu rather than off the watch
+                    // (André: "blend in, marked"). Pinned to the right edge so it never clips;
+                    // the text column between takes the space that's left and elides if long.
+                    Rectangle {
+                        id: dayChip
+                        visible: modelData.source === "intervals"
+                        anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { text: modelData.name; color: Theme.text; font.bold: true }
+                        radius: Theme.radiusSmall
+                        color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.4)
+                        width: chip.implicitWidth + 12
+                        height: chip.implicitHeight + 6
                         Text {
+                            id: chip
+                            anchors.centerIn: parent
+                            text: qsTr("intervals.icu")
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+                    Column {
+                        anchors.left: dayBadge.right
+                        anchors.leftMargin: Theme.spacingSmall
+                        anchors.right: dayChip.visible ? dayChip.left : parent.right
+                        anchors.rightMargin: Theme.spacingSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: modelData.name; color: Theme.text; font.bold: true
+                        }
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                             text: ActivityViewModel.formatDuration(modelData.durationSeconds)

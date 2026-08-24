@@ -70,10 +70,24 @@ public:
 
     Q_INVOKABLE void refresh();
 
+    // Optional per-app "send this logged Suunto App output to intervals.icu as this native
+    // stream" choice (empty/"custom" = default, developer field only). Persisted in QSettings;
+    // applied to the FIT the backend generates on the next refresh. See requestActivities.
+    Q_INVOKABLE QString intervalsStreamFor(const QString &app) const;
+    Q_INVOKABLE void setIntervalsStreamFor(const QString &app, const QString &stream);
+
+    // Pull activities FROM intervals.icu into the local DB (André, 2026-08-18) - for moves not
+    // recorded on the watch (Zwift, manual, other devices). oldestDays<=0 pulls everything;
+    // otherwise the last N days. Imported rows are marked source="intervals" so they blend into
+    // the lists but stay tellable-apart, and they never touch the watch-sync known-count.
+    Q_INVOKABLE void importFromIntervals(int oldestDays);
+
 signals:
     void loadingChanged();
     void activitiesChanged();
     void lastErrorChanged();
+    void importFinished(int count);
+    void importError(const QString &message);
 
 private:
     QNetworkAccessManager m_network;
@@ -92,7 +106,9 @@ private:
     int dbKnownCount();
     void dbClear();
     void dbInsert(int index, const QVariantMap &parsed, const QString &gpxText,
-                  const QString &fitBase64);
+                  const QString &fitBase64, const QString &ruleOutputsJson);
     bool dbLoadAll();
+    void importActivitiesInto(const QJsonArray &activities);
     void requestActivities(int knownCount, bool alreadyRetried);
+    QVariantMap intervalsStreamMap() const;
 };
