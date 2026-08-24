@@ -63,26 +63,20 @@ Item {
         const mm = String(root.viewMonth + 1).padStart(2, "0")
         return activity.replace(/[^A-Za-z0-9]/g, "") + "_" + dd + "_" + mm
     }
-    // Builds the workout.py-schema object the Workout Builder loads. "Simple" = one block of a
-    // duration at an optional target; "Intervals" = warmup + N×(work/recovery) + cooldown.
-    // The builder is where it gets fine-tuned and installed - this just seeds it.
-    function buildWorkout(activity, complex, params) {
-        const mins = (m) => ({ durationName: "time", value: Math.max(1, Math.round(m)) * 60,
-                               unit: "seconds" })
-        const steps = []
-        if (!complex) {
-            steps.push({ type: { typeName: "interval" }, duration: mins(params.duration) })
-        } else {
-            if (params.warmup > 0)
-                steps.push({ type: { typeName: "warmup" }, duration: mins(params.warmup) })
-            steps.push({ type: { typeName: "repeatStart", value: Math.max(1, params.repeats) } })
-            steps.push({ type: { typeName: "interval" }, duration: mins(params.work) })
-            steps.push({ type: { typeName: "recovery" }, duration: mins(params.recovery) })
-            steps.push({ type: { typeName: "repeatEnd" } })
-            if (params.cooldown > 0)
-                steps.push({ type: { typeName: "cooldown" }, duration: mins(params.cooldown) })
-        }
-        return JSON.stringify({ name: root.plannerTitle(activity), steps: steps })
+    // Builds the workout.py-schema object the Workout Builder loads, for the "Simple" shape:
+    // one timed block, seeded with the title. Intervals aren't built here - they open the full
+    // builder empty (see the planner's "Create workout"), where complex structure is designed.
+    // A duration step MUST carry target + notify: the builder's render() reads s.target.targetName
+    // on every step, so omitting it threw and nothing filled in (André: "numbers don't get
+    // filled up when I open the site").
+    function buildWorkout(activity, durationMin) {
+        const step = { type: { typeName: "interval" },
+                       duration: { durationName: "time",
+                                   value: Math.max(1, Math.round(durationMin)) * 60,
+                                   unit: "seconds" },
+                       target: { targetName: "none" },
+                       notify: { beep: true, light: true } }
+        return JSON.stringify({ name: root.plannerTitle(activity), steps: [step] })
     }
 
     function goPrevMonth() {
@@ -604,44 +598,34 @@ Item {
                 }
             }
 
-            // Intervals: warmup / repeats × (work/recovery) / cooldown
-            Grid {
+            // Intervals: open the full builder to design them. André, 2026-08-24: "for
+            // intervals guess you can just open the website, since people may want to do more
+            // complex stuff" - so we don't seed steps here, we just open the builder (title
+            // pre-filled) and let them build it there.
+            Text {
                 visible: plannerDialog.complex
-                columns: 2
-                columnSpacing: Theme.spacingMedium
-                rowSpacing: Theme.spacingSmall
-                Text { text: qsTr("Warm-up (min)"); color: Theme.mutedText
-                       height: 34; verticalAlignment: Text.AlignVCenter
-                       font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField { id: wuField; width: 80; text: "10"
-                                   validator: IntValidator { bottom: 0; top: 999 } }
-                Text { text: qsTr("Repeats"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField { id: repField; width: 80; text: "5"
-                                   validator: IntValidator { bottom: 1; top: 99 } }
-                Text { text: qsTr("Work (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField { id: workField; width: 80; text: "3"
-                                   validator: IntValidator { bottom: 1; top: 999 } }
-                Text { text: qsTr("Recovery (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField { id: recField; width: 80; text: "2"
-                                   validator: IntValidator { bottom: 0; top: 999 } }
-                Text { text: qsTr("Cool-down (min)"); color: Theme.mutedText; height: 34; verticalAlignment: Text.AlignVCenter; font.pixelSize: Theme.fontSizeLabel }
-                RoundedTextField { id: cdField; width: 80; text: "5"
-                                   validator: IntValidator { bottom: 0; top: 999 } }
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeLabel
+                text: qsTr("Opens the full Workout Builder in your browser with the title ready, "
+                            + "so you can design the intervals - warm-up, repeats, targets, "
+                            + "everything - and install to the watch from there.")
             }
 
             RoundedButton {
-                text: qsTr("Create workout")
+                // Simple: seed the whole one-block workout into the builder. Intervals: open the
+                // builder with just the title (see the note above) - complex structure is built
+                // on the site.
+                text: plannerDialog.complex ? qsTr("Open builder") : qsTr("Create workout")
                 onClicked: {
                     const act = root.plannerActivities[plannerDialog.activityIndex]
-                    const params = plannerDialog.complex
-                        ? { warmup: parseInt(wuField.text || "0"),
-                            repeats: parseInt(repField.text || "1"),
-                            work: parseInt(workField.text || "1"),
-                            recovery: parseInt(recField.text || "0"),
-                            cooldown: parseInt(cdField.text || "0") }
-                        : { duration: parseInt(simpleDuration.text || "1") }
-                    IntervalsService.launchWithWorkout(
-                        root.buildWorkout(act, plannerDialog.complex, params))
+                    if (plannerDialog.complex) {
+                        IntervalsService.launch(root.plannerTitle(act))
+                    } else {
+                        IntervalsService.launchWithWorkout(
+                            root.buildWorkout(act, parseInt(simpleDuration.text || "1")))
+                    }
                     plannerDialog.close()
                 }
             }
