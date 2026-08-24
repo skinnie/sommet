@@ -72,6 +72,31 @@ Item {
         const mm = String(root.viewMonth + 1).padStart(2, "0")
         return activity.replace(/[^A-Za-z0-9]/g, "") + "_" + dd + "_" + mm
     }
+    // Tidy an intervals.icu device string for display: "GARMIN EDGE_1040" -> "Garmin Edge
+    // 1040", "SUUNTO Suunto 5 Peak" -> "Suunto 5 Peak", "CONCEPT2" -> "Concept2". Title-cases
+    // real words, keeps short codes/acronyms (FR965, GEN3, LTE, GPS) as-is, de-dupes a doubled
+    // vendor. Display-only; the raw value stays in the DB.
+    function prettyDevice(d) {
+        if (!d)
+            return ""
+        var words = d.replace(/_/g, " ").split(/\s+/).filter(function (w) { return w.length > 0 })
+        var out = []
+        for (var i = 0; i < words.length; i++) {
+            var w = words[i]
+            var nice = w
+            if (w === w.toUpperCase()) {
+                var m = w.match(/^([A-Za-z]+)([0-9].*)?$/)
+                if (m && m[1].length >= 4)
+                    nice = m[1].charAt(0) + m[1].slice(1).toLowerCase() + (m[2] || "")
+                // else: short acronym or model code (FR965, GEN3, LTE, GPS) - leave uppercase
+            }
+            if (out.length && out[out.length - 1].toLowerCase() === nice.toLowerCase())
+                continue  // drop a repeated vendor ("SUUNTO Suunto ..." -> "Suunto ...")
+            out.push(nice)
+        }
+        return out.join(" ")
+    }
+
     // Builds the workout.py-schema object the Workout Builder loads, for the "Simple" shape:
     // one timed block, seeded with the title. Intervals aren't built here - they open the full
     // builder empty (see the planner's "Create workout"), where complex structure is designed.
@@ -585,7 +610,7 @@ Item {
                                   + (modelData.distanceMeters > 0
                                      ? "  ·  " + (modelData.distanceMeters / 1000).toFixed(1) + " km"
                                      : "")
-                                  + (modelData.device ? "  ·  " + modelData.device : "")
+                                  + (modelData.device ? "  ·  " + root.prettyDevice(modelData.device) : "")
                         }
                     }
                 }

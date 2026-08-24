@@ -343,8 +343,10 @@ void ActivityService::dbClear()
 {
     if (!m_db.isOpen())
         return;
+    // Only the watch's own rows - imported intervals.icu activities are not from the watch and
+    // must survive a log-wrap re-read (this runs when the watch log reset since our cache).
     QSqlQuery q(m_db);
-    q.exec(QStringLiteral("DELETE FROM activities"));
+    q.exec(QStringLiteral("DELETE FROM activities WHERE source IS NULL OR source = 'watch'"));
 }
 
 void ActivityService::dbInsert(int index, const QVariantMap &parsed, const QString &gpxText,
