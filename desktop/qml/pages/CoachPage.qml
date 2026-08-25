@@ -40,7 +40,7 @@ Item {
                     Layout.fillWidth: true
                     Text { text: qsTr("Today"); color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeSubtitle }
                     Item { Layout.fillWidth: true }
-                    ToolButton {
+                    RoundedButton {
                         text: Icons.sync
                         font.family: Icons.fontFamily
                         onClicked: CoachService.refreshReadiness()
@@ -87,7 +87,7 @@ Item {
                     spacing: Theme.spacingSmall
                     Rectangle { width: 12; height: 4; radius: 2; color: Theme.primary }
                     Text { text: qsTr("Fitness"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Rectangle { width: 12; height: 2; color: Theme.mutedText; opacity: 0.6 }
+                    Rectangle { width: 12; height: 2; radius: 1; color: Theme.mutedText; opacity: 0.6 }
                     Text { text: qsTr("Fatigue"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                 }
                 Canvas {
@@ -95,7 +95,12 @@ Item {
                     Layout.fillWidth: true
                     height: 90
                     property var series: CoachService.chartSeries
+                    // Pixel position of each day's two points, for hit-testing the pointer so a
+                    // hover/tap shows that day's fitness & fatigue - same pattern as the other charts.
+                    property var pts: []
+                    property int hoverIndex: -1
                     onSeriesChanged: requestPaint()
+                    onHoverIndexChanged: requestPaint()
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
@@ -126,6 +131,68 @@ Item {
                         ctx.moveTo(x(0), y(s[0].fitness))
                         for (i = 1; i < s.length; i++) ctx.lineTo(x(i), y(s[i].fitness))
                         ctx.strokeStyle = Theme.primary; ctx.lineWidth = 2.4; ctx.stroke()
+
+                        // record point positions for hit-testing, and highlight the hovered day
+                        var pp = []
+                        for (i = 0; i < s.length; i++)
+                            pp.push({ x: x(i), yF: y(s[i].fitness), yA: y(s[i].fatigue) })
+                        chart.pts = pp
+                        if (chart.hoverIndex >= 0 && chart.hoverIndex < pp.length) {
+                            var hp = pp[chart.hoverIndex]
+                            ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.4)
+                            ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hp.x, pad); ctx.lineTo(hp.x, h - pad); ctx.stroke()
+                            ctx.fillStyle = Theme.primary
+                            ctx.beginPath(); ctx.arc(hp.x, hp.yF, 3.5, 0, 2 * Math.PI); ctx.fill()
+                            ctx.fillStyle = Theme.mutedText
+                            ctx.beginPath(); ctx.arc(hp.x, hp.yA, 3.5, 0, 2 * Math.PI); ctx.fill()
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        function pick(mx) {
+                            var best = -1, bestD = 1e9
+                            for (var i = 0; i < chart.pts.length; ++i) {
+                                var dx = Math.abs(chart.pts[i].x - mx)
+                                if (dx < bestD) { bestD = dx; best = i }
+                            }
+                            chart.hoverIndex = best
+                        }
+                        onPositionChanged: (m) => pick(m.x)
+                        onClicked: (m) => pick(m.x)
+                        onExited: chart.hoverIndex = -1
+                    }
+
+                    // Tooltip: the hovered day's date, fitness and fatigue.
+                    Rectangle {
+                        id: coachTip
+                        visible: chart.hoverIndex >= 0 && chart.series && chart.hoverIndex < chart.series.length
+                        readonly property var pt: visible ? chart.series[chart.hoverIndex] : null
+                        readonly property real px: (visible && chart.hoverIndex < chart.pts.length)
+                                                   ? chart.pts[chart.hoverIndex].x : 0
+                        x: Math.max(2, Math.min(chart.width - width - 2, px - width / 2))
+                        y: 2
+                        width: coachTipCol.implicitWidth + 14
+                        height: coachTipCol.implicitHeight + 10
+                        // Converged onto Theme.cardNested/Theme.border (2026-08-25, André:
+                        // "redo them also" - the two chart-hover tooltips, same token swap as
+                        // every other flat-tile element this session).
+                        radius: Theme.radiusSmall
+                        color: Theme.cardNested
+                        border.color: Theme.border
+                        border.width: 1
+                        Column {
+                            id: coachTipCol
+                            anchors.centerIn: parent
+                            spacing: 1
+                            Text { text: coachTip.pt ? coachTip.pt.date : ""
+                                   color: Theme.mutedText; font.pixelSize: Theme.fontSizeTiny }
+                            Text { text: coachTip.pt ? qsTr("Fitness ") + Math.round(coachTip.pt.fitness) : ""
+                                   color: Theme.primary; font.pixelSize: Theme.fontSizeCaption; font.bold: true }
+                            Text { text: coachTip.pt ? qsTr("Fatigue ") + Math.round(coachTip.pt.fatigue) : ""
+                                   color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; font.bold: true }
+                        }
                     }
                 }
 
@@ -140,11 +207,18 @@ Item {
                             { k: qsTr("Fatigue"), v: root.readiness.fatigue },
                             { k: qsTr("Freshness"), v: root.readiness.freshness },
                         ]
+                        // The reference tile for the app's whole flat-tile control language
+                        // (André, 2026-08-25: "same type of button... like fitness fatigue and
+                        // freshness"). Switched from Theme.background to Theme.cardNested so
+                        // every other control this session copied this look from (RoundedButton,
+                        // RoundedTextField, RoundedComboBox, the Coach workout cards, ...) is
+                        // pulling the exact same token, not two near-identical-but-different
+                        // greys that could drift apart later.
                         delegate: Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 46
                             radius: Theme.radiusSmall
-                            color: Theme.background
+                            color: Theme.cardNested
                             Column {
                                 anchors.centerIn: parent
                                 spacing: 1
@@ -173,6 +247,9 @@ Item {
 
         // ---- right: the chat ----
         Card {
+            // Flat: the readiness beacon on the left is the emotional centre (primary); the
+            // conversation is the workspace beside it (2026-08-25 tune-up hierarchy).
+            variant: "flat"
             Layout.fillWidth: true
             Layout.fillHeight: true
             padding: 0
@@ -201,7 +278,7 @@ Item {
                         }
                     }
                     Item { Layout.fillWidth: true }
-                    ToolButton {
+                    RoundedButton {
                         text: Icons.settings
                         font.family: Icons.fontFamily
                         ToolTip.visible: hovered
@@ -222,7 +299,12 @@ Item {
                     onCountChanged: positionViewAtEnd()
                     delegate: Column {
                         width: chatList.width
-                        spacing: Theme.spacingSmall / 2
+                        // Doubled (André, 2026-08-25: "double the spacing between 'feel heavy'
+                        // and sprints', consider that as a base for others") - was
+                        // spacingSmall/2 (4px, an odd one-off halving used only here), now a
+                        // full Theme.spacingSmall (8) like every other "small" gap in the app,
+                        // rather than inventing a smaller half-step just for this transition.
+                        spacing: Theme.spacingSmall
                         readonly property bool mine: modelData.role === "me"
 
                         Rectangle {
@@ -244,12 +326,18 @@ Item {
                         }
                         Repeater {
                             model: modelData.cards || []
+                            // Real, 2026-08-25 (André: "on coach you have the sprints and
+                            // location with different ones... same type of button, similar
+                            // colour, [rounding] like fitness fatigue and freshness everywhere")
+                            // - these workout-suggestion cards were transparent with a hard
+                            // Theme.mutedText outline, the one place on Coach still standing
+                            // out from the flat Theme.cardNested tile language every other
+                            // control/option on this page now shares.
                             delegate: Rectangle {
                                 width: Math.min(280, chatList.width * 0.78)
                                 height: cardCol.implicitHeight + 20
                                 radius: Theme.radiusSmall
-                                color: "transparent"
-                                border.color: Theme.mutedText; border.width: 1
+                                color: Theme.cardNested
                                 Column {
                                     id: cardCol
                                     anchors.fill: parent
@@ -294,13 +382,29 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.margins: Theme.spacingSmall
+                    // Matched to the "Ask the coach anything" row's own margins below (André,
+                    // 2026-08-25: "'something shorter' should be aligned with 'ask the coach
+                    // anything'") - this row was using spacingSmall (8) while the input row uses
+                    // spacingMedium (16), so the chips sat indented from the input's left edge.
+                    Layout.margins: Theme.spacingMedium
+                    // Zero the BOTTOM margin so the gap down to the "Ask the coach anything" row
+                    // is Theme.spacingMedium ONCE, not twice (André, 2026-08-26: that gap "should
+                    // be similar to the spacing used between cards in home"). HomePage's own card
+                    // Column uses `spacing: Theme.spacingMedium` (16) between cards; here the
+                    // parent ColumnLayout has spacing 0 and each row carries margins on ALL FOUR
+                    // sides, so this row's bottom 16 stacked on the input row's top 16 and
+                    // produced a 32px gap - double Home's. Leaving the input row's own top margin
+                    // as the single source of that 16.
+                    Layout.bottomMargin: 0
                     spacing: Theme.spacingSmall
                     Repeater {
                         model: [qsTr("Something shorter"), qsTr("Outdoor instead"), qsTr("Send it to my watch")]
-                        delegate: Button {
+                        // Real, 2026-08-25 (André, after trying the flat tile look here first:
+                        // "let's make that type of button default for all app") - RoundedButton
+                        // itself now IS this flat/no-outline style, so this is back to a plain
+                        // RoundedButton rather than a bespoke Rectangle duplicating the same look.
+                        delegate: RoundedButton {
                             text: modelData
-                            flat: true
                             onClicked: CoachService.sendMessage(modelData)
                         }
                     }
@@ -318,7 +422,7 @@ Item {
                         placeholderText: qsTr("Ask the coach anything…")
                         onAccepted: sendBtn.clicked()
                     }
-                    Button {
+                    RoundedButton {
                         id: sendBtn
                         text: qsTr("Send")
                         enabled: input.text.trim().length > 0

@@ -27,16 +27,20 @@ TextField {
     leftPadding: Theme.spacingSmall
     rightPadding: Theme.spacingSmall
 
+    // Real, 2026-08-25 (André, comparing Gear's "None ▾" pickers against its own grey Rename/
+    // Retire/Delete buttons: "shouldn't they be all similar?") - every plain INPUT control
+    // (button, text field, combo box) now shares RoundedButton's flat Theme.cardNested fill +
+    // quiet Theme.border hairline, so a page never mixes white-bordered and flat-grey controls
+    // side by side. This is deliberately NOT applied to ThemedDialog/ThemedMenu/the ComboBox
+    // POPUP LIST below - those are floating SURFACES (like a Card), not inline controls, and
+    // keep the white/card + border look that already matches Card's own "primary" variant.
     background: Rectangle {
         implicitWidth: 120
         implicitHeight: 36
         radius: Theme.radiusSmall
-        color: Theme.card
+        color: Theme.cardNested
         border.width: root.activeFocus ? 2 : 1
-        // Real, 2026-08-10 ("the contour of the buttons when not selected...they are
-        // black...not that visible") - see RoundedButton.qml's own comment on this same
-        // fix across the Rounded* family.
-        border.color: root.activeFocus ? Theme.primary : Theme.mutedText
+        border.color: root.activeFocus ? Theme.primary : Theme.border
         Behavior on border.color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     }
 }

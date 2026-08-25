@@ -183,13 +183,11 @@ PageFlickable {
                         // and the two borders doubled up at the top corners (André, 2026-08-13:
                         // the open dropdown's "corner issue").
                         popup.y: poiTypeBox.height
-                        background: Rectangle {
-                            implicitHeight: 36
-                            radius: Theme.radiusSmall
-                            color: Theme.card
-                            border.width: 1
-                            border.color: Theme.mutedText
-                        }
+                        // Real, 2026-08-25 (app-wide button coherence pass): this override
+                        // duplicated RoundedComboBox's OLD white+border default, which shadowed
+                        // the shared component's own fix (now flat Theme.cardNested) - dropped
+                        // so this box inherits the current shared look instead of a frozen copy
+                        // of the old one. Only popup.y above (unrelated) needed to be per-instance.
                         // The selected type's own watch icon sits inside, left of the name, and
                         // updates live - the "logo" now lives in the dropdown itself.
                         contentItem: Item {

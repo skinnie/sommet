@@ -7,6 +7,9 @@ import AmbitApp
 // refresh() attempt has finished (hasFetchedOnce), so there's no flash of "offline" on launch.
 Card {
     id: root
+    // Supporting content, not a page hero - flat weight, matching the This-year card it sits
+    // beside on Home (2026-08-25 tune-up). Callers that want it heavier can override `variant`.
+    variant: "flat"
     width: parent ? parent.width : implicitWidth
     visible: WeatherService.hasFetchedOnce
     height: visible ? implicitHeight : 0

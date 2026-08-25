@@ -329,12 +329,13 @@ export function ActionTile({
       activeOpacity={0.75}
       style={{
         flexBasis: grow ? 0 : effectiveBasis, flexGrow: grow ? 1 : 0, minWidth: 84,
-        backgroundColor: t.card, borderColor: busy ? t.primary : 'transparent', borderWidth: busy ? 1.4 : 0,
+        // No shadows (André, 2026-08-25: "all app, desktop android, same for previous rules") -
+        // dropped the RN shadow/elevation this tile leaned on for definition; a hairline border
+        // in the idle state does that job now instead (was transparent - shadow-only before).
+        backgroundColor: t.card, borderColor: busy ? t.primary : t.border, borderWidth: busy ? 1.4 : 1,
         borderRadius: v3Radius.card - 2, paddingVertical: 14, paddingHorizontal: 6,
         alignItems: 'center', justifyContent: 'center', gap: 6,
         opacity: disabled && !busy ? 0.5 : 1,
-        elevation: 2, shadowColor: '#000000', shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1, shadowRadius: 4,
       }}
     >
       {busy ? <ActivityIndicator size="small" color={t.primary} /> : <Icon name={icon} size={20} color={t.text} />}

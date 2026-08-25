@@ -82,7 +82,12 @@ Item {
     readonly property real hoursOutside: {
         let seconds = 0
         for (const a of yearActivities) {
-            if (a.track && a.track.length > 0)
+            // Outdoor/GPS proxy: a recorded GPS track, OR any positive distance. Imported rides
+            // from intervals.icu / Garmin carry distance + duration but NO track array (they were
+            // never read off the watch), so counting only track activities dropped them entirely
+            // - a year full of imported GPS rides read as 0 h (André, 2026-08-25). Pure indoor /
+            // HRV / strength entries (no track, no distance) are still excluded.
+            if ((a.track && a.track.length > 0) || (a.distanceMeters || 0) > 0)
                 seconds += a.durationSeconds || 0
         }
         return seconds / 3600
@@ -194,9 +199,9 @@ Item {
                 width: parent.width
                 title: qsTr("Hours outside")
                 headline: qsTr("%1 h").arg(root.hoursOutside.toFixed(0))
-                subtitle: qsTr("Across %1 activities with a GPS track")
+                subtitle: qsTr("Across %1 GPS activities")
                           .arg(root.yearActivities.filter(function(a) {
-                              return a.track && a.track.length > 0 }).length)
+                              return (a.track && a.track.length > 0) || (a.distanceMeters || 0) > 0 }).length)
                 lines: TotalsFacts.hoursLines(root.hoursOutside)
             }
 

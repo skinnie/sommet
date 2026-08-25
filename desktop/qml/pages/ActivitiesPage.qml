@@ -10,6 +10,29 @@ Item {
     id: root
     property var selectedActivity: null
 
+    // Right-click delete (André, 2026-08-25): a row/card asks via deleteRequested, this holds the
+    // target while the centered confirm dialog below decides. The actual delete lives in
+    // ActivityService.deleteActivity (local tombstone + permanent intervals.icu delete).
+    property var pendingDelete: null
+    function requestDelete(a) { pendingDelete = a; deleteDialog.open() }
+
+    // The mouse's Back button returns from an open activity to the list (André, 2026-08-25).
+    // Only accepts the Back/Forward side buttons, so normal left/right clicks fall straight
+    // through to the rows and cards underneath.
+    MouseArea {
+        anchors.fill: parent
+        z: 1000
+        acceptedButtons: Qt.BackButton | Qt.ForwardButton
+        onPressed: (mouse) => {
+            if (mouse.button === Qt.BackButton && root.selectedActivity !== null) {
+                root.selectedActivity = null
+                mouse.accepted = true
+            } else {
+                mouse.accepted = false
+            }
+        }
+    }
+
     // In-page sort. `activitySortKey` is "uploaded" (backend order, newest first), "name", or
     // any ActivityMetrics key (distance/pace/avgHr/…). Sorting a COPY keeps selection (by
     // object, not index) unaffected.
@@ -174,7 +197,14 @@ Item {
         visible: root.selectedActivity === null && root.loading
                  && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Theme.spacingLarge
+        // Floats at the BOTTOM as a status toast (André's pick, 2026-08-25). It used to sit at
+        // the top on Home's line, but during a REFRESH (cached rows already on screen) the
+        // header legitimately occupies that same line and the two overlapped. Down here the
+        // header keeps Home's line permanently and both stay visible, never colliding - and
+        // since activitiesViewToggle is anchored to parent.top at a constant, moving this pill
+        // can no longer drag the List/Distance/Duration/Ascent header out of alignment.
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.spacingLarge
         text: qsTr("Adventures loading...")
         // The apology went (André, 2026-08-11: "take out that part") - it explained OUR
         // constraint, which is not the user's problem. How long to expect stays: that is
@@ -212,25 +242,20 @@ Item {
         // column, so all of (width - contentWidthUsed) is unused space on the *right*, not
         // split evenly on both sides as the first version of this assumed.
         // Real, 2026-08-09 ("replicate the design of the cards... to avoid unnecessary
-        // colors") - dropped the green accent border, plain Theme.card background plus the
-        // exact same shadow Card.qml itself uses everywhere else in the app (layer.enabled +
-        // MultiEffect.shadowEnabled - unlike the maskEnabled/maskSource attempt reverted
-        // earlier, this specific shadow usage is the same one already proven stable on
-        // every card in the app, not a new risk).
+        // colors") - plain Theme.card background, matching Card.qml's own look.
+        // 2026-08-25 (André: "no shadows, all app"): Card.qml itself dropped its shadow, so
+        // this banner (which deliberately copies Card's look) drops it too, in favour of the
+        // same hairline border every card now relies on for separation from the page.
         x: activitiesGrid.x + (activitiesGrid.contentWidthUsed - width) / 2
-        y: Theme.spacingLarge
+        // Sits BELOW the fixed header line (see the loading pill above - the header no longer
+        // chains off these banners, so they clear it instead).
+        y: 44
         width: Math.min(parent.width - Theme.spacingLarge * 2, bannerText.implicitWidth + Theme.spacingMedium * 2)
         height: bannerText.implicitHeight + Theme.spacingSmall * 2
         radius: Theme.radiusCard
         color: Theme.card
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: Theme.isDark ? "#80000000" : "#33000000"
-            shadowBlur: 0.5
-            shadowVerticalOffset: 2
-            shadowHorizontalOffset: 0
-        }
+        border.width: 1
+        border.color: Theme.border
 
         MouseArea { anchors.fill: parent }  // absorbs clicks meant for the banner, not a card underneath
 
@@ -263,7 +288,9 @@ Item {
         visible: root.selectedActivity === null && !root.loading && !HomeViewModel.isGarmin
                  && !HomeViewModel.isKailash && ActivityService.showingCachedData
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Theme.spacingLarge
+        // Sits BELOW the fixed header line (see the loading pill above - the header no longer
+        // chains off these banners, so they clear it instead).
+        y: 44
         color: Theme.mutedText
         font.italic: true
         text: qsTr("Showing cached activities from the last time the watch was connected.")
@@ -320,11 +347,17 @@ Item {
     ViewModeToggle {
         id: activitiesViewToggle
         z: 3
-        anchors.top: cachedBanner.visible ? cachedBanner.bottom
-                     : trackLogLoadingBanner.visible ? trackLogLoadingBanner.bottom
-                     : activityLoadingPill.visible ? activityLoadingPill.bottom : parent.top
-        anchors.topMargin: (cachedBanner.visible || trackLogLoadingBanner.visible || activityLoadingPill.visible)
-                           ? Theme.spacingMedium : Theme.spacingLarge
+        // Anchored to the PAGE TOP always, never to whatever banner/pill happens to be showing
+        // (André, 2026-08-25, after this drifted repeatedly: "for god sake align list distance
+        // duration and ascent"). Chaining off `<banner>.bottom` made this row's position depend
+        // on each banner's own rendered height, so every tweak to the loading pill silently
+        // moved the header - and the pill's real height never matched the arithmetic (font
+        // metrics), so it never landed where computed. Anchoring to parent.top with ONE literal
+        // margin removes that whole coupling: 17px puts this toggle's centre (its box is 26px
+        // tall, so +13) on y=30, exactly NavRail's Home centre, whatever else is on screen.
+        // The banners are overlays with their own y (z:1) and simply draw over/around this.
+        anchors.top: parent.top
+        anchors.topMargin: 17
         anchors.left: parent.left
         // Align with the leftmost content of the rows below (badge column left edge).
         anchors.leftMargin: Theme.spacingLarge + Theme.spacingMedium
@@ -382,11 +415,17 @@ Item {
         // adds spacingMedium - match both so columns line up to the pixel.
         anchors.leftMargin: Theme.spacingLarge + Theme.spacingMedium
         anchors.rightMargin: Theme.spacingLarge + Theme.spacingMedium
-        anchors.top: cachedBanner.visible ? cachedBanner.bottom
-                     : trackLogLoadingBanner.visible ? trackLogLoadingBanner.bottom
-                     : activityLoadingPill.visible ? activityLoadingPill.bottom : parent.top
-        anchors.topMargin: (cachedBanner.visible || trackLogLoadingBanner.visible || activityLoadingPill.visible)
-                           ? Theme.spacingMedium : Theme.spacingLarge
+        // Real bug fix (André, 2026-08-25: "list and distance and duration and ascent should
+        // always be aligned") - this Row used to compute its OWN top/topMargin independently
+        // off the same banner chain activitiesViewToggle ("List ▾") also uses, but with a
+        // DIFFERENT margin value, so the two only coincidentally lined up rather than being
+        // guaranteed to (they visibly drifted apart depending on which banner was showing).
+        // Anchoring directly to the toggle's own verticalCenter makes them match BY
+        // CONSTRUCTION - always, in every state - instead of two numbers that have to be kept
+        // in sync by hand. activitiesSortSimple (the map-view Sort row) already used this exact
+        // pattern for the same reason.
+        anchors.verticalCenter: activitiesViewToggle.verticalCenter
+        height: 44
         spacing: Theme.spacingMedium
         visible: root.selectedActivity === null && root.sortedActivities.length > 1
                  && Theme.activitiesView === "list"
@@ -540,6 +579,7 @@ Item {
                 anchors.top: parent.top
                 activity: modelData
                 onOpened: root.selectedActivity = modelData
+                onDeleteRequested: root.requestDelete(modelData)
             }
         }
     }
@@ -560,22 +600,23 @@ Item {
         anchors.top: activitiesHeader.visible ? activitiesHeader.bottom
                      : trackLogLoadingBanner.visible ? trackLogLoadingBanner.bottom
                      : activityLoadingPill.visible ? activityLoadingPill.bottom : parent.top
-        // Extra gap under the column headers so the first row doesn't crowd the "List"/metric
-        // titles (André, 2026-08-17: "the hiking activity is very near 'list', a bit more
-        // spacing"). spacingLarge alone still read as too tight.
-        anchors.topMargin: activitiesHeader.visible ? Theme.spacingLarge + Theme.spacingMedium
-                           : (trackLogLoadingBanner.visible || activityLoadingPill.visible)
-                           ? Theme.spacingMedium : Theme.spacingLarge
+        // 2px (André, 2026-08-25: "align them" with the nav rail) - matches NavItem's own
+        // inter-item gap (NavRail's Column spacing: 2) exactly, now that the header above is a
+        // real 44px slot and each ActivityRow is 44px too: header-bottom + 2 lands the first
+        // row's center on "Activities"'s nav position, and every row after that keeps the same
+        // 46px pitch as the nav rail (44 + 2), so row N lines up with nav item N+1.
+        anchors.topMargin: 2
         visible: root.selectedActivity === null && Theme.activitiesView === "list"
         clip: true
         reuseItems: true
-        spacing: 0
+        spacing: 2
         model: root.sortedActivities
         delegate: ActivityRow {
             required property var modelData
             width: activitiesList.width
             activity: modelData
             onOpened: root.selectedActivity = modelData
+            onDeleteRequested: root.requestDelete(modelData)
         }
     }
 
@@ -584,5 +625,83 @@ Item {
         visible: root.selectedActivity !== null
         activity: root.selectedActivity
         onBack: root.selectedActivity = null
+    }
+
+    // Centered, modal confirm for a right-click delete. ThemedDialog dims the whole app behind
+    // it (Overlay.modal scrim); anchoring to Overlay.overlay puts it in the middle of the window.
+    ThemedDialog {
+        id: deleteDialog
+        title: qsTr("Delete this activity?")
+        standardButtons: Dialog.NoButton
+        width: 430
+        readonly property var target: root.pendingDelete
+        readonly property string targetName:
+            target ? (target.name || qsTr("this activity")) : ""
+
+        contentItem: Column {
+            spacing: Theme.spacingLarge
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeBody
+                text: (deleteDialog.target && deleteDialog.target.source === "intervals")
+                    ? qsTr("“%1” will be removed from Sommet and permanently deleted from "
+                           + "intervals.icu. This can't be undone.").arg(deleteDialog.targetName)
+                    : qsTr("“%1” will be removed from Sommet and kept from coming back on the "
+                           + "next sync. Your watch's own copy can't be deleted.")
+                          .arg(deleteDialog.targetName)
+            }
+
+            // Cancel + Delete on one right-aligned line (André: "delete button and cancel
+            // aligned"). Both 36px tall so they share a baseline; Delete is the red destructive one.
+            Item {
+                width: parent.width
+                height: 36
+                Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacingSmall
+
+                    RoundedButton {
+                        text: qsTr("Cancel")
+                        onClicked: deleteDialog.close()
+                    }
+                    // Destructive action - same silhouette as RoundedButton (height, padding,
+                    // radius) so the two sit as one coherent pair, just outlined in red instead
+                    // of neutral. Real, 2026-08-25 (André: "not good" on the first version) -
+                    // that first version flipped to a SOLID red fill + white text on hover, which
+                    // is exactly the "flashy" saturated-fill look the rest of the app's status-
+                    // calming pass spent this whole session getting away from. Now it only
+                    // deepens the tint slightly on hover - still calm, still unmistakably the
+                    // one destructive control in the dialog.
+                    RoundedButton {
+                        id: confirmDel
+                        text: qsTr("Delete")
+                        background: Rectangle {
+                            radius: Theme.radiusSmall
+                            color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b,
+                                           (confirmDel.pressed || confirmDel.hovered) ? 0.20 : 0.10)
+                            border.width: 1
+                            border.color: Theme.error
+                            Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                        }
+                        contentItem: Text {
+                            text: confirmDel.text
+                            color: Theme.error
+                            font.pixelSize: Theme.fontSizeBody
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            ActivityService.deleteActivity(deleteDialog.target)
+                            deleteDialog.close()
+                        }
+                    }
+                }
+            }
+        }
     }
 }

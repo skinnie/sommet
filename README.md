@@ -268,9 +268,9 @@ Built on the real work of others:
 - **[openambit](https://github.com/openambitproject/openambit)** — `libambit`, the reference the
   USB/BLE protocol work is checked against (GPLv3).
 - **opensportsync** — the starting point for the Android app.
-- **marguslt** — firmware-download recipe, gists, movescount knownledge.
+- **marguslt** — firmware-download recipe, gists, Movescount knowledge.
 - **sebchastang** — published Suunto App Zone interval-training scripts.
--  **[bwaldvogel](https://github.com/bwaldvogel/openmoves)** — Openmoves 
+- **[bwaldvogel/openmoves](https://github.com/bwaldvogel/openmoves)** — Openmoves.
 - **[iwanders/gps_track_pod](https://github.com/iwanders/gps_track_pod)** — Suunto GPS Track Pod
   support (MIT), vendored in `tools/vendor/gpspod/`.
 - **[evelbulgroz/suunto-t6-sync](https://github.com/evelbulgroz/suunto-t6-sync)** — Suunto
@@ -287,9 +287,21 @@ Built on the real work of others:
   confirming they're real.
 - **[mihaildemidoff/suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model)** —
   a JAXB model of Suunto's SML format, a reference for the exercise-log work.
-- GPS Track Pod support from [iwanders/gps_track_pod](https://github.com/iwanders/gps_track_pod) (MIT).
-- Suunto T6 support https://github.com/evelbulgroz/suunto-t6-sync  
 - the **Suunto forum community** and **wanarun.net**.
+
+Services and libraries the app talks to at runtime:
+
+- **[cyberjunky/python-garminconnect](https://github.com/cyberjunky/python-garminconnect)** (MIT) —
+  the Garmin Connect client behind activity, weight and health sync (`tools/garmin_sync.py`,
+  `tools/garmin_weight.py`).
+- **[intervals.icu](https://intervals.icu/)** — its public API backs activity/gear import and
+  export, the wellness and weight feeds, and the profile/activity-level writes to the watch.
+- **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** — the Wahoo SYSTM
+  workout catalogue the Coach can read from (its offline sample ships as `coach/data/`).
+- **[Anthropic Claude API](https://www.anthropic.com/api)** — optional, powers the Coach chat
+  when you supply your own API key. The app works fully without it.
+- **[Qt](https://www.qt.io/)** (LGPLv3) — the desktop app's UI framework; **React Native** for
+  the Android app.
 
 
 ## Data & assets:

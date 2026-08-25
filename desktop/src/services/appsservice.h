@@ -54,6 +54,15 @@ class AppsService : public QObject
     Q_PROPERTY(bool hasCatalog READ hasCatalog NOTIFY catalogStatusChanged)
     Q_PROPERTY(int catalogCount READ catalogCount NOTIFY catalogStatusChanged)
     Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
+    // Per-app "log this app's output into recorded Moves" state (EXERCISE_MODES_RULE.LogRule),
+    // one row per activated Suunto App across every sport mode. Each entry: {mode, modeName,
+    // slot, ruleIdx, app, logRule}. Only activated apps (UseRule=1) are included - those are
+    // the apps a user actually records with, and the only ones a logging toggle makes sense
+    // for. Populated by refreshLogging() (GET /api/apps/logging).
+    Q_PROPERTY(QVariantList loggedApps READ loggedApps NOTIFY loggedAppsChanged)
+    // A LogRule toggle write (POST /api/apps/logging) is in flight - the UI disables the
+    // switch it came from until this clears, matching how every other watch write here gates.
+    Q_PROPERTY(bool loggingBusy READ loggingBusy NOTIFY loggingBusyChanged)
 
 public:
     explicit AppsService(QObject *parent = nullptr);
@@ -68,6 +77,8 @@ public:
     bool hasCatalog() const { return m_hasCatalog; }
     int catalogCount() const { return m_catalogCount; }
     bool importing() const { return m_importing; }
+    QVariantList loggedApps() const { return m_loggedApps; }
+    bool loggingBusy() const { return m_loggingBusy; }
 
     // GET /api/apps/catalog_status - is a catalog present, and how big. No watch access.
     Q_INVOKABLE void refreshCatalogStatus();
@@ -95,6 +106,17 @@ public:
     // confirmation" rule as every other write in this app.
     Q_INVOKABLE void install(int mode, int display, int field, int ruleId, bool confirm);
 
+    // GET /api/apps/logging - read-only, safe any time (needs a connected watch). Fills
+    // loggedApps with each activated app and whether its output is being logged.
+    Q_INVOKABLE void refreshLogging();
+
+    // POST /api/apps/logging - flip ONE app's LogRule on the watch. `mode`/`slot` are the
+    // same indices refreshLogging()'s own rows carry. A real single-byte flash write, guarded
+    // by tools/app_logging.py's own "exactly one LogRule byte changed" safety gate; on success
+    // loggedApps is re-read so the UI reflects the watch. The switch being toggled is the
+    // user's confirmation, same rule as every other write in this app.
+    Q_INVOKABLE void setLogging(int mode, int slot, bool on);
+
 signals:
     void loadingChanged();
     void lastErrorChanged();
@@ -107,6 +129,10 @@ signals:
     void importingChanged();
     // Emitted after importCatalog() finishes - ok, and the entry count on success.
     void catalogImported(bool ok, int count, const QString &error);
+    void loggedAppsChanged();
+    void loggingBusyChanged();
+    // Emitted after a setLogging() write finishes - ok, plus an error string on failure.
+    void loggingToggled(bool ok, const QString &error);
 
 private:
     QNetworkAccessManager m_network;
@@ -120,12 +146,15 @@ private:
     bool m_hasCatalog = false;
     int m_catalogCount = 0;
     bool m_importing = false;
+    QVariantList m_loggedApps;
+    bool m_loggingBusy = false;
 
     void setLoading(bool value);
     void setLastError(const QString &message);
     void setSearching(bool value);
     void setInstalling(bool value);
     void setImporting(bool value);
+    void setLoggingBusy(bool value);
 
     static QUrl backendUrl(const QString &path);
 };

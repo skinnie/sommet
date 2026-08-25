@@ -19,6 +19,12 @@ Dialog {
     id: root
 
     modal: true
+    // RULE (André, 2026-08-25): every dialog opens centred in the window over a dimmed
+    // backdrop. Centring lives here in the base so no dialog can forget it - `Overlay.overlay`
+    // is the app-wide overlay layer, so this is the middle of the whole window regardless of
+    // which page opened the dialog. The dim scrim is the `Overlay.modal` at the bottom of this
+    // file. Any new dialog MUST build on ThemedDialog (never a bare Dialog/Popup) to inherit both.
+    anchors.centerIn: Overlay.overlay
 
     palette.window: Theme.card
     palette.windowText: Theme.text

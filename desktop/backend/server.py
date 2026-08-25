@@ -82,6 +82,20 @@ FIRMWARE_DIR = BACKUP_DIR / "firmware"
 # by), so they live in the user's home like backups do, not inside the repo. One JSON file
 # per plan, the same schema tools/training_plan.py documents.
 PLANS_DIR = Path.home() / "AmbitAppPlans"
+# Ember (fasting/food/coffee/water) log store - so the desktop can LOG, not just display
+# (André, 2026-08-25: "on the desktop side we miss to add coffee, water etc"). One JSON file,
+# the same file-backed pattern as LEGACY_SPORT_MODES_FILE. Phone<->desktop convergence (one
+# shared store on the NAS) is a later step; this makes the desktop a real logging surface now.
+EMBER_DIR = PLANS_DIR / "ember"
+EMBER_FILE = EMBER_DIR / "log.json"
+# Phone<->desktop convergence (André, 2026-08-25): the NAS holds one shared per-day store
+# (ember-YYYY-MM-DD.json via sync.php); both this desktop and the phone PWA push+pull+merge it,
+# deduping events by a stable `uid`. Sync target lives OUTSIDE the repo (holds the token) in
+# ember/sync.json = {"url": "http://192.168.1.102/ember/sync.php", "token": "..."}; absent = no
+# sync (local-only, unchanged). Coffee-family drink ids so a phone "drink" counts as a coffee
+# here too - mirrors the phone's own COFFEE_IDS list.
+EMBER_SYNC_FILE = EMBER_DIR / "sync.json"
+EMBER_COFFEE_IDS = {"black_coffee", "espresso", "americano", "coffee_milk", "latte", "cappuccino"}
 
 # GPS Track Pod (2026-08-12, "just blind, as experimental") - retrieved GPX tracks and
 # diagnostic log bundles both land here, same "a real place in the user's home" reasoning as
@@ -328,6 +342,246 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(length)) if length else {}
 
+    # --- Ember log store (fasting/food/coffee/water) ---------------------------------
+    @staticmethod
+    def _ember_load():
+        try:
+            data = json.loads(EMBER_FILE.read_text())
+        except Exception:
+            data = {"entries": [], "fasts": []}
+        data.setdefault("deleted", [])  # tombstones: uids removed here or on the phone
+        return data
+
+    @staticmethod
+    def _ember_save(data):
+        EMBER_DIR.mkdir(parents=True, exist_ok=True)
+        EMBER_FILE.write_text(json.dumps(data, indent=2))
+
+    # ---- phone<->desktop sync (shared NAS store) --------------------------------------------
+    # Throttle: GET /api/ember pulls, but we don't want a pull on every rapid refresh. Class-level
+    # so it's shared across the per-request handler instances.
+    _ember_last_pull = 0.0
+
+    @staticmethod
+    def _ember_sync_cfg():
+        try:
+            cfg = json.loads(EMBER_SYNC_FILE.read_text())
+            return cfg if isinstance(cfg, dict) and cfg.get("url") else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ember_daykey(ts):
+        return datetime.fromtimestamp((ts or 0) / 1000).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _ember_ensure_uids(data):
+        # Stable, device-tagged ids so a re-push of the same local event dedupes, and a pulled
+        # event keeps its origin device's id (so it never gets re-tagged or duplicated).
+        changed = False
+        for e in data.get("entries", []):
+            if not e.get("uid"):
+                e["uid"] = "dt-%s-%s" % (e.get("ts"), e.get("type", ""))
+                changed = True
+        for f in data.get("fasts", []):
+            if not f.get("uid"):
+                f["uid"] = "dtf-%s" % (f.get("start"),)
+                changed = True
+        return changed
+
+    @staticmethod
+    def _ember_norm_remote_entry(e):
+        # A phone "drink" from the coffee family counts as a coffee here too.
+        t = e.get("type")
+        if t == "drink" and e.get("drinkId") in EMBER_COFFEE_IDS:
+            t = "coffee"
+        return {"uid": e.get("uid"), "ts": e.get("ts"), "type": t, "name": e.get("name", "Drink"),
+                "kcal": int(e.get("kcal", 0) or 0), "caffeineMg": int(e.get("caffeineMg", 0) or 0),
+                "volumeMl": int(e.get("volumeMl", 0) or 0), "drinkId": e.get("drinkId")}
+
+    @staticmethod
+    def _ember_http(url, token, method, params=None, body=None):
+        import urllib.request
+        import urllib.parse
+        import urllib.error
+        q = ("?" + urllib.parse.urlencode(params)) if params else ""
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url + q, data=data, method=method)
+        if token:
+            req.add_header("X-Ember-Token", token)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=6) as r:
+                raw = r.read().decode()
+            return json.loads(raw) if raw.strip() else {}
+        except urllib.error.HTTPError as ex:
+            # 404 (no file yet) is normal on first GET; anything else we just skip this round.
+            return {} if ex.code == 404 else None
+        except Exception:
+            return None
+
+    @classmethod
+    def _ember_sync(cls, data):
+        """Two-way merge with the NAS store for today+yesterday. Mutates & saves `data`."""
+        cfg = cls._ember_sync_cfg()
+        if not cfg:
+            return False
+        url, token = cfg["url"], cfg.get("token", "")
+        changed = cls._ember_ensure_uids(data)
+        now = int(time.time() * 1000)
+        days = sorted({cls._ember_daykey(now), cls._ember_daykey(now - 86400 * 1000)})
+        deleted = set(data.get("deleted", []))  # tombstones: uids that must stay gone everywhere
+        seen_e = {e["uid"] for e in data["entries"]}
+        seen_f = {f["uid"] for f in data["fasts"]}
+        for day in days:
+            remote = cls._ember_http(url, token, "GET", {"date": day})
+            if remote is None:
+                continue  # endpoint unreachable this round; leave local untouched
+            deleted |= set(remote.get("deleted", []))  # absorb tombstones from the other device
+            for e in remote.get("entries", []):
+                uid = e.get("uid")
+                if uid and uid not in seen_e and uid not in deleted:
+                    data["entries"].append(cls._ember_norm_remote_entry(e))
+                    seen_e.add(uid)
+                    changed = True
+            for f in remote.get("fasts", []):
+                uid = f.get("uid")
+                if not uid or uid in deleted:
+                    continue
+                if uid not in seen_f:
+                    data["fasts"].append({"uid": uid, "start": f.get("start"), "end": f.get("end"),
+                                          "goalHours": f.get("goalHours", 16)})
+                    seen_f.add(uid)
+                    changed = True
+                else:
+                    for lf in data["fasts"]:  # a fast ended on the other device
+                        if lf.get("uid") == uid and lf.get("end") is None and f.get("end"):
+                            lf["end"] = f["end"]
+                            changed = True
+            # a tombstone from the other device drops the matching local item
+            before = len(data["entries"]) + len(data["fasts"])
+            data["entries"] = [e for e in data["entries"] if e.get("uid") not in deleted]
+            data["fasts"] = [f for f in data["fasts"] if f.get("uid") not in deleted]
+            if len(data["entries"]) + len(data["fasts"]) != before:
+                changed = True
+            # push the union for this day back up (tombstoned uids excluded from entries/fasts,
+            # carried in `deleted` so the other device drops them too)
+            day_e = [{"uid": e["uid"], "ts": e.get("ts"), "type": e.get("type"), "name": e.get("name"),
+                      "kcal": e.get("kcal", 0), "caffeineMg": e.get("caffeineMg", 0),
+                      "volumeMl": e.get("volumeMl", 0), "drinkId": e.get("drinkId")}
+                     for e in data["entries"] if cls._ember_daykey(e.get("ts", 0)) == day]
+            day_f = [{"uid": f["uid"], "start": f.get("start"), "end": f.get("end"),
+                      "goalHours": f.get("goalHours", 16)}
+                     for f in data["fasts"] if cls._ember_daykey(f.get("start", 0)) == day]
+            cls._ember_http(url, token, "POST", None,
+                            {"source": "ember", "date": day, "updated": now,
+                             "entries": day_e, "fasts": day_f, "deleted": sorted(deleted)})
+        if set(data.get("deleted", [])) != deleted:
+            changed = True
+        data["deleted"] = sorted(deleted)
+        if changed:
+            cls._ember_save(data)
+        return changed
+
+    @staticmethod
+    def _ember_summary(data):
+        now = int(time.time() * 1000)
+        t0 = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+        since = now - 14 * 86400 * 1000
+        entries = data.get("entries", [])
+        fasts = data.get("fasts", [])
+        today = [e for e in entries if e.get("ts", 0) >= t0]
+        active = next((f for f in fasts if f.get("end") is None), None)
+        perday = {}
+        for e in entries:
+            if e.get("ts", 0) < since:
+                continue
+            k = datetime.fromtimestamp(e["ts"] / 1000).strftime("%Y-%m-%d")
+            r = perday.setdefault(k, {"date": k, "kcal": 0, "coffee": 0, "waterL": 0.0})
+            r["kcal"] += e.get("kcal", 0)
+            r["waterL"] += e.get("volumeMl", 0) / 1000.0
+            if e.get("type") == "coffee":
+                r["coffee"] += 1
+        for r in perday.values():
+            r["waterL"] = round(r["waterL"], 2)
+        done = [{"start": f["start"], "end": f["end"], "hours": round((f["end"] - f["start"]) / 3600000, 1)}
+                for f in fasts if f.get("end") and f["end"] >= since]
+        return {
+            "today": {
+                "kcal": sum(e.get("kcal", 0) for e in today),
+                "coffees": sum(1 for e in today if e.get("type") == "coffee"),
+                "waterMl": sum(e.get("volumeMl", 0) for e in today),
+                "fastActive": bool(active),
+                "fastStart": active["start"] if active else None,
+                "fastGoalHours": active.get("goalHours", 16) if active else 16,
+            },
+            "days": [perday[k] for k in sorted(perday)],
+            "fasts": done,
+        }
+
+    def _handle_ember_get(self):
+        data = self._ember_load()
+        # Pull+merge from the NAS (throttled), so phone-logged items appear here.
+        try:
+            if time.time() - self.__class__._ember_last_pull > 5:
+                self._ember_sync(data)
+                self.__class__._ember_last_pull = time.time()
+        except Exception:
+            pass
+        self._send_json(200, self._ember_summary(data))
+
+    def _handle_ember_log(self, body):
+        data = self._ember_load()
+        typ = body.get("type")
+        now = int(time.time() * 1000)
+        if typ == "coffee":
+            data["entries"].append({"ts": now, "type": "coffee", "name": "Coffee", "kcal": 2, "caffeineMg": 95})
+        elif typ == "coffee-undo":
+            for i in range(len(data["entries"]) - 1, -1, -1):
+                if data["entries"][i].get("type") == "coffee":
+                    uid = data["entries"][i].get("uid")
+                    if uid:  # already synced -> tombstone it so the delete propagates
+                        data.setdefault("deleted", []).append(uid)
+                    del data["entries"][i]
+                    break
+        elif typ == "water":
+            data["entries"].append({"ts": now, "type": "water", "name": "Water", "volumeMl": int(body.get("volumeMl", 250))})
+        elif typ == "meal":
+            data["entries"].append({"ts": now, "type": "meal", "name": body.get("name", "Meal"),
+                                    "kcal": int(body.get("kcal", 0)), "protein": int(body.get("protein", 0)),
+                                    "carbs": int(body.get("carbs", 0)), "fat": int(body.get("fat", 0))})
+        elif typ == "drink":
+            # a specific beverage from the fast-aware drinks list; counts as a coffee/water where
+            # relevant, and ends the fast if it breaks it (same behaviour as the phone app).
+            et = "coffee" if body.get("isCoffee") else ("water" if body.get("volumeMl") else "drink")
+            data["entries"].append({"ts": now, "type": et, "name": body.get("name", "Drink"),
+                                    "kcal": int(body.get("kcal", 0)), "caffeineMg": int(body.get("caffeineMg", 0)),
+                                    "volumeMl": int(body.get("volumeMl", 0))})
+            if body.get("breaksFast"):
+                for f in data["fasts"]:
+                    if f.get("end") is None:
+                        f["end"] = now
+        elif typ == "fast-start":
+            for f in data["fasts"]:
+                if f.get("end") is None:
+                    f["end"] = now
+            data["fasts"].append({"start": now, "end": None, "goalHours": int(body.get("goalHours", 16))})
+        elif typ == "fast-end":
+            for f in data["fasts"]:
+                if f.get("end") is None:
+                    f["end"] = now
+        else:
+            self._send_json(400, {"error": "unknown type"})
+            return
+        self._ember_save(data)
+        # Push this new log up to the shared store immediately.
+        try:
+            self._ember_sync(data)
+        except Exception:
+            pass
+        self._send_json(200, self._ember_summary(data))
+
     def _guard_local(self):
         """Reject cross-origin / DNS-rebinding requests. This backend is a localhost-only
         bridge that can read and WRITE the watch and touch the filesystem, so a web page the
@@ -352,10 +606,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/health":
             self._send_json(200, {"ok": True})
+        elif self.path == "/api/ember":
+            self._handle_ember_get()
         elif self.path == "/api/nav":
             self._handle_nav()
         elif self.path == "/api/activities" or self.path.startswith("/api/activities?"):
             self._handle_activities()
+        elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
+            self._handle_garmin_weight()
+        elif self.path.startswith("/api/garmin/activities"):
+            self._handle_garmin_sync("activities")
+        elif self.path.startswith("/api/garmin/health"):
+            self._handle_garmin_sync("health")
+        elif self.path.startswith("/api/garmin/sleep"):
+            self._handle_garmin_sync("sleep")
         elif self.path == "/api/pois":
             self._handle_pois_read()
         elif self.path == "/api/backups":
@@ -400,6 +664,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_agps_status()
         elif self.path == "/api/apps":
             self._handle_apps_read()
+        elif self.path == "/api/apps/logging":
+            self._handle_apps_logging_read()
         elif self.path == "/api/apps/catalog_status":
             self._handle_apps_catalog_status()
         elif self.path.startswith("/api/apps/catalog"):
@@ -471,6 +737,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_activity_level(body)
         elif self.path == "/api/intervals/stats-to-watch":
             self._handle_intervals_stats_to_watch(body)
+        elif self.path == "/api/intervals/upload":
+            self._handle_intervals_upload(body)
+        elif self.path == "/api/ember/log":
+            self._handle_ember_log(body)
+        elif self.path == "/api/garmin/weight/login":
+            self._handle_garmin_weight_login(body)
+        elif self.path == "/api/garmin/upload":
+            self._handle_garmin_upload(body)
         elif self.path == "/api/device/select":
             self._handle_device_select(body)
         elif self.path == "/api/time/sync":
@@ -493,6 +767,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_customodes_multisport(body)
         elif self.path == "/api/apps/install":
             self._handle_apps_install(body)
+        elif self.path == "/api/apps/logging":
+            self._handle_apps_logging_write(body)
+        elif self.path == "/api/hrv/install":
+            self._handle_hrv_install(body)
         elif self.path == "/api/apps/import":
             self._handle_apps_import(body)
         elif self.path == "/api/workout/compile":
@@ -2040,6 +2318,130 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    def _handle_intervals_upload(self, body):
+        """POST /api/intervals/upload. Body: {athlete_id, api_key, name?, fit_base64? | gpx?}.
+        Push one activity file to intervals.icu via tools/intervals_upload.py (reuses the same
+        HTTP-Basic API-key auth as every other intervals call here). Watch moves send fit_base64
+        (the FIT carries the logged Suunto App streams that intervals gets from nowhere else);
+        eTrex moves are GPX-only, so they send gpx. The desktop's export-scope selector decides
+        which activities this is called for - the backend just uploads whatever it's handed."""
+        athlete_id = body.get("athlete_id")
+        api_key = body.get("api_key")
+        if not athlete_id or not api_key:
+            self._send_json(400, {"ok": False, "error": "missing athlete_id/api_key"})
+            return
+        fit_b64 = body.get("fit_base64")
+        gpx = body.get("gpx")
+        if not fit_b64 and not gpx:
+            self._send_json(400, {"ok": False, "error": "no fit_base64 or gpx to upload"})
+            return
+        suffix = ".fit" if fit_b64 else ".gpx"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(base64.b64decode(fit_b64) if fit_b64 else gpx.encode("utf-8"))
+            path = f.name
+        try:
+            args = [str(athlete_id), str(api_key), path, "--json"]
+            if body.get("name"):
+                args += ["--name", str(body["name"])]
+            code, out, err = run_tool("intervals_upload.py", args)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        info = self._parse_last_json_line(out)
+        if info is None:
+            # intervals_upload prints a human line on success even without a JSON body; treat a
+            # clean exit as success, a non-zero exit (e.g. a real duplicate/401) as the error.
+            if code == 0:
+                self._send_json(200, {"ok": True, "raw_output": out})
+            else:
+                self._send_json(502, {"ok": False, "error": (err or out or "upload failed")
+                                      .strip()[:300]})
+            return
+        self._send_json(200 if info.get("ok", True) else 502, info)
+
+    # Garmin Connect body-composition (Garmin Index scale) for the Weight page's "Garmin"
+    # source. tools/garmin_weight.py owns the OAuth (garminconnect/garth) + the fetch; here we
+    # just shell out. The token store lives under AmbitAppBackups so a login persists.
+    GARMIN_TOKENS = str(BACKUP_DIR / "garmin_tokens")
+
+    def _handle_garmin_weight(self):
+        """GET /api/garmin/weight?days=N - body composition from Garmin Connect (cached login)."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        days = query.get("days", ["365"])[0]
+        code, out, err = run_tool("garmin_weight.py",
+                                  ["--days", days, "--tokens", self.GARMIN_TOKENS, "--json"],
+                                  timeout=120)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": (err or out or
+                                  "garmin_weight produced no JSON").strip()[:300]})
+            return
+        self._send_json(200 if info.get("ok") else 200, info)  # needLogin is a 200 with ok:false
+
+    def _handle_garmin_sync(self, what):
+        """GET /api/garmin/{activities,health}?days=N via tools/garmin_sync.py (cached login)."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        days = query.get("days", ["30"])[0]
+        code, out, err = run_tool("garmin_sync.py",
+                                  [f"--{what}", "--days", days,
+                                   "--tokens", self.GARMIN_TOKENS, "--json"], timeout=180)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": (err or out or
+                                  "garmin_sync produced no JSON").strip()[:300]})
+            return
+        self._send_json(200, info)  # ok:false + needLogin is still a normal 200
+
+    def _handle_garmin_upload(self, body):
+        """POST /api/garmin/upload. Body: {fit_base64? | gpx?, name?}. Upload one activity to
+        Garmin Connect (garmin_sync.py --upload). Garmin dedups by start time, so a re-upload is
+        reported as a duplicate rather than an error."""
+        fit_b64 = body.get("fit_base64")
+        gpx = body.get("gpx")
+        if not fit_b64 and not gpx:
+            self._send_json(400, {"ok": False, "error": "no fit_base64 or gpx to upload"})
+            return
+        suffix = ".fit" if fit_b64 else ".gpx"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(base64.b64decode(fit_b64) if fit_b64 else gpx.encode("utf-8"))
+            path = f.name
+        try:
+            code, out, err = run_tool("garmin_sync.py",
+                                      ["--upload", path, "--tokens", self.GARMIN_TOKENS,
+                                       "--json"], timeout=120)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": (err or out or
+                                  "garmin upload produced no JSON").strip()[:300]})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_garmin_weight_login(self, body):
+        """POST /api/garmin/weight/login. Body: {email, password, mfa?}. One-time Garmin login;
+        the password is used once, only the OAuth token store is kept."""
+        email = body.get("email")
+        password = body.get("password")
+        if not email or not password:
+            self._send_json(400, {"ok": False, "error": "missing email/password"})
+            return
+        args = ["--login", str(email), str(password), "--tokens", self.GARMIN_TOKENS, "--json"]
+        if body.get("mfa"):
+            args += ["--mfa", str(body["mfa"])]
+        code, out, err = run_tool("garmin_weight.py", args, timeout=120)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": (err or out or
+                                  "garmin login produced no JSON").strip()[:300]})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
     def _handle_settings_write(self, body):
         # Ambit1: its own 0x0b01 read-modify-write, not the SBEM 0x1101 path.
         if selected_is_legacy():
@@ -2840,6 +3242,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    def _handle_apps_logging_read(self):
+        """GET /api/apps/logging - the per-app "log this app's output into recorded Moves"
+        state (the EXERCISE_MODES_RULE.LogRule flag) for every Suunto App on every sport mode.
+        Read-only 0x0b17 CustomModes read via tools/app_logging.py --json; app names come from
+        the Apps region in the same call. Each entry: {mode, mode_name, slot, rule_idx, app,
+        use_rule, log_rule}. use_rule=1 means the app is actually activated on that mode (the
+        rows a user cares about); the UI shows those with a logging toggle."""
+        code, out, err = run_tool("app_logging.py", ["--json"], timeout=60)
+        rules = self._parse_last_json_line(out)
+        if rules is None:
+            self._send_json(502, {"ok": False, "error": "app_logging.py --json produced no "
+                                   "parseable JSON (is the watch connected?)",
+                                   "raw_output": out, "stderr": err})
+            return
+        self._send_json(200, {"ok": True, "rules": rules})
+
+    def _handle_apps_logging_write(self, body):
+        """POST /api/apps/logging  Body: {"mode": int, "slot": int, "on": bool}. Flips ONE
+        app's LogRule on the watch via tools/app_logging.py --write. That tool's own safety
+        gate refuses the write unless it's exactly one single-byte LogRule change and nothing
+        else moved, so a garbled encode never reaches flash. Success/refusal is read from the
+        exit code (0 = written or already in the wanted state; nonzero = the tool aborted),
+        not from JSON - the write path prints a human summary, and the UI re-reads state via
+        GET afterwards. This is the desktop equivalent of the CLI toggle André asked for."""
+        mode = body.get("mode")
+        slot = body.get("slot")
+        if mode is None or slot is None or "on" not in body:
+            self._send_json(400, {"ok": False,
+                                   "error": "missing \"mode\", \"slot\", or \"on\""})
+            return
+        args = ["--mode", str(int(mode)), "--slot", str(int(slot)),
+                "--log", "on" if bool(body.get("on")) else "off", "--write"]
+        code, out, err = run_tool("app_logging.py", args)
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": "app_logging.py refused or failed the "
+                                   "write", "raw_output": out, "stderr": err})
+            return
+        self._send_json(200, {"ok": True, "mode": int(mode), "slot": int(slot),
+                              "on": bool(body.get("on"))})
+
     def _handle_apps_catalog_status(self):
         """GET /api/apps/catalog_status - whether a Suunto Apps catalog is present and how many
         entries it has, so the UI can show the "Import from SuuntoLink" prompt vs. the browser.
@@ -3219,6 +3661,90 @@ class Handler(BaseHTTPRequestHandler):
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_hrv_install(self, body):
+        """POST /api/hrv/install - one-tap setup for the Health page's morning-HRV test:
+        ensure an "HRV" sport mode exists and the community "5+5 HRV" Suunto App
+        (ruleId 10069694) is wired onto its first display, so the user can record a guided
+        HRV test. Orchestrates the existing create-mode + app-install tools, and runs INSIDE
+        the backend so it serialises with the app's own watch access - the concurrent USB
+        access that garbled an earlier CustomModes write (workout_install.py's read-back guard
+        would now roll that back, but serialising avoids it in the first place).
+
+        Body: {"confirm": bool}. confirm:false previews (does the mode exist? is the app
+        already on it?); confirm:true creates the mode if missing and installs+wires the app.
+        Idempotent: if the HRV mode already carries an app it reports alreadyInstalled and
+        writes nothing, so re-tapping never duplicates the app."""
+        HRV_RULE_ID = 10069694          # the "5+5 HRV" community app in SuuntoLink's catalog
+        HRV_MODE_NAME = "HRV"
+        HRV_MODE_ACTIVITY = 95          # Indoor training: HR belt on, GPS off (stationary test)
+        confirm = bool((body or {}).get("confirm", False))
+
+        def read_modes():
+            code, out, err = run_tool("custom_modes.py", ["--json"], timeout=60)
+            info = self._parse_last_json_line(out)
+            return (info.get("exerciseModes") if info and info.get("ok") else None), out, err
+
+        modes, out, err = read_modes()
+        if modes is None:
+            self._send_json(502, {"ok": False, "error": "couldn't read the watch's sport modes",
+                                   "raw_output": out, "stderr": err})
+            return
+        hrv_idx = next((i for i, m in enumerate(modes) if m.get("name") == HRV_MODE_NAME), None)
+        already = hrv_idx is not None and (modes[hrv_idx].get("appCount") or 0) > 0
+
+        if not confirm:
+            self._send_json(200, {"ok": True, "dryRun": True,
+                                   "modeExists": hrv_idx is not None, "alreadyInstalled": already})
+            return
+        if already:
+            self._send_json(200, {"ok": True, "alreadyInstalled": True, "hrvModeIndex": hrv_idx,
+                                   "message": "The HRV app is already on your HRV mode."})
+            return
+
+        # Create the HRV mode if the watch doesn't have one yet, then find its index.
+        if hrv_idx is None:
+            code, out, err = run_tool("sport_mode_manage.py",
+                                      ["--create", HRV_MODE_NAME, "--activity",
+                                       str(HRV_MODE_ACTIVITY), "--write"], timeout=180)
+            created = self._parse_last_json_line(out)
+            modes, out2, err2 = read_modes()
+            hrv_idx = next((i for i, m in enumerate(modes or [])
+                            if m.get("name") == HRV_MODE_NAME), None)
+            if hrv_idx is None:
+                self._send_json(502, {"ok": False, "error": "created the HRV mode but could not "
+                                       "find it afterwards", "raw_output": out, "stderr": err})
+                return
+
+        # Install + wire the app (workout_install.py, whose write now self-verifies + rolls back).
+        try:
+            entry, binary = catalog_entry_binary(HRV_RULE_ID)
+        except OSError:
+            self._send_json(502, {"ok": False, "error": "app catalog not found under "
+                                   f"{CATALOG_DIR} - run tools/extract_apps_catalog.py first"})
+            return
+        if entry is None:
+            self._send_json(404, {"ok": False, "error": "the 5+5 HRV app is not in the catalog"})
+            return
+        compiled = {"name": entry["name"], "activityId": entry["activityId"],
+                    "binary": list(binary)}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(compiled, f)
+            compiled_path = f.name
+        try:
+            args = [compiled_path, "--mode", str(hrv_idx), "--display", "0", "--field", "0",
+                     "--json", "--write"]
+            code, out, err = run_tool("workout_install.py", args)
+        finally:
+            Path(compiled_path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out)
+        if result is None:
+            self._send_json(502, {"ok": False, "error": "the app install did not confirm - it "
+                                   "may have been rolled back (a safe failure); try again",
+                                   "raw_output": out, "stderr": err})
+            return
+        result["hrvModeIndex"] = hrv_idx
+        self._send_json(200 if result.get("ok") else 502, result)
 
     # --- Training Program (tools/training_plan.py - see its docstring for the whole
     # design: workouts scheduled on calendar dates as date-gated Suunto Apps, the

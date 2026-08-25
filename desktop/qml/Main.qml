@@ -41,6 +41,9 @@ ApplicationWindow {
         calendar: "pages/CalendarPage.qml",
         gear: "pages/GearPage.qml",
         coach: "pages/CoachPage.qml",
+        weight: "pages/WeightPage.qml",
+        health: "pages/HealthPage.qml",
+        ember: "pages/EmberPage.qml",
         gpsTrackPod: "pages/GpsTrackPodPage.qml",
         suuntoT6: "pages/SuuntoT6Page.qml",
         trainingProgram: "pages/TrainingProgramPage.qml",
@@ -57,6 +60,27 @@ ApplicationWindow {
         value: DeviceService.demoGarminRoot
     }
 
+    // Auto-export eTrex activities to intervals.icu when the export scope opts in (etrex/all).
+    // Fires whenever GarminService finishes a device scan; exportActivitiesToIntervals() dedups
+    // by a stored per-activity key, so re-scans don't re-upload. (Watch moves auto-export from
+    // ActivityService itself; this covers the eTrex half.) André, 2026-08-24.
+    // Garmin Connect login can happen on the Weight page or in Settings; either way, reflect it
+    // in ConnectionsService so the Settings connection status + toggles update app-wide.
+    Connections {
+        target: WeightService
+        function onGarminLoggedIn(email) { ConnectionsService.setGarminConnected(true, email) }
+    }
+
+    Connections {
+        target: GarminService
+        function onActivitiesChanged() {
+            var scope = ConnectionsService.exportScope
+            if ((scope === "etrex" || scope === "all")
+                    && GarminService.activities.length > 0)
+                ActivityService.exportActivitiesToIntervals(GarminService.activities)
+        }
+    }
+
     // Recalculate the watch's activity class from the athlete's latest intervals.icu training
     // on every connect/sync (André, 2026-08-18: "recalculate activity level on each sync usb
     // and bluetooth"). Fires once on the false->true deviceInfoOk transition, only when
@@ -70,21 +94,51 @@ ApplicationWindow {
             var nowConnected = DeviceService.deviceInfoOk
             if (nowConnected && !window._wasConnectedForClass
                     && ConnectionsService.intervalsIcuConnected) {
-                var xhr = new XMLHttpRequest()
-                xhr.onreadystatechange = function () {
-                    if (xhr.readyState === XMLHttpRequest.DONE && xhr.status !== 200)
-                        console.log("[activity-class] refresh failed:", xhr.status, xhr.responseText)
-                }
-                xhr.open("POST", "http://127.0.0.1:8766/api/intervals/activity-level")
-                xhr.setRequestHeader("Content-Type", "application/json")
-                xhr.send(JSON.stringify({
-                    athlete_id: ConnectionsService.intervalsIcuAthleteId,
-                    api_key: ConnectionsService.intervalsIcuApiKey(),
-                    confirm: true
-                }))
+                // The two watch-WRITES (profile stats + activity level), done once per connect -
+                // not on the periodic timer below, since re-writing the watch every few minutes
+                // is pointless. This is the "watch settings sync with intervals.icu, automatic"
+                // André asked for (2026-08-25): it now happens on every connect instead of only
+                // when he pressed Settings → Sync now.
+                if (ConnectionsService.syncActivityLevel)
+                    window.intervalsPostBg("/api/intervals/activity-level")
+                if (ConnectionsService.syncStatsToWatch)
+                    window.intervalsPostBg("/api/intervals/stats-to-watch")
             }
             window._wasConnectedForClass = nowConnected
         }
+    }
+
+    // Automatic intervals.icu sync (André, 2026-08-25: "make the sync automatic"). Runs the same
+    // CLOUD operations as Settings → Sync now (import gear/activities, export activities), on a
+    // timer while the app is open, so he never has to press it. Interval is 15 minutes, NOT the
+    // 1 minute he floated: intervals.icu is a cloud API and activity/gear data changes slowly, so
+    // minute polling would be wasteful and risks rate-limiting for no benefit (the NAS stack
+    // already runs a 15-minute cadence). Watch-writes are handled on connect above, not here.
+    // Respects every per-item toggle, so anything switched off in Settings stays off.
+    function intervalsPostBg(path) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("POST", "http://127.0.0.1:8766" + path)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify({ athlete_id: ConnectionsService.intervalsIcuAthleteId,
+                                  api_key: ConnectionsService.intervalsIcuApiKey(), confirm: true }))
+    }
+    function autoIntervalsCloudSync() {
+        if (!ConnectionsService.intervalsIcuConnected) return
+        if (ConnectionsService.syncImportGear) GearService.importFromIntervals()
+        if (ConnectionsService.syncImportActivities)
+            ActivityService.importFromIntervals(ConnectionsService.syncImportDays)
+        var scope = ConnectionsService.exportScope
+        if (scope === "suunto" || scope === "all") ActivityService.exportToIntervals()
+        if (scope === "etrex" || scope === "all")
+            ActivityService.exportActivitiesToIntervals(GarminService.activities)
+    }
+    Timer {   // periodic cloud sync
+        interval: 15 * 60 * 1000; running: true; repeat: true
+        onTriggered: window.autoIntervalsCloudSync()
+    }
+    Timer {   // one sync shortly after launch, once the backend is up
+        interval: 20000; running: true; repeat: false
+        onTriggered: window.autoIntervalsCloudSync()
     }
 
     Row {
@@ -108,10 +162,20 @@ ApplicationWindow {
             }
         }
 
-        Loader {
+        // 2026-08-25 tune-up: the content region now sits on `surface`, one step up from the
+        // window `background` the NavRail keeps. This is what lets a page's cards read as
+        // resting ON something instead of floating on the same flat colour as the sidebar -
+        // the separation the light theme was missing. Pages are transparent over this.
+        Rectangle {
             width: parent.width - navRail.width
             height: parent.height
-            source: window.pageSources[navRail.currentPage]
+            color: Theme.surface
+            Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
+            Loader {
+                anchors.fill: parent
+                source: window.pageSources[navRail.currentPage]
+            }
         }
     }
 }

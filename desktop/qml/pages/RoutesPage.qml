@@ -424,90 +424,213 @@ PageFlickable {
                     }
                 }
 
-                Repeater {
-                    model: onDeviceCard.loading ? [] : onDeviceCard.sortedRoutes
-                    delegate: Column {
-                        width: parent.width
-                        spacing: Theme.spacingSmall
-                        // Sorted item wrapper (see onDeviceCard.sortedRoutes): the real route is
-                        // `route`, and `origIndex` is its position in the UNSORTED list - export
-                        // must use origIndex, not the Repeater's own index.
-                        readonly property var route: modelData.r
-                        readonly property int origIndex: modelData._origIndex
+                // Route rows (André, 2026-08-25: "same height as activities... align them" -
+                // list view now matches ActivityRow's own rhythm (further tuned 2026-08-25 to
+                // 44px rows + 2px gaps - NavItem.qml's exact pitch, so Activities' list lines up
+                // with the nav rail; kept identical here so the two pages' lists still match
+                // each other). Map mode keeps its own breathing room between the taller
+                // map-preview cards - "spacing will need to adapt" per view, driven off
+                // Theme.routesView rather than one fixed value.
+                Column {
+                    width: parent.width
+                    spacing: Theme.routesView === "list" ? 2 : Theme.spacingSmall
 
-                        // Real request 2026-08-08 ("add a map for each gpx") - real points,
-                        // not a placeholder: RouteService.onWatchRoutes' own track field now
-                        // comes straight from write_nav.py's nav --json (see RouteService's
-                        // own comment), the same already-read data the summary below uses,
-                        // no extra USB round trip per route. Garmin's own track field comes
-                        // straight from the local GPX file already read.
-                        Item {
-                            // Map hidden in "list" view (Settings -> Routes view), collapsed to
-                            // zero height so the list is compact - André, 2026-08-16.
-                            visible: Theme.routesView === "map" && route.track && route.track.length > 1
+                    Repeater {
+                        model: onDeviceCard.loading ? [] : onDeviceCard.sortedRoutes
+                        delegate: Item {
+                            id: routeDelegate
                             width: parent.width
-                            height: visible ? 140 : 0
-                            MapView {
+                            // Sorted item wrapper (see onDeviceCard.sortedRoutes): the real route
+                            // is `route`, and `origIndex` is its position in the UNSORTED list -
+                            // export must use origIndex, not the Repeater's own index.
+                            readonly property var route: modelData.r
+                            readonly property int origIndex: modelData._origIndex
+                            readonly property bool listMode: Theme.routesView === "list"
+                            height: listMode ? 44 : mapCol.implicitHeight
+
+                            function doExport() {
+                                if (HomeViewModel.isGarmin) {
+                                    // Already have the real bytes - no fetch step needed.
+                                    const safeName = (route.name || "route")
+                                        .replace(/[\\/:*?"<>|]/g, "_")
+                                    exportDialog.currentFile =
+                                        LocalFileService.downloadsLocation + "/" + safeName + ".gpx"
+                                    root.saveError = ""
+                                    exportDialog.pendingGpxOverride = route.gpxText
+                                    exportDialog.open()
+                                } else {
+                                    root.pendingExportIndex = origIndex
+                                    root.pendingExportName = route.name
+                                    RouteService.exportRoute(origIndex)
+                                }
+                            }
+
+                            // ---- Map view: unchanged - map preview + name/stats + Export ----
+                            Column {
+                                id: mapCol
+                                visible: !routeDelegate.listMode
+                                width: parent.width
+                                spacing: Theme.spacingSmall
+
+                                // Real request 2026-08-08 ("add a map for each gpx") - real
+                                // points, not a placeholder: RouteService.onWatchRoutes' own
+                                // track field comes straight from write_nav.py's nav --json (see
+                                // RouteService's own comment), the same already-read data the
+                                // summary below uses, no extra USB round trip per route. Garmin's
+                                // own track field comes straight from the local GPX file already
+                                // read.
+                                Item {
+                                    visible: route.track && route.track.length > 1
+                                    width: parent.width
+                                    height: visible ? 140 : 0
+                                    MapView {
+                                        anchors.fill: parent
+                                        readonly property var center: RouteViewModel.trackCenter(route.track)
+                                        latitude: center ? center.lat : 0
+                                        longitude: center ? center.lon : 0
+                                        trackPoints: route.track || []
+                                        TapHandler {
+                                            onTapped: {
+                                                bigMap.trackPoints = route.track || []
+                                                bigMap.markers = []
+                                                bigMap.trackTitle = route.name || ""
+                                                bigMap.open()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: Theme.spacingSmall
+
+                                    Column {
+                                        width: parent.width - exportButton.width - Theme.spacingSmall
+                                        spacing: 2
+                                        Text {
+                                            text: route.name
+                                            color: Theme.text
+                                            font.pixelSize: Theme.fontSizeBody
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: qsTr("%1 · %2 points · ascent %3 m · descent %4 m")
+                                                .arg(RouteViewModel.formatDistance(route.distanceMeters))
+                                                .arg(route.pointCount)
+                                                .arg(route.ascentMeters)
+                                                .arg(route.descentMeters)
+                                            color: Theme.mutedText
+                                            font.pixelSize: Theme.fontSizeCaption
+                                        }
+                                    }
+
+                                    RoundedButton {
+                                        id: exportButton
+                                        text: (RouteService.exporting && root.pendingExportIndex === origIndex)
+                                            ? qsTr("Exporting...") : qsTr("Export")
+                                        enabled: !RouteService.exporting
+                                        onClicked: routeDelegate.doExport()
+                                    }
+                                }
+                            }
+
+                            // ---- List view: compact 64px row, ActivityRow's own pattern ----
+                            Rectangle {
+                                visible: routeDelegate.listMode
                                 anchors.fill: parent
-                                readonly property var center: RouteViewModel.trackCenter(route.track)
-                                latitude: center ? center.lat : 0
-                                longitude: center ? center.lon : 0
-                                trackPoints: route.track || []
+                                radius: Theme.radiusCard
+                                color: "transparent"
+
+                                // Same non-animated-color / animated-opacity hover fix as
+                                // ActivityRow.qml (animating "transparent"->Theme.card directly
+                                // interpolates through translucent black, a real flash bug fixed
+                                // there 2026-08-11 - same fix applies here for the same reason.
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    color: Theme.card
+                                    opacity: rowHover.hovered ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                                }
+
+                                HoverHandler { id: rowHover }
                                 TapHandler {
                                     onTapped: {
+                                        if (!route.track || route.track.length <= 1) return
                                         bigMap.trackPoints = route.track || []
                                         bigMap.markers = []
                                         bigMap.trackTitle = route.name || ""
                                         bigMap.open()
                                     }
                                 }
-                            }
-                        }
-
-                        Row {
-                            width: parent.width
-                            spacing: Theme.spacingSmall
-
-                            Column {
-                                width: parent.width - exportButton.width - Theme.spacingSmall
-                                spacing: 2
-                                Text {
-                                    text: route.name
-                                    color: Theme.text
-                                    font.pixelSize: Theme.fontSizeBody
-                                    font.bold: true
+                                // Right-click -> Export, at the cursor (same Menu.popup(x,y) fix
+                                // as ActivityRow/ActivityCard - popup() with no args opens at the
+                                // parent's (0,0), not the click position).
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: (eventPoint) => routeMenu.popup(eventPoint.position.x, eventPoint.position.y)
                                 }
-                                Text {
-                                    text: qsTr("%1 · %2 points · ascent %3 m · descent %4 m")
-                                        .arg(RouteViewModel.formatDistance(route.distanceMeters))
-                                        .arg(route.pointCount)
-                                        .arg(route.ascentMeters)
-                                        .arg(route.descentMeters)
-                                    color: Theme.mutedText
-                                    font.pixelSize: Theme.fontSizeCaption
-                                }
-                            }
-
-                            RoundedButton {
-                                id: exportButton
-                                text: (RouteService.exporting && root.pendingExportIndex === origIndex)
-                                    ? qsTr("Exporting...") : qsTr("Export")
-                                enabled: !RouteService.exporting
-                                onClicked: {
-                                    if (HomeViewModel.isGarmin) {
-                                        // Already have the real bytes - no fetch step needed.
-                                        const safeName = (route.name || "route")
-                                            .replace(/[\\/:*?"<>|]/g, "_")
-                                        exportDialog.currentFile =
-                                            LocalFileService.downloadsLocation + "/" + safeName + ".gpx"
-                                        root.saveError = ""
-                                        exportDialog.pendingGpxOverride = route.gpxText
-                                        exportDialog.open()
-                                    } else {
-                                        root.pendingExportIndex = origIndex
-                                        root.pendingExportName = route.name
-                                        RouteService.exportRoute(origIndex)
+                                ThemedMenu {
+                                    id: routeMenu
+                                    ThemedMenuItem {
+                                        text: (RouteService.exporting && root.pendingExportIndex === routeDelegate.origIndex)
+                                            ? qsTr("Exporting...") : qsTr("Export")
+                                        enabled: !RouteService.exporting
+                                        onTriggered: routeDelegate.doExport()
                                     }
+                                }
+
+                                Row {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: Theme.spacingMedium
+                                    anchors.rightMargin: Theme.spacingMedium
+                                    spacing: Theme.spacingMedium
+
+                                    // Routes have no per-item "sport type" the way activities do
+                                    // (ActivityBadge), so a plain neutral badge with the route
+                                    // glyph stands in - same 32px size/left position as
+                                    // ActivityRow's own badge, for the row rhythm to line up.
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 32; height: 32; radius: 16
+                                        color: Theme.cardNested
+                                        Icon { anchors.centerIn: parent; glyph: Icons.routes; size: 18; color: Theme.mutedText }
+                                    }
+
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width * 0.6
+                                        spacing: 1
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: route.name
+                                            color: Theme.text
+                                            font.pixelSize: Theme.fontSizeBody
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: qsTr("%1 · +%2/-%3 m")
+                                                .arg(RouteViewModel.formatDistance(route.distanceMeters))
+                                                .arg(route.ascentMeters)
+                                                .arg(route.descentMeters)
+                                            color: Theme.mutedText
+                                            font.pixelSize: Theme.fontSizeCaption
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 1
+                                    color: Theme.mutedText
+                                    opacity: 0.15
                                 }
                             }
                         }

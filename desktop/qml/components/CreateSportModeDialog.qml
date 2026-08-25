@@ -110,13 +110,16 @@ ThemedDialog {
             }
         }
 
+        // Real, 2026-08-25 (app-wide coherence pass): Theme.background/Theme.mutedText was the
+        // OLD "recessed area" pairing, predating the tune-up's own Theme.cardNested/Theme.border
+        // tokens built for exactly this - a nested scroll area inside a dialog surface.
         Rectangle {
             width: parent.width
             height: 240
             radius: Theme.radiusSmall
-            color: Theme.background
+            color: Theme.cardNested
             border.width: 1
-            border.color: Theme.mutedText
+            border.color: Theme.border
 
             ListView {
                 id: activityList

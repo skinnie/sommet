@@ -9,6 +9,7 @@
 #include <QNetworkReply>
 #include <QHttpMultiPart>
 #include <QNetworkRequest>
+#include <QSet>
 #include <QSettings>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -69,6 +70,13 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
     result[QStringLiteral("peakTrainingEffect")] = 0;   // value*10 (35 -> 3.5)
     result[QStringLiteral("poolLengths")] = 0;
     result[QStringLiteral("maxAltitudeMeters")] = 0;
+    // HRV (rMSSD, ms) computed by exercise_log.py from this move's raw R-R (needs a Smart
+    // Sensor belt); 0 = none recorded. hrvResting flags a lie-still HRV test (a 5+5 or similar)
+    // vs a workout that merely logged R-R - only resting ones feed the Health HRV series.
+    // hrvOrthoDrop is the standing-vs-lying RMSSD drop % for a 5+5 (0 when not an orthostatic).
+    result[QStringLiteral("hrvRmssd")] = 0;
+    result[QStringLiteral("hrvResting")] = 0;
+    result[QStringLiteral("hrvOrthoDrop")] = 0;
 
     QVariantList track;
     QXmlStreamReader xml(gpxText);
@@ -141,6 +149,12 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
                 result[QStringLiteral("poolLengths")] = text.toInt();
             } else if (inExtensions && currentTag == QStringLiteral("max_altitude")) {
                 result[QStringLiteral("maxAltitudeMeters")] = text.toDouble();
+            } else if (inExtensions && currentTag == QStringLiteral("hrv_rmssd")) {
+                result[QStringLiteral("hrvRmssd")] = text.toDouble();
+            } else if (inExtensions && currentTag == QStringLiteral("hrv_resting")) {
+                result[QStringLiteral("hrvResting")] = text.toInt();
+            } else if (inExtensions && currentTag == QStringLiteral("hrv_ortho_drop")) {
+                result[QStringLiteral("hrvOrthoDrop")] = text.toDouble();
             }
         }
     }
@@ -290,6 +304,13 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         m_ok = true;
         m_showingCachedData = false;
         emit activitiesChanged();
+
+        // Auto-export new watch moves to intervals.icu when the scope opts in (suunto/all).
+        // exportToIntervals() only uploads rows not already marked exported, so this is a
+        // no-op when nothing is new. eTrex auto-export is handled on GarminService's own sync.
+        const QString scope = intervalsExportScope();
+        if (scope == QStringLiteral("suunto") || scope == QStringLiteral("all"))
+            exportToIntervals();
     });
 }
 
@@ -328,6 +349,31 @@ void ActivityService::openDatabase()
     // Whether a watch activity has been uploaded to intervals.icu (export), so we don't
     // re-upload it every sync. 1 = uploaded. Imports never set this.
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN exported INTEGER"));
+    // Deleted-activity tombstones (André, 2026-08-25). One row per deleted activity, keyed by
+    // start-time|name (the same identity dedupeActivities() collapses on), so a deleted move
+    // stays gone across every future watch re-sync and intervals/Garmin re-import - the watch's
+    // circular log has no delete of its own, so this is the only durable way to keep it gone.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS deleted_activities (key TEXT PRIMARY KEY)"));
+    loadTombstones();
+}
+
+// Stable identity for a deleted activity - the same start-time|name key dedupeActivities()
+// uses to collapse the same move arriving from more than one source, so tombstoning it hides
+// every copy (watch, intervals, Garmin) at once.
+QString ActivityService::tombstoneKey(const QString &startTime, const QString &name)
+{
+    return startTime + QLatin1Char('|') + name;
+}
+
+void ActivityService::loadTombstones()
+{
+    m_tombstones.clear();
+    if (!m_db.isOpen())
+        return;
+    QSqlQuery q(QStringLiteral("SELECT key FROM deleted_activities"), m_db);
+    while (q.next())
+        m_tombstones.insert(q.value(0).toString());
 }
 
 int ActivityService::dbKnownCount()
@@ -397,6 +443,12 @@ bool ActivityService::dbLoadAll()
         "FROM activities ORDER BY start_time DESC, idx DESC"),
         m_db);
     while (q.next()) {
+        // Skip anything the user has deleted (tombstoned) - however it got back into the table
+        // (a watch re-sync re-inserts every move; an import re-adds its rows), a deleted move
+        // never re-appears in the list. Keyed by start-time|name, matching dedupeActivities().
+        if (!m_tombstones.isEmpty()
+                && m_tombstones.contains(tombstoneKey(q.value(7).toString(), q.value(1).toString())))
+            continue;
         QVariantMap parsed;
         parsed[QStringLiteral("index")] = q.value(0).toInt();
         parsed[QStringLiteral("name")] = q.value(1).toString();
@@ -437,14 +489,293 @@ bool ActivityService::dbLoadAll()
                      QStringLiteral("avgSpeedMh"), QStringLiteral("maxSpeedMh"),
                      QStringLiteral("descentMeters"), QStringLiteral("recoverySeconds"),
                      QStringLiteral("peakTrainingEffect"), QStringLiteral("poolLengths"),
-                     QStringLiteral("maxAltitudeMeters"), QStringLiteral("paceSecPerKm") }) {
+                     QStringLiteral("maxAltitudeMeters"), QStringLiteral("paceSecPerKm"),
+                     QStringLiteral("hrvRmssd"), QStringLiteral("hrvResting"),
+                     QStringLiteral("hrvOrthoDrop") }) {
                 parsed[key] = extra.value(key);
             }
         }
         m_activities.append(parsed);
     }
+    dedupeActivities();
+    updateWatchHrvStore();
     m_showingCachedData = !m_activities.isEmpty();
     return !m_activities.isEmpty();
+}
+
+void ActivityService::updateWatchHrvStore()
+{
+    // m_activities is ordered newest-first, so the first row we see for a given calendar date
+    // is that day's latest measurement - which we keep if a day happens to hold more than one
+    // resting test. Only resting tests (hrvResting == 1) with a real rMSSD qualify; workout
+    // R-R never reaches the Health series.
+    QJsonArray out;
+    QSet<QString> seenDates;
+    for (const QVariant &v : std::as_const(m_activities)) {
+        const QVariantMap a = v.toMap();
+        if (a.value(QStringLiteral("hrvResting")).toInt() != 1)
+            continue;
+        const double rmssd = a.value(QStringLiteral("hrvRmssd")).toDouble();
+        if (rmssd <= 0)
+            continue;
+        // start_time is ISO (e.g. 2026-08-24T07:00:00Z); the date is its first 10 chars.
+        const QString date = a.value(QStringLiteral("startTime")).toString().left(10);
+        if (date.size() != 10 || seenDates.contains(date))
+            continue;
+        seenDates.insert(date);
+        out.append(QJsonObject{{QStringLiteral("date"), date},
+                               {QStringLiteral("value"), rmssd}});
+    }
+    QSettings().setValue(QStringLiteral("health/watchHrv"),
+                         QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact)));
+}
+
+void ActivityService::dedupeActivities()
+{
+    // Cross-source de-duplication (André, 2026-08-24): the same real move can arrive from
+    // several sources - a Garmin Edge ride shows up both in a direct Garmin import AND via the
+    // intervals.icu aggregator; a Karoo ride reaches Suunto and onward. Collapse rows that share
+    // a start minute, keeping the highest-priority source. Priority favours DIRECT sources over
+    // the intervals aggregator, so turning intervals off (the stated goal) loses nothing that a
+    // direct source already provides. Watch-native moves (empty source) always win.
+    //   watch(empty) > garmin > suunto > eltrex/garmin-usb > intervals > other
+    auto priority = [](const QString &src) -> int {
+        if (src.isEmpty() || src == QStringLiteral("watch")) return 100;
+        if (src == QStringLiteral("garmin")) return 80;
+        if (src == QStringLiteral("suunto")) return 70;
+        if (src == QStringLiteral("etrex")) return 60;
+        if (src == QStringLiteral("intervals")) return 20;
+        return 10;
+    };
+    QHash<QString, int> bestIndexForKey;   // start-minute -> index in kept list
+    QVariantList kept;
+    for (const QVariant &v : std::as_const(m_activities)) {
+        const QVariantMap a = v.toMap();
+        // Key on the start time trimmed to the minute (sources round seconds differently).
+        QString key = a.value(QStringLiteral("startTime")).toString();
+        if (key.size() >= 16)
+            key = key.left(16);            // "YYYY-MM-DDTHH:MM"
+        if (key.isEmpty()) {               // no start time -> can't match, always keep
+            kept.append(v);
+            continue;
+        }
+        const int prio = priority(a.value(QStringLiteral("source")).toString());
+        if (!bestIndexForKey.contains(key)) {
+            bestIndexForKey.insert(key, kept.size());
+            kept.append(v);
+        } else {
+            const int idx = bestIndexForKey.value(key);
+            const int keptPrio = priority(kept.at(idx).toMap()
+                                          .value(QStringLiteral("source")).toString());
+            if (prio > keptPrio)
+                kept[idx] = v;             // a higher-priority source for the same move wins
+        }
+    }
+    m_activities = kept;
+}
+
+void ActivityService::deleteActivity(const QVariantMap &activity)
+{
+    if (!m_db.isOpen())
+        openDatabase();
+
+    const int idx = activity.value(QStringLiteral("index"), -1).toInt();
+
+    // Resolve the row's real identity from the DB - the QML activity map carries `index` but not
+    // external_id/source, and idx is the primary key, so this reads the one exact row.
+    QString source, extId, start, name;
+    {
+        QSqlQuery sel(m_db);
+        sel.prepare(QStringLiteral(
+            "SELECT source, external_id, start_time, name FROM activities WHERE idx = ?"));
+        sel.addBindValue(idx);
+        if (sel.exec() && sel.next()) {
+            source = sel.value(0).toString();
+            extId = sel.value(1).toString();
+            start = sel.value(2).toString();
+            name = sel.value(3).toString();
+        }
+    }
+    // Fall back to the map's own fields if the row isn't in the DB (e.g. the shown copy was a
+    // deduped winner from a source whose row is gone) - the tombstone still needs a real key.
+    if (start.isEmpty())
+        start = activity.value(QStringLiteral("startTime")).toString();
+    if (name.isEmpty())
+        name = activity.value(QStringLiteral("name")).toString();
+    if (source.isEmpty())
+        source = activity.value(QStringLiteral("source")).toString();
+
+    // 1) Tombstone it, so it stays gone across every future watch re-sync / import.
+    const QString key = tombstoneKey(start, name);
+    m_tombstones.insert(key);
+    QSqlQuery ins(m_db);
+    ins.prepare(QStringLiteral("INSERT OR IGNORE INTO deleted_activities (key) VALUES (?)"));
+    ins.addBindValue(key);
+    ins.exec();
+
+    // 2) Remove the local row(s) - by idx AND by the shared key, so a deduped duplicate from
+    //    another source goes too (deleting the whole activity, not just the copy on screen).
+    QSqlQuery del(m_db);
+    del.prepare(QStringLiteral(
+        "DELETE FROM activities WHERE idx = ? OR (start_time = ? AND name = ?)"));
+    del.addBindValue(idx);
+    del.addBindValue(start);
+    del.addBindValue(name);
+    del.exec();
+
+    // 3) When it came from intervals.icu, delete it there too - permanent, per André's choice.
+    //    /api/v1/activity/{id} is intervals' single-activity endpoint (same Basic API_KEY auth
+    //    as every other intervals call here); a 404 means it is already gone, which is fine.
+    if (source == QStringLiteral("intervals") && !extId.isEmpty()) {
+        QSettings settings;
+        const QString apiKey =
+            settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+        if (!apiKey.isEmpty()) {
+            QNetworkRequest req(QUrl(
+                QStringLiteral("https://intervals.icu/api/v1/activity/%1").arg(extId)));
+            const QByteArray basic = QByteArrayLiteral("API_KEY:") + apiKey.toUtf8();
+            req.setRawHeader("Authorization", "Basic " + basic.toBase64());
+            QNetworkReply *reply = m_network.deleteResource(req);
+            connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+                const int status =
+                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if (reply->error() != QNetworkReply::NoError
+                        && status != 200 && status != 204 && status != 404)
+                    setLastError(tr("Removed here, but deleting it on intervals.icu failed: %1")
+                                 .arg(reply->errorString()));
+                reply->deleteLater();
+            });
+        }
+    }
+
+    // 4) Drop it from the in-memory list now (no full reload needed) and tell the UI.
+    for (int i = m_activities.size() - 1; i >= 0; --i) {
+        const QVariantMap a = m_activities.at(i).toMap();
+        if (tombstoneKey(a.value(QStringLiteral("startTime")).toString(),
+                         a.value(QStringLiteral("name")).toString()) == key)
+            m_activities.removeAt(i);
+    }
+    emit activityDeleted(name);
+    emit activitiesChanged();
+}
+
+void ActivityService::backfillIntervalsTracks(int maxCount)
+{
+    if (m_trackBusy) return;               // a run is already walking the queue
+    if (!m_db.isOpen()) openDatabase();
+    if (!m_db.isOpen()) return;
+
+    // Only rows that genuinely need it: an intervals import, a real distance (so it plausibly
+    // has positions - indoor trainer rides have none), and no track stored yet. Newest first,
+    // because that is what the user is actually looking at.
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT external_id FROM activities "
+        "WHERE source = 'intervals' AND COALESCE(external_id,'') <> '' "
+        "  AND COALESCE(distance_m,0) > 0 "
+        "  AND COALESCE(track_json,'') IN ('', '[]') "
+        "ORDER BY start_time DESC LIMIT ?"));
+    q.addBindValue(maxCount > 0 ? maxCount : 200);
+    if (!q.exec()) return;
+
+    m_trackQueue.clear();
+    while (q.next())
+        m_trackQueue.append(q.value(0).toString());
+    if (m_trackQueue.isEmpty()) {
+        emit trackBackfillFinished(0, 0);
+        return;
+    }
+    m_trackTotal = m_trackQueue.size();
+    m_trackDone = 0;
+    m_trackFilled = 0;
+    m_trackBusy = true;
+    fetchNextTrack();
+}
+
+void ActivityService::fetchNextTrack()
+{
+    if (m_trackQueue.isEmpty()) {
+        m_trackBusy = false;
+        // How many still need a track after this run, so the caller can decide to continue.
+        int remaining = 0;
+        if (m_db.isOpen()) {
+            QSqlQuery c(QStringLiteral(
+                "SELECT COUNT(*) FROM activities WHERE source = 'intervals' "
+                "AND COALESCE(external_id,'') <> '' AND COALESCE(distance_m,0) > 0 "
+                "AND COALESCE(track_json,'') IN ('', '[]')"), m_db);
+            if (c.next()) remaining = c.value(0).toInt();
+        }
+        if (m_trackFilled > 0) {
+            dbLoadAll();                    // republish activities[] with the new tracks
+            emit activitiesChanged();
+        }
+        emit trackBackfillFinished(m_trackFilled, remaining);
+        return;
+    }
+
+    const QString id = m_trackQueue.takeFirst();
+    QSettings settings;
+    const QString key =
+        settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    if (key.isEmpty()) { m_trackQueue.clear(); fetchNextTrack(); return; }
+
+    // types=latlng,altitude - the only two streams a map trace needs. Verified against the real
+    // API (2026-08-25): the response is an ARRAY of stream objects, and for "latlng" the
+    // positions are split across TWO parallel arrays - `data` holds the latitudes and `data2`
+    // the longitudes (NOT [lat,lon] pairs, which is the obvious wrong assumption).
+    QNetworkRequest req(QUrl(QStringLiteral(
+        "https://intervals.icu/api/v1/activity/%1/streams?types=latlng,altitude").arg(id)));
+    const QByteArray basic = QByteArrayLiteral("API_KEY:") + key.toUtf8();
+    req.setRawHeader("Authorization", "Basic " + basic.toBase64());
+    // Same Cloudflare workaround as the other intervals calls: an empty UA is 1010-banned.
+    req.setRawHeader("User-Agent",
+                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
+
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id]() {
+        reply->deleteLater();
+        ++m_trackDone;
+
+        if (reply->error() == QNetworkReply::NoError) {
+            const QJsonArray streams = QJsonDocument::fromJson(reply->readAll()).array();
+            QJsonArray lat, lon, alt;
+            for (const QJsonValue &v : streams) {
+                const QJsonObject s = v.toObject();
+                const QString type = s.value(QStringLiteral("type")).toString();
+                if (type == QLatin1String("latlng")) {
+                    lat = s.value(QStringLiteral("data")).toArray();
+                    lon = s.value(QStringLiteral("data2")).toArray();
+                } else if (type == QLatin1String("altitude")) {
+                    alt = s.value(QStringLiteral("data")).toArray();
+                }
+            }
+            // Build the same {lat, lon, ele} shape parseGpx() produces, so every existing
+            // consumer (MapView, ActivityCard's preview, the detail map) works unchanged.
+            QJsonArray track;
+            const int n = qMin(lat.size(), lon.size());
+            for (int i = 0; i < n; ++i) {
+                if (lat.at(i).isNull() || lon.at(i).isNull()) continue;   // real gaps in a trace
+                QJsonObject p{{QStringLiteral("lat"), lat.at(i).toDouble()},
+                              {QStringLiteral("lon"), lon.at(i).toDouble()}};
+                if (i < alt.size() && !alt.at(i).isNull())
+                    p.insert(QStringLiteral("ele"), alt.at(i).toDouble());
+                track.append(p);
+            }
+            if (!track.isEmpty()) {
+                QSqlQuery up(m_db);
+                up.prepare(QStringLiteral(
+                    "UPDATE activities SET track_json = ? WHERE external_id = ?"));
+                up.addBindValue(QString::fromUtf8(
+                    QJsonDocument(track).toJson(QJsonDocument::Compact)));
+                up.addBindValue(id);
+                if (up.exec()) ++m_trackFilled;
+            }
+        }
+        // Deliberately continues past a failed activity rather than aborting the whole run -
+        // one bad/streamless activity should not stop the rest of the backfill.
+        emit trackBackfillProgress(m_trackDone, m_trackTotal);
+        fetchNextTrack();
+    });
 }
 
 void ActivityService::importFromIntervals(int oldestDays)
@@ -628,6 +959,107 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     dbLoadAll();
     emit activitiesChanged();
     emit importFinished(count);
+    // Pull the GPS traces for what was just imported (André, 2026-08-25 - imported outdoor
+    // moves used to show "No GPS track" because the list endpoint carries no positions). Bounded
+    // per run so this stays a background trickle rather than thousands of calls at once; the
+    // remaining count comes back on trackBackfillFinished for a caller that wants to continue.
+    backfillIntervalsTracks(150);
+}
+
+// Garmin activity typeKey -> this app's canonical sport name (same idea as
+// sportNameForIntervalsType, but Garmin's keys). Falls back to a readable form of the key.
+static QString sportNameForGarminType(const QString &typeKey)
+{
+    static const QHash<QString, QString> map = {
+        {QStringLiteral("running"), QStringLiteral("Running")},
+        {QStringLiteral("trail_running"), QStringLiteral("Trail running")},
+        {QStringLiteral("treadmill_running"), QStringLiteral("Running")},
+        {QStringLiteral("cycling"), QStringLiteral("Cycling")},
+        {QStringLiteral("road_biking"), QStringLiteral("Cycling")},
+        {QStringLiteral("mountain_biking"), QStringLiteral("Mountain biking")},
+        {QStringLiteral("indoor_cycling"), QStringLiteral("Indoor cycling")},
+        {QStringLiteral("walking"), QStringLiteral("Walking")},
+        {QStringLiteral("hiking"), QStringLiteral("Trekking")},
+        {QStringLiteral("lap_swimming"), QStringLiteral("Pool swimming")},
+        {QStringLiteral("open_water_swimming"), QStringLiteral("Openwater swim")},
+        {QStringLiteral("strength_training"), QStringLiteral("Gym training")},
+        {QStringLiteral("fitness_equipment"), QStringLiteral("Indoor training")},
+        {QStringLiteral("mountaineering"), QStringLiteral("Mountaineering")},
+        {QStringLiteral("resort_skiing_snowboarding"), QStringLiteral("Alpine skiing")},
+        {QStringLiteral("cross_country_skiing"), QStringLiteral("Cross country skiing")},
+    };
+    const QString mapped = map.value(typeKey);
+    if (!mapped.isEmpty())
+        return mapped;
+    QString s = typeKey;
+    s.replace(QLatin1Char('_'), QLatin1Char(' '));
+    return s.isEmpty() ? QStringLiteral("Unspecified sport") : s;
+}
+
+void ActivityService::importFromGarmin(int days)
+{
+    const QUrl url(kBackendBase + QStringLiteral("/api/garmin/activities?days=%1")
+                   .arg(days > 0 ? days : 3650));
+    setLoading(true);
+    QNetworkReply *reply = m_network.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        setLoading(false);
+        if (reply->error() != QNetworkReply::NoError) {
+            emit importError(reply->errorString());
+            return;
+        }
+        const auto o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!o.value(QStringLiteral("ok")).toBool(false)) {
+            emit importError(o.value(QStringLiteral("needLogin")).toBool(false)
+                ? tr("Sign in to Garmin on the Weight page first.")
+                : o.value(QStringLiteral("error")).toString(tr("Garmin activity import failed.")));
+            return;
+        }
+        importGarminActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+    });
+}
+
+void ActivityService::importGarminActivitiesInto(const QJsonArray &arr)
+{
+    if (!m_db.isOpen()) {
+        emit importError(tr("Local activity store isn't open."));
+        return;
+    }
+    m_db.transaction();
+    QSqlQuery del(m_db);
+    del.exec(QStringLiteral("DELETE FROM activities WHERE source = 'garmin'"));
+
+    int idx = -1000000;   // separate negative range from intervals imports, avoid idx collisions
+    int count = 0;
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        const int duration = o.value(QStringLiteral("duration")).toInt();
+        const double distance = o.value(QStringLiteral("distance")).toDouble();
+        if (duration < 60 && distance < 100.0)   // skip test/junk, same rule as intervals import
+            continue;
+        QSqlQuery ins(m_db);
+        ins.prepare(QStringLiteral(
+            "INSERT INTO activities "
+            "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
+            " start_time, source, external_id, device) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'garmin', ?, ?)"));
+        ins.addBindValue(idx--);
+        ins.addBindValue(sportNameForGarminType(o.value(QStringLiteral("typeKey")).toString()));
+        ins.addBindValue(duration);
+        ins.addBindValue(distance);
+        ins.addBindValue(o.value(QStringLiteral("ascent")).toDouble());
+        ins.addBindValue(o.value(QStringLiteral("calories")).toInt());
+        ins.addBindValue(o.value(QStringLiteral("start")).toString());
+        ins.addBindValue(o.value(QStringLiteral("id")).toVariant().toString());
+        ins.addBindValue(o.value(QStringLiteral("device")).toString());
+        ins.exec();
+        ++count;
+    }
+    m_db.commit();
+    dbLoadAll();
+    emit activitiesChanged();
+    emit importFinished(count);
 }
 
 void ActivityService::exportToIntervals()
@@ -703,6 +1135,281 @@ void ActivityService::uploadOneToIntervals(int idx, const QByteArray &fit,
             up.exec();
         } else {
             ++m_exportFailed;
+        }
+        if (--m_exportPending <= 0) {
+            setLoading(false);
+            emit exportFinished(m_exportUploaded, m_exportFailed);
+        }
+    });
+}
+
+QString ActivityService::intervalsExportScope() const
+{
+    return QSettings().value(QStringLiteral("intervals/exportScope"),
+                             QStringLiteral("manual")).toString();
+}
+
+void ActivityService::setIntervalsExportScope(const QString &scope)
+{
+    QSettings().setValue(QStringLiteral("intervals/exportScope"), scope);
+    // For a scope that includes watch moves, push what's outstanding right away (bulk export
+    // is a no-op when there's nothing new). eTrex is driven from GarminService on its own sync.
+    if (scope == QStringLiteral("suunto") || scope == QStringLiteral("all"))
+        exportToIntervals();
+}
+
+void ActivityService::exportActivityToIntervals(const QString &name, const QString &fitBase64,
+                                                const QString &gpxText)
+{
+    const QSettings settings;
+    const QString athlete =
+        settings.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    const QString key =
+        settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    if (athlete.isEmpty() || key.isEmpty()) {
+        emit exportError(tr("Connect Intervals.icu in Settings first."));
+        return;
+    }
+    // Prefer the FIT (carries the logged-app streams); fall back to GPX for eTrex moves, which
+    // have no FIT. The activity name (if any) becomes the upload's filename hint.
+    const QByteArray fit = QByteArray::fromBase64(fitBase64.toLatin1());
+    const QString base = name.isEmpty() ? QStringLiteral("activity")
+                                        : QString(name).replace(QLatin1Char('"'), QString());
+    setLoading(true);
+    m_exportPending = 1;
+    m_exportUploaded = 0;
+    m_exportFailed = 0;
+    if (!fit.isEmpty()) {
+        uploadFileToIntervals(-1, fit, QStringLiteral("application/fit"),
+                              base + QStringLiteral(".fit"), athlete, key);
+    } else if (!gpxText.isEmpty()) {
+        uploadFileToIntervals(-1, gpxText.toUtf8(), QStringLiteral("application/gpx+xml"),
+                              base + QStringLiteral(".gpx"), athlete, key);
+    } else {
+        setLoading(false);
+        m_exportPending = 0;
+        emit exportError(tr("This activity has no FIT or GPX data to upload."));
+    }
+}
+
+void ActivityService::exportActivitiesToIntervals(const QVariantList &activities)
+{
+    QSettings settings;
+    const QString athlete =
+        settings.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    const QString key =
+        settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    if (athlete.isEmpty() || key.isEmpty()) {
+        emit exportError(tr("Connect Intervals.icu in Settings first."));
+        return;
+    }
+    // Per-activity dedup key (eTrex moves have no DB idx). Kept in QSettings; marked optimistically
+    // when we start the upload so a repeated sync doesn't re-push the same file.
+    QStringList done = settings.value(QStringLiteral("intervals/exportedKeys")).toStringList();
+    struct Item { QByteArray data; QString contentType, filename; };
+    QList<Item> items;
+    for (const QVariant &v : activities) {
+        const QVariantMap a = v.toMap();
+        const QString akey = a.value(QStringLiteral("startTime")).toString()
+                             + QLatin1Char('|') + a.value(QStringLiteral("name")).toString();
+        if (done.contains(akey))
+            continue;
+        const QByteArray fit =
+            QByteArray::fromBase64(a.value(QStringLiteral("fitBase64")).toString().toLatin1());
+        const QString gpx = a.value(QStringLiteral("gpxText")).toString();
+        const QString base = a.value(QStringLiteral("name")).toString().isEmpty()
+            ? QStringLiteral("activity")
+            : QString(a.value(QStringLiteral("name")).toString()).replace(QLatin1Char('"'), QString());
+        if (!fit.isEmpty())
+            items.append({fit, QStringLiteral("application/fit"), base + QStringLiteral(".fit")});
+        else if (!gpx.isEmpty())
+            items.append({gpx.toUtf8(), QStringLiteral("application/gpx+xml"),
+                          base + QStringLiteral(".gpx")});
+        else
+            continue;
+        done << akey;
+    }
+    if (items.isEmpty()) {
+        emit exportFinished(0, 0);
+        return;
+    }
+    settings.setValue(QStringLiteral("intervals/exportedKeys"), done);
+    setLoading(true);
+    m_exportPending = items.size();
+    m_exportUploaded = 0;
+    m_exportFailed = 0;
+    for (const Item &it : items)
+        uploadFileToIntervals(-1, it.data, it.contentType, it.filename, athlete, key);
+}
+
+void ActivityService::exportActivityToGarmin(const QString &name, const QString &fitBase64,
+                                             const QString &gpxText)
+{
+    Q_UNUSED(name)
+    if (fitBase64.isEmpty() && gpxText.isEmpty()) {
+        emit exportError(tr("This activity has no FIT or GPX data to upload."));
+        return;
+    }
+    QJsonObject payload;
+    if (!fitBase64.isEmpty())
+        payload.insert(QStringLiteral("fit_base64"), fitBase64);
+    else
+        payload.insert(QStringLiteral("gpx"), gpxText);
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/garmin/upload")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    setLoading(true);
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(payload).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        setLoading(false);
+        const auto o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (o.value(QStringLiteral("ok")).toBool(false))
+            emit exportFinished(1, 0);
+        else
+            emit exportError(o.value(QStringLiteral("needLogin")).toBool(false)
+                ? tr("Sign in to Garmin on the Weight page first.")
+                : o.value(QStringLiteral("error")).toString(tr("Garmin upload failed.")));
+    });
+}
+
+void ActivityService::uploadToGarmin(const QByteArray &data, bool isFit)
+{
+    QJsonObject payload;
+    if (isFit)
+        payload.insert(QStringLiteral("fit_base64"), QString::fromLatin1(data.toBase64()));
+    else
+        payload.insert(QStringLiteral("gpx"), QString::fromUtf8(data));
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/garmin/upload")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(payload).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const auto o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (o.value(QStringLiteral("ok")).toBool(false))
+            ++m_exportUploaded;
+        else
+            ++m_exportFailed;
+        if (--m_exportPending <= 0) {
+            setLoading(false);
+            emit exportFinished(m_exportUploaded, m_exportFailed);
+        }
+    });
+}
+
+void ActivityService::exportToGarmin()
+{
+    if (!m_db.isOpen()) {
+        emit exportError(tr("Local activity store isn't open."));
+        return;
+    }
+    QSettings settings;
+    QStringList done = settings.value(QStringLiteral("garmin/exportedKeys")).toStringList();
+    QList<QByteArray> fits;
+    QSqlQuery q(QStringLiteral(
+        "SELECT fit_base64, start_time, name FROM activities "
+        "WHERE (source IS NULL OR source = 'watch') AND fit_base64 IS NOT NULL "
+        "AND fit_base64 <> ''"), m_db);
+    while (q.next()) {
+        const QString key = q.value(1).toString() + QLatin1Char('|') + q.value(2).toString();
+        if (done.contains(key))
+            continue;
+        const QByteArray fit = QByteArray::fromBase64(q.value(0).toString().toLatin1());
+        if (fit.isEmpty())
+            continue;
+        fits.append(fit);
+        done << key;
+    }
+    if (fits.isEmpty()) {
+        emit exportFinished(0, 0);
+        return;
+    }
+    settings.setValue(QStringLiteral("garmin/exportedKeys"), done);
+    setLoading(true);
+    m_exportPending = fits.size();
+    m_exportUploaded = 0;
+    m_exportFailed = 0;
+    for (const QByteArray &fit : fits)
+        uploadToGarmin(fit, /*isFit=*/true);
+}
+
+void ActivityService::exportActivitiesToGarmin(const QVariantList &activities)
+{
+    QSettings settings;
+    QStringList done = settings.value(QStringLiteral("garmin/exportedKeys")).toStringList();
+    struct Item { QByteArray data; bool isFit; };
+    QList<Item> items;
+    for (const QVariant &v : activities) {
+        const QVariantMap a = v.toMap();
+        const QString key = a.value(QStringLiteral("startTime")).toString()
+                            + QLatin1Char('|') + a.value(QStringLiteral("name")).toString();
+        if (done.contains(key))
+            continue;
+        const QByteArray fit =
+            QByteArray::fromBase64(a.value(QStringLiteral("fitBase64")).toString().toLatin1());
+        const QString gpx = a.value(QStringLiteral("gpxText")).toString();
+        if (!fit.isEmpty())
+            items.append({fit, true});
+        else if (!gpx.isEmpty())
+            items.append({gpx.toUtf8(), false});
+        else
+            continue;
+        done << key;
+    }
+    if (items.isEmpty()) {
+        emit exportFinished(0, 0);
+        return;
+    }
+    settings.setValue(QStringLiteral("garmin/exportedKeys"), done);
+    setLoading(true);
+    m_exportPending = items.size();
+    m_exportUploaded = 0;
+    m_exportFailed = 0;
+    for (const Item &it : items)
+        uploadToGarmin(it.data, it.isFit);
+}
+
+void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
+                                            const QString &contentType, const QString &filename,
+                                            const QString &athlete, const QString &key)
+{
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+    QHttpPart filePart;
+    filePart.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
+    filePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                       QStringLiteral("form-data; name=\"file\"; filename=\"%1\"").arg(filename));
+    filePart.setBody(data);
+    multiPart->append(filePart);
+
+    QNetworkRequest req(QUrl(
+        QStringLiteral("https://intervals.icu/api/v1/athlete/%1/activities").arg(athlete)));
+    const QByteArray basic = QByteArrayLiteral("API_KEY:") + key.toUtf8();
+    req.setRawHeader("Authorization", "Basic " + basic.toBase64());
+    req.setRawHeader("User-Agent",
+                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
+
+    QNetworkReply *reply = m_network.post(req, multiPart);
+    multiPart->setParent(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError
+                        && (status == 200 || status == 201);
+        if (ok) {
+            ++m_exportUploaded;
+            if (idx >= 0 && m_db.isOpen()) {
+                QSqlQuery up(m_db);
+                up.prepare(QStringLiteral("UPDATE activities SET exported = 1 WHERE idx = ?"));
+                up.addBindValue(idx);
+                up.exec();
+            }
+        } else {
+            ++m_exportFailed;
+            // A per-file upload (idx<0) surfaces the reason; the bulk path already aggregates.
+            if (idx < 0)
+                emit exportError(status == 409
+                    ? tr("intervals.icu already has this activity (duplicate).")
+                    : reply->errorString());
         }
         if (--m_exportPending <= 0) {
             setLoading(false);

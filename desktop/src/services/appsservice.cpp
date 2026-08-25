@@ -55,6 +55,93 @@ void AppsService::setImporting(bool value)
     emit importingChanged();
 }
 
+void AppsService::setLoggingBusy(bool value)
+{
+    if (m_loggingBusy == value)
+        return;
+    m_loggingBusy = value;
+    emit loggingBusyChanged();
+}
+
+void AppsService::refreshLogging()
+{
+    QNetworkReply *reply = m_network.get(QNetworkRequest(backendUrl(QStringLiteral("/api/apps/logging"))));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool ok = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+        if (!ok) {
+            setLastError(reply->error() != QNetworkReply::NoError
+                ? QStringLiteral("GET /api/apps/logging: %1").arg(reply->errorString())
+                : QStringLiteral("GET /api/apps/logging: %1").arg(
+                    obj.value(QStringLiteral("error")).toString()));
+            m_loggedApps.clear();
+            emit loggedAppsChanged();
+            return;
+        }
+
+        m_loggedApps.clear();
+        for (const auto &v : obj.value(QStringLiteral("rules")).toArray()) {
+            const auto e = v.toObject();
+            // Only activated apps are worth a logging toggle - an app the mode doesn't use
+            // records nothing regardless of LogRule. use_rule/log_rule arrive as JSON booleans
+            // (custom_modes decodes them to Python bools), so read via toVariant().toBool() -
+            // QJsonValue::toInt() returns 0 for a JSON bool and would drop every row.
+            if (!e.value(QStringLiteral("use_rule")).toVariant().toBool())
+                continue;
+            QVariantMap row;
+            row[QStringLiteral("mode")] = e.value(QStringLiteral("mode")).toInt();
+            row[QStringLiteral("modeName")] = e.value(QStringLiteral("mode_name")).toString();
+            row[QStringLiteral("slot")] = e.value(QStringLiteral("slot")).toInt();
+            row[QStringLiteral("ruleIdx")] = e.value(QStringLiteral("rule_idx")).toInt();
+            const auto app = e.value(QStringLiteral("app"));
+            row[QStringLiteral("app")] = app.isNull() ? QString() : app.toString();
+            row[QStringLiteral("logRule")] = e.value(QStringLiteral("log_rule")).toVariant().toBool();
+            m_loggedApps.append(row);
+        }
+        setLastError(QString());
+        emit loggedAppsChanged();
+    });
+}
+
+void AppsService::setLogging(int mode, int slot, bool on)
+{
+    setLoggingBusy(true);
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/apps/logging")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QJsonObject body;
+    body[QStringLiteral("mode")] = mode;
+    body[QStringLiteral("slot")] = slot;
+    body[QStringLiteral("on")] = on;
+
+    QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        setLoggingBusy(false);
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool ok = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+        if (!ok) {
+            const QString err = reply->error() != QNetworkReply::NoError
+                ? QStringLiteral("POST /api/apps/logging: %1").arg(reply->errorString())
+                : QStringLiteral("POST /api/apps/logging: %1").arg(
+                    obj.value(QStringLiteral("error")).toString());
+            setLastError(err);
+            emit loggingToggled(false, err);
+            // Re-read so the switch snaps back to the watch's real state after a failed write.
+            refreshLogging();
+            return;
+        }
+        setLastError(QString());
+        emit loggingToggled(true, QString());
+        // The write changed the watch; re-read the authoritative state.
+        refreshLogging();
+    });
+}
+
 void AppsService::refreshCatalogStatus()
 {
     QNetworkReply *reply = m_network.get(QNetworkRequest(backendUrl(QStringLiteral("/api/apps/catalog_status"))));

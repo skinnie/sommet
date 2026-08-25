@@ -26,6 +26,10 @@ PageFlickable {
     property string lastResultText: ""
     property bool lastResultOk: true
 
+    // Read the watch's current per-app logging state so the toggle card below reflects it.
+    // Read-only; safe whenever a watch is connected (the card explains itself when it isn't).
+    Component.onCompleted: AppsService.refreshLogging()
+
     function launch(service) {
         const error = service.launch();
         root.lastResultOk = error.length === 0;
@@ -160,6 +164,102 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeCaption
                     color: root.lastResultOk ? Theme.success : Theme.error
                     text: root.lastResultText
+                }
+            }
+        }
+
+        // --- App logging ---------------------------------------------------------------
+        // André, 2026-08-25 ("can't we have the toggle?"): the Movescount-era per-app logging
+        // (EXERCISE_MODES_RULE.LogRule) is on by default when an app is installed, but this
+        // card is where you turn a specific app's logging off (or back on) without the CLI.
+        // A logged app's per-sample output lands in the recorded Move (Charts tab / FIT dev
+        // fields / intervals custom streams). Needs a connected watch to read and write.
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingMedium
+
+                Row {
+                    spacing: Theme.spacingSmall
+                    Text {
+                        text: Icons.activities
+                        font.family: Icons.fontFamily
+                        font.pixelSize: 28
+                        color: Theme.primary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: qsTr("App logging")
+                        font.bold: true
+                        font.pixelSize: Theme.fontSizeHeading
+                        color: Theme.text
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Each Suunto App on a sport mode can log its output into every "
+                                + "recorded Move - it then shows up on the activity's Charts, in "
+                                + "the exported FIT, and as an intervals.icu custom stream. On by "
+                                + "default; turn it off here for any app you don't want recorded.")
+                }
+
+                // One row per activated app, grouped visually by mode via the small mode label.
+                Repeater {
+                    model: AppsService.loggedApps
+                    delegate: Row {
+                        width: parent ? parent.width : 0
+                        spacing: Theme.spacingMedium
+
+                        Column {
+                            width: parent.width - logSwitch.width - Theme.spacingMedium
+                            spacing: 1
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeBody
+                                text: modelData.app && modelData.app.length > 0
+                                      ? modelData.app
+                                      : qsTr("App #%1").arg(modelData.ruleIdx)
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                color: Theme.mutedText
+                                font.pixelSize: Theme.fontSizeCaption
+                                text: modelData.modeName && modelData.modeName.length > 0
+                                      ? modelData.modeName
+                                      : qsTr("Mode %1").arg(modelData.mode)
+                            }
+                        }
+
+                        RoundedSwitch {
+                            id: logSwitch
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: modelData.logRule
+                            enabled: !AppsService.loggingBusy
+                            onToggled: AppsService.setLogging(modelData.mode, modelData.slot, checked)
+                        }
+                    }
+                }
+
+                // Empty state: either no watch, or no app installed on any mode yet.
+                Text {
+                    visible: AppsService.loggedApps.length === 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("No Suunto App is installed on a sport mode yet - install one from "
+                                + "a sport mode's data-field picker and it'll appear here to log. "
+                                + "(Connect your watch if this looks empty unexpectedly.)")
                 }
             }
         }

@@ -17,9 +17,16 @@ Rectangle {
     property var activity
 
     signal opened()
+    // Right-click → Delete (André, 2026-08-25). The page owns the confirm dialog and the actual
+    // delete; the row just reports that this activity was asked to go.
+    signal deleteRequested()
 
+    // 44px, matching NavItem.qml's own implicitHeight exactly (André, 2026-08-25: "list
+    // should align with home... indoor with activities... walking with routes" - the row
+    // rhythm now mirrors the nav rail's: 44px row + 2px gap = the same 46px pitch NavItem's
+    // own Column produces, so each list row lands on the same y as its equivalent nav item).
     width: parent ? parent.width : 0
-    height: 64
+    height: 44
     radius: Theme.radiusCard
     color: "transparent"
 
@@ -44,6 +51,23 @@ Rectangle {
 
     HoverHandler { id: hover }
     TapHandler { onTapped: root.opened() }
+    // Right mouse button opens the context menu AT THE CURSOR. Real bug (found 2026-08-25,
+    // "the awful garbage bin icon... make it right click, delete"): Menu.popup() with no
+    // arguments opens relative to its PARENT item's (0,0), not the click position - every
+    // right-click on this row opened the menu pinned to the row's own top-left corner instead
+    // of where the cursor actually was. Passing the TapHandler's own hit position fixes it.
+    TapHandler {
+        id: rightTap
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => rowMenu.popup(eventPoint.position.x, eventPoint.position.y)
+    }
+    ThemedMenu {
+        id: rowMenu
+        ThemedMenuItem {
+            text: qsTr("Delete activity")
+            onTriggered: root.deleteRequested()
+        }
+    }
 
     Row {
         anchors.left: parent.left

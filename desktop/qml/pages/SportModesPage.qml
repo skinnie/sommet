@@ -1174,13 +1174,17 @@ PageFlickable {
                         Column {
                             visible: displaysColumn.displays.length < root.maxDisplays
                             spacing: 4
+                            // Real, 2026-08-25 (app-wide button coherence pass): a real tappable
+                            // "add" control (TapHandler below), so it gets the same flat
+                            // Theme.cardNested fill + quiet Theme.border hairline as every other
+                            // control now, instead of a transparent circle with a hard outline.
                             Rectangle {
                                 width: 100
                                 height: 100
                                 radius: 50
-                                color: "transparent"
+                                color: Theme.cardNested
                                 border.width: 2
-                                border.color: Theme.mutedText
+                                border.color: Theme.border
                                 Text {
                                     anchors.centerIn: parent
                                     text: "+"

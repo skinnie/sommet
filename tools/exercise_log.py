@@ -27,8 +27,16 @@ times, once each under `TZ=Europe/Paris`, `TZ=America/New_York`, `TZ=Asia/Tokyo`
 
 import argparse
 import datetime
+import json
 import math
 import struct
+
+import hrv  # RMSSD/orthostatic from this move's raw R-R (ibi) samples - hrv.py, same dir
+
+# A resting HRV test (a 5+5 orthostatic, or any lie-still measurement) barely moves and sits at
+# a low HR, unlike a workout that happens to log R-R. Only moves that clear this bar feed the
+# Health page's HRV series, so an easy run's exercise-HRV never masquerades as resting HRV.
+HRV_RESTING_MAX_DISTANCE_M = 200
 
 EXERCISE_LOG_BASE = 0x027AC40
 EXERCISE_LOG_SIZE = 5526464  # confirmed live via 0x0b21, this project, earlier this session
@@ -76,6 +84,39 @@ RULEOUTPUT_TYPES = (0x64, 0x65, 0x66, 0x67, 0x68)
 RULEOUTPUT_ABSENT = -0x80000000  # 0x80000000 read as a signed i32
 
 
+def resolve_rule_labels(samples, custom_modes_bytes, apps_bytes):
+    """Best-effort {slot_name -> app name} for a move's logged Suunto App outputs.
+
+    ruleoutput slot N (1-based) = the Nth rule with LogRule=1, in order, of the sport mode the
+    move was recorded in. That mode is found by the move's CustomModeID (carried in the
+    'activity' episodic sample as `sportmode`); each logged rule's RuleIdx then names the app
+    via the Apps region. Returns {} on any mismatch (mode edited/removed since, no dumps, etc.)
+    - the caller falls back to the raw ruleoutputN names, so this never has to be exact."""
+    if not custom_modes_bytes or not apps_bytes:
+        return {}
+    try:
+        import custom_modes as cm
+        import apps as _apps
+        mode_id = next((s.get("sportmode") for s in samples if s.get("type") == "activity"), None)
+        if mode_id is None:
+            return {}
+        decoded = cm.decode(custom_modes_bytes)
+        mode = next((m for m in decoded["exercise_modes"]
+                     if m["Settings"].get("CustomModeID") == mode_id), None)
+        if mode is None:
+            return {}
+        app_names = [e.get("name") for e in _apps.decode(apps_bytes)]
+        labels = {}
+        logged = [r for r in mode["Rules"] if r.get("LogRule")]
+        for i, rule in enumerate(logged):
+            idx = rule["RuleIdx"]
+            if 0 <= idx < len(app_names) and app_names[idx]:
+                labels[f"ruleoutput{i + 1}"] = app_names[idx]
+        return labels
+    except Exception:                          # labels are a nicety - never fail a decode over one
+        return {}
+
+
 def ruleoutput_series(samples):
     """Per-slot lists of a logged Suunto App's raw values across an entry, sentinel filtered.
 
@@ -91,6 +132,20 @@ def ruleoutput_series(samples):
             if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
                 series.setdefault(v["name"], []).append(v["value"])
     return series
+
+
+def ruleoutput_times(samples):
+    """Per-slot elapsed-seconds-from-start list, aligned 1:1 with ruleoutput_series() values
+    (identical iteration and sentinel filter). Uses each periodic sample's relative time."""
+    times = {}
+    for s in samples:
+        if s.get("type") != "periodic":
+            continue
+        t_s = round(s.get("time", 0) / 1000, 1)
+        for v in s.get("values", []):
+            if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
+                times.setdefault(v["name"], []).append(t_s)
+    return times
 
 
 def read8(data, offset):
@@ -563,10 +618,18 @@ def extract_track_points(header, samples):
 
     points = []
     cur_lat = cur_lon = cur_ele = 0.0
+    cur_rules = {}                    # latest logged Suunto App outputs seen so far
     has_pos = False
 
     for s in samples:
         emit = False
+        # Track the most recent logged-app output (ruleoutput1..5) so every emitted point
+        # carries the value in effect at its time (carry-forward) - the FIT/analysis side
+        # then has a dense per-record series without needing the app to fire every sample.
+        if s["type"] == "periodic":
+            for v in s["values"]:
+                if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
+                    cur_rules[v["name"]] = v["value"]
         if s["type"] == "gps_base":
             cur_lat = s["latitude"] / 1e7
             cur_lon = s["longitude"] / 1e7
@@ -597,7 +660,8 @@ def extract_track_points(header, samples):
 
         if emit and has_pos and (cur_lat != 0.0 or cur_lon != 0.0):
             time = s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))
-            points.append({"lat": cur_lat, "lon": cur_lon, "ele": cur_ele, "time": time})
+            points.append({"lat": cur_lat, "lon": cur_lon, "ele": cur_ele, "time": time,
+                           "rules": dict(cur_rules)})
 
     return points
 
@@ -616,6 +680,31 @@ def to_gpx(header, samples):
     unconverted header fields only for the (position-less, so track-less anyway) entries
     that never got a GPS fix at all."""
     points = extract_track_points(header, samples)
+
+    # HRV from this move's raw R-R (ibi) samples, if it recorded any (needs a Suunto Smart
+    # Sensor belt). When the move is a 5+5 orthostatic (a Lap splits it into >=2 R-R phases),
+    # the LYING phase's RMSSD is the resting reading - the one comparable to a morning supine
+    # measurement (intervals.icu) - and we also carry the standing-vs-lying drop%. Otherwise
+    # the whole-move RMSSD is used. `hrv_resting` flags whether this qualifies as a resting
+    # test (see HRV_RESTING_MAX_DISTANCE_M) so the app can keep workout R-R out of the Health
+    # HRV series. Emitted only when there is actually R-R to report.
+    hrv_lines = []
+    hi = hrv.hrv_from_move(samples)
+    ortho = hi["orthostatic"]
+    rmssd_val = ortho_drop = None
+    if ortho and ortho["lying"]["rmssd_ms"] is not None:
+        rmssd_val = ortho["lying"]["rmssd_ms"]
+        ortho_drop = ortho["rmssd_drop_pct"]
+    elif hi["whole_move"]["rmssd_ms"] is not None:
+        rmssd_val = hi["whole_move"]["rmssd_ms"]
+    if rmssd_val is not None:
+        is_resting = (header["distance"] < HRV_RESTING_MAX_DISTANCE_M
+                      and header["heartrate_avg"] > 0)
+        hrv_lines.append(f'      <hrv_rmssd>{rmssd_val}</hrv_rmssd>')
+        hrv_lines.append(f'      <hrv_resting>{1 if is_resting else 0}</hrv_resting>')
+        if ortho_drop is not None:
+            hrv_lines.append(f'      <hrv_ortho_drop>{ortho_drop}</hrv_ortho_drop>')
+
     meta_time = (_iso_utc(header["utc_start"]) if "utc_start" in header else
                  f'{header["year"]:04d}-{header["month"]:02d}-{header["day"]:02d}'
                  f'T{header["hour"]:02d}:{header["minute"]:02d}:{header["msec"]//1000:02d}Z')
@@ -657,6 +746,7 @@ def to_gpx(header, samples):
         f'      <peak_training_effect>{header["peak_training_effect"]}</peak_training_effect>',
         f'      <pool_lengths>{header["swimming_pool_lengths"]}</pool_lengths>',
         f'      <max_altitude>{header["altitude_max"]}</max_altitude>',
+        *hrv_lines,
         '    </extensions>',
         '  <trkseg>',
     ]
@@ -706,6 +796,11 @@ def _s32(b, v): b.extend(struct.pack("<i", v))
 
 
 _E, _U8, _U16, _U32, _S32 = 0x00, 0x02, 0x84, 0x86, 0x85  # FIT base-type codes
+_STR, _BYTE = 0x07, 0x0D  # FIT string and byte(array) base-type codes
+# A stable 16-byte application UUID identifying this project's developer-data producer, so
+# intervals.icu / any FIT reader groups our logged-app fields under one known app. Arbitrary
+# but fixed: "AMBIT-APP-RULELOG" as bytes, padded to 16.
+_DEV_APP_ID = b"AMBIT-APP-RULLOG"  # exactly 16 bytes
 
 
 def _write_def(b, local, global_num, fields):
@@ -736,15 +831,51 @@ def _to_fit_sport(activity_type):
     return 0  # generic
 
 
-def to_fit(header, samples):
+# Optional native-stream targets a logged Suunto App output can be mapped onto, so it rides in
+# as a standard intervals.icu stream (getting that stream's native analytics) INSTEAD OF only
+# the custom developer field. The developer field is always emitted regardless; this is purely
+# additive and off by default - the user opts a specific app in. Each entry: FIT `record` field
+# number, byte size, base type, and the FIT "invalid" fill for a sample with no value yet.
+#   name -> (field_num, size, base_type, invalid)
+FIT_STREAM_TARGETS = {
+    "power":     (7, 2, _U16, 0xFFFF),        # intervals shows this as Power (watts)
+    "cadence":   (4, 1, _U8, 0xFF),           # Cadence (rpm/spm)
+    "heartrate": (3, 1, _U8, 0xFF),           # Heart rate (overwrites real HR - use with care)
+}
+
+
+def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     """Port of generateFitFile() - takes this project's own already-decoded header/samples
     (the equivalent of what the TS version gets after parseTrackPoints() re-reads a GPX) and
     returns raw FIT bytes. header['distance']/['duration_ms']/['ascent'] are used directly,
     matching the TS `activity.duration_s || stats...` fallback (we always have the real
-    watch-reported values, so the fallback branch never applies here)."""
+    watch-reported values, so the fallback branch never applies here).
+
+    Logged Suunto App outputs (ruleoutput1..5, LogRule=1) are carried through as FIT
+    *developer fields* - one per slot present - so analysis tools (intervals.icu included)
+    surface each as its own graph. `rule_labels` optionally maps a slot name ("ruleoutput1")
+    to a human field name ("Steps"); absent, the raw slot name is used. See ruleoutput_series
+    and app_logging.py for the mechanism these values come from."""
     points = extract_track_points(header, samples)
     if not points:
         raise ValueError("no GPS points in this entry")
+
+    # Which logged-app slots this move actually carries (sentinel-filtered), in slot order.
+    rule_labels = rule_labels or {}
+    present = ruleoutput_series(samples)
+    rule_slots = [n for n in ("ruleoutput1", "ruleoutput2", "ruleoutput3",
+                              "ruleoutput4", "ruleoutput5") if n in present]
+    # Optional per-slot mapping onto a native stream (see FIT_STREAM_TARGETS). Keyed by slot
+    # name ("ruleoutput1"); only present, recognised targets are kept. Two slots can't share a
+    # native field, so first-wins on a collision.
+    rule_stream_map = rule_stream_map or {}
+    mapped = []                      # [(slot_name, field_num, size, base, invalid)]
+    used_fields = set()
+    for name in rule_slots:
+        target = FIT_STREAM_TARGETS.get((rule_stream_map.get(name) or "").lower())
+        if target and target[0] not in used_fields:
+            mapped.append((name, *target))
+            used_fields.add(target[0])
 
     start_epoch = int(points[0]["time"].timestamp())
     end_epoch = int(points[-1]["time"].timestamp())
@@ -808,9 +939,46 @@ def to_fit(header, samples):
     _u8(data, 9)          # event = 9 (lap)
     _u8(data, 1)
 
-    # record (local 4, global 20) - definition, then one data record per point
-    _write_def(data, 4, 20,
-                [(253, 4, _U32), (0, 4, _S32), (1, 4, _S32), (2, 2, _U16), (5, 4, _U32)])
+    # Developer-data declarations for the logged Suunto App outputs (FIT dev fields). One
+    # developer_data_id (our fixed app UUID) plus one field_description per present slot; the
+    # record messages below then carry each slot's value as a developer field.
+    if rule_slots:
+        # developer_data_id (local 5, global 207): application_id[16 byte], developer_data_index
+        _write_def(data, 5, 207, [(1, 16, _BYTE), (3, 1, _U8)])
+        _u8(data, 5)
+        data.extend(_DEV_APP_ID)
+        _u8(data, 0)                          # developer_data_index = 0
+        # field_description (local 6, global 206) - re-sent per slot (variable-length strings
+        # mean each needs its own definition sizing).
+        for slot_no, name in enumerate(rule_slots):
+            label = (rule_labels.get(name) or name).encode("utf-8", "replace") + b"\x00"
+            _write_def(data, 6, 206, [
+                (0, 1, _U8), (1, 1, _U8), (2, 1, _U8), (3, len(label), _STR)])
+            _u8(data, 6)
+            _u8(data, 0)                      # developer_data_index
+            _u8(data, slot_no)                # field_definition_number (our dev field id)
+            _u8(data, _S32)                   # fit_base_type_id = sint32 (raw i32, 1:1)
+            data.extend(label)                # field_name
+
+    # record (local 4, global 20) - definition, then one data record per point. When apps are
+    # logged, the definition also declares one developer field per slot (a trailing dev-field
+    # block: [count][ (dev_field_num, size, dev_data_index) ...]).
+    # Definition header: 0x40 = definition; 0x20 (developer-data flag) MUST be set too when the
+    # definition declares developer fields, else a reader won't read the trailing dev block.
+    _u8(data, 0x40 | (0x20 if rule_slots else 0) | 4)
+    _u8(data, 0)                              # reserved
+    _u8(data, 0)                              # architecture: little-endian
+    _u16(data, 20)                            # global message number: record
+    native_fields = [(253, 4, _U32), (0, 4, _S32), (1, 4, _S32), (2, 2, _U16), (5, 4, _U32)]
+    # Append any app-outputs the user opted to map onto a native stream (power/cadence/hr).
+    native_fields += [(fnum, size, base) for _, fnum, size, base, _ in mapped]
+    _u8(data, len(native_fields))
+    for num, size, base_type in native_fields:
+        _u8(data, num); _u8(data, size); _u8(data, base_type)
+    if rule_slots:
+        _u8(data, len(rule_slots))            # number of developer fields
+        for slot_no, _ in enumerate(rule_slots):
+            _u8(data, slot_no); _u8(data, 4); _u8(data, 0)  # (dev field num, size=4, dev idx)
 
     SEMI = (2 ** 31) / 180  # degrees -> semicircles
     cum_dist = 0.0
@@ -832,6 +1000,21 @@ def to_fit(header, samples):
         _s32(data, lng)
         _u16(data, alt)
         _u32(data, round(cum_dist * 100))
+        rules_here = p.get("rules") or {}
+        # Mapped native-stream values (clamped to each field's range; the field's own FIT
+        # "invalid" fill until the app's first value). Written before the dev fields, matching
+        # the definition order above.
+        for name, _fnum, size, base, invalid in mapped:
+            v = rules_here.get(name)
+            if v is None:
+                out = invalid
+            else:
+                out = max(0, min(v, 0xFFFE if size == 2 else 0xFE))
+            (_u16 if size == 2 else _u8)(data, out)
+        # developer field values, carried forward from the latest periodic ruleoutput seen at
+        # or before this point (0x7FFFFFFF = FIT sint32 "invalid" until the first real value).
+        for name in rule_slots:
+            _s32(data, rules_here.get(name, 0x7FFFFFFF))
 
     hdr = bytearray()
     _u8(hdr, 14)                    # header size
@@ -855,6 +1038,12 @@ def main():
                      help="write one .gpx file per entry found into this directory")
     ap.add_argument("--fit-out", metavar="DIR",
                      help="write one .fit file per entry found into this directory")
+    ap.add_argument("--map", action="append", default=[], metavar="APP=STREAM",
+                     help="OPTIONAL: also carry a logged app's output as a native FIT stream so "
+                          "intervals.icu graphs it with that stream's analytics. APP is the app "
+                          "name or a ruleoutputN slot; STREAM is one of "
+                          f"{'/'.join(sorted(FIT_STREAM_TARGETS))}. The custom developer field "
+                          "is always emitted regardless; repeat --map for more apps.")
     # Real, 2026-08-11 (desktop Activities page perf audit: every refresh re-decoded every
     # activity ever recorded, every time). The caller (server.py, on behalf of desktop's own
     # local cache) already knows how many activities it has from a previous run - passing
@@ -874,7 +1063,24 @@ def main():
                      help="also tell the watch each newly-read move is synced (0x1201 write)")
     args = ap.parse_args()
 
+    # Parse --map APP=STREAM pairs once into {key_lower: stream_lower}. Key may be an app name
+    # or a ruleoutputN slot; resolved to the actual slot per move below.
+    user_stream_map = {}
+    for pair in args.map:
+        if "=" not in pair:
+            ap.error(f"--map expects APP=STREAM, got {pair!r}")
+        key, _, stream = pair.partition("=")
+        stream = stream.strip().lower()
+        if stream not in FIT_STREAM_TARGETS:
+            ap.error(f"--map stream must be one of {sorted(FIT_STREAM_TARGETS)}, got {stream!r}")
+        user_stream_map[key.strip().lower()] = stream
+
     link = None
+    link = None
+    # Lazily-read CustomModes/Apps dumps used only to LABEL logged-app FIT fields by app name
+    # (a nicety). Loaded once, on the first move that actually has a ruleoutput, and only when
+    # reading a live watch - so a log with no logged apps pays nothing.
+    _label_cache = {"loaded": False, "cm": None, "apps": None}
     if args.from_file:
         with open(args.from_file, "rb") as f:
             data = f.read()
@@ -959,10 +1165,37 @@ def main():
         # Logged Suunto App outputs (LogRule=1). Report them so a move recorded with app
         # logging on can be confirmed here, and the raw range read off to calibrate scaling.
         rules = ruleoutput_series(samples)
+        # Resolve app-name labels once, on the first move that has any logged output (live only).
+        rule_labels = {}
+        if rules and link is not None and not _label_cache["loaded"]:
+            _label_cache["loaded"] = True
+            try:
+                import custom_modes as _cm
+                import apps as _apps
+                _label_cache["cm"] = read_flash(link, _cm.CUSTOM_MODES_BASE,
+                                                _cm.CUSTOM_MODES_SIZE, label="")
+                _label_cache["apps"] = _apps.read_apps_region(link)
+            except Exception:
+                pass
+        if rules:
+            rule_labels = resolve_rule_labels(samples, _label_cache["cm"], _label_cache["apps"])
         for name in sorted(rules):
             vals = rules[name]
-            print(f"  {name}: {len(vals)} logged sample(s), raw range "
-                  f"{min(vals)}..{max(vals)} (Suunto App output - raw i32, scaling TBD)")
+            lbl = f" ({rule_labels[name]})" if name in rule_labels else ""
+            print(f"  {name}{lbl}: {len(vals)} logged sample(s), raw range "
+                  f"{min(vals)}..{max(vals)} (Suunto App output - raw i32, verbatim)")
+        # Sidecar for the desktop/backend: the per-slot logged-app series, so the app can graph
+        # it without re-parsing FIT. Written next to the gpx/fit, one JSON per move that has any.
+        if rules and (args.gpx_out or args.fit_out):
+            import os
+            outdir = args.fit_out or args.gpx_out
+            os.makedirs(outdir, exist_ok=True)
+            times = ruleoutput_times(samples)
+            sidecar = {name: {"label": rule_labels.get(name, name),
+                              "times": times.get(name, []), "values": rules[name]}
+                       for name in rules}
+            with open(os.path.join(outdir, f"move{count}.rules.json"), "w") as f:
+                json.dump(sidecar, f)
         if args.gpx_out:
             import os
             os.makedirs(args.gpx_out, exist_ok=True)
@@ -975,7 +1208,16 @@ def main():
             os.makedirs(args.fit_out, exist_ok=True)
             path = os.path.join(args.fit_out, f"move{count}.fit")
             try:
-                fit_bytes = to_fit(header, samples)
+                # Translate the user's app-name/slot-keyed map to this move's slot names.
+                per_move_map = {}
+                if user_stream_map:
+                    for slot in rules:
+                        key_label = (rule_labels.get(slot) or "").lower()
+                        stream = user_stream_map.get(slot.lower()) or user_stream_map.get(key_label)
+                        if stream:
+                            per_move_map[slot] = stream
+                fit_bytes = to_fit(header, samples, rule_labels=rule_labels,
+                                   rule_stream_map=per_move_map)
             except ValueError as exc:
                 # to_fit() deliberately requires at least one GPS point (real, not a bug -
                 # a GPS-less entry has no track to build FIT records from). A genuine,
@@ -1008,7 +1250,6 @@ def main():
     # files themselves, same directory convention, no separate --json flag needed for one
     # integer.
     if args.gpx_out:
-        import json
         import os
         with open(os.path.join(args.gpx_out, "master.json"), "w") as f:
             json.dump({"total_entries": master["entries"]}, f)

@@ -19,20 +19,39 @@ import { useThemeMode } from './ThemeModeContext';
 
 export interface V3Colors {
   background: string;
+  // 2026-08-25 tune-up (mutualised from desktop/qml/Theme.qml the same session): the surface
+  // stepping the light theme was missing. `surface` is the content region a screen sits on,
+  // `cardNested` is for things inside a card (list rows, grouped settings), `border`/
+  // `borderStrong` are the hairline between levels. `hard` is the orange training-load
+  // semantic between warning-amber and error-red.
+  surface: string;
   card: string;
+  cardNested: string;
+  border: string;
+  borderStrong: string;
   primary: string;
   secondary: string;
   accent: string;
   success: string;
   warning: string;
+  hard: string;
   error: string;
   text: string;
   mutedText: string;
 }
 
+// 2026-08-25 "UI tune-up" (André): calmer, lower-chroma colour + real surface hierarchy,
+// agreed off an editable design canvas and applied identically to desktop (Theme.qml) and
+// the Ember PWA (ember/app.css) so all three apps stay one coherent theme. The teal identity
+// (#167E6A) and the semantic ramp were pulled toward quieter tones; green is still the
+// identity, just less flashy.
 export const v3Light: V3Colors = {
-  background: '#F6F8F9',
+  background: '#E9EDF0',
+  surface:    '#F2F5F7',
   card:       '#FFFFFF',
+  cardNested: '#EDF1F4',
+  border:     '#DCE2E7',
+  borderStrong: '#C6CED6',
   // 2026-08-15 (André, full design-parity audit: "the android app should look 100%
   // identical to the desktop except the intervals. Desktop is our baseline"). Light-mode
   // primary/accent were a slate grey (#475569/#64748B) - a leftover from the 2026-08-09
@@ -41,25 +60,35 @@ export const v3Light: V3Colors = {
   // never brought back into line: desktop stayed on its teal identity (Theme.qml's
   // _lightPrimary #167E6A / _lightAccent #2FA98C), Android was left grey - so the two apps
   // did not match in light mode. Restored to desktop's exact teal so they do.
-  primary:    '#167E6A',
+  primary:    '#2E6A57',
   secondary:  '#5B6270',
-  accent:     '#2FA98C',
-  success:    '#1A7F37',
-  warning:    '#946200',
-  error:      '#C0392B',
+  accent:     '#3C8571',
+  success:    '#3E7D52',
+  warning:    '#9A7A22',
+  hard:       '#B5652F',
+  error:      '#B0473C',
   text:       '#1A1D22',
   mutedText:  '#5B6270',
 };
 
 export const v3Dark: V3Colors = {
-  background: '#14171C',
+  background: '#0F1216',
+  surface:    '#171B22',
   card:       '#1B1F27',
-  primary:    '#9CA3AF',
-  secondary:  '#9AA3AF',
-  accent:     '#CBD5E1',
-  success:    '#4CAF6D',
-  warning:    '#E0A73B',
-  error:      '#E0655A',
+  cardNested: '#232935',
+  border:     '#2B313C',
+  borderStrong: '#3A414E',
+  // 2026-08-25 pass 2: dark primary was a grey that made every link/active element read as
+  // dead grey-on-grey (André, seeing it live). Now a calm pine green - same hue as light's
+  // #2E6A57, lifted for the dark card - so dark gets one living accent. Secondary lifted so
+  // labels stay legible. Kept identical to desktop Theme.qml's _dark* values.
+  primary:    '#59A88C',
+  secondary:  '#ADB6C2',
+  accent:     '#7BC0A6',
+  success:    '#5C9E72',
+  warning:    '#CB9A45',
+  hard:       '#CE8258',
+  error:      '#CE6A60',
   text:       '#E9EBEE',
   // 2026-08-11 (André, S2): was #9AA3AF, which measures 6.5:1 on the dark card but is the
   // colour caption text uses - at that size antialiasing renders it noticeably dimmer than

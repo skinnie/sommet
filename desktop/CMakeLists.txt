@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.1.46 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -150,6 +150,7 @@ qt_add_qml_module(ambitapp
         qml/components/MapView.qml
         qml/components/ActivityCard.qml
         qml/components/ActivityDetail.qml
+        qml/components/RuleOutputChart.qml
         qml/components/EtrexIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
@@ -168,6 +169,11 @@ qt_add_qml_module(ambitapp
         qml/pages/SettingsPage.qml
         qml/pages/SportModesPage.qml
         qml/pages/IntervalsPage.qml
+        qml/pages/WeightPage.qml
+        qml/pages/HealthPage.qml
+        qml/pages/EmberPage.qml
+        qml/components/EmberBars.qml
+        qml/components/MetricChart.qml
         qml/pages/AppZonePage.qml
         qml/pages/TrainingProgramPage.qml
         qml/pages/GpsTrackPodPage.qml
@@ -201,6 +207,10 @@ qt_add_qml_module(ambitapp
         src/services/localfileservice.cpp
         src/services/garminservice.h
         src/services/garminservice.cpp
+        src/services/weightservice.h
+        src/services/weightservice.cpp
+        src/services/healthservice.h
+        src/services/healthservice.cpp
         src/services/intervalsservice.h
         src/services/intervalsservice.cpp
         src/services/appzoneservice.h

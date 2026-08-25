@@ -186,7 +186,7 @@ ThemedDialog {
                     width: parent.width
                     height: 40
                     radius: Theme.radiusSmall
-                    color: Theme.background
+                    color: Theme.cardNested
 
                     Text {
                         anchors.left: parent.left
@@ -216,11 +216,11 @@ ThemedDialog {
                 enabled: root.legs.length < root.maxLegs
                 onClicked: legMenu.open()
 
-                Menu {
+                ThemedMenu {
                     id: legMenu
                     Repeater {
                         model: root.availableModes
-                        delegate: MenuItem {
+                        delegate: ThemedMenuItem {
                             required property var modelData
                             text: modelData.name
                             onTriggered: root.addLeg(modelData.name)

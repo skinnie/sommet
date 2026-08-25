@@ -45,6 +45,28 @@ QtObject {
         // ordered list of metric keys (see ActivityMetrics.qml). Default matches the original
         // four fixed columns; the user adds/changes columns via the header dropdowns + "+".
         property string activityColumns: "distance,duration,ascent,calories"
+        // André, 2026-08-25: the Ember fasting/calorie companion. `emberEnabled` shows/hides
+        // its sidebar entry; `emberInstallUrl` is the phone-install link surfaced in Settings.
+        // (Persisted here alongside the other app-view prefs, the same mechanism the theme
+        // override uses - no new settings singleton needed for two values.)
+        //
+        // Ember is a personal side-project, not part of the public Sommet release, so it ships
+        // HIDDEN: `emberEnabled` defaults false, and its Settings card only appears once the
+        // easter egg is found - tapping the version label 10x sets `emberUnlocked` (André,
+        // 2026-08-25: "I don't want this app visible to the public for now"). His own machine
+        // keeps whatever these were already persisted as.
+        property bool emberEnabled: false
+        property bool emberUnlocked: false
+        // Empty by DEFAULT on purpose (2026-08-26, release prep): this used to ship André's own
+        // personal trycloudflare tunnel URL, which is both ephemeral (dead for anyone else) and
+        // personal infrastructure that has no business in a public release. Each user pastes
+        // their own Ember URL in Settings; the value is persisted per-install, so an existing
+        // setup keeps whatever it already had - only a fresh install starts blank.
+        property string emberInstallUrl: ""
+        // When on, Ember's daily totals are also pushed to intervals.icu wellness
+        // (kcalConsumed / hydrationVolume / macros + the FastingTime & Coffees custom fields)
+        // via tools/ember_to_intervals.py, reusing the intervals connection Sommet already has.
+        property bool emberSyncIntervals: false
     }
 
     // "map" (cards with a track thumbnail, the original) or "list" (rows, no maps).
@@ -52,6 +74,10 @@ QtObject {
     property alias routesView: settingsId.routesView
     property alias poisView: settingsId.poisView
     property alias activityColumns: settingsId.activityColumns
+    property alias emberEnabled: settingsId.emberEnabled
+    property alias emberUnlocked: settingsId.emberUnlocked
+    property alias emberInstallUrl: settingsId.emberInstallUrl
+    property alias emberSyncIntervals: settingsId.emberSyncIntervals
 
     // Convenience: the column keys as a real array, and a setter that writes them back as CSV.
     function activityColumnList() {
@@ -68,21 +94,50 @@ QtObject {
     }
 
     // --- Light palette ---
-    readonly property color _lightBackground: "#F6F8F9"
+    // Real, 2026-08-25 (André, the "UI tune-up" pass - calmer + clearer surface hierarchy,
+    // agreed off an editable design canvas). Two changes here, both mutualised to Android
+    // (android/src/theme/v3.ts) and the Ember PWA (ember/app.css) the same session so all
+    // three apps stay one coherent theme:
+    //   1. SURFACE STEPPING. The old palette had only background + card, so nothing could
+    //      sit "between" and the light theme read washed-out (cards floated on shadow alone).
+    //      Added `surface` (the content region a page sits on), `cardNested` (inset groups /
+    //      list rows), and a real `border`/`borderStrong` hairline - the piece the light
+    //      theme was missing entirely. `background` also nudged a touch darker for separation.
+    //   2. CALMER COLOUR. The teal identity (#167E6A) and the semantic ramp were too
+    //      saturated for the restrained, technical feel we want; each pulled toward a lower-
+    //      chroma tone. Green is still the identity, just quieter. Added `hard` (orange) so
+    //      training-load / "hard" states have a semantic between warning-amber and error-red.
+    readonly property color _lightBackground: "#E9EDF0"
+    readonly property color _lightSurface: "#F2F5F7"
     readonly property color _lightCard: "#FFFFFF"
-    readonly property color _lightPrimary: "#167E6A"
+    readonly property color _lightCardNested: "#EDF1F4"
+    readonly property color _lightBorder: "#DCE2E7"
+    readonly property color _lightBorderStrong: "#C6CED6"
+    readonly property color _lightPrimary: "#2E6A57"
     readonly property color _lightSecondary: "#5B6270"
-    readonly property color _lightAccent: "#2FA98C"
-    readonly property color _lightSuccess: "#1A7F37"
-    readonly property color _lightWarning: "#946200"
-    readonly property color _lightError: "#C0392B"
+    readonly property color _lightAccent: "#3C8571"
+    readonly property color _lightSuccess: "#3E7D52"
+    readonly property color _lightWarning: "#9A7A22"
+    readonly property color _lightHard: "#B5652F"
+    readonly property color _lightError: "#B0473C"
     readonly property color _lightText: "#1A1D22"
     readonly property color _lightMutedText: "#5B6270"
 
     // --- Dark palette --- (not a naive invert - contrast and the accent's own legibility
     // are each checked on this ground independently, per this project's own design practice)
-    readonly property color _darkBackground: "#14171C"
+    // 2026-08-25 (same tune-up pass): background deepened #14171C -> #0F1216 so the new
+    // `surface` (#171B22) and `cardNested` (#232935) each read as a distinct step above it;
+    // dark already had stronger hierarchy than light, this just formalises the extra levels.
+    readonly property color _darkBackground: "#0F1216"
+    readonly property color _darkSurface: "#171B22"
     readonly property color _darkCard: "#1B1F27"
+    readonly property color _darkCardNested: "#232935"
+    readonly property color _darkBorder: "#2B313C"
+    readonly property color _darkBorderStrong: "#3A414E"
+    // Orange "hard" semantic, dark. Kept a touch brighter than light so it holds on the
+    // dark card, the same way _darkWarning/_darkError already sit brighter than their light
+    // counterparts.
+    readonly property color _darkHard: "#CE8258"
     // Real, 2026-08-10 ("desktop version in dark mode still has the cyan color like the
     // android version had, can you use the same scheme of colors we did for the android
     // (grey)") - primary/accent were still the original teal (#57C9B3/#7CD6C4) this whole
@@ -91,12 +146,22 @@ QtObject {
     // header comment: "why we have this cyano blue? ... change to a nicer grey" - a real,
     // explicit choice, not a bug). These two values are that same grey, so both platforms'
     // dark mode match again - light mode wasn't part of this request, left as-is.
-    readonly property color _darkPrimary: "#9CA3AF"
-    readonly property color _darkSecondary: "#9AA3AF"
-    readonly property color _darkAccent: "#CBD5E1"
-    readonly property color _darkSuccess: "#4CAF6D"
-    readonly property color _darkWarning: "#E0A73B"
-    readonly property color _darkError: "#E0655A"
+    // 2026-08-25, second tune-up pass (André, seeing dark live: "grey letters non visible...
+    // not smooth or calm at all"). Root cause: EVERY interactive element - links (Open Totals,
+    // Synced, View guide) and the active-nav pill - is painted Theme.primary, which was a grey
+    // (#9CA3AF). Grey links on grey text on a grey-labelled card read as dead, murky mush, not
+    // calm. Primary is now a calm pine green, the same hue family as the light theme's
+    // _lightPrimary (#2E6A57) but lifted for legibility on the dark card (~7:1 on _darkCard) -
+    // so the dark theme gets the single living green anchor the light one already had. This
+    // reverses the earlier all-grey dark choice (which was really about killing a garish CYAN,
+    // #57C9B3 - a muted pine is not that). Secondary lifted too, so labels stop disappearing.
+    readonly property color _darkPrimary: "#59A88C"
+    readonly property color _darkSecondary: "#ADB6C2"
+    readonly property color _darkAccent: "#7BC0A6"
+    // 2026-08-25 tune-up: semantic ramp desaturated to match the calmer light palette.
+    readonly property color _darkSuccess: "#5C9E72"
+    readonly property color _darkWarning: "#CB9A45"
+    readonly property color _darkError: "#CE6A60"
     readonly property color _darkText: "#E9EBEE"
     // Real, 2026-08-11 (André, S2: "on dark mode, POIs and Routes are grey, we already fight
     // that on android app, we need a more visible color, without hurting the eyes"). Was
@@ -110,7 +175,18 @@ QtObject {
     readonly property color _darkMutedText: "#B4BDC9"
 
     readonly property color background: isDark ? _darkBackground : _lightBackground
+    // 2026-08-25 surface-hierarchy tokens (see the light-palette block above for the why).
+    // `surface` is the content region every page sits on - so cards rest ON something rather
+    // than floating on `background`; `cardNested` is for things that live INSIDE a card
+    // (list rows, settings groups, fun-facts); `border`/`borderStrong` are the hairline that
+    // separates every level. Card.qml's `variant` property is what actually picks between
+    // these per card.
+    readonly property color surface: isDark ? _darkSurface : _lightSurface
     readonly property color card: isDark ? _darkCard : _lightCard
+    readonly property color cardNested: isDark ? _darkCardNested : _lightCardNested
+    readonly property color border: isDark ? _darkBorder : _lightBorder
+    readonly property color borderStrong: isDark ? _darkBorderStrong : _lightBorderStrong
+    readonly property color hard: isDark ? _darkHard : _lightHard
     readonly property color primary: isDark ? _darkPrimary : _lightPrimary
 
     // Ink drawn ON TOP OF MAP TILES - the track line and the POI markers. Deliberately NOT

@@ -26,11 +26,18 @@ ComboBox {
     // null for a plain page combo, which is then bounded by the window as before.
     property Item boundsItem: null
 
+    // Real, 2026-08-25 (André: "some menus have white with black rounding and others just
+    // grey... shouldn't they be all similar?" - Gear's "None ▾" pickers sat white-bordered
+    // right next to its own grey Rename/Retire/Delete buttons). The CLOSED box is a plain
+    // input control, same family as RoundedButton/RoundedTextField, so it gets the same flat
+    // Theme.cardNested fill + quiet Theme.border hairline now. The dropdown POPUP below is
+    // deliberately left as Theme.card + border - it's a floating SURFACE (like a Dialog/Menu),
+    // not an inline control, and that's the one place white-with-border is still correct.
     background: Rectangle {
         radius: Theme.radiusSmall
-        color: Theme.card
+        color: Theme.cardNested
         border.width: 1
-        border.color: control.activeFocus ? Theme.primary : Theme.mutedText
+        border.color: control.activeFocus ? Theme.primary : Theme.border
     }
 
     contentItem: Text {

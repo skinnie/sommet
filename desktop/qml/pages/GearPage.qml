@@ -65,17 +65,17 @@ Item {
         confirmDialog.open()
     }
 
-    Dialog {
+    ThemedDialog {
         id: nameDialog
         property var cb: null
         anchors.centerIn: Overlay.overlay
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
-        TextField { id: nameField; implicitWidth: 320; onAccepted: nameDialog.accept() }
+        RoundedTextField { id: nameField; implicitWidth: 320; onAccepted: nameDialog.accept() }
         onAccepted: { if (cb && nameField.text.trim().length > 0) cb(nameField.text.trim()); cb = null }
     }
 
-    Dialog {
+    ThemedDialog {
         id: remDialog
         property string gearId: ""
         title: qsTr("Add reminder")
@@ -84,9 +84,9 @@ Item {
         standardButtons: Dialog.Ok | Dialog.Cancel
         ColumnLayout {
             spacing: Theme.spacingSmall
-            TextField { id: remName; implicitWidth: 320; placeholderText: qsTr("Name (e.g. check chain)") }
+            RoundedTextField { id: remName; implicitWidth: 320; placeholderText: qsTr("Name (e.g. check chain)") }
             RowLayout {
-                TextField { id: remValue; Layout.fillWidth: true; placeholderText: qsTr("Every…"); inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                RoundedTextField { id: remValue; Layout.fillWidth: true; placeholderText: qsTr("Every…"); inputMethodHints: Qt.ImhFormattedNumbersOnly }
                 RoundedComboBox { id: remUnit; model: ["km", "h", "days", "activities"]; Layout.preferredWidth: 140 }
             }
         }
@@ -100,14 +100,14 @@ Item {
         }
     }
 
-    Dialog {
+    ThemedDialog {
         id: confirmDialog
         property string gearId: ""
         title: qsTr("Confirm")
         anchors.centerIn: Overlay.overlay
         modal: true
-        standardButtons: Dialog.Yes | Dialog.No
-        Label { id: confirmLabel }
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label { id: confirmLabel; color: Theme.text }
         onAccepted: GearService.removeGear(gearId)
     }
 
@@ -158,7 +158,7 @@ Item {
 
             Text { text: qsTr("Within %1 km").arg(Math.round(exRadius.value))
                    color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
-            Slider { id: exRadius; from: 10; to: 1000; stepSize: 10; value: 250; Layout.fillWidth: true }
+            RoundedSlider { id: exRadius; from: 10; to: 1000; stepSize: 10; value: 250; Layout.fillWidth: true }
 
             Text { text: qsTr("Use this gear"); color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
             RoundedComboBox { id: exGear; Layout.fillWidth: true; textRole: "text" }
@@ -184,7 +184,9 @@ Item {
         }
     }
 
-    Rectangle { anchors.fill: parent; color: Theme.background }
+    // 2026-08-25 tune-up: the content region is `surface` now (see Main.qml), so a page that
+    // paints its own ground uses surface too, or it'd read a step off from every other page.
+    Rectangle { anchors.fill: parent; color: Theme.surface }
 
     ColumnLayout {
         anchors.fill: parent
@@ -337,11 +339,11 @@ Item {
                                     // Gear actions
                                     RowLayout {
                                         spacing: Theme.spacingSmall
-                                        Button { flat: true; text: qsTr("Rename"); onClicked: root.askName(qsTr("Rename"), modelData.name, function (n) { GearService.renameGear(modelData.id, n) }) }
-                                        Button { flat: true; text: modelData.retired ? qsTr("Un-retire") : qsTr("Retire"); onClicked: GearService.setRetired(modelData.id, !modelData.retired) }
-                                        Button { flat: true; text: qsTr("Add part"); onClicked: root.askName(qsTr("Add component"), "", function (n) { GearService.addComponent(modelData.id, n, "Other") }) }
-                                        Button { flat: true; text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
-                                        Button { flat: true; text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
+                                        RoundedButton { text: qsTr("Rename"); onClicked: root.askName(qsTr("Rename"), modelData.name, function (n) { GearService.renameGear(modelData.id, n) }) }
+                                        RoundedButton { text: modelData.retired ? qsTr("Un-retire") : qsTr("Retire"); onClicked: GearService.setRetired(modelData.id, !modelData.retired) }
+                                        RoundedButton { text: qsTr("Add part"); onClicked: root.askName(qsTr("Add component"), "", function (n) { GearService.addComponent(modelData.id, n, "Other") }) }
+                                        RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
+                                        RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                     }
 
                                     // Reminders on the gear
@@ -357,7 +359,7 @@ Item {
                                                 color: modelData.due ? Theme.error : modelData.soon ? Theme.warning : Theme.mutedText
                                                 font.pixelSize: Theme.fontSizeCaption
                                             }
-                                            Button { flat: true; text: "×"; onClicked: GearService.removeReminder(parentGear.id, modelData.id) }
+                                            RoundedButton { text: "×"; onClicked: GearService.removeReminder(parentGear.id, modelData.id) }
                                         }
                                     }
 
@@ -371,8 +373,8 @@ Item {
                                             RowLayout {
                                                 Layout.fillWidth: true
                                                 Text { Layout.fillWidth: true; text: "• " + modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeBody }
-                                                Button { flat: true; text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
-                                                Button { flat: true; text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
+                                                RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
+                                                RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                             }
                                             Repeater {
                                                 model: modelData.reminders

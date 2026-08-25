@@ -70,6 +70,14 @@ public:
 
     Q_INVOKABLE void refresh();
 
+    // Delete one activity (André, 2026-08-25). Removes it from the local database AND remembers
+    // it (a tombstone keyed by start-time|name) so re-syncing the watch or re-importing from
+    // intervals/Garmin never brings it back - the watch's own log is circular and cannot be
+    // deleted, so a tombstone is the only way a deleted watch move stays gone. When the activity
+    // came FROM intervals.icu (source == "intervals"), it is ALSO deleted there permanently, per
+    // André's choice. The row is identified by its `index` (the DB idx primary key).
+    Q_INVOKABLE void deleteActivity(const QVariantMap &activity);
+
     // Optional per-app "send this logged Suunto App output to intervals.icu as this native
     // stream" choice (empty/"custom" = default, developer field only). Persisted in QSettings;
     // applied to the FIT the backend generates on the next refresh. See requestActivities.
@@ -81,6 +89,26 @@ public:
     // otherwise the last N days. Imported rows are marked source="intervals" so they blend into
     // the lists but stay tellable-apart, and they never touch the watch-sync known-count.
     Q_INVOKABLE void importFromIntervals(int oldestDays);
+
+    // Backfill the GPS track for already-imported intervals.icu activities (André, 2026-08-25:
+    // "we have activities with distance (running, so outside! so gps!) and they say no gps").
+    // importFromIntervals only ever fetched the activity-LIST JSON, which carries summary
+    // numbers and no positions at all - so every imported outdoor move was stored with an empty
+    // track and rendered as "No GPS track" even though intervals.icu had the real trace.
+    //
+    // The per-activity stream endpoint is a SEPARATE call, so this cannot be folded into the
+    // list request: it is one GET per activity. With thousands of rows that is far too many to
+    // fire at once, so this walks a queue ONE request at a time, newest-first, and only for rows
+    // that actually need it (source='intervals', a real distance, no track yet). `maxCount`
+    // bounds a single run so a first backfill is progressive rather than a multi-thousand-call
+    // stampede; call it again to continue where it left off.
+    Q_INVOKABLE void backfillIntervalsTracks(int maxCount);
+
+    // Import activities FROM Garmin Connect into the local DB (André, 2026-08-24) - the cloud
+    // account (a Garmin watch/Edge), distinct from the eTrex USB path in GarminService. Fetched
+    // via the backend's /api/garmin/activities (tools/garmin_sync.py owns the OAuth). Rows are
+    // tagged source="garmin"; a pull-only refresh, watch rows untouched.
+    Q_INVOKABLE void importFromGarmin(int days);
 
     // Export (upload) the watch's own activities TO intervals.icu as FIT files (André,
     // 2026-08-24). Only rows we haven't already uploaded; each is marked once it lands.
@@ -100,12 +128,36 @@ public:
     Q_INVOKABLE void exportActivityToIntervals(const QString &name, const QString &fitBase64,
                                                const QString &gpxText);
 
+    // Export one activity to Garmin Connect (the Upload tab's Garmin button). Goes through the
+    // backend (tools/garmin_sync.py --upload owns the OAuth). Garmin dedups by start time.
+    Q_INVOKABLE void exportActivityToGarmin(const QString &name, const QString &fitBase64,
+                                            const QString &gpxText);
+
+    // Bulk-export to Garmin Connect, mirroring the intervals export scope. exportToGarmin()
+    // pushes watch moves (their FIT); exportActivitiesToGarmin() pushes a passed list (eTrex,
+    // GPX). Both dedup by a stored per-activity key so re-running is a no-op (Garmin also dedups
+    // by start time on its side).
+    Q_INVOKABLE void exportToGarmin();
+    Q_INVOKABLE void exportActivitiesToGarmin(const QVariantList &activities);
+
+    // Bulk-export a list of activity maps (each {name, startTime, fitBase64?, gpxText?}) that
+    // aren't already exported. Used for eTrex moves (which live in GarminService, GPX-only);
+    // dedup is by a stable per-activity key kept in QSettings, so re-running is a no-op.
+    Q_INVOKABLE void exportActivitiesToIntervals(const QVariantList &activities);
+
 signals:
     void loadingChanged();
     void activitiesChanged();
     void lastErrorChanged();
     void importFinished(int count);
     void importError(const QString &message);
+    // Emitted after an activity is removed locally (the intervals.icu delete, when it applies,
+    // is fire-and-forget - a cloud failure is surfaced via lastError, not this signal).
+    void activityDeleted(const QString &name);
+    // GPS backfill progress (see backfillIntervalsTracks): `done`/`total` for this run, and a
+    // final count of how many rows actually gained a real track.
+    void trackBackfillProgress(int done, int total);
+    void trackBackfillFinished(int filled, int remaining);
     void exportFinished(int uploaded, int failed);
     void exportError(const QString &message);
 
@@ -125,12 +177,43 @@ private:
     void openDatabase();
     int dbKnownCount();
     void dbClear();
+    // Deleted-activity tombstones (start-time|name). Loaded once from the `deleted_activities`
+    // table in openDatabase(); dbLoadAll() skips any row whose key is in here, so a deleted
+    // move never re-appears however it gets re-inserted (watch re-sync, intervals/Garmin
+    // re-import). deleteActivity() adds to both the table and this set.
+    // GPS backfill state (see backfillIntervalsTracks). One in-flight request at a time: the
+    // queue holds the external_ids still to fetch, and fetchNextTrack() pops one, stores its
+    // track_json, then chains to the next.
+    QStringList m_trackQueue;
+    int m_trackTotal = 0;
+    int m_trackDone = 0;
+    int m_trackFilled = 0;
+    bool m_trackBusy = false;
+    void fetchNextTrack();
+
+    QSet<QString> m_tombstones;
+    void loadTombstones();
+    static QString tombstoneKey(const QString &startTime, const QString &name);
     void dbInsert(int index, const QVariantMap &parsed, const QString &gpxText,
                   const QString &fitBase64, const QString &ruleOutputsJson);
     bool dbLoadAll();
+    // Extracts the resting-HRV readings (5+5 / lie-still tests, hrvResting == 1) from the
+    // loaded activities and persists them to QSettings health/watchHrv as [{date,value}], where
+    // HealthService merges them into the Health page's HRV series as the "watch" source. Kept
+    // decoupled via QSettings (same pattern as manual entries) rather than a direct service ref.
+    void updateWatchHrvStore();
+    void dedupeActivities();
     void importActivitiesInto(const QJsonArray &activities);
+    void importGarminActivitiesInto(const QJsonArray &activities);
     void uploadOneToIntervals(int idx, const QByteArray &fit,
                               const QString &athlete, const QString &key);
+    // Generic single-file uploader used by the per-activity export (FIT or GPX). idx<0 means
+    // "not a DB row" - success isn't recorded against any activity.
+    void uploadFileToIntervals(int idx, const QByteArray &data, const QString &contentType,
+                               const QString &filename, const QString &athlete,
+                               const QString &key);
+    // Upload one activity to Garmin via the backend; counts into the m_export* tally.
+    void uploadToGarmin(const QByteArray &data, bool isFit);
     int m_exportPending = 0;
     int m_exportUploaded = 0;
     int m_exportFailed = 0;

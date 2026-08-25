@@ -420,11 +420,12 @@ def main():
                           " do NOT pin it to a display field - testing whether an unwired"
                           " guidance rule appears in the browsable WORKOUT options menu."
                           " --display/--field not required with this.")
-    ap.add_argument("--log", action="store_true",
-                     help="record this app's output into the Move (LogRule=1) so it can appear"
-                          " as a graph in analysis - reviving the Movescount app-logging"
-                          " feature. Default off, matching SuuntoLink. See app_logging.py to"
-                          " toggle logging on an app that is already installed.")
+    ap.add_argument("--no-log", action="store_true",
+                     help="do NOT record this app's output into the Move (LogRule=0). By"
+                          " default an installed app IS logged (LogRule=1) so its output can"
+                          " appear as a graph in analysis - the standing rule that any app"
+                          " activated in a sport mode gets logged. Pass this to opt a specific"
+                          " app out. See app_logging.py to toggle it on an already-installed app.")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--json", action="store_true",
                      help="print one final JSON line summarizing the result - for"
@@ -478,6 +479,19 @@ def main():
         layout = [("CustomModes", F.CUSTOM_MODES_BASE, payload),
                   ("tail", F.CUSTOM_MODES_BASE, None)]
         send_plan(link, flash, layout, commit=False)
+        if args.write:
+            # Read back and confirm the region landed byte-for-byte (see the app-install path's
+            # own note on the 2026-08-25 garbled write). --restore is idempotent, so on a
+            # mismatch we just report and the caller re-runs - re-writing the same region is the
+            # recovery.
+            readback = read_flash(link, F.CUSTOM_MODES_BASE, len(payload),
+                                  label="CustomModes (verify)")
+            if readback != payload:
+                n = min(len(readback), len(payload))
+                first = next((i for i in range(n) if readback[i] != payload[i]), n)
+                sys.exit(f"CustomModes read-back MISMATCH at 0x{first:x} - the write did not land. "
+                         "Nothing else changed; re-run the same --restore to retry.")
+            print("CustomModes verified: read-back matches.")
         print(f"\n{'wrote' if args.write else 'would write'} {extent} used bytes"
               f" (of {len(new_custom_modes)}) to CustomModes (restore)")
         return 0
@@ -546,7 +560,7 @@ def main():
 
         new_custom_modes = install_app_into_mode(
             current_custom_modes, args.mode, args.display, args.field, rule_idx,
-            as_workout=args.as_workout, log_rule=args.log)
+            as_workout=args.as_workout, log_rule=not args.no_log)
 
         # Refuse to send anything violating the Type/Shortcut invariant (Finding 53's
         # "connect to Moveslink" root cause) - checked here, on the actual bytes about to be
@@ -583,6 +597,36 @@ def main():
         # needs-restart / clock-reset state seen on real hardware after installs.
         send_plan(link, flash, apps_layout, commit=False)
         send_plan(link, flash2, cm_layout, commit=False)
+
+        # Read CustomModes back and confirm the watch actually holds the bytes we built.
+        # install_app_into_mode()'s output is verified to decode clean, so a mismatch here is a
+        # transport/concurrent-access glitch, not a builder bug - seen once (2026-08-25): a
+        # CustomModes write came back 54 bytes shifted with 0x00 runs, scrambling every mode
+        # after the target. Catch it and roll back to the pre-write region (current_custom_modes,
+        # already in memory) using the proven single-region write path, so the watch is NEVER
+        # left corrupted. The Apps write is additive/self-describing and re-run-safe, so the app
+        # entry can stay; only CustomModes is restored.
+        if args.write:
+            readback = read_flash(link, F.CUSTOM_MODES_BASE, len(cm_payload),
+                                  label="CustomModes (verify)")
+            if readback != cm_payload:
+                n = min(len(readback), len(cm_payload))
+                first = next((i for i in range(n) if readback[i] != cm_payload[i]), n)
+                print(f"!! CustomModes read-back MISMATCH at 0x{first:x} - the write did not land "
+                      f"correctly. Rolling back to the pre-write region.")
+                old_payload = current_custom_modes[:cm.used_extent(current_custom_modes)]
+                rb = FlashImage()
+                rb.write(F.CUSTOM_MODES_BASE, old_payload)
+                send_plan(link, rb, [("CustomModes", F.CUSTOM_MODES_BASE, old_payload),
+                                     ("tail", F.CUSTOM_MODES_BASE, None)], commit=False)
+                check = read_flash(link, F.CUSTOM_MODES_BASE, len(old_payload),
+                                   label="CustomModes (rollback verify)")
+                if check == old_payload:
+                    sys.exit("CustomModes write was corrupted; rolled back to the pre-write "
+                             "region and verified. Nothing bad left on the watch - re-run to retry.")
+                sys.exit("CustomModes write was corrupted AND the rollback read-back did not "
+                         "match either - restore manually from your --backup-to file.")
+            print("CustomModes verified: read-back matches the built region byte-for-byte.")
 
     total = sum(len(payload) for _, payload, _ in link.sent)
     print(f"\n{len(link.sent)} messages, {total} payload bytes"

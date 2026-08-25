@@ -455,19 +455,15 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   emptyFilter: { paddingVertical: 40, alignItems: 'center' },
   emptyFilterText: { color: t.mutedText, fontSize: 14 },
   deleteHint: { fontSize: 11, color: t.mutedText, textAlign: 'center', marginTop: 8, marginBottom: 16 },
-  // Card.qml's own real shadow values, applied here directly (not via the <Card> component,
-  // since this is a TouchableOpacity row, not a plain surface) so the activity list matches
-  // every other v3-themed surface in the app.
+  // No shadows (André, 2026-08-25: "all app, desktop android, same for previous rules") -
+  // matches Card.qml/Card.tsx's own hairline-border-instead-of-shadow look.
   card: {
     backgroundColor: t.card,
     borderRadius: 16,
     padding: 16,
     marginBottom: 10,
-    elevation: 3,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.14,
-    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: t.border,
   },
   // v3.0 UI port - real per-activity track preview (ActivitiesPage.qml parity), see
   // ActivityThumbnail.tsx's own comment on why it's a lightweight SVG shape, not a live map.

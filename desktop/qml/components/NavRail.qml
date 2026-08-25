@@ -97,6 +97,33 @@ Rectangle {
             selected: root.currentPage === "gear"
             onClicked: root.pageSelected("gear")
         }
+        // Weight (André, 2026-08-24): body-weight history from intervals.icu today, a Garmin
+        // Index Scale feed later. About your body, not the connected watch - always shown.
+        NavItem {
+            width: parent.width
+            glyph: Icons.weight
+            label: qsTr("Weight")
+            selected: root.currentPage === "weight"
+            onClicked: root.pageSelected("weight")
+        }
+        // Health (André, 2026-08-24): daily resting HR + steps from Garmin Connect.
+        NavItem {
+            width: parent.width
+            glyph: Icons.health
+            label: qsTr("Health")
+            selected: root.currentPage === "health"
+            onClicked: root.pageSelected("health")
+        }
+        // Ember (André, 2026-08-25): fasting + calorie / coffee / water tracker; logs sync
+        // from the phone app. Shown/hidden by the Settings toggle (Theme.emberEnabled).
+        NavItem {
+            width: parent.width
+            visible: Theme.emberEnabled
+            glyph: Icons.ember
+            label: qsTr("Ember")
+            selected: root.currentPage === "ember"
+            onClicked: root.pageSelected("ember")
+        }
         NavItem {
             width: parent.width
             // Nothing to back up, and nothing to restore to, without a device.

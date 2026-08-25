@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import AmbitApp
 
 // The base surface every content card in the app builds on (Home's device card, activity
@@ -15,8 +14,24 @@ Rectangle {
     default property alias content: contentItem.data
     property int padding: Theme.spacingMedium
 
+    // Real, 2026-08-25 (the UI tune-up, then André: "no shadows, all app, desktop android").
+    // One Card, three weights, so pages stop reading at a single uniform emphasis (André's own
+    // words: "a bit noisy... every element the same") - but flat, no shadow anywhere now.
+    //   "primary" - the one thing that matters on a page (device status, readiness): card
+    //               fill + hairline border. This is the default, so a bare `Card { }` keeps
+    //               behaving like every existing card.
+    //   "flat"    - everything else that is still a card (weather, totals, health metrics,
+    //               and containers for lists/settings): card fill + border.
+    //   "nested"  - things that live INSIDE a card (list rows, settings groups, fun-facts):
+    //               the recessed `cardNested` fill + border.
+    // The three variants now differ ONLY in fill colour (border/radius/no-shadow are shared) -
+    // border + fill come from the Theme surface tokens.
+    property string variant: "primary"
+
     radius: Theme.radiusCard
-    color: Theme.card
+    color: root.variant === "nested" ? Theme.cardNested : Theme.card
+    border.width: 1
+    border.color: Theme.border
     // Real, 2026-08-09 ("general desktop polish pass") - every card in the app builds on
     // this one Rectangle, so this one Behavior covers every card's light/dark theme
     // transition at once, matching Main.qml's own window-background fix for the same gap.
@@ -30,15 +45,6 @@ Rectangle {
     // children (the Column/Row callers put inside), which is what was needed here.
     implicitWidth: contentItem.childrenRect.width + padding * 2
     implicitHeight: contentItem.childrenRect.height + padding * 2
-
-    layer.enabled: true
-    layer.effect: MultiEffect {
-        shadowEnabled: true
-        shadowColor: Theme.isDark ? "#80000000" : "#33000000"
-        shadowBlur: 0.5
-        shadowVerticalOffset: 2
-        shadowHorizontalOffset: 0
-    }
 
     Item {
         id: contentItem

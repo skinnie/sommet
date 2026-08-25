@@ -121,8 +121,12 @@ PageFlickable {
         if (ConnectionsService.syncImportActivities) {
             any = true; ActivityService.importFromIntervals(ConnectionsService.syncImportDays);
         }
-        if (ConnectionsService.syncExportActivities) {
-            any = true; ActivityService.exportToIntervals();
+        var scope = ConnectionsService.exportScope;
+        if (scope === "suunto" || scope === "all") {
+            any = true; ActivityService.exportToIntervals();       // watch moves (with app streams)
+        }
+        if (scope === "etrex" || scope === "all") {
+            any = true; ActivityService.exportActivitiesToIntervals(GarminService.activities);
         }
         if (!any)
             syncStatus.text = qsTr("Nothing selected - turn on what you want to sync above.");
@@ -194,6 +198,86 @@ PageFlickable {
                 // The map/list view choice moved out of Settings and onto each list page
                 // itself (Activities/Routes/POIs), André 2026-08-16 - a per-page toggle now,
                 // still persisted via Theme.activitiesView/routesView/poisView.
+            }
+        }
+
+        // Ember - fast & calorie tracking companion (André, 2026-08-25). The switch shows/hides
+        // the Ember page in the sidebar; the link opens the phone app to Add to Home Screen.
+        // Hidden until the easter egg is found (10 taps on the version label in About below) -
+        // Ember isn't part of the public release. A Column skips invisible children in layout,
+        // so this leaves no gap when hidden.
+        Card {
+            width: parent.width
+            visible: Theme.emberUnlocked
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.ember; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Ember"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text {
+                    text: qsTr("Fast & calorie tracking app. Logs made on your phone sync here and show as charts.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                RoundedSwitch {
+                    text: qsTr("Show Ember in the sidebar")
+                    checked: Theme.emberEnabled
+                    onToggled: Theme.emberEnabled = checked
+                }
+                RoundedSwitch {
+                    text: qsTr("Also sync to intervals.icu")
+                    checked: Theme.emberSyncIntervals
+                    onToggled: Theme.emberSyncIntervals = checked
+                }
+                Text {
+                    visible: Theme.emberSyncIntervals
+                    text: qsTr("Daily calories, water, macros, fasting hours and coffees are pushed to your intervals.icu wellness (into the fields you already have).")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                Text {
+                    text: qsTr("Install on your phone")
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeLabel
+                    font.bold: true
+                    topPadding: Theme.spacingSmall
+                }
+                Text {
+                    text: qsTr("Open this link in your phone's browser, then Share → Add to Home Screen.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedTextField {
+                        id: emberUrlField
+                        width: parent.width - copyBtn.width - openBtn.width - Theme.spacingSmall * 2
+                        text: Theme.emberInstallUrl
+                        placeholderText: qsTr("https:// your Ember URL")
+                        onEditingFinished: Theme.emberInstallUrl = text
+                    }
+                    RoundedButton {
+                        id: copyBtn
+                        text: qsTr("Copy")
+                        onClicked: { emberUrlField.selectAll(); emberUrlField.copy(); emberUrlField.deselect() }
+                    }
+                    RoundedButton {
+                        id: openBtn
+                        text: qsTr("Open")
+                        enabled: emberUrlField.text.length > 0
+                        onClicked: Qt.openUrlExternally(emberUrlField.text)
+                    }
+                }
             }
         }
 
@@ -309,9 +393,201 @@ PageFlickable {
                         font.pixelSize: Theme.fontSizeBody
                     }
                 }
+                Row {
+                    spacing: 6
+                    TapHandler { onTapped: garminDialog.open() }
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: ConnectionsService.garminConnected ? Theme.success : Theme.mutedText
+                    }
+                    Text {
+                        text: ConnectionsService.garminConnected
+                            ? qsTr("Garmin Connect — connected (%1)").arg(ConnectionsService.garminEmail)
+                            : qsTr("Garmin Connect — tap to sign in")
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeBody
+                    }
+                }
                 // Cloud storage (Dropbox/Google Drive/OneDrive) used to live here as OAuth
                 // "connections"; backup now just saves to a folder you pick (point it at a cloud
                 // sync folder), so those rows and their key dialogs were removed - André 2026-08-16.
+            }
+        }
+
+        // --- Weight ---
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.weight; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Weight"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("Pick where weigh-ins come from. Your own manual entries are " +
+                               "always included whichever you choose — add them on the Weight page.")
+                }
+                // Provider filter (André, 2026-08-26: "there is no toggle to choose from
+                // intervals.icu or garmin"). Previously this card only DESCRIBED the automatic
+                // merge with no way to change it. "Merge both" keeps that original behaviour.
+                Row {
+                    spacing: Theme.spacingMedium
+                    RoundedRadioButton {
+                        text: qsTr("Merge both")
+                        checked: WeightService.source === "all"
+                        onToggled: if (checked) WeightService.source = "all"
+                    }
+                    RoundedRadioButton {
+                        text: qsTr("intervals.icu")
+                        checked: WeightService.source === "intervals"
+                        onToggled: if (checked) WeightService.source = "intervals"
+                    }
+                    RoundedRadioButton {
+                        text: qsTr("Garmin")
+                        checked: WeightService.source === "garmin"
+                        onToggled: if (checked) WeightService.source = "garmin"
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    visible: WeightService.source === "all"
+                    text: qsTr("Merging: if both have a reading for the same day, the one with " +
+                               "more detail (body fat, muscle…) wins, so there are no duplicates.")
+                }
+            }
+        }
+
+        // --- Health ---
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.health; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Health"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("Merges resting HR, steps and HRV from intervals.icu and Garmin " +
+                               "Connect (plus body battery from Garmin), de-duplicated by day. " +
+                               "Add manual readings on the Health page.")
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spacingSmall
+                    Text { text: qsTr("Sleep"); color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                           anchors.verticalCenter: parent.verticalCenter
+                           width: parent.width - sleepSrcCombo.width - Theme.spacingSmall }
+                    RoundedComboBox {
+                        id: sleepSrcCombo
+                        width: 200
+                        anchors.verticalCenter: parent.verticalCenter
+                        readonly property var _keys: ["intervals", "garmin", "off"]
+                        model: [qsTr("intervals.icu"), qsTr("Garmin Connect"),
+                                qsTr("Don't show sleep")]
+                        currentIndex: Math.max(0, _keys.indexOf(HealthService.sleepProvider))
+                        onActivated: (i) => HealthService.sleepProvider = _keys[i]
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spacingSmall
+                    Text { text: qsTr("HRV (overnight)"); color: Theme.text
+                           font.pixelSize: Theme.fontSizeBody
+                           anchors.verticalCenter: parent.verticalCenter
+                           width: parent.width - hrvSrcCombo.width - Theme.spacingSmall }
+                    RoundedComboBox {
+                        id: hrvSrcCombo
+                        width: 200
+                        anchors.verticalCenter: parent.verticalCenter
+                        readonly property var _keys: ["intervals", "garmin"]
+                        model: [qsTr("intervals.icu"), qsTr("Garmin Connect")]
+                        currentIndex: Math.max(0, _keys.indexOf(HealthService.hrvSource))
+                        onActivated: (i) => HealthService.hrvSource = _keys[i]
+                    }
+                }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedSwitch {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: HealthService.ambitHrvEnabled
+                        onToggled: HealthService.ambitHrvEnabled = checked
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.parent.width - 60
+                        wrapMode: Text.WordWrap
+                        text: qsTr("Show Ambit3 morning HRV as its own line. This is a spot " +
+                                   "reading you take (a 5+5 or lie-still test) - a different " +
+                                   "measurement from the overnight value, tracked on its own, " +
+                                   "not compared to it.")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeBody
+                    }
+                }
+
+                // --- Ambit3 morning-HRV: set up the watch app + import a reading. Kept here in
+                // Settings (it's setup, not a daily glance); a finished import jumps to Health. ---
+                Rectangle { width: parent.width; height: 1; color: Theme.mutedText; opacity: 0.2 }
+                Text { text: qsTr("Morning HRV from your Ambit3")
+                       color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    text: qsTr("1.  Install the HRV app on your watch and wear the Suunto Smart " +
+                               "Sensor belt (the R-R one).\n" +
+                               "2.  Start the HRV app and run it for ~5 min, lying still.\n" +
+                               "      (Orthostatic version: 5 min lying → press Lap → 5 min standing.)\n" +
+                               "3.  Connect the watch by USB and tap Import now.")
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Your reading appears on the orange \"Morning HRV (Ambit3)\" line " +
+                               "on the Health page. Do it at the same time each morning (right " +
+                               "after waking, before getting up) to track your own baseline. Only " +
+                               "lie-still tests are imported - your normal workouts are ignored.")
+                }
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: HealthService.hrvInstalling ? qsTr("Installing…")
+                                                          : qsTr("Install HRV app")
+                        enabled: !HealthService.hrvInstalling
+                        onClicked: HealthService.installHrvApp()
+                    }
+                    RoundedButton {
+                        text: ActivityService.loading ? qsTr("Importing…") : qsTr("Import now")
+                        enabled: !ActivityService.loading
+                        onClicked: { hrvImport.requested = true; ActivityService.refresh() }
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    visible: HealthService.hrvInstallMessage.length > 0
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
+                    text: HealthService.hrvInstallMessage
+                }
+                // When the import finishes, open the Health page to show the new reading.
+                QtObject { id: hrvImport; property bool requested: false }
+                Connections {
+                    target: ActivityService
+                    function onLoadingChanged() {
+                        if (hrvImport.requested && !ActivityService.loading) {
+                            hrvImport.requested = false
+                            HealthService.refresh()
+                            NavBus.navigate("health")
+                        }
+                    }
+                }
             }
         }
 
@@ -829,10 +1105,22 @@ PageFlickable {
                 }
 
                 Item { width: 1; height: Theme.spacingSmall }
+                // Reworded 2026-08-26 (André: "claude, what do you mean with that text?") - the
+                // old single line crammed the mode, the key requirement, the subscription
+                // warning and the cost into one parenthetical. Same facts, split into a plain
+                // title + a caption, in user language rather than "chat backend".
                 Text {
                     width: parent.width; wrapMode: Text.WordWrap
-                    text: qsTr("Chat backend: Claude API (real conversation, needs an Anthropic API key - NOT your claude.ai subscription, small per-message cost)")
+                    text: qsTr("Chat with a real AI coach")
                     font.bold: true; font.pixelSize: Theme.fontSizeBody; color: Theme.text
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("Off, the coach replies from a few pre-written answers. On, it " +
+                               "talks to Claude about your real training. That needs an " +
+                               "Anthropic API key — not your claude.ai login, which won't work " +
+                               "here — and costs a few cents per conversation.")
                 }
                 Row {
                     spacing: Theme.spacingSmall
@@ -857,12 +1145,12 @@ PageFlickable {
                         echoMode: TextInput.Password
                         placeholderText: CoachService.anthropicKeySet ? qsTr("Key saved (enter to replace)") : qsTr("Anthropic API key")
                     }
-                    Button {
+                    RoundedButton {
                         text: qsTr("Save")
                         enabled: anthropicKeyField.text.length > 0
                         onClicked: { CoachService.setAnthropicApiKey(anthropicKeyField.text); anthropicKeyField.text = "" }
                     }
-                    Button {
+                    RoundedButton {
                         text: qsTr("Clear")
                         visible: CoachService.anthropicKeySet
                         onClicked: CoachService.clearAnthropicApiKey()
@@ -929,17 +1217,54 @@ PageFlickable {
                     spacing: Theme.spacingMedium
                     SommetMark { size: 46; anchors.verticalCenter: parent.verticalCenter }
                     Column {
+                        id: aboutBlock
                         anchors.verticalCenter: parent.verticalCenter
+                        // Easter egg (André, 2026-08-25): 10 taps on the version reveals the
+                        // hidden Ember card above. Resets if you pause between taps so it isn't
+                        // stumbled into. No visual affordance - it's meant to be a secret.
+                        property int emberTaps: 0
                         Text {
-                            text: qsTr("Sommet v0.1.46")
+                            id: versionLabel
+                            text: qsTr("Sommet v0.2.0")
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                             font.bold: true
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: !Theme.emberUnlocked
+                                onClicked: {
+                                    aboutBlock.emberTaps++
+                                    tapResetTimer.restart()
+                                    if (aboutBlock.emberTaps >= 10) {
+                                        Theme.emberUnlocked = true
+                                        Theme.emberEnabled = true
+                                        aboutBlock.emberTaps = 0
+                                    }
+                                }
+                            }
+                            Timer {
+                                id: tapResetTimer
+                                interval: 1500
+                                onTriggered: aboutBlock.emberTaps = 0
+                            }
                         }
                         Text {
                             text: qsTr("Sommet — for Suunto Ambit")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
+                        }
+                        // Quiet confirmation once unlocked (and a way back out).
+                        Text {
+                            visible: Theme.emberUnlocked
+                            text: qsTr("Ember unlocked ✓  ·  hide")
+                            color: Theme.accent
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.bold: true
+                            topPadding: 2
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: { Theme.emberEnabled = false; Theme.emberUnlocked = false }
+                            }
                         }
                     }
                 }
@@ -1135,10 +1460,41 @@ PageFlickable {
                         }
                     }
 
-                    SyncToggle {
-                        label: qsTr("Export the watch's activities to intervals.icu")
-                        value: ConnectionsService.syncExportActivities
-                        onToggled: (checked) => ConnectionsService.syncExportActivities = checked
+                    // Export scope (André, 2026-08-24): which activities push TO intervals.icu.
+                    // Activities that came FROM intervals (Suunto/Garmin/Strava imports) are never
+                    // re-exported. A watch move carries its logged Suunto App streams; eTrex is GPX.
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        Text {
+                            text: qsTr("Export activities to intervals.icu")
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeBody
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - exportScopeCombo.width - Theme.spacingSmall
+                            wrapMode: Text.WordWrap
+                        }
+                        RoundedComboBox {
+                            id: exportScopeCombo
+                            width: 190
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property var _keys: ["manual", "suunto", "etrex", "all"]
+                            model: [qsTr("Only when I choose"),
+                                    qsTr("All Suunto activities"),
+                                    qsTr("eTrex activities"),
+                                    qsTr("All activities")]
+                            currentIndex: Math.max(0, _keys.indexOf(ConnectionsService.exportScope))
+                            onActivated: (i) => ConnectionsService.exportScope = _keys[i]
+                        }
+                    }
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        text: qsTr("“Only when I choose” exports per-activity from each " +
+                                   "activity's Upload tab. The others auto-export on sync. " +
+                                   "Activities imported from intervals are never sent back.")
                     }
 
                     RoundedButton {
@@ -1184,6 +1540,145 @@ PageFlickable {
                         function onExportError(message) {
                             root.syncAppend(qsTr("Export"), false, message)
                         }
+                    }
+                }
+            }
+        }
+
+        ThemedDialog {
+            id: garminDialog
+            title: qsTr("Garmin Connect")
+            modal: true
+            parent: Overlay.overlay
+            anchors.centerIn: Overlay.overlay
+            standardButtons: Dialog.Close
+
+            // Close the dialog once a login succeeds (ConnectionsService flips connected).
+            Connections {
+                target: ConnectionsService
+                function onGarminChanged() {
+                    if (ConnectionsService.garminConnected) garminDialog.gStatus = ""
+                }
+            }
+            Connections {
+                target: WeightService
+                function onChanged() {
+                    if (!WeightService.loading && WeightService.lastError.length > 0)
+                        garminDialog.gStatus = WeightService.lastError
+                }
+            }
+            property string gStatus: ""
+
+            Column {
+                width: 340
+                spacing: Theme.spacingSmall
+
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: ConnectionsService.garminConnected
+                        ? qsTr("Signed in as %1. Garmin provides weight (Index scale), health, " +
+                               "and activity import/export.").arg(ConnectionsService.garminEmail)
+                        : qsTr("Your password is used once to sign in; only a login token is kept " +
+                               "afterwards. Add the 2FA code if your account uses it.")
+                }
+                RoundedTextField {
+                    id: gEmailField; width: parent.width
+                    visible: !ConnectionsService.garminConnected
+                    placeholderText: qsTr("Garmin email")
+                }
+                RoundedTextField {
+                    id: gPassField; width: parent.width
+                    visible: !ConnectionsService.garminConnected
+                    placeholderText: qsTr("Password"); echoMode: TextInput.Password
+                }
+                RoundedTextField {
+                    id: gMfaField; width: 160
+                    visible: !ConnectionsService.garminConnected
+                    placeholderText: qsTr("2FA code (if any)")
+                }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        visible: !ConnectionsService.garminConnected
+                        text: WeightService.loading ? qsTr("Signing in…") : qsTr("Sign in")
+                        enabled: !WeightService.loading && gEmailField.text.length > 0
+                                 && gPassField.text.length > 0
+                        onClicked: {
+                            garminDialog.gStatus = ""
+                            WeightService.garminLogin(gEmailField.text, gPassField.text, gMfaField.text)
+                        }
+                    }
+                    RoundedButton {
+                        visible: ConnectionsService.garminConnected
+                        text: qsTr("Disconnect")
+                        onClicked: { ConnectionsService.disconnectGarmin(); garminDialog.close() }
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.error
+                    font.pixelSize: Theme.fontSizeCaption
+                    visible: garminDialog.gStatus.length > 0
+                    text: garminDialog.gStatus
+                }
+
+                // Garmin sync options (shown once connected) - parallels intervals' sync menu.
+                Column {
+                    width: parent.width
+                    visible: ConnectionsService.garminConnected
+                    spacing: Theme.spacingSmall
+                    Rectangle { width: parent.width; height: 1
+                        color: Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.25) }
+                    Text { text: qsTr("Sync options"); font.bold: true; color: Theme.text
+                           font.pixelSize: Theme.fontSizeLabel }
+                    Row {
+                        width: parent.width
+                        Text { text: qsTr("Import activities from Garmin"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeCaption
+                               width: parent.width - giSw.width - Theme.spacingSmall
+                               wrapMode: Text.WordWrap; anchors.verticalCenter: parent.verticalCenter }
+                        RoundedSwitch { id: giSw; anchors.verticalCenter: parent.verticalCenter
+                            checked: ConnectionsService.garminImportActivities
+                            onToggled: ConnectionsService.garminImportActivities = checked }
+                    }
+                    Row {
+                        width: parent.width; spacing: Theme.spacingSmall
+                        Text { text: qsTr("Export activities to Garmin"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeCaption
+                               width: parent.width - garminExpCombo.width - Theme.spacingSmall
+                               wrapMode: Text.WordWrap; anchors.verticalCenter: parent.verticalCenter }
+                        RoundedComboBox {
+                            id: garminExpCombo
+                            width: 170
+                            anchors.verticalCenter: parent.verticalCenter
+                            readonly property var _keys: ["manual", "suunto", "etrex", "all"]
+                            model: [qsTr("Only when I choose"), qsTr("All Suunto activities"),
+                                    qsTr("eTrex activities"), qsTr("All activities")]
+                            currentIndex: Math.max(0, _keys.indexOf(ConnectionsService.garminExportScope))
+                            onActivated: (i) => ConnectionsService.garminExportScope = _keys[i]
+                        }
+                    }
+                    RoundedButton {
+                        width: parent.width
+                        enabled: !ActivityService.loading
+                        text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync Garmin now")
+                        onClicked: {
+                            var scope = ConnectionsService.garminExportScope
+                            if (ConnectionsService.garminImportActivities)
+                                ActivityService.importFromGarmin(0)
+                            if (scope === "suunto" || scope === "all")
+                                ActivityService.exportToGarmin()
+                            if (scope === "etrex" || scope === "all")
+                                ActivityService.exportActivitiesToGarmin(GarminService.activities)
+                        }
+                    }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        text: qsTr("“Only when I choose” exports per-activity from each activity's " +
+                                   "Upload tab. Weight, body composition, health and sleep from " +
+                                   "Garmin sync automatically — see the Weight and Health pages. " +
+                                   "Don't also import Garmin activities via intervals.icu (dupes).")
                     }
                 }
             }

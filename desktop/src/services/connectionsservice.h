@@ -61,6 +61,15 @@ class ConnectionsService : public QObject
 
     Q_PROPERTY(bool intervalsIcuConnected READ intervalsIcuConnected NOTIFY intervalsIcuChanged)
     Q_PROPERTY(QString intervalsIcuAthleteId READ intervalsIcuAthleteId NOTIFY intervalsIcuChanged)
+    // Garmin Connect (André, 2026-08-24): login lives in Settings; the OAuth token store is
+    // owned backend-side (tools/garmin_weight.py), so here we only track a connected flag +
+    // the email, set once a login succeeds. See garminConnected / setGarminConnected.
+    Q_PROPERTY(bool garminConnected READ garminConnected NOTIFY garminChanged)
+    Q_PROPERTY(QString garminEmail READ garminEmail NOTIFY garminChanged)
+    // What Garmin syncs: activities in, and an export scope out (weight + health merge on their
+    // own pages). garminExportScope mirrors the intervals export scope: manual/suunto/etrex/all.
+    Q_PROPERTY(bool garminImportActivities READ garminImportActivities WRITE setGarminImportActivities NOTIFY syncFlagsChanged)
+    Q_PROPERTY(QString garminExportScope READ garminExportScope WRITE setGarminExportScope NOTIFY syncFlagsChanged)
 
     // intervals.icu sync-menu toggles (Andre, 2026-08-18): the user picks what "Sync now"
     // runs. Manual, not background - each is a plain persisted on/off. Defaults keep the
@@ -69,7 +78,14 @@ class ConnectionsService : public QObject
     Q_PROPERTY(bool syncStatsToWatch READ syncStatsToWatch WRITE setSyncStatsToWatch NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool syncActivityLevel READ syncActivityLevel WRITE setSyncActivityLevel NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool syncImportActivities READ syncImportActivities WRITE setSyncImportActivities NOTIFY syncFlagsChanged)
+    // Import activities from the Garmin Connect cloud account (André, 2026-08-24) - distinct
+    // from the eTrex USB import; shares the Garmin login done on the Weight page.
+    Q_PROPERTY(bool syncImportGarmin READ syncImportGarmin WRITE setSyncImportGarmin NOTIFY syncFlagsChanged)
     Q_PROPERTY(bool syncExportActivities READ syncExportActivities WRITE setSyncExportActivities NOTIFY syncFlagsChanged)
+    // Export-scope selector (André, 2026-08-24): "manual" (per-activity only), "suunto" (watch
+    // moves), "etrex" (Garmin eTrex device moves), "all" (suunto+etrex). Source of truth for
+    // export; shares the QSettings key ActivityService reads for its auto-export.
+    Q_PROPERTY(QString exportScope READ exportScope WRITE setExportScope NOTIFY syncFlagsChanged)
     // How far back the activity import pulls: 0 = everything, else the last N days (André: "let
     // user decide").
     Q_PROPERTY(int syncImportDays READ syncImportDays WRITE setSyncImportDays NOTIFY syncFlagsChanged)
@@ -100,6 +116,39 @@ public:
     bool intervalsIcuConnected() const { return !m_intervalsIcuAthleteId.isEmpty(); }
     QString intervalsIcuAthleteId() const { return m_intervalsIcuAthleteId; }
 
+    bool garminConnected() const {
+        return QSettings().value(QStringLiteral("connections/garmin/connected"), false).toBool();
+    }
+    QString garminEmail() const {
+        return QSettings().value(QStringLiteral("connections/garmin/email")).toString();
+    }
+    // Set by WeightService after a successful/failed Garmin login (the network call lives there).
+    Q_INVOKABLE void setGarminConnected(bool on, const QString &email) {
+        QSettings s;
+        s.setValue(QStringLiteral("connections/garmin/connected"), on);
+        if (on && !email.isEmpty())
+            s.setValue(QStringLiteral("connections/garmin/email"), email);
+        emit garminChanged();
+    }
+    Q_INVOKABLE void disconnectGarmin() {
+        QSettings s;
+        s.remove(QStringLiteral("connections/garmin/connected"));
+        s.remove(QStringLiteral("connections/garmin/email"));
+        emit garminChanged();
+    }
+    bool garminImportActivities() const { return syncFlag("garminImportActivities", false); }
+    void setGarminImportActivities(bool v) { setSyncFlag("garminImportActivities", v); }
+    QString garminExportScope() const {
+        return QSettings().value(QStringLiteral("garmin/exportScope"),
+                                 QStringLiteral("manual")).toString();
+    }
+    void setGarminExportScope(const QString &v) {
+        if (v == garminExportScope())
+            return;
+        QSettings().setValue(QStringLiteral("garmin/exportScope"), v);
+        emit syncFlagsChanged();
+    }
+
     bool syncImportGear() const { return syncFlag("importGear", true); }
     void setSyncImportGear(bool v) { setSyncFlag("importGear", v); }
     bool syncStatsToWatch() const { return syncFlag("statsToWatch", false); }
@@ -108,8 +157,23 @@ public:
     void setSyncActivityLevel(bool v) { setSyncFlag("activityLevel", v); }
     bool syncImportActivities() const { return syncFlag("importActivities", false); }
     void setSyncImportActivities(bool v) { setSyncFlag("importActivities", v); }
-    bool syncExportActivities() const { return syncFlag("exportActivities", false); }
-    void setSyncExportActivities(bool v) { setSyncFlag("exportActivities", v); }
+    bool syncImportGarmin() const { return syncFlag("importGarmin", false); }
+    void setSyncImportGarmin(bool v) { setSyncFlag("importGarmin", v); }
+    // Derived from exportScope so any legacy binding still reads "is export on?".
+    bool syncExportActivities() const { return exportScope() != QStringLiteral("manual"); }
+    void setSyncExportActivities(bool v) {
+        setExportScope(v ? QStringLiteral("suunto") : QStringLiteral("manual"));
+    }
+    QString exportScope() const {
+        return QSettings().value(QStringLiteral("intervals/exportScope"),
+                                 QStringLiteral("manual")).toString();
+    }
+    void setExportScope(const QString &v) {
+        if (v == exportScope())
+            return;
+        QSettings().setValue(QStringLiteral("intervals/exportScope"), v);
+        emit syncFlagsChanged();
+    }
     int syncImportDays() const;
     void setSyncImportDays(int v);
     bool runalyzeConnected() const { return m_runalyzeConnected; }
@@ -177,6 +241,7 @@ public:
 
 signals:
     void intervalsIcuChanged();
+    void garminChanged();
     void syncFlagsChanged();
     void runalyzeChanged();
     void stravaChanged();

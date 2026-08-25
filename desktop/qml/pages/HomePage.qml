@@ -206,11 +206,13 @@ PageFlickable {
                     // using one here needs a real licensing check first, the same care
                     // already applied to not reusing SuuntoLink's own icon for this app's
                     // icon. A real product photo replaces this once that's settled.
+                    // Converged onto Theme.cardNested (2026-08-25 coherence pass) - same
+                    // recessed-icon-square family as every other flat grey tile now.
                     Rectangle {
                         width: 64
                         height: 64
                         radius: Theme.radiusSmall
-                        color: Theme.background
+                        color: Theme.cardNested
                         Icon {
                             visible: !HomeViewModel.isGarmin
                             anchors.centerIn: parent
@@ -277,7 +279,7 @@ PageFlickable {
                             width: 64
                             height: 64
                             radius: Theme.radiusSmall
-                            color: Theme.background
+                            color: Theme.cardNested
                             Icon {
                                 anchors.centerIn: parent
                                 glyph: Icons.watch
@@ -466,9 +468,13 @@ PageFlickable {
                             text: DeviceService.gpsOrbitBusy
                                 ? qsTr("Checking...")
                                 : (DeviceService.gpsOrbitStatusText || qsTr("Tap to check"))
-                            color: Theme.primary
+                            // Status-calming: settled state is quiet; green + underline only for
+                            // the actionable "Tap to check" prompt (see the Clock field above).
+                            readonly property bool actionable: !DeviceService.gpsOrbitBusy
+                                                               && !DeviceService.gpsOrbitStatusText
+                            color: actionable ? Theme.primary : Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
-                            font.underline: !DeviceService.gpsOrbitBusy
+                            font.underline: actionable
                             TapHandler {
                                 enabled: !DeviceService.gpsOrbitBusy
                                 onTapped: DeviceService.updateGpsOrbit()
@@ -503,9 +509,14 @@ PageFlickable {
                                 ? qsTr("Syncing...")
                                 : (DeviceService.timeSyncStatusText.length > 0
                                    ? qsTr("Synced") : qsTr("Tap to sync"))
-                            color: Theme.primary
+                            // Status-calming (2026-08-25): a settled "Synced" is the norm, so it
+                            // reads as quiet grey; green + underline is reserved for the one
+                            // actionable state ("Tap to sync"). Colour follows meaning, not decoration.
+                            readonly property bool actionable: !DeviceService.timeSyncBusy
+                                                               && DeviceService.timeSyncStatusText.length === 0
+                            color: actionable ? Theme.primary : Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
-                            font.underline: !DeviceService.timeSyncBusy
+                            font.underline: actionable
                             TapHandler {
                                 enabled: !DeviceService.timeSyncBusy
                                 onTapped: clockSyncDialog.open()
@@ -657,6 +668,7 @@ PageFlickable {
         // when 0 or 1 watch is connected.
         Card {
             width: parent.width
+            variant: "nested"   // secondary utility strip under the device card - recedes
             visible: DeviceService.connectedWatches.length > 1
 
             Column {
@@ -738,6 +750,7 @@ PageFlickable {
 
                 Card {
                     id: thisYearCard
+                    variant: "flat"   // supporting stat, not the page hero
                     width: parent.width
                     visible: activityCount > 0
 
@@ -876,6 +889,10 @@ PageFlickable {
                 // the card works on a mountain with no signal too.
                 Card {
                     id: funFactCard
+                    // Back to flat/white (André, 2026-08-25: "put it back again in white like
+                    // the others please") - matching This year/Weather/Last Activity, not the
+                    // recessed "nested" look.
+                    variant: "flat"
                     width: parent.width
                     visible: factText.length > 0
                     // Bottom-aligned with the weather card - André, 2026-08-12, after
@@ -985,6 +1002,7 @@ PageFlickable {
         // here wasn't asked for. ---
         Card {
             width: parent.width
+            variant: "flat"   // Kailash history panel - supporting content
             visible: HomeViewModel.isKailash
                      && (KailashService.loading || KailashService.historyOk
                          || KailashService.lastError.length > 0)
@@ -1235,6 +1253,7 @@ PageFlickable {
         // else to say, and Connections already has a real home on Settings). ---
         Card {
             id: lastActivityCard
+            variant: "flat"   // supporting content, paired with This year / Weather
             width: parent.width
             readonly property bool activityLoading:
                 HomeViewModel.isGarmin ? GarminService.activitiesLoading

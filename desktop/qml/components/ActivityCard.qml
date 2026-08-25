@@ -10,6 +10,8 @@ Card {
 
     property var activity  // one entry from ActivityService.activities
     signal opened
+    // Right-click → Delete (André, 2026-08-25) - the page owns the confirm + the delete.
+    signal deleteRequested
 
     readonly property var _center: ActivityViewModel.trackCenter(activity.track)
 
@@ -21,6 +23,20 @@ Card {
     Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
 
     TapHandler { id: cardTap; onTapped: root.opened() }
+    // Right mouse button opens the context menu AT THE CURSOR - same fix as ActivityRow.qml
+    // (Menu.popup() with no args opens at the parent's (0,0), which on a 360x280 card meant the
+    // menu always appeared pinned to the top-left corner over the map thumbnail).
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint) => cardMenu.popup(eventPoint.position.x, eventPoint.position.y)
+    }
+    ThemedMenu {
+        id: cardMenu
+        ThemedMenuItem {
+            text: qsTr("Delete activity")
+            onTriggered: root.deleteRequested()
+        }
+    }
 
     Column {
         width: parent.width

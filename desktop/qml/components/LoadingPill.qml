@@ -30,8 +30,16 @@ Item {
         id: pill
         // The pill hugs its contents rather than being given a fixed size, so a longer
         // message in another language does not get clipped.
+        // FIXED 32px height (2026-08-25, fourth pass - André: "reduce that adventure loading to
+        // like 40%, is annoying me"). No longer tied to matching a nav slot exactly - the list
+        // header's own position during loading is now a hardcoded value (see
+        // ActivitiesPage.qml's activitiesViewToggle) that does NOT depend on this pill's real
+        // height at all, so this can just be "small and out of the way" without needing to hit
+        // an exact number. clip: true guards against the 2-line text ever visually overflowing
+        // this shorter box.
+        clip: true
         width: content.width + Theme.spacingLarge * 2
-        height: content.height + Theme.spacingMedium * 2
+        height: 32
         radius: height / 2
         color: Theme.card
         border.width: 1
