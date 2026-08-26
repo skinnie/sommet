@@ -945,14 +945,43 @@ class Handler(BaseHTTPRequestHandler):
             activities = []
             for entry in info.get("logs", []):
                 gpx_path = Path(entry["gpx_file"])
+                gpx = gpx_path.read_text() if gpx_path.exists() else ""
                 activities.append({
                     "index": entry["index"],
-                    "gpx": gpx_path.read_text() if gpx_path.exists() else "",
+                    "gpx": self._enrich_legacy_gpx(gpx, entry),
                     "fit_base64": None,
                 })
             self._send_json(200, {"ok": True, "activities": activities,
                                    "total_entries": info.get("total_entries", len(activities)),
                                    "raw_output": out})
+
+    @staticmethod
+    def _enrich_legacy_gpx(gpx, entry):
+        """The legacy CLI writes a bare lat/lon/time GPX, but ActivityService.parseGpx reads
+        every summary stat (distance/duration/ascent/...) from a GPX <extensions> block -
+        that's how the Ambit3/exercise_log.py path populates them. Without it an Ambit1/2
+        activity shows a track but ZERO distance/duration/etc. (found 2026-08-26 on a real
+        Ambit2 walk: 2.2 km / 26 min on the watch, blank in the app). The legacy `logs` index
+        already carries all those numbers, so inject the same extensions here. Inserted before
+        <trkseg> (a schema-valid trk position parseGpx reads regardless); no-op on an empty
+        GPX or one that already has extensions."""
+        if not gpx or "<extensions>" in gpx or "<trkseg>" not in gpx:
+            return gpx
+        fields = []
+        dur = int(round(entry.get("duration_ms", 0) / 1000))
+        if dur:
+            fields.append("<duration>%d</duration>" % dur)
+        for tag, key in (("distance", "distance_m"), ("ascent", "ascent_m"),
+                          ("descent", "descent_m"), ("energy", "energy_consumption_kcal"),
+                          ("sport_type", "activity_type"), ("avg_hr", "heartrate_avg_bpm"),
+                          ("max_hr", "heartrate_max_bpm")):
+            v = entry.get(key, 0)
+            if v:
+                fields.append("<%s>%s</%s>" % (tag, v, tag))
+        if not fields:
+            return gpx
+        ext = "<extensions>" + "".join(fields) + "</extensions>"
+        return gpx.replace("<trkseg>", ext + "<trkseg>", 1)
 
     def _handle_legacy_settings(self):
         """GET /api/legacy/settings - Ambit1/2 personal settings + waypoints, real read via
