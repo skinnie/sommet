@@ -33,6 +33,7 @@ import {
 } from '../services/ApiIntervalsIcu';
 import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
+import { CoordinatePicker } from '../components/CoordinatePicker';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -124,6 +125,9 @@ export default function SettingsScreen() {
   // Ember easter egg (2026-08-26, desktop parity): 10 taps on the version label reveal it.
   const [emberTaps, setEmberTaps]                   = useState(0);
   const [emberOn, setEmberOn]                       = useState(false);
+  // Which coordinate row (if any) is currently being picked on a map - desktop parity with
+  // WatchSettingsPage's "Pick on a map". null = picker closed.
+  const [coordPickKey, setCoordPickKey]             = useState<string | null>(null);
   const [savingIntervals, setSavingIntervals]       = useState(false);
   const [gearImporting, setGearImporting]           = useState(false);
   const [gearSyncing, setGearSyncing]               = useState(false);
@@ -795,6 +799,15 @@ export default function SettingsScreen() {
                   >
                     <Text style={styles.btnText}>{t.saveBtn}</Text>
                   </TouchableOpacity>
+                  {/* Pick on a map - desktop parity (WatchSettingsPage's own button). Pointing
+                      at a coordinate beats typing six decimal places by hand. */}
+                  <TouchableOpacity
+                    style={styles.coordSetBtn}
+                    disabled={busy}
+                    onPress={() => setCoordPickKey(row.key)}
+                  >
+                    <Text style={styles.btnText}>Map</Text>
+                  </TouchableOpacity>
                 </View>
               )}
               </>)}
@@ -807,6 +820,26 @@ export default function SettingsScreen() {
 
       </View>
       )}
+
+      {/* Map coordinate picker (desktop parity: WatchSettingsPage's "Pick on a map").
+          home_latitude and home_longitude are two SEPARATE setting rows, but a point on a map
+          is inherently both - so a pick fills BOTH edit buffers. The write itself still needs
+          an explicit Save per row, keeping this app's "explicit tap for any write" rule rather
+          than silently pushing two values to the watch from a map tap. */}
+      <CoordinatePicker
+        visible={coordPickKey !== null}
+        initialLat={parseFloat(coordEdits.home_latitude ?? '') || 0}
+        initialLon={parseFloat(coordEdits.home_longitude ?? '') || 0}
+        onCancel={() => setCoordPickKey(null)}
+        onPick={(la, lo) => {
+          setCoordEdits(prev => ({
+            ...prev,
+            home_latitude: la.toFixed(6),
+            home_longitude: lo.toFixed(6),
+          }));
+          setCoordPickKey(null);
+        }}
+      />
 
       {/* ── Connections - real, 2026-08-09 ("settings was completely reworked in our
           desktop app... proceed"). Ports SettingsPage.qml's real Connections card: one
