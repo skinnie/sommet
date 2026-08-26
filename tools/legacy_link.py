@@ -54,11 +54,18 @@ def _binary_path():
     return None
 
 
-def run(args):
+def run(args, timeout=120):
     """Runs the compiled CLI, returns its parsed JSON stdout object. Raises RuntimeError
     with a clear, actionable message (never a build isn't findable) if it's missing or the
     process failed to produce parseable JSON - the same "report, don't mask" discipline as
-    every other tools/*.py CLI in this project."""
+    every other tools/*.py CLI in this project.
+
+    timeout: seconds allowed for the child. 120 suits the small single-shot commands
+    (device-info/settings/poi-*), but `logs` reads every stored activity off the watch and
+    scales with their count - a real Ambit2 with 32 activities blew past the old fixed 120s,
+    which fired after only ~16 had been read, truncating the sync (the wrapper then raised
+    and the app's /api/activities 502'd entirely). Caught 2026-08-26; the 2026-08-22 Ambit1
+    test had 0 logs, so this slow path was never exercised. logs() passes a generous value."""
     binary = _binary_path()
     if binary is None:
         raise RuntimeError(
@@ -83,7 +90,7 @@ def run(args):
     # ASCII by construction (ambit_legacy_cli.c's json_str escapes every byte >= 0x80), so
     # only this surrounding chatter needs the tolerant decode.
     proc = subprocess.run([str(binary), *device_args, *args],
-                           capture_output=True, timeout=120)
+                           capture_output=True, timeout=timeout)
     proc_stdout = proc.stdout.decode("utf-8", "replace")
     proc_stderr = proc.stderr.decode("utf-8", "replace")
     try:
@@ -108,7 +115,9 @@ def settings():
 
 
 def logs(outdir):
-    return run(["logs", str(outdir)])
+    # A full watch of activities is read one move at a time over slow USB; a real 32-move
+    # Ambit2 outran the old 120s, so allow generously (30 min) rather than truncate a sync.
+    return run(["logs", str(outdir)], timeout=1800)
 
 
 def poi_add(name, lat, lon):

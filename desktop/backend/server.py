@@ -927,9 +927,13 @@ class Handler(BaseHTTPRequestHandler):
         yet for this family's log format, so fit_base64 is always null - same "real GPS
         track, no FIT" shape ActivityService already tolerates from tools/gps_track_pod.py.
         known_count/mark_synced (query params on the SBEM path above) don't apply here: the
-        legacy log read has no partial-skip or synced-flag mechanism in this project yet."""
+        legacy log read has no partial-skip or synced-flag mechanism in this project yet.
+
+        The whole-watch log read scales with activity count (a real Ambit2 with 32 moves
+        outran the old 120s inner timeout, 2026-08-26); legacy_link.py's logs() now allows
+        30 min, so give run_tool a matching outer budget, not the 180s default."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            code, out, err = run_tool("legacy_link.py", ["logs", tmpdir])
+            code, out, err = run_tool("legacy_link.py", ["logs", tmpdir], timeout=1830)
             if code != 0:
                 self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
                 return
@@ -1213,9 +1217,38 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_pois_read_ble()
             return
+        if selected_is_legacy():
+            self._handle_pois_read_legacy()
+            return
         code, out, err = run_tool("write_nav.py", ["pois"])
         self._send_json(200 if code == 0 else 502, {
             "ok": code == 0, "raw_output": out, "stderr": err})
+
+    def _handle_pois_read_legacy(self):
+        """The Ambit1/2 path for GET /api/pois. write_nav.py's `pois` (SBEM 0x0b24) comes
+        back EMPTY on this family - they predate SBEM (see legacy_link.py) - so an Ambit2
+        with real waypoints showed none in the app (found 2026-08-26 against a 14-waypoint
+        Ambit2; the 2026-08-22 Ambit1 test had 0 waypoints, so this gap was never hit). The
+        waypoints ARE read by legacy_link.py's `settings` (PMEM 2.0). Reuse that read and
+        re-emit them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..`
+        text (lat/lon as 1e7 integers) that PoiService::parseOnWatchPois already parses, so
+        the same on-watch POI card works unchanged - same raw_output contract as the SBEM
+        and BLE branches above."""
+        code, out, err = run_tool("legacy_link.py", ["settings"])
+        info = self._parse_last_json_line(out)
+        if info is None or not info.get("ok"):
+            self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
+                                   "no parseable JSON", "raw_output": out, "stderr": err})
+            return
+        waypoints = info.get("waypoints", [])
+        lines = [f"  watch: legacy Ambit1/2 - {len(waypoints)} waypoint(s) via PMEM 2.0"]
+        for wp in waypoints:
+            name = str(wp.get("name", "")).replace("'", "")
+            lat = int(round(float(wp.get("lat", 0.0)) * 1e7))
+            lon = int(round(float(wp.get("lon", 0.0)) * 1e7))
+            lines.append(f"  Name='{name}'  Location.Latitude={lat}  "
+                         f"Location.Longitude={lon}")
+        self._send_json(200, {"ok": True, "raw_output": "\n".join(lines) + "\n"})
 
     def _handle_pois_read_ble(self):
         """The BLE path for GET /api/pois - tools/ble_pois.py's read_pois_summary(). Real
