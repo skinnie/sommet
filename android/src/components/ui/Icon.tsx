@@ -11,7 +11,12 @@ export type IconName =
   | 'watch' | 'etrex' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
   | 'cycling' | 'running' | 'walking'
   | 'play' | 'pause' | 'skipBack' | 'skipForward'
-  | 'download' | 'upload' | 'calendar' | 'bluetooth';
+  | 'download' | 'upload' | 'calendar' | 'bluetooth'
+  // Nav-rail icons for the screens ported from desktop (2026-08-26). Each mirrors the Material
+  // Symbol the desktop's Icons.qml picks for the same page, so the two rails read alike:
+  // coach = forum, weight = monitor_weight, health = monitor_heart, ember = local_fire_department.
+  // Before this they all fell back to 'chart' and the rail showed four identical bar charts.
+  | 'coach' | 'weight' | 'health' | 'ember';
 
 interface Props {
   name: IconName;
@@ -104,6 +109,41 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24">
           <Path d="M6.5 6.5 L17.5 17.5 L12 23 L12 1 L17.5 6.5 L6.5 17.5" {...s} />
+        </Svg>
+      );
+    case 'coach':
+      // forum: a speech bubble with a second one behind it — the Coach page is a chat.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M8 3h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-1v3l-3.5-3H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" {...s} />
+          <Path d="M6 17H5a2 2 0 0 1-2-2V8" {...s} />
+        </Svg>
+      );
+    case 'weight':
+      // monitor_weight: a square scale with a dial arc and needle. The arc sits low and spans
+      // most of the width on purpose - a smaller, higher arc with a longer needle read as a
+      // question mark in a box at 22dp on the nav rail (seen on the tablet, 2026-08-26).
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={3} y={3} width={18} height={18} rx={3} {...s} />
+          <Path d="M7 14a5 5 0 0 1 10 0" {...s} />
+          <Line x1={12} y1={14} x2={9.5} y2={11} {...s} />
+        </Svg>
+      );
+    case 'health':
+      // monitor_heart: a heart with an ECG trace across it.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M20.4 8.6a4.6 4.6 0 0 0-8.4-2.6 4.6 4.6 0 0 0-8.4 2.6c0 .5.1 1 .2 1.4h3.7l1.4-2.4 2 5 1.6-3.1 1 1.1h5.9c.1-.5.2-1 .2-1.5z" {...s} />
+          <Path d="M4.6 12.2c1.3 3 4.8 5.6 7.4 7.4 2.6-1.8 6.1-4.4 7.4-7.4" {...s} />
+        </Svg>
+      );
+    case 'ember':
+      // local_fire_department: the flame Ember (the fasting PWA) is named for.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M12 2c.6 3-1.2 4.4-2.7 5.9C7.5 9.6 6 11.3 6 14a6 6 0 0 0 12 0c0-2.6-1.3-4.4-2.7-6.1-.7 1-1.5 1.6-2.3 1.8.5-2.6-.2-5.6-1-7.7z" {...s} />
+          <Path d="M12 21a3 3 0 0 1-3-3c0-1.6 1.4-2.4 3-4.5 1.6 2.1 3 2.9 3 4.5a3 3 0 0 1-3 3z" {...s} />
         </Svg>
       );
     case 'map':

@@ -147,10 +147,12 @@ export default function HomeScreen() {
   // (cable Ambit3's proven 0x0300/0x0302 pair, or Kailash's real BLE-only 0x1201 pushes).
   // No status persists across screens - a one-shot "did it work" line is enough here.
   const [timeSyncBusy, setTimeSyncBusy] = useState(false);
-  // Ember easter-egg state (2026-08-26): read once on mount; the tile below only renders when
-  // the Settings version-label taps have unlocked it.
+  // Ember easter-egg state (2026-08-26): the tile below only renders once the Settings
+  // version-label taps have unlocked it. Re-read on every focus, not just on mount - Home stays
+  // mounted while you visit Settings, so a mount-only read left the freshly-unlocked tile
+  // invisible until the app was restarted (caught on the tablet, 2026-08-26).
   const [emberUnlocked, setEmberUnlockedState] = useState(false);
-  useEffect(() => { isEmberUnlocked().then(setEmberUnlockedState); }, []);
+  useFocusEffect(useCallback(() => { isEmberUnlocked().then(setEmberUnlockedState); }, []));
   const [timeSyncMsg, setTimeSyncMsg] = useState<string | null>(null);
   const handleSyncTime = useCallback(async () => {
     setTimeSyncBusy(true);
@@ -801,14 +803,14 @@ export default function HomeScreen() {
     { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear') },
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
-    { id: 'coach', label: 'Coach', icon: 'chart' as const, onPress: () => navigation.navigate('Coach') },
+    { id: 'coach', label: 'Coach', icon: 'coach' as const, onPress: () => navigation.navigate('Coach') },
     // Ember: only once the Settings easter egg has been found, matching the desktop's own
     // Theme.emberUnlocked gate - so it stays hidden for everyone who hasn't looked for it.
     ...(emberUnlocked
-      ? [{ id: 'ember', label: 'Ember', icon: 'chart' as const, onPress: () => navigation.navigate('Ember') }]
+      ? [{ id: 'ember', label: 'Ember', icon: 'ember' as const, onPress: () => navigation.navigate('Ember') }]
       : []),
-    { id: 'health', label: 'Health', icon: 'chart' as const, onPress: () => navigation.navigate('Health') },
-    { id: 'weight', label: 'Weight', icon: 'chart' as const, onPress: () => navigation.navigate('Weight') },
+    { id: 'health', label: 'Health', icon: 'health' as const, onPress: () => navigation.navigate('Health') },
+    { id: 'weight', label: 'Weight', icon: 'weight' as const, onPress: () => navigation.navigate('Weight') },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },
   ];
 
