@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Path, Line, Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Line, Circle } from 'react-native-svg';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 
 // A small line chart for a dated metric series — the Android counterpart of the desktop's
@@ -63,27 +63,40 @@ export function MetricChart({
           Not enough data yet.
         </Text>
       ) : (
-        <Chart series={series} geom={geom} height={height} color={t.primary} grid={t.border} axis={t.mutedText} />
+        <>
+          <Chart series={series} geom={geom} height={height} color={t.primary} grid={t.border} />
+          {/* Axis dates live OUTSIDE the SVG on purpose. The chart stretches to the card width
+              via preserveAspectRatio="none", which scales glyphs horizontally too - dates drawn
+              inside it came out visibly squashed. Found by actually driving the app, 2026-08-26.
+              The year is kept: slicing it off made both ends of a 365-day window read "08-26". */}
+          <View style={styles.axis}>
+            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{series[0].date}</Text>
+            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{series[series.length - 1].date}</Text>
+          </View>
+        </>
       )}
     </View>
   );
 }
 
 function Chart({
-  series, geom, height, color, grid, axis,
+  series, geom, height, color, grid,
 }: {
   series: MetricPoint[];
   geom: { min: number; max: number };
   height: number;
   color: string;
   grid: string;
-  axis: string;
 }) {
-  // A fixed viewBox with preserveAspectRatio="none" lets the SVG stretch to whatever width the
-  // card ends up being, without needing an onLayout measurement pass.
-  const W = 300;
+  // The viewBox matches the REAL laid-out width, measured via onLayout, rather than a fixed 300
+  // stretched with preserveAspectRatio="none". Stretching scaled the horizontal axis about 4x on
+  // a tablet and scaled STROKES with it, so every line rendered visibly thick and blocky
+  // (André, 2026-08-26: "the graphs show very thick lines") - and squashed any text drawn inside.
+  // Measuring costs one extra render on first layout and keeps strokes a true 2px everywhere.
+  const [w, setW] = useState(0);
   const H = height;
-  const padL = 4, padR = 4, padT = 8, padB = 18;
+  const padL = 4, padR = 4, padT = 8, padB = 6;
+  const W = w || 300;
 
   const x = (i: number) => padL + (W - padL - padR) * (series.length === 1 ? 0.5 : i / (series.length - 1));
   const y = (v: number) => padT + (H - padT - padB) * (1 - (v - geom.min) / (geom.max - geom.min));
@@ -92,15 +105,15 @@ function Chart({
   const last = series[series.length - 1];
 
   return (
-    <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {/* baseline only - a faint reference, not a full grid, so the line stays the subject */}
-      <Line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
-      <Path d={d} stroke={color} strokeWidth={2} fill="none" />
-      {/* emphasised endpoint: the current value is what you actually look for */}
-      <Circle cx={x(series.length - 1)} cy={y(last.value)} r={3} fill={color} />
-      <SvgText x={padL} y={H - 5} fontSize={9} fill={axis}>{series[0].date.slice(5)}</SvgText>
-      <SvgText x={W - padR} y={H - 5} fontSize={9} fill={axis} textAnchor="end">{last.date.slice(5)}</SvgText>
-    </Svg>
+    <View onLayout={e => setW(Math.round(e.nativeEvent.layout.width))} style={{ width: '100%' }}>
+      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+        {/* baseline only - a faint reference, not a full grid, so the line stays the subject */}
+        <Line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
+        <Path d={d} stroke={color} strokeWidth={1.6} fill="none" />
+        {/* emphasised endpoint: the current value is what you actually look for */}
+        <Circle cx={x(series.length - 1)} cy={y(last.value)} r={2.5} fill={color} />
+      </Svg>
+    </View>
   );
 }
 
@@ -110,4 +123,6 @@ const styles = StyleSheet.create({
   label: { fontSize: v3Type.label, fontWeight: '600' },
   value: { fontSize: v3Type.title, fontWeight: '700' },
   empty: { fontSize: v3Type.body, paddingVertical: v3Spacing.medium },
+  axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  axisLabel: { fontSize: v3Type.tiny },
 });

@@ -227,7 +227,11 @@ function FitnessChart({
   fatigueColor: string;
   grid: string;
 }) {
-  const W = 300, H = 110, padT = 6, padB = 6, padX = 2;
+  // Real measured width, not a stretched fixed viewBox - see MetricChart.tsx for why
+  // (preserveAspectRatio="none" scales strokes with the axis and renders them thick/blocky).
+  const [w, setW] = useState(0);
+  const H = 110, padT = 6, padB = 6, padX = 2;
+  const W = w || 300;
   // Both series share ONE scale, otherwise the fitness/fatigue crossover - the whole point of
   // this chart - would be a meaningless artefact of two different axes.
   const all = chart.flatMap(p => [p.fitness, p.fatigue]);
@@ -239,12 +243,14 @@ function FitnessChart({
     chart.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(sel(p)).toFixed(1)}`).join(' ');
 
   return (
-    <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <Line x1={padX} y1={H - padB} x2={W - padX} y2={H - padB} stroke={grid} strokeWidth={1} />
-      <Path d={path(p => p.fatigue)} stroke={fatigueColor} strokeWidth={1.4} fill="none"
-            strokeDasharray="3,3" opacity={0.7} />
-      <Path d={path(p => p.fitness)} stroke={fitnessColor} strokeWidth={2.4} fill="none" />
-    </Svg>
+    <View onLayout={e => setW(Math.round(e.nativeEvent.layout.width))} style={{ width: '100%' }}>
+      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+        <Line x1={padX} y1={H - padB} x2={W - padX} y2={H - padB} stroke={grid} strokeWidth={1} />
+        <Path d={path(p => p.fatigue)} stroke={fatigueColor} strokeWidth={1.2} fill="none"
+              strokeDasharray="3,3" opacity={0.7} />
+        <Path d={path(p => p.fitness)} stroke={fitnessColor} strokeWidth={1.8} fill="none" />
+      </Svg>
+    </View>
   );
 }
 
