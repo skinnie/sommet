@@ -288,6 +288,16 @@ SELECTED_PRODUCT_ID = None
 LEGACY_PRODUCT_IDS = {0x0010, 0x0019, 0x001A, 0x001D}  # Bluebird, Duck, Colibri, Greentit
 
 
+def device_key():
+    """A stable per-watch identity for tagging activities, so the desktop cache can keep
+    several watches' histories side by side instead of one watch's index-N clobbering
+    another's (André, 2026-08-26 - "can we interchange watches?"). The pinned product id
+    (hex) distinguishes different models, which is the real fleet here (Ambit1/2/3/Traverse/
+    Kailash); two watches of the SAME model would still share it - the serial would be the
+    fully-unique key, a cheap future upgrade. "watch" when nothing is pinned."""
+    return hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else "watch"
+
+
 def selected_is_legacy():
     """True when the pinned watch (or, with none pinned, whichever is plugged) is an
     Ambit1/2. Falls back to a real device_info.py query when nothing is pinned - cheap (one
@@ -916,7 +926,8 @@ class Handler(BaseHTTPRequestHandler):
             total_entries = (json.loads(master_path.read_text())["total_entries"]
                               if master_path.exists() else len(activities))
             self._send_json(200, {"ok": True, "activities": activities,
-                                   "total_entries": total_entries, "raw_output": out})
+                                   "total_entries": total_entries, "device": device_key(),
+                                   "raw_output": out})
 
     def _handle_activities_legacy(self):
         """The Ambit1/2 path for GET /api/activities - tools/legacy_link.py's `logs`
@@ -953,7 +964,7 @@ class Handler(BaseHTTPRequestHandler):
                 })
             self._send_json(200, {"ok": True, "activities": activities,
                                    "total_entries": info.get("total_entries", len(activities)),
-                                   "raw_output": out})
+                                   "device": device_key(), "raw_output": out})
 
     @staticmethod
     def _enrich_legacy_gpx(gpx, entry):
@@ -1261,7 +1272,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:                          # noqa: BLE001
                 print(f"mark-synced (BLE) failed, activities still returned: {exc}")
         self._send_json(200, {"ok": True, "transport": "ble", "activities": activities,
-                               "total_entries": master["entries"]})
+                               "total_entries": master["entries"], "device": device_key()})
 
     def _handle_pois_read(self):
         """POIs currently on the watch. Raw output, deliberately - unlike routes'

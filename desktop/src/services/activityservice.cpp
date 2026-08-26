@@ -185,7 +185,10 @@ void ActivityService::refresh()
 {
     setLoading(true);
     setLastError(QString());
-    requestActivities(dbKnownCount(), false);
+    // known_count is per-watch now: compute it for the watch the last fetch was about. If that
+    // differs from the one actually plugged in, the response's device tag flags the switch and
+    // requestActivities re-fetches scoped to the real watch (see its handler).
+    requestActivities(dbKnownCount(m_lastDevice), false);
 }
 
 QVariantMap ActivityService::intervalsStreamMap() const
@@ -269,9 +272,21 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         // knew, the watch's log wrapped/reset since our database was built, so our cached
         // indices no longer mean the same activities. One automatic retry from scratch
         // (known_count 0) rather than silently mixing old and new data under the same idx.
+        // Which watch this response is about (backend device_key()). If it differs from the
+        // watch our known_count was computed against, the backend may have skipped the wrong
+        // activities - re-fetch once, scoped to the real watch, before touching the cache.
+        const QString device = root.value(QStringLiteral("device")).toString();
+        if (!alreadyRetried && knownCount > 0 && !device.isEmpty()
+            && device != m_lastDevice) {
+            m_lastDevice = device;
+            requestActivities(dbKnownCount(device), true);
+            return;
+        }
+        m_lastDevice = device;
+
         const int totalEntries = root.value(QStringLiteral("total_entries")).toInt();
         if (totalEntries < knownCount && !alreadyRetried) {
-            dbClear();
+            dbClear(device);            // only this watch's rows; other watches' histories stay
             requestActivities(0, true);
             return;
         }
@@ -290,7 +305,7 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
                 ? QString::fromUtf8(QJsonDocument(ruleOutputs.toObject()).toJson(
                       QJsonDocument::Compact))
                 : QString();
-            dbInsert(index, parsed, gpxText, fitBase64, ruleOutputsJson);
+            dbInsert(index, device, parsed, gpxText, fitBase64, ruleOutputsJson);
         }
 
         setLoading(false);
@@ -349,6 +364,40 @@ void ActivityService::openDatabase()
     // Whether a watch activity has been uploaded to intervals.icu (export), so we don't
     // re-upload it every sync. 1 = uploaded. Imports never set this.
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN exported INTEGER"));
+    // Multi-watch keying (André, 2026-08-26: "can we interchange watches?"). The table was
+    // keyed by idx alone, so watch B's index-0 REPLACE'd watch A's index-0. Re-key to
+    // (idx, device) so several watches' histories coexist. Detect the old idx-only PK via
+    // pragma and rebuild once. Watch rows that predate the device tag (device NULL/empty) are
+    // dropped here and re-read from the watch on the next sync; imports (device set, negative
+    // idx) copy across unchanged.
+    {
+        bool tableExists = false, deviceInPk = false;
+        QSqlQuery info(m_db);
+        info.exec(QStringLiteral("PRAGMA table_info(activities)"));
+        while (info.next()) {
+            tableExists = true;
+            if (info.value(1).toString() == QStringLiteral("device")
+                && info.value(5).toInt() > 0)
+                deviceInPk = true;
+        }
+        if (tableExists && !deviceInPk) {
+            q.exec(QStringLiteral("BEGIN TRANSACTION"));
+            q.exec(QStringLiteral(
+                "CREATE TABLE activities_rekey ("
+                "idx INTEGER, name TEXT, duration_s INTEGER, distance_m REAL, ascent_m REAL, "
+                "energy_kcal INTEGER, sport_type_raw INTEGER, start_time TEXT, track_json TEXT, "
+                "gpx_text TEXT, fit_base64 TEXT, rule_outputs_json TEXT, source TEXT, "
+                "external_id TEXT, device TEXT, exported INTEGER, PRIMARY KEY(idx, device))"));
+            q.exec(QStringLiteral(
+                "INSERT INTO activities_rekey SELECT idx, name, duration_s, distance_m, "
+                "ascent_m, energy_kcal, sport_type_raw, start_time, track_json, gpx_text, "
+                "fit_base64, rule_outputs_json, source, external_id, device, exported "
+                "FROM activities WHERE device IS NOT NULL AND device != ''"));
+            q.exec(QStringLiteral("DROP TABLE activities"));
+            q.exec(QStringLiteral("ALTER TABLE activities_rekey RENAME TO activities"));
+            q.exec(QStringLiteral("COMMIT"));
+        }
+    }
     // Deleted-activity tombstones (André, 2026-08-25). One row per deleted activity, keyed by
     // start-time|name (the same identity dedupeActivities() collapses on), so a deleted move
     // stays gone across every future watch re-sync and intervals/Garmin re-import - the watch's
@@ -376,31 +425,41 @@ void ActivityService::loadTombstones()
         m_tombstones.insert(q.value(0).toString());
 }
 
-int ActivityService::dbKnownCount()
+int ActivityService::dbKnownCount(const QString &device)
 {
     if (!m_db.isOpen())
         return 0;
     // Only watch rows drive "how many the app already has" - imported rows use negative idx
-    // and must not inflate this (they'd make the watch skip reading real activities).
-    QSqlQuery q(QStringLiteral(
-        "SELECT MAX(idx) FROM activities WHERE source IS NULL OR source = 'watch'"), m_db);
+    // and must not inflate this (they'd make the watch skip reading real activities). Scoped
+    // to the given device so each watch's known_count is its own (multi-watch keying).
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT MAX(idx) FROM activities WHERE (source IS NULL OR source = 'watch') "
+        "AND device = ?"));
+    q.addBindValue(device);
+    q.exec();
     if (q.next())
         return q.value(0).toInt();  // NULL (empty table) -> QVariant().toInt() == 0
     return 0;
 }
 
-void ActivityService::dbClear()
+void ActivityService::dbClear(const QString &device)
 {
     if (!m_db.isOpen())
         return;
-    // Only the watch's own rows - imported intervals.icu activities are not from the watch and
-    // must survive a log-wrap re-read (this runs when the watch log reset since our cache).
+    // Only THIS watch's own rows - imported intervals.icu activities and other watches' moves
+    // must survive a log-wrap re-read (this runs when the selected watch's log reset since our
+    // cache).
     QSqlQuery q(m_db);
-    q.exec(QStringLiteral("DELETE FROM activities WHERE source IS NULL OR source = 'watch'"));
+    q.prepare(QStringLiteral(
+        "DELETE FROM activities WHERE (source IS NULL OR source = 'watch') AND device = ?"));
+    q.addBindValue(device);
+    q.exec();
 }
 
-void ActivityService::dbInsert(int index, const QVariantMap &parsed, const QString &gpxText,
-                                const QString &fitBase64, const QString &ruleOutputsJson)
+void ActivityService::dbInsert(int index, const QString &device, const QVariantMap &parsed,
+                                const QString &gpxText, const QString &fitBase64,
+                                const QString &ruleOutputsJson)
 {
     if (!m_db.isOpen())
         return;
@@ -410,10 +469,11 @@ void ActivityService::dbInsert(int index, const QVariantMap &parsed, const QStri
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO activities "
-        "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
+        "(idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         " start_time, track_json, gpx_text, fit_base64, rule_outputs_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     q.addBindValue(index);
+    q.addBindValue(device);
     q.addBindValue(parsed.value(QStringLiteral("name")));
     q.addBindValue(parsed.value(QStringLiteral("durationSeconds")));
     q.addBindValue(parsed.value(QStringLiteral("distanceMeters")));

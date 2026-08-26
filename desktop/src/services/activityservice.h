@@ -175,8 +175,13 @@ private:
     static QVariantMap parseGpx(const QString &gpxText);
 
     void openDatabase();
-    int dbKnownCount();
-    void dbClear();
+    // Per-watch scoping (André, 2026-08-26): activities are keyed by (device, idx) so several
+    // watches' histories coexist instead of one watch's index-N replacing another's. device is
+    // the backend's device_key() (product-id hex). m_lastDevice is the device the last fetch
+    // was about, used to compute the next known_count against the right watch.
+    int dbKnownCount(const QString &device);
+    void dbClear(const QString &device);
+    QString m_lastDevice;
     // Deleted-activity tombstones (start-time|name). Loaded once from the `deleted_activities`
     // table in openDatabase(); dbLoadAll() skips any row whose key is in here, so a deleted
     // move never re-appears however it gets re-inserted (watch re-sync, intervals/Garmin
@@ -194,8 +199,9 @@ private:
     QSet<QString> m_tombstones;
     void loadTombstones();
     static QString tombstoneKey(const QString &startTime, const QString &name);
-    void dbInsert(int index, const QVariantMap &parsed, const QString &gpxText,
-                  const QString &fitBase64, const QString &ruleOutputsJson);
+    void dbInsert(int index, const QString &device, const QVariantMap &parsed,
+                  const QString &gpxText, const QString &fitBase64,
+                  const QString &ruleOutputsJson);
     bool dbLoadAll();
     // Extracts the resting-HRV readings (5+5 / lie-still tests, hrvResting == 1) from the
     // loaded activities and persists them to QSettings health/watchHrv as [{date,value}], where
