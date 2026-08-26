@@ -1225,7 +1225,7 @@ PageFlickable {
                         property int emberTaps: 0
                         Text {
                             id: versionLabel
-                            text: qsTr("Sommet v0.2.0")
+                            text: qsTr("Sommet v0.2.1")
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                             font.bold: true
