@@ -29,6 +29,10 @@ import AppZoneScreen from './src/screens/AppZoneScreen';
 import IntervalsScreen from './src/screens/IntervalsScreen';
 import WorkoutCalendarScreen from './src/screens/WorkoutCalendarScreen';
 import GearScreen from './src/screens/GearScreen';
+// Weight/Health - desktop parity (2026-08-26). Both read intervals.icu's wellness feed via
+// src/services/WellnessService.ts; see that file for what Android can and cannot reach.
+import WeightScreen from './src/screens/WeightScreen';
+import HealthScreen from './src/screens/HealthScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
@@ -63,6 +67,10 @@ export type RootStackParamList = {
   // needed) - launched from the Activities screen header, not the device-gated Home shell.
   Totals: undefined;
   Calendar: undefined;
+  // Weight/Health (2026-08-26, port of desktop WeightPage/HealthPage). Both read intervals.icu
+  // wellness, so like Totals/Calendar they need no connected device and are reachable any time.
+  Weight: undefined;
+  Health: undefined;
   // Experimental (2026-08-14) - gated behind the Experimental flag (see ExperimentalContext),
   // reached from the Settings > Experimental section. App-Zone + Intervals write flash and are
   // unproven on Android hardware; Smart Sensor is a separate BLE peripheral (the HR belt).
@@ -205,6 +213,16 @@ function AppShell() {
             name="Totals"
             component={TotalsScreen}
             options={{ title: t.totalsScreenTitle }}
+          />
+          <Stack.Screen
+            name="Weight"
+            component={WeightScreen}
+            options={{ title: 'Weight' }}
+          />
+          <Stack.Screen
+            name="Health"
+            component={HealthScreen}
+            options={{ title: 'Health' }}
           />
           <Stack.Screen
             name="Calendar"
