@@ -21,7 +21,8 @@ import { DemoDevicePicker } from '../components/ui/DemoDevicePicker';
 import Icon, { IconName } from '../components/ui/Icon';
 import { CREDITS } from '../legal/credits';
 import { DecodedSetting, SettingField, SettingScreen } from '../services/AmbitSettingsReader';
-import { readAmbitSettings, writeAmbitSetting } from '../services/AmbitSettingsService';
+import { readAmbitSettings, writeAmbitSetting, writeLegacyPersonalSetting } from '../services/AmbitSettingsService';
+import { isWritablePersonalField } from '../services/AmbitPersonalSettingsWriter';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { EPHEMERIS_GPS_ONLY_KEY, GlonassStatus, getGlonassStatus } from '../services/SgeeService';
 import type { WriteDevice } from '../services/AmbitSettingsWriter';
@@ -249,6 +250,24 @@ export default function SettingsScreen() {
   }
 
   async function handleWriteAmbitSetting(key: string, value: number) {
+    // Ambit 1/2 (read-only for everything else) but the Personal profile fields ARE writable
+    // via the legacy 0x0b01 path (2026-08-26). Route those there; the state/result contract is
+    // the same so the reflect-confirmed-value logic below is shared.
+    if (ambitReadOnly && isWritablePersonalField(key)) {
+      setWritingKey(key);
+      await writeLegacyPersonalSetting(key, value, s => {
+        if (s.phase === 'done' || s.phase === 'error') {
+          setWritingKey(null);
+          if (s.error) Alert.alert(t.error, s.error);
+        }
+        if (s.result && s.result.confirmedValue !== null) {
+          setAmbitSettings(prev => prev && prev.map(row =>
+            row.key === key ? { ...row, value: s.result!.confirmedValue as number } : row));
+          setNumEdits(prev => ({ ...prev, [key]: String(s.result!.confirmedValue) }));
+        }
+      });
+      return;
+    }
     if (!ambitSettingsFields || !ambitWriteDevice) return;
     setWritingKey(key);
     await writeAmbitSetting(key, value, ambitSettingsFields, ambitWriteDevice, s => {
@@ -684,6 +703,9 @@ export default function SettingsScreen() {
             .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
             .join(' ');
           const busy = writingKey === row.key;
+          // Ambit 1/2 are read-only EXCEPT the Personal profile fields, now writable via the
+          // legacy 0x0b01 path (2026-08-26). Those render with the same editors as an Ambit3.
+          const roDisplay = ambitReadOnly && !isWritablePersonalField(row.key);
           const showHeader = idx === 0 || settingScreenOf(arr[idx - 1].row) !== settingScreenOf(row);
           return (
             <React.Fragment key={row.key}>
@@ -693,11 +715,11 @@ export default function SettingsScreen() {
             <View style={styles.ambitSettingRow}>
               <Text style={styles.ambitSettingLabel}>{label}</Text>
 
-              {ambitReadOnly && (
+              {roDisplay && (
                 <Text style={styles.ambitSettingValueRO}>{readOnlyValue(row)}</Text>
               )}
 
-              {!ambitReadOnly && (<>
+              {!roDisplay && (<>
               {row.kind === 'bool' && (
                 <Toggle
                   value={row.value === 1}

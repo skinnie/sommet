@@ -15,6 +15,16 @@
 #include "libambit/libambit_int.h"
 #include "device_driver_ambit3_navigation.h"
 
+// libambit_protocol_command lives in protocol.h, which (unlike libambit.h) has no extern "C"
+// guard - including it from this C++ TU would mangle the name and fail to link against the C
+// libambit.a. Forward-declare it with C linkage instead (used for the legacy 0x0b00/0x0b01
+// personal-settings read-modify-write). Buffers are freed with plain free() - the existing
+// nativeAmbitReadPoiListRaw comment confirms libambit_protocol_free() is exactly that.
+extern "C" int libambit_protocol_command(ambit_object_t *object, uint16_t command,
+                                         uint8_t *data, size_t datalen,
+                                         uint8_t **reply_data, size_t *replylen,
+                                         uint8_t legacy_format);
+
 // libambit_new_from_fd() est déclaré dans libambit_android.c
 extern "C" ambit_object_t *libambit_new_from_fd(int fd, int ep_in, int ep_out,
                                                  uint16_t vid, uint16_t pid);
@@ -961,6 +971,63 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitReadPersonalSettings(
          << "}";
     libambit_personal_settings_free(ps);
     return env->NewStringUTF(json.str().c_str());
+}
+
+/**
+ * nativeAmbitWritePersonalSetting
+ *
+ * Ambit 1/2 (Bluebird) legacy personal-settings WRITE - the 0x0b01 command openambit/libambit
+ * only ever declared, reverse-engineered from a real SuuntoLink<->Ambit2 USB capture
+ * (2026-08-26, docs/ambit2_protocol_findings.md): the settings struct is 188 bytes on the
+ * Ambit2 (132 on the Ambit1), same field offsets. Read-modify-write: read the whole struct
+ * (0x0b00), patch one field in place at `offset` (`width` 1 or 2, little-endian value), write
+ * the whole thing back (0x0b01) at the device's OWN reply length so the Ambit2's extra tail is
+ * preserved rather than truncated. Guarded to the Bluebird family and bounds-checked. Mirrors
+ * the desktop tools/vendor/ambit_legacy_cli cmd_settings_write, hardware-verified there
+ * (rest_hr round-trip on a real Ambit2). Returns JNI_TRUE on success.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWritePersonalSetting(
+        JNIEnv * /*env*/, jobject /*thiz*/, jint offset, jint width, jint value)
+{
+    if (!g_device) { LOGE("nativeAmbitWritePersonalSetting: Not connected"); return JNI_FALSE; }
+    uint16_t pid = g_device->device_info.product_id;
+    // Bluebird family only: Ambit1 0x0010, Ambit2 0x0019, Ambit2S 0x001A, Ambit2R 0x001D.
+    if (pid != 0x0010 && pid != 0x0019 && pid != 0x001A && pid != 0x001D) {
+        LOGE("nativeAmbitWritePersonalSetting: not an Ambit1/2 (pid 0x%04x)", pid);
+        return JNI_FALSE;
+    }
+    if (width != 1 && width != 2) { LOGE("nativeAmbitWritePersonalSetting: bad width %d", width); return JNI_FALSE; }
+
+    uint8_t *reply = nullptr;
+    size_t replylen = 0;
+    if (libambit_protocol_command(g_device, 0x0b00, nullptr, 0, &reply, &replylen, 0) != 0
+        || replylen < 132) {
+        if (reply) free(reply);
+        LOGE("nativeAmbitWritePersonalSetting: 0x0b00 read failed (len %zu)", replylen);
+        return JNI_FALSE;
+    }
+    if ((size_t)(offset + width) > replylen) {
+        free(reply);
+        LOGE("nativeAmbitWritePersonalSetting: offset %d+%d beyond struct %zu", offset, width, replylen);
+        return JNI_FALSE;
+    }
+    if (width == 2) {
+        reply[offset] = (uint8_t)(value & 0xff);
+        reply[offset + 1] = (uint8_t)((value >> 8) & 0xff);
+    } else {
+        reply[offset] = (uint8_t)value;
+    }
+    uint8_t *wreply = nullptr;
+    size_t wlen = 0;
+    int rc = libambit_protocol_command(g_device, 0x0b01, reply, replylen, &wreply, &wlen, 0);
+    if (wreply) free(wreply);
+    free(reply);
+    if (rc != 0) {
+        LOGE("nativeAmbitWritePersonalSetting: 0x0b01 write rc %d", rc);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 /**

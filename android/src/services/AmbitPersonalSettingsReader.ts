@@ -37,6 +37,14 @@ interface PersonalField {
   choices?: SettingChoice[];
   // Raw-int -> display-value multiplier (e.g. weight is stored as kg*100). Default 1.
   scale?: number;
+  // Editable-field metadata (2026-08-26): control 'number' renders a text+Save editor in
+  // SettingsScreen; min/max are the display-unit bounds handleSetNumber enforces; unit is
+  // shown after the value. Only set on the writable personal-profile fields (see
+  // AmbitPersonalSettingsWriter.AMBIT12_WRITABLE); every other field stays read-only.
+  control?: 'number';
+  min?: number;
+  max?: number;
+  unit?: string;
 }
 
 const AMBIT12_PERSONAL_FIELDS: PersonalField[] = [
@@ -67,13 +75,16 @@ const AMBIT12_PERSONAL_FIELDS: PersonalField[] = [
   // Personal profile - present in the legacy struct (personal.c), surfaced read-only. These
   // are the fields a user recognises from the watch's own "Personal" menu. Ambit 1/2 have no
   // settings-write command in the protocol (no 0x0b01 in any real capture), so display only.
+  // Personal profile - now WRITABLE on the Ambit1/2 (0x0b01, reverse-engineered from a real
+  // SuuntoLink<->Ambit2 capture 2026-08-26; see AmbitPersonalSettingsWriter.ts). control
+  // 'number'/enum + min/max make SettingsScreen render them editable for legacy watches.
   { key: 'gender', kind: 'enum', choices: [{ value: 1, label: 'Male' }, { value: 0, label: 'Female' }] },
-  { key: 'birth_year', kind: 'number' },
-  { key: 'weight', kind: 'number', scale: 0.01 },   // stored as kg*100
-  { key: 'height', kind: 'number' },                // cm
-  { key: 'max_hr', kind: 'number' },                // bpm
-  { key: 'rest_hr', kind: 'number' },               // bpm
-  { key: 'fitness_level', kind: 'number' },
+  { key: 'birth_year', kind: 'number', control: 'number', min: 1920, max: 2035 },
+  { key: 'weight', kind: 'number', scale: 0.01, control: 'number', min: 0, max: 300, unit: 'kg' }, // kg*100
+  { key: 'height', kind: 'number', control: 'number', min: 0, max: 255, unit: 'cm' },
+  { key: 'max_hr', kind: 'number', control: 'number', min: 0, max: 255, unit: 'bpm' },
+  { key: 'rest_hr', kind: 'number', control: 'number', min: 0, max: 255, unit: 'bpm' },
+  { key: 'fitness_level', kind: 'number', control: 'number', min: 0, max: 255 },
 ];
 
 /** Decodes the JSON from readPersonalSettings() (native/AmbitUsbModule.ts) into the same
@@ -93,7 +104,8 @@ export function decodePersonalSettings(json: string): DecodedSetting[] {
          || f.key === 'fitness_level') && v === 0) continue;
     if (f.key === 'birth_year' && (v < 1900 || v > thisYear)) continue;
     const value = f.scale ? Math.round(v * f.scale * 10) / 10 : v;
-    out.push({ key: f.key, path: f.key, kind: f.kind, value, choices: f.choices });
+    out.push({ key: f.key, path: f.key, kind: f.kind, value, choices: f.choices,
+               control: f.control, min: f.min, max: f.max, unit: f.unit });
   }
   return out;
 }

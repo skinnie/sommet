@@ -248,6 +248,18 @@ export function readPersonalSettings(): Promise<string> {
 }
 
 /**
+ * Ambit 1/2 (Bluebird) legacy personal-settings WRITE (0x0b01), reverse-engineered from a
+ * real SuuntoLink<->Ambit2 USB capture (2026-08-26, docs/ambit2_protocol_findings.md). The
+ * native side does the read-modify-write: read the whole struct (188 B on Ambit2 / 132 on
+ * Ambit1), patch `value` at `offset` (`width` 1 or 2, little-endian), write it back at the
+ * device's own length. See AmbitPersonalSettingsWriter.ts for the field offset table. Resolves
+ * true when the write was sent OK - the caller re-reads to confirm the watch applied it.
+ */
+export function writePersonalSetting(offset: number, width: number, value: number): Promise<boolean> {
+  return NativeAmbit.writePersonalSetting(offset, width, value);
+}
+
+/**
  * Real, hardware-confirmed 2026-08-08: writes a full sml.DeviceSettings blob back via
  * 0x1101 - André confirmed on a real connected Ambit3's own screen that this exact
  * mechanism visibly switched the display Light -> Dark. `dataBase64` must be the *entire*

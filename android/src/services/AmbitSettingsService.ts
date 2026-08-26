@@ -1,4 +1,5 @@
 import { connect, disconnect, getDeviceInfo, readSettingsRaw, readPersonalSettings, isBleTransportActive } from '../native/AmbitUsbModule';
+import { writePersonalField } from './AmbitPersonalSettingsWriter';
 import {
   AMBIT3_SETTINGS_FIELDS, TRAVERSE_SETTINGS_FIELDS, KAILASH_SETTINGS_FIELDS, SettingField,
   decodeSettings, DecodedSetting,
@@ -150,6 +151,38 @@ export async function writeAmbitSetting(
     onState({ phase: 'error', error: e?.message ?? 'Failed to write the setting' });
   } finally {
     if (!overBle) await disconnect().catch(() => {});
+  }
+}
+
+/**
+ * Ambit 1/2 (Bluebird) legacy personal-settings write - the 0x0b01 path
+ * (AmbitPersonalSettingsWriter.writePersonalField, reverse-engineered from a real capture,
+ * docs/ambit2_protocol_findings.md). Same connect -> write+confirm -> disconnect shape and
+ * WriteSettingState contract as writeAmbitSetting() so SettingsScreen handles both the same
+ * way. `displayValue` is what the user typed (e.g. kg for weight); the writer converts it to
+ * the raw struct value, writes, and re-reads to confirm. USB-only family (no BLE branch).
+ */
+export async function writeLegacyPersonalSetting(
+  key: string,
+  displayValue: number,
+  onState: (s: WriteSettingState) => void,
+): Promise<void> {
+  onState({ phase: 'connecting' });
+  try {
+    await connect();
+  } catch (e: any) {
+    onState({ phase: 'error', error: e?.message ?? 'Connection to the watch failed' });
+    return;
+  }
+  onState({ phase: 'writing' });
+  try {
+    const confirmed = await writePersonalField(key, displayValue);
+    onState({ phase: 'done', result: { ok: true, key, previousValue: null,
+                                       requestedValue: displayValue, confirmedValue: confirmed } });
+  } catch (e: any) {
+    onState({ phase: 'error', error: e?.message ?? 'Failed to write the setting' });
+  } finally {
+    await disconnect().catch(() => {});
   }
 }
 

@@ -103,6 +103,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitReadDeviceLogRaw(): String?
     private external fun nativeAmbitReadSettingsRaw(): String?
     private external fun nativeAmbitReadPersonalSettings(): String?
+    private external fun nativeAmbitWritePersonalSetting(offset: Int, width: Int, value: Int): Boolean
     private external fun nativeAmbitWriteSettingsRaw(data: ByteArray): Boolean
     private external fun nativeAmbitSetDateTime(): Boolean
     private external fun nativeAmbitReadCustomModesRaw(): String?
@@ -881,6 +882,28 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 else promise.reject("PERSONAL_SETTINGS_READ_FAILED", "Failed to read personal settings (see logcat AmbitJNI)")
             } catch (e: Exception) {
                 promise.reject("PERSONAL_SETTINGS_READ_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    // Ambit 1/2 (Bluebird) legacy personal-settings WRITE (0x0b01), reverse-engineered from a
+    // real SuuntoLink<->Ambit2 USB capture (2026-08-26). Read-modify-write of one field: the
+    // native side reads the whole struct (0x0b00), patches `value` at `offset` (`width` 1 or 2,
+    // little-endian), and writes it back at the device's own length. See AmbitPersonalSettings-
+    // Writer.ts for the field offset table. Guarded to the Bluebird family natively.
+    @ReactMethod
+    fun writePersonalSetting(offset: Int, width: Int, value: Int, promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val ok = nativeAmbitWritePersonalSetting(offset, width, value)
+                if (ok) promise.resolve(true)
+                else promise.reject("PERSONAL_SETTINGS_WRITE_FAILED", "Failed to write personal setting (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("PERSONAL_SETTINGS_WRITE_ERROR", e.message ?: "Unknown error")
             }
         }
     }
