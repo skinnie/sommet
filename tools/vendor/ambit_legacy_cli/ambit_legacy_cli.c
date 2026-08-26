@@ -927,13 +927,19 @@ static int cmd_settings_write(const char *key, long value, int dry_run) {
         printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
         return 1;
     }
-    if (info->product_id != 0x0010) {
+    if (!is_legacy_pid(info->product_id)) {
         fputs("@@JSON@@\n", stdout);
-        printf("{\"ok\": false, \"error\": \"this settings layout is the Ambit1's only\"}\n");
+        printf("{\"ok\": false, \"error\": \"settings write is the Ambit1/2 (Bluebird) family only\"}\n");
         libambit_close(dev); libambit_free_enumeration(devices);
         return 1;
     }
 
+    /* The settings struct is 132 B on the Ambit1 but 188 B on the Ambit2 (confirmed from a
+     * real SuuntoLink USBPcap 2026-08-26 - see docs/ambit2_protocol_findings.md). The
+     * confirmed field offsets are family-common (personal.c reads them identically for all),
+     * so this is a read-modify-WRITE of the device's OWN full struct: A1_SETTINGS_BLOB (132)
+     * stays the sanity floor (every confirmed field lives below it), but we copy and write
+     * back exactly `replylen` bytes so the Ambit2's extra tail is preserved, not truncated. */
     uint8_t *reply = NULL; size_t replylen = 0;
     if (libambit_protocol_command(dev, 0x0b00, NULL, 0, &reply, &replylen, 0) != 0
         || replylen < A1_SETTINGS_BLOB) {
@@ -943,11 +949,18 @@ static int cmd_settings_write(const char *key, long value, int dry_run) {
         libambit_close(dev); libambit_free_enumeration(devices);
         return 1;
     }
-    uint8_t blob[A1_SETTINGS_BLOB];
-    memcpy(blob, reply, A1_SETTINGS_BLOB);
+    int off = A1_SETTING_FIELDS[idx].off;
+    if ((size_t)(off + A1_SETTING_FIELDS[idx].width) > replylen) {
+        libambit_protocol_free(reply);
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"field offset beyond this device's settings struct; nothing written\"}\n");
+        libambit_close(dev); libambit_free_enumeration(devices);
+        return 1;
+    }
+    uint8_t *blob = malloc(replylen);
+    memcpy(blob, reply, replylen);
     libambit_protocol_free(reply);
 
-    int off = A1_SETTING_FIELDS[idx].off;
     unsigned old = (A1_SETTING_FIELDS[idx].width == 2)
                      ? (unsigned)(blob[off] | (blob[off + 1] << 8)) : blob[off];
     if (A1_SETTING_FIELDS[idx].width == 2) {
@@ -959,9 +972,10 @@ static int cmd_settings_write(const char *key, long value, int dry_run) {
     int rc = 0;
     if (!dry_run) {
         uint8_t *wreply = NULL; size_t wlen = 0;
-        rc = libambit_protocol_command(dev, 0x0b01, blob, A1_SETTINGS_BLOB, &wreply, &wlen, 0);
+        rc = libambit_protocol_command(dev, 0x0b01, blob, replylen, &wreply, &wlen, 0);
         libambit_protocol_free(wreply);
     }
+    free(blob);
 
     fputs("@@JSON@@\n", stdout);
     printf("{\"ok\": %s, \"dryRun\": %s, \"field\": ", rc == 0 ? "true" : "false",
