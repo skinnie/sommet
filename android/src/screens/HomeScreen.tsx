@@ -796,6 +796,7 @@ export default function HomeScreen() {
     { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear') },
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
+    { id: 'coach', label: 'Coach', icon: 'chart' as const, onPress: () => navigation.navigate('Coach') },
     { id: 'health', label: 'Health', icon: 'chart' as const, onPress: () => navigation.navigate('Health') },
     { id: 'weight', label: 'Weight', icon: 'chart' as const, onPress: () => navigation.navigate('Weight') },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },

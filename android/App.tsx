@@ -33,6 +33,7 @@ import GearScreen from './src/screens/GearScreen';
 // src/services/WellnessService.ts; see that file for what Android can and cannot reach.
 import WeightScreen from './src/screens/WeightScreen';
 import HealthScreen from './src/screens/HealthScreen';
+import CoachScreen from './src/screens/CoachScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
@@ -71,6 +72,8 @@ export type RootStackParamList = {
   // wellness, so like Totals/Calendar they need no connected device and are reachable any time.
   Weight: undefined;
   Health: undefined;
+  // Coach readiness (2026-08-26): intervals.icu training load, no device needed.
+  Coach: undefined;
   // Experimental (2026-08-14) - gated behind the Experimental flag (see ExperimentalContext),
   // reached from the Settings > Experimental section. App-Zone + Intervals write flash and are
   // unproven on Android hardware; Smart Sensor is a separate BLE peripheral (the HR belt).
@@ -223,6 +226,11 @@ function AppShell() {
             name="Health"
             component={HealthScreen}
             options={{ title: 'Health' }}
+          />
+          <Stack.Screen
+            name="Coach"
+            component={CoachScreen}
+            options={{ title: 'Coach' }}
           />
           <Stack.Screen
             name="Calendar"
