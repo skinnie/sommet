@@ -1613,6 +1613,7 @@ class Handler(BaseHTTPRequestHandler):
         `restore` already understand, nothing invented here."""
         BACKUP_DIR.mkdir(exist_ok=True)
         backups = []
+        seen_prefixes = set()
         for routes_file in sorted(BACKUP_DIR.glob("*-routes.bin"), reverse=True):
             prefix = str(routes_file)[:-len("-routes.bin")]
             waypoints_file = Path(f"{prefix}-waypoints.bin")
@@ -1622,7 +1623,25 @@ class Handler(BaseHTTPRequestHandler):
                 "prefix": prefix,
                 "label": Path(prefix).name,
                 "createdAt": routes_file.stat().st_mtime,
+                "hasEmber": Path(f"{prefix}-ember.json").exists(),
+                "hasRoutes": True,
             })
+            seen_prefixes.add(prefix)
+        # Ember-only backups (no watch connected when the backup was made - a Garmin owner, or
+        # no watch at all) have no -routes.bin, so the loop above never finds them. List them
+        # too, or they'd be made successfully but then invisible forever.
+        for ember_file in sorted(BACKUP_DIR.glob("*-ember.json"), reverse=True):
+            prefix = str(ember_file)[:-len("-ember.json")]
+            if prefix in seen_prefixes:
+                continue
+            backups.append({
+                "prefix": prefix,
+                "label": Path(prefix).name,
+                "createdAt": ember_file.stat().st_mtime,
+                "hasEmber": True,
+                "hasRoutes": False,
+            })
+        backups.sort(key=lambda b: b["createdAt"], reverse=True)
         self._send_json(200, {"ok": True, "backups": backups})
 
     def _handle_ble_status(self):
@@ -4273,9 +4292,25 @@ class Handler(BaseHTTPRequestHandler):
         label = time.strftime("%Y%m%d-%H%M%S")
         prefix = str(target / label)
         code, out, err = run_tool("write_nav.py", ["nav", "--save", prefix])
-        ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
+        routes_ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
+        # Ember rides along in the same backup (André, 2026-08-26: "afaik there is zero GUI
+        # service to backup it somewhere" - this closes that gap the same keyless way, no new
+        # mechanism). Best-effort and silent if Ember was never used (no log.json yet).
+        #
+        # Independent of the watch call above on purpose: someone using Ember without a
+        # connected/supported watch (a Garmin owner, or no watch at all) must still get a
+        # successful backup, not a 502 because `nav --save` had nothing to talk to.
+        has_ember = False
+        try:
+            if EMBER_FILE.exists():
+                Path(f"{prefix}-ember.json").write_text(EMBER_FILE.read_text())
+                has_ember = True
+        except Exception:
+            pass
+        ok = routes_ok or has_ember
         self._send_json(200 if ok else 502, {
-            "ok": ok, "prefix": prefix, "label": label, "raw_output": out, "stderr": err})
+            "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
+            "hasRoutes": routes_ok, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):
         """Body: {"prefix": str, "confirm": bool}. Real hardware write when confirmed - same
@@ -4285,18 +4320,45 @@ class Handler(BaseHTTPRequestHandler):
         if not prefix:
             self._send_json(400, {"error": "missing \"prefix\""})
             return
-        if not (Path(f"{prefix}-routes.bin").exists()
-                and Path(f"{prefix}-waypoints.bin").exists()):
+        has_routes_backup = (Path(f"{prefix}-routes.bin").exists()
+                              and Path(f"{prefix}-waypoints.bin").exists())
+        has_ember_backup = Path(f"{prefix}-ember.json").exists()
+        if not (has_routes_backup or has_ember_backup):
             self._send_json(400, {"error": f"no backup found at prefix {prefix!r}"})
             return
 
         confirm = bool(body.get("confirm", False))
-        args = ["restore", prefix]
-        if confirm:
-            args.append("--write")
-        code, out, err = run_tool("write_nav.py", args)
-        self._send_json(200 if code == 0 else 502, {
-            "ok": code == 0, "wrote": confirm and code == 0, "raw_output": out, "stderr": err})
+        # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to
+        # restore - skip that call entirely rather than have it fail on files that were never
+        # written in the first place.
+        if has_routes_backup:
+            args = ["restore", prefix]
+            if confirm:
+                args.append("--write")
+            code, out, err = run_tool("write_nav.py", args)
+            ok = code == 0
+        else:
+            code, out, err, ok = 0, "", "", True
+
+        # Ember restores alongside the watch data if this backup has it - same rehearsal-first
+        # confirm=false/true pattern, so a dry-run reports what WOULD happen without touching
+        # anything. Full overwrite (not merged), matching what "restore a backup" means
+        # everywhere else here: older backups made before Ember existed just have nothing to
+        # restore, silently.
+        ember_backup = Path(f"{prefix}-ember.json")
+        ember_result = None
+        if ember_backup.exists():
+            try:
+                data = json.loads(ember_backup.read_text())
+                ember_result = {"entries": len(data.get("entries", [])), "fasts": len(data.get("fasts", []))}
+                if confirm:
+                    self._ember_save(data)
+            except Exception as ex:
+                ember_result = {"error": str(ex)}
+
+        self._send_json(200 if ok else 502, {
+            "ok": ok, "wrote": confirm and ok, "raw_output": out, "stderr": err,
+            "ember": ember_result})
 
 
 def main():

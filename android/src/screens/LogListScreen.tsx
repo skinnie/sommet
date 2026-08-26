@@ -27,6 +27,7 @@ import {
   ALL_METRICS, MetricValues, metricLabel, metricValue, metricRaw, metricsAvailableFor,
 } from '../services/ActivityMetrics';
 import { MetricColumnMenu } from '../components/ui/MetricColumnMenu';
+import { deleteIntervalsIcuActivity } from '../services/ApiIntervalsIcu';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'LogList'>;
 
@@ -186,9 +187,13 @@ export default function LogListScreen() {
   }
 
   function confirmDelete(item: ActivityRecord) {
+    // Say plainly when the delete also removes the remote copy - it is irreversible, so the
+    // confirm must not imply this only hides it locally.
+    const alsoRemote = item.id.startsWith('icu:');
     Alert.alert(
       t.deleteTitle,
-      t.deleteMsg(formatDate(item.date)),
+      t.deleteMsg(formatDate(item.date))
+        + (alsoRemote ? '\n\nThis also deletes it permanently from intervals.icu.' : ''),
       [
         { text: t.cancel, style: 'cancel' },
         {
@@ -198,6 +203,13 @@ export default function LogListScreen() {
             await deleteActivity(item.id);           // ajoute à la liste noire
             if (item.gpx_path) {
               await RNFS.unlink(item.gpx_path).catch(() => {});
+            }
+            // An activity that CAME FROM intervals.icu is also deleted there (2026-08-26,
+            // desktop parity - André chose "also delete from the source" over a local-only
+            // hide). Watch-recorded moves have no remote copy to remove. Fire-and-forget: the
+            // local delete already stands, and a network failure must not resurrect the row.
+            if (item.id.startsWith('icu:')) {
+              deleteIntervalsIcuActivity(item.id).catch(() => {});
             }
             await load();
           },
@@ -345,6 +357,12 @@ export default function LogListScreen() {
                     <Text style={styles.cardType}>{capitalize(item.activity_type)}</Text>
                   </View>
                 )}
+                {/* Which device recorded it (2026-08-26, desktop parity). Only imported
+                    activities carry one - a move read off the connected watch leaves it empty,
+                    because the watch is implied - so this line simply doesn't render for those. */}
+                {!!item.device && (
+                  <Text style={styles.cardDevice} numberOfLines={1}>{item.device}</Text>
+                )}
               </View>
               <Text style={styles.cardArrow}>›</Text>
             </View>
@@ -471,6 +489,7 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   cardRow: { flexDirection: 'row', alignItems: 'center' },
   cardLeft: { flex: 1 },
   cardDate: { fontSize: 15, color: t.text, fontWeight: '600', marginBottom: 2 },
+  cardDevice: { fontSize: 11, color: t.mutedText, marginTop: 1 },
   cardTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3 },
   cardType: { fontSize: 12, color: t.mutedText },
   cardSub: { fontSize: 13, color: t.mutedText },

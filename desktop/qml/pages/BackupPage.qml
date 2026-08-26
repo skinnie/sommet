@@ -35,6 +35,11 @@ PageFlickable {
         onAccepted: BackupService.createBackup(selectedFolder)
     }
 
+    // Whether the watch-backup card below is showing - if it is, it already backs up Ember
+    // too (the backend writes an -ember.json alongside every watch backup, silently), so the
+    // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
+    readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+
     Column {
         id: column
         anchors.horizontalCenter: parent.horizontalCenter
@@ -122,6 +127,14 @@ PageFlickable {
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                         }
+                        // Ember rides along in every backup automatically (André, 2026-08-26) -
+                        // this just says so, so it isn't a silent surprise on restore.
+                        Text {
+                            visible: modelData.hasEmber === true
+                            text: qsTr("+ Ember data")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                         Row {
                             spacing: Theme.spacingSmall
                             // Real request 2026-08-07: "replace the rehearse restore button
@@ -202,6 +215,92 @@ PageFlickable {
                                                 : qsTr("Save a backup to a folder…")
                     enabled: !BackupService.loading
                     onClicked: backupFolderDialog.open()
+                }
+            }
+        }
+
+        // Ember backup (André, 2026-08-26: "afaik there is zero GUI service to backup it
+        // somewhere") - its own always-reachable card, since the watch-backup card above only
+        // shows for a connected Suunto watch that supports routes, and Ember has nothing to do
+        // with the watch. Same keyless mechanism as everything else on this page: point it at
+        // any folder, including one Dropbox/OneDrive/Drive syncs for you - no sign-in, no API
+        // keys, nothing for André (or anyone self-hosting Sommet) to register with a provider.
+        Card {
+            width: parent.width
+            visible: Theme.emberUnlocked && !root.watchBackupShown
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("Ember backup"); font.bold: true; color: Theme.text }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Your fasting, calories, coffee and water history. Save it to " +
+                                "any folder - point it at a Dropbox/OneDrive/Drive-synced " +
+                                "folder and it backs up to the cloud too, no sign-in needed.")
+                }
+
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        enabled: !BackupService.loading
+                        onClicked: BackupService.createBackup()
+                    }
+                    RoundedButton {
+                        text: qsTr("Save to a folder…")
+                        enabled: !BackupService.loading
+                        onClicked: backupFolderDialog.open()
+                    }
+                }
+
+                Text {
+                    visible: BackupService.lastActionText.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: BackupService.lastActionOk ? Theme.success : Theme.error
+                    text: BackupService.lastActionText
+                }
+
+                Text {
+                    text: qsTr("Existing backups")
+                    font.bold: true
+                    color: Theme.text
+                    topPadding: Theme.spacingSmall
+                }
+                Text {
+                    visible: BackupService.backups.filter(function (b) { return b.hasEmber }).length === 0
+                    text: qsTr("None yet.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                }
+                Repeater {
+                    model: BackupService.backups.filter(function (b) { return b.hasEmber })
+                    delegate: Column {
+                        width: parent.width
+                        spacing: 4
+                        Text {
+                            text: new Date(modelData.createdAt * 1000)
+                                .toLocaleString(Qt.locale(), Locale.ShortFormat)
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeBody
+                        }
+                        Row {
+                            spacing: Theme.spacingSmall
+                            RoundedButton {
+                                text: qsTr("Open backup folder")
+                                onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
+                            }
+                            RoundedButton {
+                                text: qsTr("Restore")
+                                onClicked: BackupService.restoreBackup(modelData.prefix, true)
+                            }
+                        }
+                    }
                 }
             }
         }

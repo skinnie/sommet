@@ -1,4 +1,5 @@
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
+import { backfillIntervalsTracks } from './IntervalsTracks';
 import {
   markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord,
 } from '../database/db';
@@ -7,8 +8,9 @@ import {
 // prefer to have all activities living on my app"). Pull-only. Brings in EVERY activity as a
 // lightweight record (date/type/duration/distance/ascent) so it shows in the activity list,
 // Totals and Calendar - including indoor/Zwift rides that have no GPS. The map trace for an
-// outdoor ride is fetched lazily from intervals.icu streams when it's opened (a follow-up),
-// so imported records start with no gpx_path.
+// outdoor ride is NOT in that payload - it needs a separate per-activity streams call, which
+// IntervalsTracks.ts does as a throttled backfill (2026-08-26; this used to be an unimplemented
+// "follow-up" comment, so every imported outdoor move showed no map at all).
 //
 // De-dup is two-layered: intervals activities are namespaced `icu:<id>` so re-importing is a
 // no-op, and an intervals activity that actually ORIGINATED from the watch (same day + type +
@@ -74,19 +76,36 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       Math.abs(e.distance_m - distance_m) <= Math.max(50, distance_m * 0.01));
     if (dupOfWatch) { skipped++; continue; }
 
+    // Which device recorded it (2026-08-26, desktop parity). intervals.icu gives a real name
+    // for nearly every activity; fall back to a friendly form of the upload source when the
+    // device itself is unnamed.
+    const device = String(a.device_name || a.source || '').trim();
+
     const record: ActivityRecord = {
       id: icuId,
       synced_at: Date.now(),
-      gpx_path: '',                       // map fetched lazily from streams when opened
+      gpx_path: '',                       // GPS trace is backfilled by IntervalsTracks.ts
       date,
       duration_s,
       distance_m,
       d_plus: Math.round(Number(a.total_elevation_gain ?? a.icu_elevation_gain ?? 0)) || 0,
       activity_type: type,
+      device,
     };
     await markActivitySynced(record);
     knownIds.add(icuId);
     imported++;
   }
+
+  // Pull the GPS traces for what was just imported (2026-08-26, desktop parity). Bounded per
+  // run so this stays a background trickle rather than one request per activity across the whole
+  // history; it is resumable, so calling import again continues where it left off. Failure here
+  // must not fail the import itself - the records are already saved and usable without a map.
+  try {
+    await backfillIntervalsTracks(40);
+  } catch {
+    /* non-fatal: traces fill in on a later run */
+  }
+
   return { imported, skipped };
 }

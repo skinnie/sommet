@@ -13,6 +13,11 @@ export interface ActivityRecord {
   distance_m: number;     // distance en mètres
   d_plus: number;         // dénivelé positif cumulé (m)
   activity_type: string;  // ex: "Orienteering", "Running"…
+  // Which device recorded it, when known (2026-08-26, desktop parity: "we also added from what
+  // device they came from, and I don't see it"). intervals.icu imports carry a real name here
+  // ("GARMIN FR965", "SUUNTO Suunto Race S"); moves read off the connected watch leave it empty,
+  // because the watch is implied.
+  device?: string;
 }
 
 // ─── Singleton DB ─────────────────────────────────────────────────────────────
@@ -44,6 +49,9 @@ export async function getDb(): Promise<SQLiteDatabase> {
   // Migrations
   await _db.executeSql(
     `ALTER TABLE activities ADD COLUMN activity_type TEXT NOT NULL DEFAULT ''`
+  ).catch(() => {});
+  await _db.executeSql(
+    `ALTER TABLE activities ADD COLUMN device TEXT NOT NULL DEFAULT ''`
   ).catch(() => {});
   // ── Gear tracker (v3) — see gearDb.ts. Local-first, mirrored to intervals.icu. ──
   // A component (part) is a gear row with parent_id set. remote_id is the intervals.icu id
@@ -161,8 +169,8 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
   const db = await getDb();
   await db.executeSql(
     `INSERT OR REPLACE INTO activities
-       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.synced_at,
@@ -172,6 +180,7 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
       record.distance_m,
       record.d_plus,
       record.activity_type,
+      record.device ?? '',
     ]
   );
 }

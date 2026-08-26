@@ -76,3 +76,23 @@ export async function uploadFitToIntervalsIcu(
     viewerUrl: `https://intervals.icu/activities/${activityId}`,
   };
 }
+
+// Permanently delete ONE activity from intervals.icu (2026-08-26, desktop parity — André chose
+// "also delete from the source" over a local-only hide). Irreversible on their side, so callers
+// must confirm with the user first.
+//
+// `activityId` is intervals' own id. This app namespaces imported rows as `icu:<id>` locally, so
+// strip that prefix before calling. A 404 means it is already gone, which counts as success.
+export async function deleteIntervalsIcuActivity(activityId: string): Promise<boolean> {
+  const creds = await getIntervalsIcuCredentials();
+  if (!creds) return false;
+  const id = activityId.replace(/^icu:/, '');
+  const resp = await fetch(`${API_BASE}/activity/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: 'Basic ' + btoa(`API_KEY:${creds.apiKey}`),
+      'User-Agent': 'Sommet/1.0',
+    },
+  });
+  return resp.ok || resp.status === 404;
+}
