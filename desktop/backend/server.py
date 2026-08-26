@@ -1086,7 +1086,38 @@ class Handler(BaseHTTPRequestHandler):
                         "modes": info["modes"]})
                     return
             except (RuntimeError, OSError):
-                pass    # not an Ambit1, or the read failed - fall through to the factory set
+                pass    # not an Ambit1, or the read failed - try the 90-byte reader next
+
+        # Ambit2 (and the rest of the Bluebird family): the ambit1_sport_mode_read above is
+        # 0x0010-only. tools/legacy_sport_modes.py reads region 0x2000's 90-byte layout and
+        # decodes the real modes incl. the hrbelt/pods bitfield (solved from a real capture,
+        # 2026-08-26 - docs/ambit2_protocol_findings.md), so the page shows the watch's own
+        # modes rather than invented presets. Falls through to factory if nothing decodes.
+        if selected_is_legacy():
+            try:
+                sys.path.insert(0, str(TOOLS_DIR))
+                import legacy_sport_modes                       # noqa: PLC0415
+                env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+                old = os.environ.get("AMBIT_PRODUCT_ID")
+                if env_pid:
+                    os.environ["AMBIT_PRODUCT_ID"] = env_pid
+                try:
+                    with WATCH_LOCK:
+                        modes = legacy_sport_modes.read_app_modes()
+                finally:
+                    if env_pid:
+                        if old is None:
+                            os.environ.pop("AMBIT_PRODUCT_ID", None)
+                        else:
+                            os.environ["AMBIT_PRODUCT_ID"] = old
+                if modes:
+                    self._send_json(200, {
+                        "ok": True, "saved": False, "source": "watch",
+                        "maxModes": self.LEGACY_MAX_SPORT_MODES,
+                        "modes": modes})
+                    return
+            except (RuntimeError, OSError):
+                pass    # reader unavailable or read failed - fall through to the factory set
 
         self._send_json(200, {
             "ok": True, "saved": False, "source": "factory",

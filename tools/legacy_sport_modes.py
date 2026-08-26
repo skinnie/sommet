@@ -112,6 +112,34 @@ def parse_region(data):
     return modes
 
 
+def to_app_mode(m):
+    """One decoded settings dict -> the desktop app's sport-mode schema (the same keys
+    server.py's LEGACY_FACTORY_SPORT_MODES uses and legacy_link.sport_modes_to_cli_lines
+    consumes), so the Sport Modes page shows the watch's REAL modes, pods included."""
+    pods = m.get("pods", {})
+    return {
+        "name": m.get("activity_name", ""),
+        "activityId": m.get("activity_id", 0),
+        "modeId": m.get("sport_mode_id", 0),
+        "gpsInterval": m.get("gps_interval", 0),
+        "recordingInterval": m.get("recording_interval", 0),
+        "altiBaroMode": m.get("alti_baro_mode", 0),
+        "autolapM": m.get("autolap", 0),
+        "hrBelt": pods.get("hr_belt", False),
+        "footPod": pods.get("foot_pod", False),
+        "bikePod": pods.get("bike_pod", False),
+        "cadencePod": pods.get("cadence_pod", False),
+        "powerPod": pods.get("power_pod", False),
+    }
+
+
+def read_app_modes(from_file=None):
+    """Read the watch's sport modes (live, or --from a saved dump) and return them in the
+    desktop app's schema. Empty list if nothing decodes (caller falls back to factory)."""
+    data = pathlib.Path(from_file).read_bytes() if from_file else read_region_live()
+    return [to_app_mode(m) for m in parse_region(data) if m.get("activity_name")]
+
+
 def _binary_path():
     for name in ("ambit_legacy_cli", "ambit_legacy_cli.exe"):
         c = HERE / "vendor" / "ambit_legacy_cli" / name
