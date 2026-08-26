@@ -34,6 +34,7 @@ import GearScreen from './src/screens/GearScreen';
 import WeightScreen from './src/screens/WeightScreen';
 import HealthScreen from './src/screens/HealthScreen';
 import CoachScreen from './src/screens/CoachScreen';
+import EmberScreen from './src/screens/EmberScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
@@ -74,6 +75,8 @@ export type RootStackParamList = {
   Health: undefined;
   // Coach readiness (2026-08-26): intervals.icu training load, no device needed.
   Coach: undefined;
+  // Ember recap - hidden until the Settings easter egg unlocks it (EmberUnlock.ts).
+  Ember: undefined;
   // Experimental (2026-08-14) - gated behind the Experimental flag (see ExperimentalContext),
   // reached from the Settings > Experimental section. App-Zone + Intervals write flash and are
   // unproven on Android hardware; Smart Sensor is a separate BLE peripheral (the HR belt).
@@ -231,6 +234,11 @@ function AppShell() {
             name="Coach"
             component={CoachScreen}
             options={{ title: 'Coach' }}
+          />
+          <Stack.Screen
+            name="Ember"
+            component={EmberScreen}
+            options={{ title: 'Ember' }}
           />
           <Stack.Screen
             name="Calendar"

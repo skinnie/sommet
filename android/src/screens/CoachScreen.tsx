@@ -1,20 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl,
+  TextInput, TouchableOpacity,
 } from 'react-native';
 import Svg, { Path, Line } from 'react-native-svg';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { loadCoachData, CoachData, ReadinessLight } from '../services/CoachService';
+import {
+  sendCoachMessage, hasAnthropicKey, ChatMessage, ChatBackend,
+} from '../services/CoachChat';
 
 // Coach — the Android counterpart of desktop/qml/pages/CoachPage.qml's readiness beacon
 // (André, 2026-08-26: "port everything to android").
 //
-// Scope note, stated plainly rather than left as a surprise: this ports the READINESS half -
-// the traffic light, the fitness/fatigue/freshness numbers and the trend chart, which is the
-// part that answers "what should I do today?". The desktop's chat half is NOT here: it needs
-// an Anthropic API key, a key store, a conversation UI and the SYSTM workout catalogue, and
-// shipping a half-wired chat box would be worse than shipping none. The numbers below are the
-// same ones the desktop shows, from the same source, with the same thresholds.
+// Both halves of the desktop page: the readiness beacon (traffic light, fitness/fatigue/
+// freshness, trend chart) and the chat. The chat runs on canned replies by default and on the
+// real Claude API once the user adds their OWN Anthropic key in Settings - see CoachChat.ts.
 
 export default function CoachScreen() {
   const t = useV3Theme();
@@ -35,6 +36,35 @@ export default function CoachScreen() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // ---- chat ----
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [backend, setBackend] = useState<ChatBackend>('canned');
+
+  // The backend follows whether a key is actually stored: no key means canned, so the chat is
+  // never silently dead waiting on a credential the user never entered.
+  useEffect(() => {
+    hasAnthropicKey().then(has => setBackend(has ? 'claude' : 'canned'));
+  }, []);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    const next: ChatMessage[] = [...messages, { role: 'me', text }];
+    setMessages(next);
+    setInput('');
+    setSending(true);
+    try {
+      const reply = await sendCoachMessage(next, data.readiness, backend);
+      setMessages([...next, { role: 'coach', text: reply }]);
+    } catch (e: any) {
+      setMessages([...next, { role: 'coach', text: String(e?.message ?? e) }]);
+    } finally {
+      setSending(false);
+    }
+  }, [input, sending, messages, data.readiness, backend]);
 
   // Semantic colours, matching the desktop's own mapping of light -> Theme colour.
   const lightColor = (l: ReadinessLight): string =>
@@ -117,6 +147,74 @@ export default function CoachScreen() {
           </Text>
         </>
       )}
+
+      {/* ── Chat ── */}
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card, marginTop: v3Spacing.medium }]}>
+        <Text style={[styles.label, { color: t.mutedText, marginBottom: v3Spacing.small }]}>
+          {backend === 'claude' ? 'Coach' : 'Coach (pre-written replies)'}
+        </Text>
+
+        {messages.length === 0 && (
+          <Text style={[styles.caption, { color: t.mutedText, marginBottom: v3Spacing.small }]}>
+            {backend === 'claude'
+              ? 'Ask about today, and I read your real training when I answer.'
+              : 'Add your Anthropic API key in Settings for a real conversation. Until then these are pre-written answers.'}
+          </Text>
+        )}
+
+        {messages.map((m, i) => (
+          <View
+            key={i}
+            style={[
+              styles.bubble,
+              m.role === 'me'
+                ? { backgroundColor: t.primary, alignSelf: 'flex-end' }
+                : { backgroundColor: t.cardNested, alignSelf: 'flex-start' },
+            ]}
+          >
+            <Text style={{ color: m.role === 'me' ? '#fff' : t.text, fontSize: v3Type.body }}>{m.text}</Text>
+          </View>
+        ))}
+
+        {sending && <ActivityIndicator color={t.primary} style={{ marginVertical: v3Spacing.small }} />}
+
+        {/* Suggestion chips - the same three the desktop offers. */}
+        {!sending && (
+          <View style={styles.chips}>
+            {['Something shorter', 'Outdoor instead', 'Send it to my watch'].map(label => (
+              <TouchableOpacity
+                key={label}
+                onPress={() => { setInput(label); }}
+                style={[styles.chip, { backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]}
+              >
+                <Text style={{ color: t.text, fontSize: v3Type.caption, fontWeight: '600' }}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.inputRow}>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask the coach anything…"
+            placeholderTextColor={t.mutedText}
+            onSubmitEditing={send}
+            returnKeyType="send"
+            style={[styles.input, { color: t.text, backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]}
+          />
+          <TouchableOpacity
+            onPress={send}
+            disabled={!input.trim() || sending}
+            style={[styles.sendBtn, {
+              backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small,
+              opacity: !input.trim() || sending ? 0.5 : 1,
+            }]}
+          >
+            <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '600' }}>Send</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </ScrollView>
   );
 }
@@ -162,6 +260,12 @@ const styles = StyleSheet.create({
   tileLabel: { fontSize: v3Type.tiny, fontWeight: '600' },
   tileValue: { fontSize: v3Type.bodyLarge, fontWeight: '700' },
   legend: { flexDirection: 'row', alignItems: 'center', marginBottom: v3Spacing.small },
+  bubble: { maxWidth: '85%', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, marginBottom: v3Spacing.small },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: v3Spacing.medium },
+  chip: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, marginRight: 6, marginBottom: 6 },
+  inputRow: { flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, borderWidth: 1, paddingHorizontal: v3Spacing.small, paddingVertical: 9, fontSize: v3Type.body, marginRight: v3Spacing.small },
+  sendBtn: { borderWidth: 1, paddingHorizontal: v3Spacing.medium, paddingVertical: 10 },
   swatch: { width: 12, height: 4, borderRadius: 2, marginRight: 6 },
   caption: { fontSize: v3Type.caption },
 });

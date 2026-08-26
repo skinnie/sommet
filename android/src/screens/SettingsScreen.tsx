@@ -31,6 +31,8 @@ import {
 import {
   getIntervalsIcuCredentials, saveIntervalsIcuCredentials, removeIntervalsIcuCredentials,
 } from '../services/ApiIntervalsIcu';
+import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
+import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -114,6 +116,14 @@ export default function SettingsScreen() {
   const [intervalsAthleteId, setIntervalsAthleteId] = useState('');
   const [intervalsApiKey, setIntervalsApiKey]       = useState('');
   const [intervalsSaved, setIntervalsSaved]         = useState(false);
+  // Coach chat key (2026-08-26, desktop parity). The user's OWN Anthropic key - never bundled,
+  // and NOT a claude.ai subscription, which is the thing people try first and that cannot work.
+  const [anthropicKey, setAnthropicKeyInput]        = useState('');
+  const [anthropicSaved, setAnthropicSaved]         = useState(false);
+  const [savingAnthropic, setSavingAnthropic]       = useState(false);
+  // Ember easter egg (2026-08-26, desktop parity): 10 taps on the version label reveal it.
+  const [emberTaps, setEmberTaps]                   = useState(0);
+  const [emberOn, setEmberOn]                       = useState(false);
   const [savingIntervals, setSavingIntervals]       = useState(false);
   const [gearImporting, setGearImporting]           = useState(false);
   const [gearSyncing, setGearSyncing]               = useState(false);
@@ -304,6 +314,10 @@ export default function SettingsScreen() {
       setIntervalsAthleteId(creds?.athleteId ?? '');
       setIntervalsApiKey(creds?.apiKey ?? '');
     });
+    // Reflect whether a Coach key is already stored (the key itself is never read back into
+    // the field - only whether one exists).
+    hasAnthropicKey().then(setAnthropicSaved);
+    isEmberUnlocked().then(setEmberOn);
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
   }, []));
@@ -353,6 +367,23 @@ export default function SettingsScreen() {
     } finally {
       setSavingIntervals(false);
     }
+  }
+
+  async function handleSaveAnthropic() {
+    setSavingAnthropic(true);
+    try {
+      await setAnthropicKey(anthropicKey);
+      setAnthropicSaved(true);
+      setAnthropicKeyInput('');       // don't keep the secret in component state after saving
+    } finally {
+      setSavingAnthropic(false);
+    }
+  }
+
+  async function handleRemoveAnthropic() {
+    await clearAnthropicKey();
+    setAnthropicSaved(false);
+    setAnthropicKeyInput('');
   }
 
   async function handleRemoveIntervals() {
@@ -895,6 +926,34 @@ export default function SettingsScreen() {
               )}
             </View>
             {intervalsSaved && <StatusLine text={t.credsStored} />}
+
+            {/* Coach chat key (2026-08-26, desktop parity). Deliberately spells out that this is
+                an Anthropic API key and NOT a claude.ai subscription - that is the mistake people
+                make, and it cannot work. Without a key the Coach still runs on pre-written
+                replies, so this is optional. */}
+            <Text style={[styles.cardTitle, { marginTop: 16 }]}>Coach chat</Text>
+            <Text style={styles.sectionDesc}>
+              Off, the coach replies from a few pre-written answers. Add your own Anthropic API
+              key (console.anthropic.com) for a real conversation about your training — not your
+              claude.ai login, which won't work here. Costs a few cents per conversation.
+            </Text>
+            <FieldRow
+              icon="key"
+              value={anthropicKey}
+              onChangeText={setAnthropicKeyInput}
+              placeholder={anthropicSaved ? 'Key saved (enter to replace)' : 'Anthropic API key'}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <View style={styles.row}>
+              <Button label={t.saveBtn} variant="filled" loading={savingAnthropic}
+                      onPress={handleSaveAnthropic} />
+              {anthropicSaved && (
+                <Button label={t.deleteBtn} icon="delete" variant="outline" tone="alert"
+                        grow={false} onPress={handleRemoveAnthropic} />
+              )}
+            </View>
             {/* Gear import/sync - lives here in the intervals.icu connection (André, 2026-08-18),
                 only once credentials are stored. Import pulls your gear down; Sync is two-way. */}
             {intervalsSaved && (
@@ -971,7 +1030,22 @@ export default function SettingsScreen() {
           <IconBadge icon="info" />
           <Text style={styles.cardTitle}>{t.aboutSection}</Text>
         </View>
-        <Text style={styles.sectionDesc}>{t.aboutVersion(APP_VERSION)}</Text>
+        {/* Easter egg, same as the desktop's: ten taps here unlock the Ember recap screen.
+            Silent until it fires - an egg that announces itself isn't one. */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={async () => {
+            const n = emberTaps + 1;
+            setEmberTaps(n);
+            if (n >= 10 && !emberOn) {
+              await setEmberUnlocked(true);
+              setEmberOn(true);
+              Alert.alert('Ember', 'Ember unlocked — find it on Home.');
+            }
+          }}
+        >
+          <Text style={styles.sectionDesc}>{t.aboutVersion(APP_VERSION)}</Text>
+        </TouchableOpacity>
         <Text style={[styles.sectionDesc, { marginTop: 10 }]}>{t.aboutDisclaimer}</Text>
 
         <Text style={styles.creditsHeading}>{t.aboutCreditsSection}</Text>

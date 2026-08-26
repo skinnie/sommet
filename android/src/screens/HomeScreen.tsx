@@ -33,6 +33,7 @@ import { decodeDeviceHistory, KailashHistory } from '../services/KailashHistoryR
 import { decodeDeviceLog, realTrackPoints, deviceLogToGpx, KailashDeviceLog } from '../services/KailashDeviceLogReader';
 import { getAllActivities, ActivityRecord } from '../database/db';
 import { distanceLines } from '../services/TotalsFacts';
+import { isEmberUnlocked } from '../services/EmberUnlock';
 import { APP_VERSION } from '../config/version';
 import { useDemo } from '../config/DemoContext';
 import { useExperimental } from '../config/ExperimentalContext';
@@ -146,6 +147,10 @@ export default function HomeScreen() {
   // (cable Ambit3's proven 0x0300/0x0302 pair, or Kailash's real BLE-only 0x1201 pushes).
   // No status persists across screens - a one-shot "did it work" line is enough here.
   const [timeSyncBusy, setTimeSyncBusy] = useState(false);
+  // Ember easter-egg state (2026-08-26): read once on mount; the tile below only renders when
+  // the Settings version-label taps have unlocked it.
+  const [emberUnlocked, setEmberUnlockedState] = useState(false);
+  useEffect(() => { isEmberUnlocked().then(setEmberUnlockedState); }, []);
   const [timeSyncMsg, setTimeSyncMsg] = useState<string | null>(null);
   const handleSyncTime = useCallback(async () => {
     setTimeSyncBusy(true);
@@ -797,6 +802,11 @@ export default function HomeScreen() {
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
     { id: 'coach', label: 'Coach', icon: 'chart' as const, onPress: () => navigation.navigate('Coach') },
+    // Ember: only once the Settings easter egg has been found, matching the desktop's own
+    // Theme.emberUnlocked gate - so it stays hidden for everyone who hasn't looked for it.
+    ...(emberUnlocked
+      ? [{ id: 'ember', label: 'Ember', icon: 'chart' as const, onPress: () => navigation.navigate('Ember') }]
+      : []),
     { id: 'health', label: 'Health', icon: 'chart' as const, onPress: () => navigation.navigate('Health') },
     { id: 'weight', label: 'Weight', icon: 'chart' as const, onPress: () => navigation.navigate('Weight') },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },
