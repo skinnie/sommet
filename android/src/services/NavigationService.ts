@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { connect, disconnect, pickGpxFile, writeRoute, readRegion, saveToDownloads, getDeviceInfo, readLegacyNav } from '../native/AmbitUsbModule';
+import { connect, disconnect, pickGpxFile, writeRoute, readRegion, saveToDownloads, getDeviceInfo, readLegacyNav, readLegacyRegion } from '../native/AmbitUsbModule';
+import { ROUTE_REGION_ADDR, POINTS_OFFSET, parseHead, parseRoutes } from './LegacyRoute';
 import { isAmbit12 } from './AmbitSettingsService';
 import { parseRouteGpx, nearestPointIndex, RoutePoint } from './RouteGpxParser';
 import { simplifyRoute } from './RouteSimplify';
@@ -261,12 +262,37 @@ export async function readOnWatchNavigation(): Promise<WatchNavigation> {
           }
           routes.push({ name, points: rpts, distanceM: Math.round(distanceM), ascentM: 0, descentM: 0 });
         }
+        // The REAL route region (0x041EB0) if this watch has one - full tracks, not the A/B
+        // markers the waypoint grouping above can recover. Desktop parity, 2026-08-27; both
+        // decoders were checked against the same bytes read off André's own Ambit1 and agree
+        // (3 routes, 1695 points, "Gare du Nord" at 48.88097,2.35613).
+        //
+        // Two reads: the head first, because route_count/routepoint_count decide how much of
+        // the 16 KB region is worth pulling over USB. A watch that never had a route written
+        // has no magic there, and the waypoint reconstruction above stands as the answer.
+        let regionRoutes: WatchRoute[] = [];
+        try {
+          const head = await readLegacyRegion(ROUTE_REGION_ADDR, 32);
+          const info = parseHead(head);
+          if (info && info.routeCount > 0) {
+            const total = POINTS_OFFSET + 8 * info.pointCount;
+            const blob = await readLegacyRegion(ROUTE_REGION_ADDR, total);
+            regionRoutes = parseRoutes(blob).map(r => ({
+              name: r.name,
+              points: r.points,
+              distanceM: r.distanceM,
+              ascentM: 0,
+              descentM: 0,
+            }));
+          }
+        } catch { /* no readable route region - the waypoint grouping above still applies */ }
+
         const data: WatchNavigation = {
           waypoints: loose.map((w: any) => ({
             name: w.name || 'Waypoint', routeName: '',
             latitude: w.lat_e7 / 1e7, longitude: w.lon_e7 / 1e7,
           })),
-          routes,
+          routes: regionRoutes.length > 0 ? regionRoutes : routes,
         };
         await AsyncStorage.setItem(NAV_CACHE_KEY, JSON.stringify(data)).catch(() => {});
         return data;
