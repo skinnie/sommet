@@ -1,7 +1,7 @@
 import { connect, disconnect, readRegion, readCustomModesRaw, writeRegion, writeCustomModesRaw, isBleTransportActive } from '../native/AmbitUsbModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { decode as decodeCM, encodeRegion } from './SportModeCodec';
-import { decodeApps, buildAppsRegion, CompiledApp } from './AppsCodec';
+import { decodeApps, buildAppsRegion, CompiledApp, AppEntry } from './AppsCodec';
 import { resolveRegion } from './MemoryMap';
 import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE } from './GuidedWorkoutCore';
 import { entryLabel, isExpired, planDiff, rebuildAppsRegion, CalendarEntry } from './TrainingCalendarCore';
@@ -59,6 +59,31 @@ function bytesEqualPrefix(a: Uint8Array, b: Uint8Array, len: number): boolean {
   return true;
 }
 
+/** A region that legitimately holds no apps: unwritten flash (all 0xFF header) or a valid
+ * num_entries==0 directory. Any other probe that yields no decodable entries is a suspect read. */
+function isCleanEmpty(probe: Uint8Array): boolean {
+  if (probe.length < 4) return true;
+  if (probe[0] === 0xff && probe[1] === 0xff) return true; // unwritten flash
+  return u16(probe, 0) === 0;                              // a real empty directory
+}
+
+/** Read + decode the App Zone, re-reading when a read decodes to empty but the region does NOT
+ * look genuinely empty - a glitchy read must never be believed, because syncCalendar rewrites the
+ * WHOLE region and an empty "existing" would wipe apps that are really on the watch. */
+async function readExistingAppsStable(base: number): Promise<AppEntry[]> {
+  let last: AppEntry[] = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const probe = base64ToBytes(await readRegion(base, 8192));
+    const usedLen = appsUsedLength(probe);
+    const region = usedLen > 0 ? base64ToBytes(await readRegion(base, usedLen)) : new Uint8Array(0);
+    const existing = decodeApps(region);
+    if (existing.length > 0 || isCleanEmpty(probe)) return existing; // trustworthy result
+    last = existing;                                                 // suspect empty - re-read
+    await new Promise<void>((r) => setTimeout(() => r(), 300));
+  }
+  return last;
+}
+
 /** Diffs `plan` against what's on the watch and, if `write` is true, applies it: erases every
  * expired managed entry and installs every due entry that already has a compiled binary. A
  * dry-run (write=false) still reads the watch and computes the real diff, just doesn't write -
@@ -77,10 +102,12 @@ export async function syncCalendar(
     const apps = await resolveRegion('Apps');
     if (!apps) { onState({ phase: 'error', error: 'This watch has no App Zone (Apps) region.' }); return null; }
 
-    const probe = base64ToBytes(await readRegion(apps.base, 8192));
-    const usedLen = appsUsedLength(probe);
-    const appsRegion = usedLen > 0 ? base64ToBytes(await readRegion(apps.base, usedLen)) : new Uint8Array(0);
-    const existing = decodeApps(appsRegion);
+    // Read the App Zone, guarding against a transient/garbled read: a glitchy read that decodes
+    // to "empty" must never be trusted for a write, or the whole-region rewrite would WIPE apps
+    // that are actually on the watch (observed once during a heavy multi-watch session, 2026-08-27).
+    // A genuinely empty region is either unwritten flash (0xFF) or a valid num_entries==0 header;
+    // anything else that fails to decode is suspect, so re-read before believing it.
+    const existing = await readExistingAppsStable(apps.base);
 
     const removed = existing.filter((e) => isExpired(e.name, today)).map((e) => e.name);
     const { keptRawBlocks, toAdd } = planDiff(existing, plan, today);
