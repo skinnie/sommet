@@ -180,8 +180,10 @@ export default function EmberScreen() {
           barColor={t.warning} series={fastSeries} />}
       {series(d => d.kcal).length > 1 &&
         <EmberBars label="Calories in" unit=" kcal" barColor={t.success} series={series(d => d.kcal)} />}
+      {series(d => d.coffee).length > 1 &&
+        <EmberBars label="Coffee (cups/day)" barColor={t.hard} series={series(d => d.coffee)} />}
       {series(d => d.waterL).length > 1 &&
-        <MetricChart label="Water (litres)" unit=" L" decimals={1} series={series(d => d.waterL)} />}
+        <MetricChart label="Water (litres)" unit=" L" decimals={1} goal={2.5} series={series(d => d.waterL)} />}
 
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
         Logged here and synced with the Ember store on your other devices.

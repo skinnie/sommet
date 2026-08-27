@@ -191,13 +191,15 @@ PageFlickable {
         // --- charts (mockup: bars + line) ---
         Card { width: parent.width
             EmberBars { width: parent.width; label: qsTr("Fasting hours"); unit: "h"; goal: 16; barColor: Theme.warning; series: root.fastSeries() } }
+        Card { width: parent.width
+            EmberBars { width: parent.width; label: qsTr("Calories in"); unit: " kcal"; barColor: Theme.success; series: root.daySeries("kcal") } }
         Row {
             width: parent.width; spacing: Theme.spacingMedium
             property real cw: (width - Theme.spacingMedium) / 2
             Card { width: parent.cw
-                EmberBars { width: parent.width; label: qsTr("Calories in"); unit: " kcal"; barColor: Theme.success; series: root.daySeries("kcal") } }
+                EmberBars { width: parent.width; label: qsTr("Coffee (cups/day)"); barColor: Theme.hard; series: root.daySeries("coffee") } }
             Card { width: parent.cw
-                MetricChart { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; lineColor: Theme.accent; series: root.daySeries("waterL") } }
+                MetricChart { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; lineColor: Theme.accent; goal: 2.5; series: root.daySeries("waterL") } }
         }
     }
 

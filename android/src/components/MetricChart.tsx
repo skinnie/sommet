@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Path, Line, Circle } from 'react-native-svg';
+import Svg, { Path, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 
 // A small line chart for a dated metric series — the Android counterpart of the desktop's
@@ -23,12 +23,14 @@ export function MetricChart({
   series,
   height = 160,
   decimals = 0,
+  goal = 0,
 }: {
   label: string;
   unit?: string;
   series: MetricPoint[];
   height?: number;
   decimals?: number;
+  goal?: number;   // optional dashed target line (e.g. Ember's 2.5 L/day water goal); 0 = none
 }) {
   const t = useV3Theme();
 
@@ -39,11 +41,12 @@ export function MetricChart({
     const values = series.map(p => p.value);
     let min = Math.min(...values);
     let max = Math.max(...values);
+    if (goal > 0) { min = Math.min(min, goal); max = Math.max(max, goal); } // keep the goal line in view
     if (max - min < 1e-9) { min -= 1; max += 1; }      // flat series: give it a visible band
     const pad = (max - min) * 0.1;
     min -= pad; max += pad;
     return { min, max, values };
-  }, [series]);
+  }, [series, goal]);
 
   const latest = series.length > 0 ? series[series.length - 1] : null;
 
@@ -64,7 +67,8 @@ export function MetricChart({
         </Text>
       ) : (
         <>
-          <Chart series={series} geom={geom} height={height} color={t.primary} grid={t.border} />
+          <Chart series={series} geom={geom} height={height} color={t.primary} grid={t.border}
+            goal={goal} goalColor={t.mutedText} unit={unit} />
           {/* Axis dates live OUTSIDE the SVG on purpose. The chart stretches to the card width
               via preserveAspectRatio="none", which scales glyphs horizontally too - dates drawn
               inside it came out visibly squashed. Found by actually driving the app, 2026-08-26.
@@ -80,13 +84,16 @@ export function MetricChart({
 }
 
 function Chart({
-  series, geom, height, color, grid,
+  series, geom, height, color, grid, goal = 0, goalColor = grid, unit = '',
 }: {
   series: MetricPoint[];
   geom: { min: number; max: number };
   height: number;
   color: string;
   grid: string;
+  goal?: number;
+  goalColor?: string;
+  unit?: string;
 }) {
   // The viewBox matches the REAL laid-out width, measured via onLayout, rather than a fixed 300
   // stretched with preserveAspectRatio="none". Stretching scaled the horizontal axis about 4x on
@@ -110,6 +117,16 @@ function Chart({
         {/* baseline only - a faint reference, not a full grid, so the line stays the subject */}
         <Line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
         <Path d={d} stroke={color} strokeWidth={1.6} fill="none" />
+        {/* optional dashed goal line + label */}
+        {goal > 0 && (
+          <>
+            <Line x1={padL} y1={y(goal)} x2={W - padR} y2={y(goal)}
+              stroke={goalColor} strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="4,4" />
+            <SvgText x={padL + 2} y={y(goal) - 3} fill={goalColor} fontSize={9} textAnchor="start">
+              {goal}{unit} goal
+            </SvgText>
+          </>
+        )}
         {/* emphasised endpoint: the current value is what you actually look for */}
         <Circle cx={x(series.length - 1)} cy={y(last.value)} r={2.5} fill={color} />
       </Svg>
