@@ -45,11 +45,26 @@ QtObject {
 
     // Backup & Restore is write_nav.py's nav --save/restore over the SBEM flash regions.
     // BackupPage used to read supportsRoutes for this, which was fine while the two were the
-    // same predicate - excluding Kailash above would silently have taken Backup away from it
-    // as a side effect, so the two are separated here and this one keeps its exact previous
-    // value. Whether a Kailash backup actually round-trips is a real open question (its
-    // regions are not the Ambit3's), deliberately NOT answered by this change.
-    property bool supportsWatchBackup: !_isLegacy
+    // same predicate; they are separated because excluding Kailash from Routes would
+    // otherwise have taken Backup away from it as a silent side effect.
+    //
+    // Kailash IS excluded, but on its own evidence - a real `nav --save` run against the
+    // connected watch, 2026-08-27:
+    //   - routes.bin  came back 129,968 of 130,000 bytes 0xFF, header magic 0x3008 vs the
+    //     0x340c expected -> "routes 0  points 0  waypoints 0", and the API's own hasRoutes
+    //     was false. waypoints.bin the same: 16,380 of 16,384 bytes 0xFF. Both regions are
+    //     blank, which is consistent - this watch has no routes/POIs feature to fill them.
+    //   - TrainingProgram "this watch does not declare it"; CustomModes and Apps both
+    //     "read failed (short reply)". The 0x0b21 memory map answered with 4 bytes.
+    //   - The one region with real bytes was GlonassSGEE, which is the GPS ephemeris: it is
+    //     re-downloaded and expires on its own, so capturing it is pointless.
+    // So the card promised a watch backup that captures nothing, and - the part that matters
+    // - `nav --save` never touches TrackLog or DeviceHistory, which IS the irreplaceable data
+    // on this watch and IS what a firmware flash wipes ([[ambit_app_kailash_desktop_home_fix]]).
+    // Backing up a Kailash properly means those two regions and is a real feature, not a flag.
+    // With this false, BackupPage falls through to its dedicated Ember card, so Ember backup
+    // is still offered.
+    property bool supportsWatchBackup: !_isLegacy && !_isKailash
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see
