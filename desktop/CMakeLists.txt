@@ -36,6 +36,12 @@ set_target_properties(ambitapp PROPERTIES
     OUTPUT_NAME Sommet
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
+    # Without these, Qt stamps the macOS Info.plist with its placeholders: CFBundleIdentifier
+    # com.yourcompany.ambitapp and CFBundleName ambitapp (the old internal target name). The app
+    # already brands itself Sommet everywhere else and writes QSettings under com.sommet.Sommet,
+    # so align the bundle identity to match (spotted on the first Mac build, 2026-08-27).
+    MACOSX_BUNDLE_GUI_IDENTIFIER com.sommet.Sommet
+    MACOSX_BUNDLE_BUNDLE_NAME Sommet
 )
 
 # Pure-QML singletons - see qml/Theme.qml's own header comment for why these are QML, not

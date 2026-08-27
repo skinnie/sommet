@@ -204,6 +204,10 @@ jobs:
           # on the user's Mac. -L copies the real lib through the Homebrew symlink, named exactly
           # "libhidapi.dylib" (the name `hid` requests). codesign --deep below then signs it too.
           cp -L "$(brew --prefix hidapi)/lib/libhidapi.dylib" "$APP/Contents/Resources/backend/libhidapi.dylib"
+          # The copied lib still carries Homebrew's install id (/opt/homebrew/opt/hidapi/...),
+          # a path that won't exist on a user's Mac - harmless today because `hid` dlopens it by
+          # path, but a latent trap. Rewrite it to be self-describing relative to its loader.
+          install_name_tool -id "@loader_path/libhidapi.dylib" "$APP/Contents/Resources/backend/libhidapi.dylib"
           # Ad-hoc sign the WHOLE bundle last (after macdeployqt rewrote the frameworks and we
           # added the backend, both of which invalidate any signature). Apple Silicon refuses
           # to launch a binary with a broken/absent signature - it shows a 🚫 and reads as
