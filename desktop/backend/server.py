@@ -1950,6 +1950,17 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_device_ble()
             return
+        # Heal a stale pin first (issue #16): after a hot-swap SELECTED_PRODUCT_ID may still
+        # point at the unplugged watch, and this endpoint is the model/connected source the UI
+        # uses to decide whether to show the legacy Routes/POIs cards. If it returned ok:false
+        # here, those cards vanished until /api/devices happened to be polled. Enumerate and
+        # heal so the very next /api/device poll after a swap already reports the right watch.
+        try:
+            _lc, _lo, _le = run_tool("list_watches.py", [])
+            _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
+            self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
+        except (json.JSONDecodeError, IndexError, ValueError):
+            pass  # enumeration hiccup - fall through to the read, which self-reports if it fails
         code, out, err = run_tool("device_info.py", ["--json"])
         if code != 0:
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
@@ -1977,16 +1988,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "list_watches.py produced no parseable "
                                    "JSON", "raw_output": out, "stderr": err})
             return
-        # Self-heal a stale pin (issue #16): if the selected watch is no longer on the bus - the
-        # user unplugged it and plugged a different one - every other endpoint would keep throwing
-        # "no <that watch> on the USB bus" until they found the device picker. Clear the dead pin;
-        # if exactly one watch is now present, adopt it so a swap just works. This endpoint is
-        # polled by the Home watch-switcher, so the pin heals on the next refresh after a swap.
-        enumerated = [w.get("productId") for w in info.get("watches", [])]
-        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
-            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
+        # Self-heal a stale pin (issue #16) - see _heal_stale_pin(). Polled by the Home
+        # switcher, so a swap heals on the next refresh; _handle_device heals too (below) so
+        # the model/connected signal the UI's legacy-card visibility depends on never spends
+        # a poll cycle reporting "not an Ambit1/2" and blanking Routes/POIs after a swap.
+        self._heal_stale_pin([w.get("productId") for w in info.get("watches", [])])
         info["selected"] = SELECTED_PRODUCT_ID
         self._send_json(200, info)
+
+    @staticmethod
+    def _heal_stale_pin(enumerated):
+        """Clear SELECTED_PRODUCT_ID if the pinned watch is no longer on the bus; adopt the
+        sole remaining watch if exactly one is present. Idempotent and cheap when the pin is
+        already valid. Central to issue #16: a stale pin makes every watch endpoint fail
+        ("no <that watch> on the USB bus") until it heals."""
+        global SELECTED_PRODUCT_ID
+        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
+            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
 
     def _handle_device_select(self, body):
         """POST /api/device/select {"productId": int|null} - pin which watch every subsequent
