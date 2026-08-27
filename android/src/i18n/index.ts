@@ -24,6 +24,28 @@ export const isFrench = locale.toLowerCase().startsWith('fr');
 // Kept in sync with the forced English `t` above (see note there).
 export const dateLocale = 'en-GB';
 
+// Day-first dates, everywhere, regardless of the device locale - the Android counterpart of the
+// desktop DateFormat.qml singleton (André, 2026-08-27: "it should be DD/MM/YYYY everywhere").
+// The pattern is explicit rather than taken from the locale, so a date never silently changes
+// shape. Numeric only - spelled-out headers (the Calendar's "August 2026", the weather strip's
+// "Mon") are words and are left to the locale, exactly as on the desktop.
+function _asDate(value: string | number | Date): Date | null {
+  const d = value instanceof Date ? value : new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+/** 27/08/2026 - the everyday activity date (desktop DateFormat.date). '' on an invalid input. */
+export function fmtDate(value: string | number | Date): string {
+  const d = _asDate(value);
+  if (!d) return '';
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+/** 27/08/2026 14:05 - when the time matters, e.g. backups (desktop DateFormat.dateTime). */
+export function fmtDateTime(value: string | number | Date): string {
+  const d = _asDate(value);
+  if (!d) return '';
+  return `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 // ─── Traductions ──────────────────────────────────────────────────────────────
 
 const fr = {

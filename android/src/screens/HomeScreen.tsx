@@ -38,7 +38,7 @@ import { APP_VERSION } from '../config/version';
 import { useDemo } from '../config/DemoContext';
 import { useExperimental } from '../config/ExperimentalContext';
 import { manualUrlFor, garminManualUrlFor } from '../config/manuals';
-import { t } from '../i18n';
+import { t, fmtDate as fmtDateShared } from '../i18n';
 import Icon from '../components/ui/Icon';
 import { ActionTile, Badge, Button, Chip, StatusLine } from '../components/ui/primitives';
 // v3.0 UI port (2026-08-09, "go all the way to the new theming") - the whole screen (not
@@ -1284,8 +1284,7 @@ function fmtDuration(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtDateShared(iso); // day-first dd/MM/yyyy, matching the desktop (see i18n/fmtDate)
 }
 
 function syncPhaseLabel(phase: SyncState['phase']): string {

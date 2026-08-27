@@ -8,7 +8,7 @@ import {
   createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile,
 } from '../services/NavBackupService';
 import { shareFile } from '../native/AmbitUsbModule';
-import { t, dateLocale } from '../i18n';
+import { t, fmtDateTime } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Button, Section, StatusLine, WarningNote } from '../components/ui/primitives';
 
@@ -135,10 +135,7 @@ export default function BackupScreen() {
         {backups.length === 0 && <StatusLine text={t.backupExistingEmpty} />}
         {backups.map(b => (
           <View key={b.prefix} style={styles.backupRow}>
-            <Text style={styles.backupDate}>{new Date(b.createdAt).toLocaleString(dateLocale, {
-              day: '2-digit', month: '2-digit', year: 'numeric',
-              hour: '2-digit', minute: '2-digit', hour12: false,
-            })}</Text>
+            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}</Text>
             <View style={styles.backupRowBtns}>
               <TouchableOpacity style={styles.shareBtn} onPress={() => handleShareBackup(b)}>
                 <Text style={styles.shareBtnText}>{t.backupShareBtn}</Text>
