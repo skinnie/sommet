@@ -194,10 +194,35 @@ def test_roundtrip(blob):
             "worst_drift_m": worst * 111320}
 
 
+def from_pcap(path):
+    """Pull the route region straight out of a SuuntoLink capture.
+
+    The region dump is NOT committed: assets/pcap is gitignored, and the bytes are somebody's
+    actual home and commute routes, which do not belong in a public repo. Regenerate it with
+    this instead - assets/pcap/2026-08-23-ambit1-suuntolink/zzambit1full.pcap is the capture
+    this format was solved from.
+    """
+    import ambit_pcap                                        # noqa: PLC0415 - optional dep
+    chunks = {}
+    for m in ambit_pcap.messages(path):
+        if m.command == 0x0B16 and not m.incoming and len(m.payload) >= 8:
+            addr, plen, _seq = struct.unpack("<IHH", m.payload[:8])
+            # The region and everything the writer appended after it, in address order.
+            if ROUTE_REGION_ADDR <= addr < ROUTE_REGION_ADDR + 0x20000:
+                chunks[addr] = m.payload[8:8 + plen]
+    return b"".join(chunks[a] for a in sorted(chunks))
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) != 2:
-        sys.exit(f"usage: {sys.argv[0]} ROUTE_REGION.bin   # dumps and self-tests")
+        sys.exit(f"usage: {sys.argv[0]} ROUTE_REGION.bin|CAPTURE.pcap   # dumps and self-tests")
+    if sys.argv[1].endswith((".pcap", ".pcapng")):
+        data = from_pcap(sys.argv[1])
+        for r in parse(data)["routes"]:
+            print(f"{r['name']!r:20s} {r['point_count']:5d} pts  {r['distance_m']:7d} m")
+        print(test_roundtrip(data))
+        raise SystemExit(0)
     data = open(sys.argv[1], "rb").read()
     for r in parse(data)["routes"]:
         print(f"{r['name']!r:20s} {r['point_count']:5d} pts  {r['distance_m']:7d} m  "
