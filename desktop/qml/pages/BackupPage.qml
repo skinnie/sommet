@@ -58,11 +58,58 @@ PageFlickable {
         // connected Ambit1 got a real 502 (skipped every SBEM region, "this watch does not
         // declare it") - same fix as Watch Settings/Sport Modes/Routes/POIs.
         Text {
-            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsWatchBackup
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin
+                     && !DeviceCapabilities.supportsWatchBackup
+                     && !DeviceCapabilities.supportsTravelArchive
             width: 480
             wrapMode: Text.WordWrap
             color: Theme.mutedText
             text: qsTr("%1 doesn't support Backup & Restore on this app yet.").arg(HomeViewModel.deviceDisplayName)
+        }
+
+        // Kailash's own backup. Deliberately NOT the "Backup & Restore" card below: it saves
+        // different regions, and it is one-way. See DeviceCapabilities.supportsTravelArchive.
+        Card {
+            width: parent.width
+            visible: DeviceCapabilities.supportsTravelArchive
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("Travel history & GPS track"); font.bold: true; color: Theme.text }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Saves this watch's visited places, travel stats and " +
+                                "activity log, plus the passive GPS track as .gpx files. " +
+                                "A firmware update erases all of it, so keep a copy first.")
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("This is an archive, not a restore point - there is no way to " +
+                                "write either back to the watch.")
+                }
+
+                RoundedButton {
+                    text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                    enabled: !BackupService.loading
+                    onClicked: BackupService.createBackup()
+                }
+
+                Text {
+                    visible: BackupService.lastActionText.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: BackupService.lastActionOk ? Theme.success : Theme.error
+                    text: BackupService.lastActionText
+                }
+            }
         }
 
         Card {
@@ -102,7 +149,8 @@ PageFlickable {
 
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
+            visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
+                                                 || DeviceCapabilities.supportsTravelArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -130,6 +178,12 @@ PageFlickable {
                         // Ember rides along in every backup automatically (André, 2026-08-26) -
                         // this just says so, so it isn't a silent surprise on restore.
                         Text {
+                            visible: modelData.hasKailash === true
+                            text: qsTr("+ travel history & GPS track")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text {
                             visible: modelData.hasEmber === true
                             text: qsTr("+ Ember data")
                             color: Theme.mutedText
@@ -146,7 +200,11 @@ PageFlickable {
                                 text: qsTr("Open backup folder")
                                 onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
                             }
+                            // A Kailash archive (travel history + GPS track, no -routes.bin
+                            // and no -ember.json) has no write path back to the watch - the
+                            // backend refuses it with that reason, so don't offer the button.
                             RoundedButton {
+                                visible: modelData.hasRoutes === true || modelData.hasEmber === true
                                 text: qsTr("Restore")
                                 onClicked: BackupService.restoreBackup(modelData.prefix, true)
                             }
@@ -161,7 +219,8 @@ PageFlickable {
         // and the backup lands there; the desktop sync client carries it to the cloud. ---
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
+            visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
+                                                 || DeviceCapabilities.supportsTravelArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall

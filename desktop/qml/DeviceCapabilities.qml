@@ -65,6 +65,16 @@ QtObject {
     // With this false, BackupPage falls through to its dedicated Ember card, so Ember backup
     // is still offered.
     property bool supportsWatchBackup: !_isLegacy && !_isKailash
+
+    // What a Kailash CAN have backed up, which is not nothing - it is just not the nav
+    // regions above. Its DeviceHistory (visited cities/countries, travel stats, the
+    // activity-mode logbook) and TrackLog (passive GPS track) are the irreplaceable data on
+    // this watch, and are exactly what a firmware flash wipes. The backend writes them as
+    // JSON plus one .gpx per correlated segment.
+    //
+    // One-way on purpose: there is no proven write path back for either region, so this is
+    // an archive, not a restore point, and the UI must not offer to restore it.
+    property bool supportsTravelArchive: _isKailash
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see

@@ -314,6 +314,26 @@ def selected_is_legacy():
     return bool(info) and info.get("model") in ("Bluebird", "Duck", "Colibri", "Greentit")
 
 
+# Kailash (Hoopoe). Its product id is the one this project had to add a fallback bucket for
+# ([[ambit_app_kailash_usb_crash_root_cause]]); named here so backup can dispatch on it the
+# same way selected_is_legacy() does for Ambit1/2.
+KAILASH_PRODUCT_IDS = {0x002A}
+
+
+def selected_is_kailash():
+    """True when the pinned watch (or, with none pinned, whichever is plugged) is a Kailash.
+    Same shape and same fallback as selected_is_legacy() above - one cheap device_info.py
+    round trip when nothing is pinned, rather than guessing from SELECTED_PRODUCT_ID alone."""
+    if SELECTED_PRODUCT_ID is not None:
+        return SELECTED_PRODUCT_ID in KAILASH_PRODUCT_IDS
+    code, out, err = run_tool("device_info.py", ["--json"])
+    try:
+        info = json.loads(out.strip().splitlines()[-1]) if out.strip() else None
+    except Exception:  # noqa: BLE001 - not parseable means "don't know", not Kailash
+        info = None
+    return bool(info) and info.get("model") == "Hoopoe"
+
+
 def run_tool(script, args, timeout=180):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
@@ -1789,6 +1809,8 @@ class Handler(BaseHTTPRequestHandler):
                 "createdAt": routes_file.stat().st_mtime,
                 "hasEmber": Path(f"{prefix}-ember.json").exists(),
                 "hasRoutes": True,
+                "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
+                              or Path(f"{prefix}-kailash-tracklog.json").exists(),
             })
             seen_prefixes.add(prefix)
         # Ember-only backups (no watch connected when the backup was made - a Garmin owner, or
@@ -1804,7 +1826,26 @@ class Handler(BaseHTTPRequestHandler):
                 "createdAt": ember_file.stat().st_mtime,
                 "hasEmber": True,
                 "hasRoutes": False,
+                "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
+                              or Path(f"{prefix}-kailash-tracklog.json").exists(),
             })
+            seen_prefixes.add(prefix)
+        # Kailash archives have neither -routes.bin nor -ember.json, so neither loop above
+        # finds them - they would be written successfully and then be invisible forever, the
+        # same trap the Ember-only loop exists to avoid.
+        for kail_file in sorted(BACKUP_DIR.glob("*-kailash-history.json"), reverse=True):
+            prefix = str(kail_file)[:-len("-kailash-history.json")]
+            if prefix in seen_prefixes:
+                continue
+            backups.append({
+                "prefix": prefix,
+                "label": Path(prefix).name,
+                "createdAt": kail_file.stat().st_mtime,
+                "hasEmber": False,
+                "hasRoutes": False,
+                "hasKailash": True,
+            })
+            seen_prefixes.add(prefix)
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
         self._send_json(200, {"ok": True, "backups": backups})
 
@@ -4525,8 +4566,16 @@ class Handler(BaseHTTPRequestHandler):
         target.mkdir(parents=True, exist_ok=True)
         label = time.strftime("%Y%m%d-%H%M%S")
         prefix = str(target / label)
-        code, out, err = run_tool("write_nav.py", ["nav", "--save", prefix])
-        routes_ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
+        # Skipped entirely on a Kailash - see the branch below for what its regions actually
+        # contain. This is a ~250 KB flash read over USB that comes back blank on that watch,
+        # so it costs real seconds to produce three useless files.
+        is_kailash = selected_is_kailash()
+        if is_kailash:
+            code, out, err = 0, "", ""
+            routes_ok = False
+        else:
+            code, out, err = run_tool("write_nav.py", ["nav", "--save", prefix])
+            routes_ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
         # Ember rides along in the same backup (André, 2026-08-26: "afaik there is zero GUI
         # service to backup it somewhere" - this closes that gap the same keyless way, no new
         # mechanism). Best-effort and silent if Ember was never used (no log.json yet).
@@ -4541,10 +4590,59 @@ class Handler(BaseHTTPRequestHandler):
                 has_ember = True
         except Exception:
             pass
-        ok = routes_ok or has_ember
+        # A Kailash's backup is a different thing entirely, and this is the whole reason it
+        # gets its own branch (André, 2026-08-27: "try it" - so we did, against his watch).
+        # `nav --save` above is meaningless here: its routes region came back 129,968 of
+        # 130,000 bytes 0xFF with a header magic of 0x3008 against the 0x340c expected, and
+        # waypoints 16,380 of 16,384 bytes 0xFF - both simply blank, which is consistent,
+        # because this watch has no routes or POIs feature to fill them. CustomModes, Apps
+        # and TrainingProgram are not declared or short-reply. The only region with real
+        # bytes was GlonassSGEE, the GPS ephemeris, which expires and re-downloads itself.
+        #
+        # What IS irreplaceable on a Kailash is its DeviceHistory (visited cities/countries,
+        # travel stats, the activity-mode logbook) and its TrackLog (the passive GPS track) -
+        # and those are exactly what a firmware flash wipes
+        # ([[ambit_app_kailash_desktop_home_fix]]). Neither is touched by `nav --save`, so a
+        # Kailash backup that captured nothing is what this replaces.
+        #
+        # This is an ARCHIVE, not a restore point: there is no proven write path for either
+        # region and this project does not invent one. Written as JSON (the tools' own
+        # output, losslessly) plus a .gpx of the track so the data is usable outside this app
+        # at all - which is the actual point of keeping it.
+        has_kailash = False
+        kailash_err = ""
+        if is_kailash:
+            hist_code, hist_out, hist_err = run_tool("kailash_history.py", ["--json"])
+            hist = self._parse_last_json_line(hist_out)
+            if hist and hist.get("ok"):
+                Path(f"{prefix}-kailash-history.json").write_text(
+                    json.dumps(hist, indent=2))
+                has_kailash = True
+            else:
+                kailash_err = (hist_err or hist_out or "kailash_history.py produced no JSON")
+
+            # ~1.3 MB flash read over USB - the same longer timeout /api/kailash/tracklog uses.
+            trk_code, trk_out, trk_err = run_tool("kailash_tracklog.py", ["--json"], timeout=300)
+            trk = self._parse_last_json_line(trk_out)
+            if trk and trk.get("ok"):
+                Path(f"{prefix}-kailash-tracklog.json").write_text(
+                    json.dumps(trk, indent=2))
+                has_kailash = True
+                # Every correlated segment the tool already produced a GPX for, concatenated
+                # one file per activity. Skipped silently when a segment has no track (a
+                # session predating TrackLog's coverage) rather than writing an empty file.
+                for i, act in enumerate(trk.get("activities") or []):
+                    gpx = act.get("gpxText")
+                    if gpx:
+                        Path(f"{prefix}-kailash-track-{i + 1}.gpx").write_text(gpx)
+            elif not kailash_err:
+                kailash_err = (trk_err or trk_out or "kailash_tracklog.py produced no JSON")
+
+        ok = routes_ok or has_ember or has_kailash
         self._send_json(200 if ok else 502, {
             "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
-            "hasRoutes": routes_ok, "raw_output": out, "stderr": err})
+            "hasRoutes": routes_ok, "hasKailash": has_kailash,
+            "kailashError": kailash_err, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):
         """Body: {"prefix": str, "confirm": bool}. Real hardware write when confirmed - same
@@ -4558,6 +4656,16 @@ class Handler(BaseHTTPRequestHandler):
                               and Path(f"{prefix}-waypoints.bin").exists())
         has_ember_backup = Path(f"{prefix}-ember.json").exists()
         if not (has_routes_backup or has_ember_backup):
+            # A Kailash archive is deliberately one-way: this project has no proven write
+            # path for DeviceHistory or TrackLog and does not invent one for a restore.
+            # Say that, rather than the generic "no backup found" it would otherwise get.
+            if (Path(f"{prefix}-kailash-history.json").exists()
+                    or Path(f"{prefix}-kailash-tracklog.json").exists()):
+                self._send_json(400, {"error": "This is a Kailash archive - travel history "
+                                       "and GPS track, kept so a firmware flash cannot lose "
+                                       "them. There is no write path back to the watch for "
+                                       "either, so it cannot be restored."})
+                return
             self._send_json(400, {"error": f"no backup found at prefix {prefix!r}"})
             return
 
