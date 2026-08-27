@@ -27,6 +27,10 @@ const CUSTOM_MODES_SIZE = 12288;
 
 export interface CalendarPlanEntry extends CalendarEntry {
   compiled?: CompiledApp; // set once the user has pasted-and-imported the compiled result
+  // The structured workout, carried on entries imported from intervals.icu so a pending entry can
+  // regenerate its compiler JSON (IntervalsWorkouts). Undefined on hand-built entries. Not used by
+  // syncCalendar (which only installs `compiled`).
+  workout?: import('./WorkoutSource').Workout;
 }
 
 export interface SyncState {
