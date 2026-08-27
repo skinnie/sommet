@@ -19,6 +19,7 @@
 // nativeAmbitWriteLegacyRegion for the Ambit1/2 sport-mode + nav restore writes.
 extern "C" {
 #include "libambit/pmem20.h"
+#include "libambit/device_support.h"  // libambit_device_support_find_first -> per-model driver_param
 }
 
 // libambit_protocol_command lives in protocol.h, which (unlike libambit.h) has no extern "C"
@@ -1065,12 +1066,21 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyRegion(
     if (len <= 0) { LOGE("nativeAmbitWriteLegacyRegion: empty data"); return JNI_FALSE; }
     jbyte *bytes = env->GetByteArrayElements(data, nullptr);
 
-    // A local pmem20 over the connected device, 0x400 (1024 B) chunking - the Bluebird driver's own
-    // driver_param (device_support.c) and what SuuntoLink uses in the capture. Self-contained so we
-    // don't reach into the private driver_data struct.
+    // Chunk size is the DEVICE'S OWN driver_param, not a constant: the Ambit2 (Duck) writes 0x400
+    // (1024 B) but the Ambit1 (Bluebird, fw>=1.9) writes 0x200 (512 B) - device_support.c. Sending
+    // 1024-B 0x0b16 chunks to the Ambit1 gets every chunk NAK'd (data_write -1, HW 2026-08-27).
+    // find_first(vid,pid) returns the same supported row libambit's Android init picks, so this
+    // matches the chunk size the running driver was init'd with. Fall back to 0x400 if unknown.
+    const ambit_known_device_t *kd =
+        libambit_device_support_find_first(g_device->device_info.vendor_id, pid);
+    uint16_t chunk = (kd && kd->driver_param) ? (uint16_t)kd->driver_param : 0x400;
+    LOGI("nativeAmbitWriteLegacyRegion: chunk size 0x%x for pid 0x%04x", chunk, pid);
+
+    // A local pmem20 over the connected device. Self-contained so we don't reach into the private
+    // driver_data struct.
     libambit_pmem20_t pm;
     memset(&pm, 0, sizeof(pm));
-    int ir = libambit_pmem20_init(&pm, g_device, 0x400);
+    int ir = libambit_pmem20_init(&pm, g_device, chunk);
     int rc = -1;
     if (ir == 0) {
         rc = libambit_pmem20_data_write(&pm, (uint32_t)address, (const uint8_t *)bytes, (size_t)len);
