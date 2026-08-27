@@ -906,6 +906,29 @@ class Handler(BaseHTTPRequestHandler):
         legacy waypoints (tools/legacy_link.py settings, which now carries each waypoint's
         route_name) and reconstruct routes from them - so the desktop matches the Android app
         (both showed 0 legacy routes before, 2026-08-27)."""
+        # The REAL route region first (0x041EB0). Until 2026-08-27 nothing could read it -
+        # openambit writes routes but has no reader - so this endpoint inferred routes from
+        # route-tagged waypoints instead, which only ever recovers the A/B markers, never the
+        # track. Hardware-confirmed on André's Ambit1 the same day: 3 routes, 1695 points,
+        # region CRC matching, "Gare du Nord" decoding to 48.88097,2.35613.
+        code, out, err = run_tool("legacy_link.py", ["routes"], timeout=900)
+        info = self._parse_last_json_line(out)
+        if info and info.get("ok") and info.get("routes"):
+            routes = [{
+                "name": r["name"].strip(),
+                "pointCount": r["point_count"],
+                "waypointCount": r["point_count"],
+                "distanceMeters": r["distance_m"],
+                "ascentMeters": 0, "descentMeters": 0,
+                "track": [{"lat": la, "lon": lo, "ele": None} for la, lo in r["points"]],
+            } for r in info["routes"]]
+            self._send_json(200, {"ok": True, "routes": routes,
+                                   "raw_output": "legacy Ambit1/2 - %d route(s) read from the "
+                                   "route region\n" % len(routes)})
+            return
+
+        # Fall back to the waypoint reconstruction - a watch whose route region was never
+        # written has no magic there, and its route-tagged waypoints are still worth showing.
         code, out, err = run_tool("legacy_link.py", ["settings"])
         info = self._parse_last_json_line(out)
         if info is None or not info.get("ok"):

@@ -508,6 +508,62 @@ static int cmd_poi_add(const char *name, double lat, double lon) {
 /* Real write: writes back an empty waypoint list. Used to revert cmd_poi_add's own test
  * writes and, generally, to clear the on-device waypoint list. Does NOT touch routes -
  * ps->routes is left exactly as read. */
+/* Read one flash region and print it as hex - READ ONLY, nothing is written.
+ *
+ * The Ambit1/2 route region (0x041EB0) has no reader anywhere: openambit can write routes
+ * (ambit_navigation_route_write) but never reads them back, and this project's own Python
+ * read_flash() speaks the Ambit3 dialect - every command through it, device_info included,
+ * comes back empty on a Bluebird (checked live, 2026-08-27). libambit's own transport is what
+ * this family answers, so the reader belongs here.
+ *
+ * 0x0b17 takes [u32 address][u32 length] and echoes both back before the data, exactly as
+ * André's SuuntoLink capture shows it doing on his own Ambit1 (its first read is
+ * 0x2000/4 B, then 512 B at a time). Chunked at 512 to match that capture rather than the
+ * 1024 the Ambit3 path uses. */
+static int cmd_flash_read(uint32_t address, uint32_t length) {
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
+
+    uint8_t *out = (uint8_t*)malloc(length);
+    if (!out) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"out of memory\"}\n"); libambit_close(dev); libambit_free_enumeration(devices); return 1; }
+
+    uint32_t got = 0;
+    int rc = 0;
+    while (got < length) {
+        uint32_t want = (length - got) > 512 ? 512 : (length - got);
+        uint8_t req[8];
+        uint32_t a = htole32(address + got), l = htole32(want);
+        memcpy(req, &a, 4);
+        memcpy(req + 4, &l, 4);
+
+        uint8_t *reply = NULL;
+        size_t replylen = 0;
+        rc = libambit_protocol_command(dev, ambit_command_log_read, req, sizeof(req), &reply, &replylen, 0);
+        if (rc != 0 || replylen < 8 + want) {
+            fputs("@@JSON@@\n", stdout);
+            printf("{\"ok\": false, \"error\": \"0x0b17 at 0x%06x: rc=%d replylen=%zu (wanted %u)\", \"read\": %u}\n",
+                   address + got, rc, replylen, want, got);
+            if (reply) libambit_protocol_free(reply);
+            free(out); libambit_close(dev); libambit_free_enumeration(devices);
+            return 1;
+        }
+        memcpy(out + got, reply + 8, want);
+        libambit_protocol_free(reply);
+        got += want;
+    }
+
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": true, \"address\": %u, \"length\": %u, \"hex\": \"", address, got);
+    for (uint32_t i = 0; i < got; i++) printf("%02x", out[i]);
+    printf("\"}\n");
+
+    free(out);
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return 0;
+}
+
 static int cmd_poi_clear(void) {
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
@@ -1029,6 +1085,10 @@ int main(int argc, char **argv) {
         return cmd_poi_add(argv[2], atof(argv[3]), atof(argv[4]));
     }
     if (strcmp(argv[1], "poi-clear") == 0) return cmd_poi_clear();
+    if (strcmp(argv[1], "flash-read") == 0) {
+        if (argc < 4) { fprintf(stderr, "usage: %s flash-read ADDR LEN   (both decimal or 0x...)\n", argv[0]); return 2; }
+        return cmd_flash_read((uint32_t)strtoul(argv[2], NULL, 0), (uint32_t)strtoul(argv[3], NULL, 0));
+    }
     if (strcmp(argv[1], "settings-write") == 0) {
         if (argc < 4) {
             fprintf(stderr, "usage: %s settings-write KEY VALUE [--dry-run]\n", argv[0]);

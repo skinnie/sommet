@@ -49,6 +49,18 @@ HEAD_LEN = 32
 INFO_LEN = 48
 POINT_LEN = 8
 
+# The route_info table is a FIXED 50 slots, not packed to route_count - so the points always
+# begin at the same offset however many routes there are. Confirmed on real hardware
+# (André's Ambit1, 2026-08-27): the region reads back 15,992 bytes for 3 routes / 1695 points,
+# and 32 + 50*48 = 2432 is exactly where the points start.
+#
+# The pcap alone gets this WRONG and does so silently: SuuntoLink writes the head+info in one
+# 176-byte packet at 0x041EB0 and then jumps to 0x042830 for the points, so reassembling its
+# writes by concatenation closes a 2,256-byte gap that is really there, shifts every point and
+# still decodes to believable coordinates. Only reading the watch showed it.
+ROUTE_INFO_SLOTS = 50
+POINTS_OFFSET = HEAD_LEN + INFO_LEN * ROUTE_INFO_SLOTS
+
 _HEAD = "<HBBHHIH18s"        # magic, u2, u3, route_count, u4, routepoint_count, checksum, pad
 _INFO = "<16sIHIiiiiHHH"
 
@@ -91,7 +103,7 @@ def parse(blob):
         raise ValueError(f"not a legacy route region: magic 0x{magic:04X} != 0x{HEAD_MAGIC:04X}")
 
     info_off = HEAD_LEN
-    pts_off = info_off + INFO_LEN * route_count
+    pts_off = POINTS_OFFSET
     routes = []
     for i in range(route_count):
         raw = blob[info_off + INFO_LEN * i: info_off + INFO_LEN * (i + 1)]
@@ -158,10 +170,15 @@ def build(routes):
             max(0, max(xs)), max(0, max(ys)), 0xFFFF, 0xFFFF, 0))
         start += len(pts)
 
+    if len(routes) > ROUTE_INFO_SLOTS:
+        raise ValueError(f"{len(routes)} routes exceeds the region's {ROUTE_INFO_SLOTS} slots")
     info_blob = b"".join(infos)
+    # The checksum covers only the USED info entries plus the points - openambit sizes its
+    # buffer by route_count, not by the table - so the padding is not part of it.
     checksum = crc16_ccitt_false(info_blob + bytes(pts_blob))
     head = struct.pack(_HEAD, HEAD_MAGIC, 0, 1, len(routes), 0, start, checksum, b"\x00" * 18)
-    return head + info_blob + bytes(pts_blob)
+    table = info_blob.ljust(INFO_LEN * ROUTE_INFO_SLOTS, b"\x00")
+    return head + table + bytes(pts_blob)
 
 
 def test_roundtrip(blob):

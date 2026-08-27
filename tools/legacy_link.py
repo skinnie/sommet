@@ -128,6 +128,40 @@ def poi_clear():
     return run(["poi-clear"])
 
 
+def flash_read(address, length):
+    """Raw region read over 0x0b17 - READ ONLY. Returns bytes.
+
+    Goes through the C CLI because this family answers libambit's transport and not the
+    Ambit3 dialect write_nav.py speaks: every command through that path, device_info
+    included, comes back empty on a Bluebird (checked live, 2026-08-27).
+    """
+    info = run(["flash-read", str(int(address)), str(int(length))], timeout=600)
+    if not info.get("ok"):
+        raise RuntimeError(info.get("error", "flash-read failed"))
+    return bytes.fromhex(info["hex"])
+
+
+def routes():
+    """The watch's REAL routes, off the route region - full point tracks, not the A/B
+    waypoint markers /api/nav had to infer them from before.
+
+    Two reads: the 32-byte head first, because it carries route_count and routepoint_count and
+    those decide how much there is to fetch - the region is 16 KB and reading all of it when a
+    watch holds one short route would be slow for nothing.
+    """
+    import legacy_route                                      # noqa: PLC0415
+
+    head = flash_read(legacy_route.ROUTE_REGION_ADDR, legacy_route.HEAD_LEN)
+    magic = int.from_bytes(head[:2], "little")
+    if magic != legacy_route.HEAD_MAGIC:
+        return {"ok": True, "routes": [], "note": f"no route region (magic 0x{magic:04X})"}
+    point_count = int.from_bytes(head[8:12], "little")
+    total = legacy_route.POINTS_OFFSET + legacy_route.POINT_LEN * point_count
+    blob = flash_read(legacy_route.ROUTE_REGION_ADDR, total)
+    parsed = legacy_route.parse(blob)
+    return {"ok": True, "routes": parsed["routes"], "routepoint_count": parsed["routepoint_count"]}
+
+
 def settings_write(key, value, dry_run=False):
     """Writes ONE personal-settings field on an Ambit1.
 
@@ -206,7 +240,7 @@ def sport_mode_write(modes, dry_run=False):
 
 
 _COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear",
-             "sport-mode-write-presets")
+             "sport-mode-write-presets", "routes")
 
 
 def main():
@@ -222,6 +256,8 @@ def main():
             if len(sys.argv) < 5:
                 sys.exit(f"usage: {sys.argv[0]} poi-add NAME LAT LON")
             result = poi_add(sys.argv[2], sys.argv[3], sys.argv[4])
+        elif cmd == "routes":
+            result = routes()
         elif cmd == "sport-mode-write-presets":
             result = sport_mode_write_presets(dry_run="--dry-run" in sys.argv[2:])
         else:
