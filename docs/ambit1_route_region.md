@@ -83,9 +83,22 @@ the concern that a large route would not fit does not arise. Addressable flash r
 
 ## Status
 
-Reading is done and wired: `tools/legacy_route.py` (parse/build), `legacy_link.py routes`,
-and `/api/nav`, which now returns full tracks instead of the A/B waypoint markers it used to
-infer routes from.
+Reading is done and wired on **both platforms**, each confirmed against this same watch:
+
+- desktop — `tools/legacy_route.py` (parse/build), `legacy_link.py routes`, `/api/nav`
+- Android — `src/services/LegacyRoute.ts` over `readLegacyRegion()`, the same `0x0b17`
+  512-byte legacy read the sport-modes page already used
+
+Both replace the A/B waypoint markers that routes used to be inferred from. The difference is
+not cosmetic: the reconstruction reported Grand Tour HDF as **9 points / 60.94 km**, because
+it only ever saw the named turn-points and measured straight lines between them. The region
+gives its real **852 points / 128.72 km**.
+
+Verified on the tablet with the Ambit1 on USB OTG, 2026-08-27 — all three routes, point
+counts and distances identical to the desktop read, and the Paris route draws along the
+actual street network (Porte Dauphine, Colline de Chaillot, Bois de Boulogne, St-Cloud).
+That last check is the one that matters: a wrong scale or anchor still yields plausible
+numbers, but the line stops following roads.
 
 Writing is **not** done. openambit's writer produces bytes that match this capture, and the
 region can now be read first — which is what makes a safe read-modify-write possible rather
