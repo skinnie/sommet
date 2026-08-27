@@ -199,7 +199,7 @@ PageFlickable {
             Card { width: parent.cw
                 EmberBars { width: parent.width; label: qsTr("Coffee (cups/day)"); barColor: Theme.hard; series: root.daySeries("coffee") } }
             Card { width: parent.cw
-                MetricChart { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; lineColor: Theme.accent; goal: 2.5; series: root.daySeries("waterL") } }
+                EmberBars { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; goal: 2.5; decimals: 1; barColor: Theme.accent; series: root.daySeries("waterL") } }
         }
     }
 

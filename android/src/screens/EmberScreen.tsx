@@ -3,7 +3,6 @@ import {
   View, Text, StyleSheet, ScrollView, RefreshControl, Pressable, Modal, Alert,
 } from 'react-native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
-import { MetricChart } from '../components/MetricChart';
 import { EmberBars } from '../components/EmberBars';
 import {
   loadEmber, saveEmber, applyLog, emberSummary, EmberData, EmberSummary, LogBody,
@@ -183,7 +182,7 @@ export default function EmberScreen() {
       {series(d => d.coffee).length > 1 &&
         <EmberBars label="Coffee (cups/day)" barColor={t.hard} series={series(d => d.coffee)} />}
       {series(d => d.waterL).length > 1 &&
-        <MetricChart label="Water (litres)" unit=" L" decimals={1} goal={2.5} series={series(d => d.waterL)} />}
+        <EmberBars label="Water (litres)" unit=" L" decimals={1} goal={2.5} barColor={t.accent} series={series(d => d.waterL)} />}
 
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
         Logged here and synced with the Ember store on your other devices.
