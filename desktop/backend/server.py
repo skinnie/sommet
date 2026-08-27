@@ -1968,6 +1968,7 @@ class Handler(BaseHTTPRequestHandler):
         (2026-08-16, porting the Android multi-watch picker). tools/list_watches.py mirrors
         write_nav.Link's own enumerate walk, so the list is exactly the set Link could open.
         Includes `selected` (the product_id currently pinned via /api/device/select, or null)."""
+        global SELECTED_PRODUCT_ID
         code, out, err = run_tool("list_watches.py", [])
         last_line = out.strip().splitlines()[-1] if out.strip() else ""
         try:
@@ -1976,6 +1977,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "list_watches.py produced no parseable "
                                    "JSON", "raw_output": out, "stderr": err})
             return
+        # Self-heal a stale pin (issue #16): if the selected watch is no longer on the bus - the
+        # user unplugged it and plugged a different one - every other endpoint would keep throwing
+        # "no <that watch> on the USB bus" until they found the device picker. Clear the dead pin;
+        # if exactly one watch is now present, adopt it so a swap just works. This endpoint is
+        # polled by the Home watch-switcher, so the pin heals on the next refresh after a swap.
+        enumerated = [w.get("productId") for w in info.get("watches", [])]
+        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
+            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
         info["selected"] = SELECTED_PRODUCT_ID
         self._send_json(200, info)
 
