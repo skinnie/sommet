@@ -180,13 +180,16 @@ PageFlickable {
                         // are not from other device"). Backups made before the stamp existed
                         // say so honestly rather than claiming to be this watch's.
                         Text {
+                            // The contents hint LABELS an old backup; it never decides whether
+                            // it may be restored - "Ambit" spans Ambit1/2/3 and Traverse, which
+                            // do not share layouts. Only a recorded model/serial authorises.
                             text: modelData.deviceModel
                                   ? qsTr("From %1").arg(HomeViewModel.displayNameForModel(modelData.deviceModel))
                                   : modelData.deviceHint === "kailash"
-                                    ? qsTr("From a Kailash (identified by its contents)")
+                                    ? qsTr("Looks like a Kailash backup - no watch recorded, so it can't be restored")
                                     : modelData.deviceHint === "ambit"
-                                      ? qsTr("From an Ambit (identified by its contents)")
-                                      : qsTr("From an unknown watch (saved before backups recorded this)")
+                                      ? qsTr("Looks like an Ambit backup - no watch recorded, so it can't be restored")
+                                      : qsTr("No watch recorded, so it can't be restored")
                             color: modelData.deviceSerial && DeviceService.serial
                                    && modelData.deviceSerial !== DeviceService.serial
                                    ? Theme.error : Theme.mutedText
@@ -222,16 +225,17 @@ PageFlickable {
                             // from a DIFFERENT watch - the backend refuses that too, but the
                             // button should not be there to press in the first place.
                             RoundedButton {
+                                // Restorable only when this backup records the watch it came
+                                // from AND that is the watch connected now - model first
+                                // (families are not interchangeable), serial to tell two of the
+                                // same model apart. The backend enforces the same rule; this
+                                // just keeps the button from being there to press.
                                 visible: (modelData.hasRoutes === true || modelData.hasEmber === true)
+                                         && modelData.deviceHint !== "kailash"
+                                         && !!modelData.deviceModel
+                                         && DeviceService.model === modelData.deviceModel
                                          && !(modelData.deviceSerial && DeviceService.serial
                                               && modelData.deviceSerial !== DeviceService.serial)
-                                         // Older, unstamped backups can still be told apart by
-                                         // what is in them: Ambit regions have no meaning on a
-                                         // Kailash, so don't offer to write them there.
-                                         && !(modelData.deviceHint === "ambit"
-                                              && DeviceCapabilities.supportsTravelArchive)
-                                         // A Kailash archive is one-way whatever else is in it.
-                                         && modelData.deviceHint !== "kailash"
                                 text: qsTr("Restore")
                                 onClicked: BackupService.restoreBackup(modelData.prefix, true)
                             }

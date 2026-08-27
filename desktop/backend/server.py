@@ -4736,36 +4736,49 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"no backup found at prefix {prefix!r}"})
             return
 
-        # Never push one watch's regions at a different watch. This project's own standing rule
-        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]),
-        # and until now the backup list had no idea which watch each entry came from - an Ambit3
-        # nav backup and a Kailash archive sat side by side, both offering Restore.
-        # A backup with no stamp predates it (2026-08-27) and is treated as unknown: allowed,
-        # because refusing every older backup would be worse, and write_nav.py's own per-region
-        # "this watch does not declare it" check still stands behind this.
+        # Never push one watch's regions at a different watch. This project's standing rule
+        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]).
+        #
+        # The authority is the MODEL, not a family (André, 2026-08-27: "I would say the safe
+        # side, back up by model... by family may be risky no?" - and he is right: "Ambit"
+        # covers Ambit1, Ambit2, Ambit3 and Traverse, which do NOT share layouts. Traverse's
+        # waypoint descriptor alone differs from Peak's and decodes to garbage
+        # ([[ambit_app_traverse_waypoint_decode]]), and the region bases differ too
+        # ([[ambit_app_native_region_base_hardcoding]]). A family check would have called that
+        # pairing safe.) The contents hint is kept for LABELLING only and never authorises.
+        #
+        # So: serial must match when the backup records one, model must match always, and a
+        # backup that records neither - i.e. anything saved before this stamp existed
+        # (2026-08-27) - cannot be restored at all. Refusing an old backup is recoverable
+        # (connect the watch, take a fresh one); writing the wrong watch's flash is not.
         want_model, want_serial = self._backup_device(prefix)
-        # No serial: fall back to the family hint, which is all an older backup can offer.
-        # An Ambit-family nav backup must not be pushed at a Kailash - it does not declare
-        # those regions at all, so "restoring" it is meaningless at best.
-        if not want_serial and self._backup_hint(prefix) == "ambit" and selected_is_kailash():
+        if not want_model and not want_serial:
             self._send_json(400, {"error": (
-                "That backup holds Ambit sport modes, apps and navigation regions, which a "
-                "Kailash does not have. It was saved before backups recorded which watch "
-                "they came from, so it cannot be matched by serial - refusing rather than "
-                "writing one watch's data to another.")})
+                "This backup was saved before backups recorded which watch they came from, "
+                "so there is no way to confirm it belongs to the watch connected now. "
+                "Restoring the wrong watch's data cannot be undone, so it is refused. "
+                "Connect that watch and take a fresh backup to have a restorable one.")})
             return
-        if want_serial:
-            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
-            di = self._parse_last_json_line(di_out)
-            have_serial = str((di or {}).get("serial") or "")
-            have_model = str((di or {}).get("model") or "")
-            if have_serial and have_serial != want_serial:
-                self._send_json(400, {"error": (
-                    f"That backup was taken from a {want_model or 'different'} "
-                    f"(serial {want_serial}); the watch connected now is a "
-                    f"{have_model or 'different watch'} (serial {have_serial}). "
-                    "Restoring one watch's data onto another is refused.")})
-                return
+
+        di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+        di = self._parse_last_json_line(di_out)
+        have_model = str((di or {}).get("model") or "")
+        have_serial = str((di or {}).get("serial") or "")
+        if not have_model and not have_serial:
+            self._send_json(400, {"error": "Couldn't identify the connected watch, so the "
+                                   "backup cannot be matched to it. Refusing to restore."})
+            return
+        if want_model and have_model and want_model != have_model:
+            self._send_json(400, {"error": (
+                f"That backup was taken from a {want_model}; the watch connected now is a "
+                f"{have_model}. Restoring one model's data onto another is refused.")})
+            return
+        if want_serial and have_serial and want_serial != have_serial:
+            self._send_json(400, {"error": (
+                f"That backup was taken from a different {want_model or 'watch'} "
+                f"(serial {want_serial}); the one connected now is serial {have_serial}. "
+                "Two watches of the same model are still different watches - refusing.")})
+            return
 
         confirm = bool(body.get("confirm", False))
         # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to
