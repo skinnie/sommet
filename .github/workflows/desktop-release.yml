@@ -162,6 +162,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # macOS has the same hidapi gap as Windows: the `hid` wheel bundles no libhidapi.dylib, so
+      # /api/devices can't enumerate the watch on a clean Mac (first Mac hardware test, 2026-08-27).
+      # Install it via Homebrew (preinstalled on the runner) and hand its path to PyInstaller via
+      # HIDAPI_DYLIB; ambit_backend.spec bundles it at the app root.
+      - name: Fetch libhidapi.dylib (native USB lib for `hid`)
+        run: |
+          brew install hidapi
+          echo "HIDAPI_DYLIB=$(brew --prefix hidapi)/lib/libhidapi.dylib" >> "$GITHUB_ENV"
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip
@@ -191,6 +199,11 @@ jobs:
           mkdir -p "$APP/Contents/Resources/backend"
           cp dist/backend/ambit-backend "$APP/Contents/Resources/backend/"
           chmod +x "$APP/Contents/Resources/backend/ambit-backend"
+          # Ship libhidapi.dylib next to the helper so the app can point DYLD_LIBRARY_PATH at this
+          # dir (see backendprocess.cpp) and the frozen `hid` can dlopen it - no brew or env needed
+          # on the user's Mac. -L copies the real lib through the Homebrew symlink, named exactly
+          # "libhidapi.dylib" (the name `hid` requests). codesign --deep below then signs it too.
+          cp -L "$(brew --prefix hidapi)/lib/libhidapi.dylib" "$APP/Contents/Resources/backend/libhidapi.dylib"
           # Ad-hoc sign the WHOLE bundle last (after macdeployqt rewrote the frameworks and we
           # added the backend, both of which invalidate any signature). Apple Silicon refuses
           # to launch a binary with a broken/absent signature - it shows a 🚫 and reads as
