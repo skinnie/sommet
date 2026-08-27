@@ -76,27 +76,27 @@ PageFlickable {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                Text { text: qsTr("Waypoints, routes & settings"); font.bold: true; color: Theme.text }
+                Text { text: qsTr("Routes & POIs"); font.bold: true; color: Theme.text }
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
-                    text: qsTr("Saves this watch's waypoints and the routes built from them, " +
-                                "plus its settings - as JSON and as a .gpx you can open " +
-                                "anywhere.")
+                    text: qsTr("Backs up this watch's routes and POIs (its whole navigation " +
+                                "database) and can restore them - plus a .gpx and JSON copy " +
+                                "you can open anywhere.")
                 }
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("An archive, not a restore point - POIs can be added back one " +
-                                "at a time, but this family has no whole-region restore.")
+                    text: qsTr("Restore is under Existing backups below, and only for a backup " +
+                                "taken from this same watch.")
                 }
 
                 RoundedButton {
-                    text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                    text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
                     enabled: !BackupService.loading
                     onClicked: BackupService.createBackup()
                 }
@@ -278,9 +278,14 @@ PageFlickable {
                                 // (families are not interchangeable), serial to tell two of the
                                 // same model apart. The backend enforces the same rule; this
                                 // just keeps the button from being there to press.
-                                visible: (modelData.hasRoutes === true || modelData.hasEmber === true)
+                                // Ambit1/2 (hasLegacy) restore routes+POIs via the legacy
+                                // command/flash-write path; Ambit3/Traverse (hasRoutes) via the
+                                // SBEM path; Ember-only backups restore Ember. Kailash stays
+                                // one-way (no write path). Model+serial must match the connected
+                                // watch either way - the backend enforces the same rule.
+                                visible: (modelData.hasRoutes === true || modelData.hasLegacy === true
+                                          || modelData.hasEmber === true)
                                          && modelData.deviceHint !== "kailash"
-                                         && modelData.deviceHint !== "legacy"
                                          && !!modelData.deviceModel
                                          && DeviceService.model === modelData.deviceModel
                                          && !(modelData.deviceSerial && DeviceService.serial

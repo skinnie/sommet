@@ -4782,9 +4782,11 @@ class Handler(BaseHTTPRequestHandler):
         # Saved verbatim, plus a .gpx of every waypoint so the data is usable outside this app,
         # matching what the Kailash archive above does for its own regions.
         #
-        # An archive, not a restore point: POI writing is wired for this family
-        # (legacy_link.py poi-add) but there is no whole-region legacy restore, and inventing
-        # one is not this change.
+        # A RESTORABLE backup for this family now (2026-08-27): its waypoints (POIs) go back via
+        # the command path and its route region via a chunked flash-write + commit tail, both in
+        # tools/legacy_link.py, HW-proven first on the Android port. Still saves the same JSON+GPX
+        # archive so the data is readable outside the app; adds -legacy-routes.bin so Restore can
+        # rewrite the route region byte-for-byte.
         has_legacy = False
         legacy_err = ""
         if is_legacy:
@@ -4793,6 +4795,18 @@ class Handler(BaseHTTPRequestHandler):
             if lg and lg.get("ok"):
                 Path(f"{prefix}-legacy-settings.json").write_text(json.dumps(lg, indent=2))
                 has_legacy = True
+                # The route region as raw bytes, for a byte-exact restore (waypoints restore
+                # from the settings JSON above). Best-effort: a watch with no routes just skips
+                # it, and a route read that fails must not lose the waypoint archive.
+                try:
+                    rr_code, rr_out, rr_err = run_tool(
+                        "legacy_link.py", ["route-region-save", f"{prefix}-legacy-routes.bin"],
+                        timeout=900)
+                    rr = self._parse_last_json_line(rr_out)
+                    if not (rr and rr.get("ok")):
+                        legacy_err = (rr_err or rr_out or "route-region-save produced no JSON")
+                except Exception:  # noqa: BLE001 - routes are a bonus; never drop the archive
+                    pass
                 wpts = lg.get("waypoints") or []
                 if wpts:
                     routes_g, loose = self._legacy_route_groups(wpts)
@@ -4839,16 +4853,15 @@ class Handler(BaseHTTPRequestHandler):
         if self._backup_hint(prefix) in ("kailash", "legacy"):
             has_routes_backup = False
         has_ember_backup = Path(f"{prefix}-ember.json").exists()
-        if not (has_routes_backup or has_ember_backup):
+        # Ambit1/2 legacy nav restore (2026-08-27): waypoints (POIs) via the command path +
+        # the route region via chunked flash-write + commit tail (tools/legacy_link.py). A
+        # legacy backup always has -legacy-settings.json (its waypoints); -legacy-routes.bin
+        # rides along when the watch had routes.
+        has_legacy_backup = Path(f"{prefix}-legacy-settings.json").exists()
+        if not (has_routes_backup or has_ember_backup or has_legacy_backup):
             # A Kailash archive is deliberately one-way: this project has no proven write
             # path for DeviceHistory or TrackLog and does not invent one for a restore.
             # Say that, rather than the generic "no backup found" it would otherwise get.
-            if Path(f"{prefix}-legacy-settings.json").exists():
-                self._send_json(400, {"error": (
-                    "This is an Ambit1/2 archive - its waypoints, routes and settings, kept "
-                    "as a record. POIs can be added back one at a time, but there is no "
-                    "whole-region restore for this family, so it cannot be restored.")})
-                return
             if (Path(f"{prefix}-kailash-history.json").exists()
                     or Path(f"{prefix}-kailash-tracklog.json").exists()):
                 self._send_json(400, {"error": "This is a Kailash archive - travel history "
@@ -4907,7 +4920,9 @@ class Handler(BaseHTTPRequestHandler):
         # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to
         # restore - skip that call entirely rather than have it fail on files that were never
         # written in the first place.
-        if has_routes_backup:
+        if has_legacy_backup:
+            code, out, err, ok = self._restore_legacy(prefix, confirm)
+        elif has_routes_backup:
             args = ["restore", prefix]
             if confirm:
                 args.append("--write")
@@ -4935,6 +4950,48 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if ok else 502, {
             "ok": ok, "wrote": confirm and ok, "raw_output": out, "stderr": err,
             "ember": ember_result})
+
+    def _restore_legacy(self, prefix, confirm):
+        """Restore an Ambit1/2 nav backup: waypoints (POIs) then the route region. Returns
+        (code, out, err, ok) to match the write_nav.py branch. confirm=False rehearses (reports
+        the plan, writes nothing); confirm=True performs the real writes.
+
+        Order matches the Android port: waypoints FIRST (their write's nav_memory_delete clears
+        the waypoint list but NOT the route flash region), then the route region - so a restore
+        rebuilds exactly what was saved and never leaves routes half-written."""
+        settings_path = Path(f"{prefix}-legacy-settings.json")
+        routes_bin = Path(f"{prefix}-legacy-routes.bin")
+        try:
+            saved = json.loads(settings_path.read_text())
+        except Exception as ex:  # noqa: BLE001
+            return 1, "", f"cannot read {settings_path.name}: {ex}", False
+        wpts = saved.get("waypoints") or []
+        has_routes = routes_bin.exists() and routes_bin.stat().st_size > 0
+
+        if not confirm:
+            # Rehearsal: describe what a real restore would write, touch nothing.
+            plan = f"Would restore {len(wpts)} POI(s)"
+            plan += f" and the route region ({routes_bin.stat().st_size} bytes)" if has_routes \
+                else " (no routes in this backup)"
+            return 0, plan + "\n", "", True
+
+        out_lines = []
+        # 1. Waypoints (POIs) - clears the on-device list and writes the backed-up set.
+        wp_code, wp_out, wp_err = run_tool(
+            "legacy_link.py", ["nav-restore-json", str(settings_path)], timeout=600)
+        wp = self._parse_last_json_line(wp_out)
+        if not (wp and wp.get("ok")):
+            return 1, "\n".join(out_lines), (wp_err or wp_out or "waypoint restore failed"), False
+        out_lines.append(f"POIs restored: {wp.get('wrote', len(wpts))}")
+        # 2. Route region - byte-exact rewrite + commit tail.
+        if has_routes:
+            rr_code, rr_out, rr_err = run_tool(
+                "legacy_link.py", ["route-region-restore", str(routes_bin)], timeout=900)
+            rr = self._parse_last_json_line(rr_out)
+            if not (rr and rr.get("ok")):
+                return 1, "\n".join(out_lines), (rr_err or rr_out or "route restore failed"), False
+            out_lines.append(f"Route region restored: {rr.get('written', 0)} bytes")
+        return 0, "\n".join(out_lines) + "\n", "", True
 
 
 def main():

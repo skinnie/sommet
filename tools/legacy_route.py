@@ -49,6 +49,13 @@ HEAD_LEN = 32
 INFO_LEN = 48
 POINT_LEN = 8
 
+# The 0x0b18 commit-tail `extra` for this region: [u32 addr][u32 extra], no hash. Writing the
+# route region without it lets the watch ack + read it back in-session, then silently revert on
+# reconnect (openambit omits it - see the ambit-app-legacy-write-commit-tail note). Constant per
+# region, content-independent: confirmed 0xFFFFFA1A on BOTH André's Ambit1 and Ambit2 SuuntoLink
+# captures (0x041eb0 -> 0xfffffa1a). Restore (legacy_link.restore_route_region) passes it through.
+ROUTE_COMMIT_EXTRA = 0xFFFFFA1A
+
 # The route_info table is a FIXED 50 slots, not packed to route_count - so the points always
 # begin at the same offset however many routes there are. Confirmed on real hardware
 # (André's Ambit1, 2026-08-27): the region reads back 15,992 bytes for 3 routes / 1695 points,

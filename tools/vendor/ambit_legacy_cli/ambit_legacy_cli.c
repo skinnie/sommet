@@ -1056,6 +1056,180 @@ static int cmd_settings_write(const char *key, long value, int dry_run) {
     return rc == 0 ? 0 : 1;
 }
 
+/* Real flash-region WRITE: chunked 0x0b16 data_write + the 0x0b18 commit tail that makes it
+ * stick (openambit omits the tail and its writes silently revert after reconnect - see the
+ * ambit-app-legacy-write-commit-tail note). Used to restore the Ambit1/2 route region
+ * (0x041EB0, tail extra 0xFFFFFA1A) and, in principle, any legacy flash region.
+ *
+ * The chunk size is the DEVICE'S OWN driver_param (Ambit2 1024, Ambit1 512 - device_support.c):
+ * a 1024-B chunk to an Ambit1 gets NAK'd. Both confirmed against André's own SuuntoLink pcaps
+ * (Ambit1 route region written in 512-B 0x0b16 packets, tail 0x041eb0/0xfffffa1a; Ambit2 1024).
+ * `extra` is passed in because it is region-specific (routes 0xFFFFFA1A, sport modes 0xFFFFFFFF).
+ */
+static int cmd_flash_write(uint32_t address, const char *file, uint32_t extra) {
+    FILE *f = fopen(file, "rb");
+    if (!f) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"cannot open %s\"}\n", file); return 1; }
+    fseek(f, 0, SEEK_END);
+    long flen = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (flen <= 0 || flen > 2 * 1024 * 1024) {
+        fclose(f); fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"implausible file length %ld\"}\n", flen);
+        return 1;
+    }
+    uint8_t *buf = (uint8_t*)malloc((size_t)flen);
+    if (!buf || fread(buf, 1, (size_t)flen, f) != (size_t)flen) {
+        free(buf); fclose(f); fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"read %s failed\"}\n", file);
+        return 1;
+    }
+    fclose(f);
+
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) { free(buf); fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
+
+    /* Per-device write chunk = device_support.c's driver_param: the Ambit1 (Bluebird 0x0010)
+     * caps 0x0b16 writes at 512, the Ambit2 family (Duck/Colibri/Greentit) at 1024. Both
+     * confirmed against André's own SuuntoLink pcaps. Map by product_id directly - the table's
+     * find_first() isn't exported from libambit.so. Unknown legacy pid -> the safe 512. */
+    uint32_t chunk = (info->product_id == 0x0010) ? 512 : 1024;
+
+    uint32_t off = 0;
+    int rc = 0;
+    while (off < (uint32_t)flen) {
+        uint32_t want = ((uint32_t)flen - off) > chunk ? chunk : ((uint32_t)flen - off);
+        uint8_t *req = (uint8_t*)malloc(8 + want);
+        uint32_t a = htole32(address + off), l = htole32(want);
+        memcpy(req, &a, 4);
+        memcpy(req + 4, &l, 4);
+        memcpy(req + 8, buf + off, want);
+        uint8_t *reply = NULL; size_t replylen = 0;
+        rc = libambit_protocol_command(dev, ambit_command_data_write, req, 8 + want, &reply, &replylen, 0);
+        free(req);
+        if (reply) libambit_protocol_free(reply);
+        if (rc != 0) {
+            fputs("@@JSON@@\n", stdout);
+            printf("{\"ok\": false, \"error\": \"0x0b16 at 0x%06x rc=%d (chunk %u)\", \"written\": %u}\n",
+                   address + off, rc, chunk, off);
+            free(buf); libambit_close(dev); libambit_free_enumeration(devices);
+            return 1;
+        }
+        off += want;
+    }
+    free(buf);
+
+    /* 0x0b18 commit tail [u32 addr][u32 extra] - no hash (the sport-mode/nav variant). */
+    uint8_t tail[8];
+    uint32_t a = htole32(address), e = htole32(extra);
+    memcpy(tail, &a, 4);
+    memcpy(tail + 4, &e, 4);
+    uint8_t *treply = NULL; size_t tlen = 0;
+    int trc = libambit_protocol_command(dev, ambit_command_data_tail_len, tail, sizeof(tail), &treply, &tlen, 0);
+    if (treply) libambit_protocol_free(treply);
+
+    int ok = (trc == 0);
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": %s, \"address\": %u, \"written\": %u, \"chunk\": %u, \"tail_extra\": %u, \"tail_rc\": %d}\n",
+           ok ? "true" : "false", address, off, chunk, extra, trc);
+
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return ok ? 0 : 1;
+}
+
+/* Real waypoint (POI) RESTORE: replaces the whole on-device waypoint list with the set in
+ * FILE. FILE is a flat binary, 48 bytes per waypoint, little-endian (same layout the Android
+ * app's AmbitLegacyNav.encodeWaypoints writes):
+ *   [0..15] name  [16..31] route_name  [32] lat i32  [36] lon i32  [40] type(u8, RAW device
+ *   type)  [41] year u16  [43] month [44] day [45] hour [46] minute [47] second
+ * We keep `type` RAW (no Movescount table conversion) so a backup round-trips byte-exact -
+ * hence the command path here rather than libambit_navigation_write (which would convert it).
+ *   0x0b1b write_start -> 0x0b04 nav_memory_delete -> one 0x0b05 waypoint_write per point.
+ * 0x0b04 clears the waypoint list only (NOT the route flash region - HW-confirmed), so this
+ * never endangers routes; the caller restores routes separately via flash-write. */
+static int cmd_waypoints_restore(const char *file) {
+    FILE *f = fopen(file, "rb");
+    if (!f) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"cannot open %s\"}\n", file); return 1; }
+    fseek(f, 0, SEEK_END);
+    long flen = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (flen < 0 || (flen % 48) != 0 || flen > 48 * 250) {
+        fclose(f); fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"bad record file length %ld (want a multiple of 48, <=250 pts)\"}\n", flen);
+        return 1;
+    }
+    int count = (int)(flen / 48);
+    uint8_t *recs = (uint8_t*)malloc((size_t)(flen > 0 ? flen : 1));
+    if (flen > 0 && (!recs || fread(recs, 1, (size_t)flen, f) != (size_t)flen)) {
+        free(recs); fclose(f); fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"read %s failed\"}\n", file);
+        return 1;
+    }
+    fclose(f);
+
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) { free(recs); fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
+
+    /* write_start then clear the whole nav list. */
+    uint8_t *r = NULL; size_t rl = 0;
+    if (libambit_protocol_command(dev, ambit_command_write_start, NULL, 0, &r, &rl, 0) != 0) {
+        if (r) libambit_protocol_free(r);
+        fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"write_start (0x0b1b) denied\"}\n");
+        free(recs); libambit_close(dev); libambit_free_enumeration(devices); return 1;
+    }
+    if (r) { libambit_protocol_free(r); r = NULL; }
+    if (libambit_protocol_command(dev, ambit_command_nav_memory_delete, NULL, 0, &r, &rl, 0) != 0) {
+        if (r) libambit_protocol_free(r);
+        fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"nav_memory_delete (0x0b04) failed\"}\n");
+        free(recs); libambit_close(dev); libambit_free_enumeration(devices); return 1;
+    }
+    if (r) { libambit_protocol_free(r); r = NULL; }
+
+    int wrote = 0, failed = 0;
+    for (int i = 0; i < count; i++) {
+        const uint8_t *rec = recs + (size_t)i * 48;
+        uint8_t p[55];
+        memset(p, 0, sizeof(p));
+        memcpy(p + 4, rec + 0, 16);            /* name[16] */
+        p[19] = 0;
+        memcpy(p + 20, rec + 16, 16);          /* route_name[16] */
+        p[35] = 0;
+        p[36] = rec[47];                       /* ctime_second */
+        p[37] = rec[46];                       /* ctime_minute */
+        p[38] = rec[45];                       /* ctime_hour */
+        p[39] = rec[44];                       /* ctime_day */
+        p[40] = rec[43];                       /* ctime_month */
+        p[41] = rec[41]; p[42] = rec[42];      /* ctime_year u16 (LE, copied verbatim) */
+        memcpy(p + 43, rec + 32, 4);           /* latitude i32 (LE, verbatim) */
+        memcpy(p + 47, rec + 36, 4);           /* longitude i32 (LE, verbatim) */
+        p[51] = rec[40];                       /* type (raw device type) */
+        p[53] = (uint8_t)strnlen((const char *)(p + 4), 16);  /* name_count */
+        uint8_t *wr = NULL; size_t wl = 0;
+        if (libambit_protocol_command(dev, ambit_command_waypoint_write, p, sizeof(p), &wr, &wl, 0) != 0) failed++;
+        else wrote++;
+        if (wr) libambit_protocol_free(wr);
+    }
+    free(recs);
+
+    /* No in-command navigation_read verify here. libambit's waypoint_read has a latent
+     * heap bug that intermittently double-frees when reading a freshly-written list back on
+     * this connection (host-side only, AFTER the writes land - the writes themselves are
+     * confirmed correct via the separate `settings` command). Reading back through the same
+     * process that just wrote is exactly what triggers it, so the caller (server.py's restore
+     * / legacy_link) confirms via a fresh `settings` invocation instead - the stable path
+     * (personal_settings_get + navigation_read), which never hit this. Report the write result. */
+    int ok = (failed == 0);
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": %s, \"requested\": %d, \"wrote\": %d, \"failed\": %d}\n",
+           ok ? "true" : "false", count, wrote, failed);
+
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     /* Optional leading "--device PID" (decimal or 0x-hex) picks which connected Suunto
      * device this invocation talks to - required whenever more than one might be on the
@@ -1088,6 +1262,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "flash-read") == 0) {
         if (argc < 4) { fprintf(stderr, "usage: %s flash-read ADDR LEN   (both decimal or 0x...)\n", argv[0]); return 2; }
         return cmd_flash_read((uint32_t)strtoul(argv[2], NULL, 0), (uint32_t)strtoul(argv[3], NULL, 0));
+    }
+    if (strcmp(argv[1], "flash-write") == 0) {
+        if (argc < 5) { fprintf(stderr, "usage: %s flash-write ADDR FILE EXTRA   (ADDR/EXTRA decimal or 0x...)\n", argv[0]); return 2; }
+        return cmd_flash_write((uint32_t)strtoul(argv[2], NULL, 0), argv[3], (uint32_t)strtoul(argv[4], NULL, 0));
+    }
+    if (strcmp(argv[1], "waypoints-restore") == 0) {
+        if (argc < 3) { fprintf(stderr, "usage: %s waypoints-restore FILE   (flat 48-byte records)\n", argv[0]); return 2; }
+        return cmd_waypoints_restore(argv[2]);
     }
     if (strcmp(argv[1], "settings-write") == 0) {
         if (argc < 4) {
