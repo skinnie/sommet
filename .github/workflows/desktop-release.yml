@@ -170,6 +170,15 @@ jobs:
         run: |
           brew install hidapi
           echo "HIDAPI_DYLIB=$(brew --prefix hidapi)/lib/libhidapi.dylib" >> "$GITHUB_ENV"
+      # Ambit1/2 (routes, POIs, personal settings) go through the compiled ambit_legacy_cli,
+      # which nothing in CI ever built - so every packaged build shipped without it and those
+      # endpoints returned "ambit_legacy_cli is not built". build.sh is macOS-aware as of the
+      # macos build fixes; it needs cmake and pkg-config, and links the system hidapi.
+      - name: Build ambit_legacy_cli (Ambit1/2 support)
+        run: |
+          brew install cmake pkg-config libusb
+          ./tools/vendor/ambit_legacy_cli/build.sh
+          test -x tools/vendor/ambit_legacy_cli/ambit_legacy_cli
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip

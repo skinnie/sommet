@@ -90,8 +90,15 @@ def run(args, timeout=120):
     # hanging forever on "Reading settings off the watch...". The JSON payload itself is pure
     # ASCII by construction (ambit_legacy_cli.c's json_str escapes every byte >= 0x80), so
     # only this surrounding chatter needs the tolerant decode.
+    # Cap libambit's per-report read budget. Its 20 s default is spent in full on every
+    # command the watch simply never answers (unsupported opcodes probed while identifying
+    # the device), which put a single device-info call at 167 s on macOS against an Ambit2 -
+    # past the `timeout` below, so the page just failed. The watch replies in milliseconds
+    # when it replies at all, so a shorter budget only shortens the waiting-for-silence.
+    env = os.environ.copy()
+    env.setdefault("AMBIT_READ_TIMEOUT_MS", "3000")
     proc = subprocess.run([str(binary), *device_args, *args],
-                           capture_output=True, timeout=timeout)
+                           capture_output=True, timeout=timeout, env=env)
     proc_stdout = proc.stdout.decode("utf-8", "replace")
     proc_stderr = proc.stderr.decode("utf-8", "replace")
     try:

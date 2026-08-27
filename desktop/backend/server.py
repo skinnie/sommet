@@ -1146,6 +1146,34 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
+        # Reconstruct routes the same way _handle_nav_legacy() does. libambit never fills
+        # `routes` on this family - it returns every point as a waypoint carrying a
+        # route_name - so the CLI's own routes list is always empty and this endpoint used
+        # to hand the Routes page routes:[] no matter what was on the watch. The page's
+        # legacy card reads THIS endpoint (not /api/nav), so the reconstruction added for
+        # /api/nav never reached the UI: a watch with two real routes still showed none.
+        # Only fills a genuinely empty list, so a future firmware that does populate it wins.
+        if info.get("ok") and not info.get("routes"):
+            routes, _loose = self._legacy_route_groups(info.get("waypoints", []))
+            if routes:
+                # _legacy_route_groups() emits /api/nav's camelCase shape, which
+                # RouteService::parseOnWatchRoutesJson() consumes. THIS endpoint has a
+                # different contract: its routes[] come straight from ambit_legacy_cli, and
+                # RoutesPage.qml's legacy card binds to those native snake_case names
+                # (points_count / distance_m / altitude_asc_m / altitude_dec_m / points).
+                # Handing it the camelCase shape left every field undefined in the delegate,
+                # so a watch with two real routes still rendered nothing. Translate.
+                info["routes"] = [{
+                    "name": r["name"],
+                    "waypoint_count": r["waypointCount"],
+                    "points_count": r["pointCount"],
+                    "distance_m": int(round(r["distanceMeters"])),
+                    "altitude_asc_m": int(round(r["ascentMeters"])),
+                    "altitude_dec_m": int(round(r["descentMeters"])),
+                    "points": [{"lat": p["lat"], "lon": p["lon"],
+                                "altitude_m": int(p["ele"] or 0)} for p in r["track"]],
+                } for r in routes]
+                info["routes_count"] = len(info["routes"])
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_legacy_sport_mode_write_presets(self, body):
@@ -2077,6 +2105,17 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_device_ble()
             return
+        # Heal a stale pin first (issue #16): after a hot-swap SELECTED_PRODUCT_ID may still
+        # point at the unplugged watch, and this endpoint is the model/connected source the UI
+        # uses to decide whether to show the legacy Routes/POIs cards. If it returned ok:false
+        # here, those cards vanished until /api/devices happened to be polled. Enumerate and
+        # heal so the very next /api/device poll after a swap already reports the right watch.
+        try:
+            _lc, _lo, _le = run_tool("list_watches.py", [])
+            _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
+            self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
+        except (json.JSONDecodeError, IndexError, ValueError):
+            pass  # enumeration hiccup - fall through to the read, which self-reports if it fails
         code, out, err = run_tool("device_info.py", ["--json"])
         if code != 0:
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
@@ -2095,6 +2134,7 @@ class Handler(BaseHTTPRequestHandler):
         (2026-08-16, porting the Android multi-watch picker). tools/list_watches.py mirrors
         write_nav.Link's own enumerate walk, so the list is exactly the set Link could open.
         Includes `selected` (the product_id currently pinned via /api/device/select, or null)."""
+        global SELECTED_PRODUCT_ID
         code, out, err = run_tool("list_watches.py", [])
         last_line = out.strip().splitlines()[-1] if out.strip() else ""
         try:
@@ -2103,8 +2143,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "list_watches.py produced no parseable "
                                    "JSON", "raw_output": out, "stderr": err})
             return
+        # Self-heal a stale pin (issue #16) - see _heal_stale_pin(). Polled by the Home
+        # switcher, so a swap heals on the next refresh; _handle_device heals too (below) so
+        # the model/connected signal the UI's legacy-card visibility depends on never spends
+        # a poll cycle reporting "not an Ambit1/2" and blanking Routes/POIs after a swap.
+        self._heal_stale_pin([w.get("productId") for w in info.get("watches", [])])
         info["selected"] = SELECTED_PRODUCT_ID
         self._send_json(200, info)
+
+    @staticmethod
+    def _heal_stale_pin(enumerated):
+        """Clear SELECTED_PRODUCT_ID if the pinned watch is no longer on the bus; adopt the
+        sole remaining watch if exactly one is present. Idempotent and cheap when the pin is
+        already valid. Central to issue #16: a stale pin makes every watch endpoint fail
+        ("no <that watch> on the USB bus") until it heals."""
+        global SELECTED_PRODUCT_ID
+        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
+            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
 
     def _handle_device_select(self, body):
         """POST /api/device/select {"productId": int|null} - pin which watch every subsequent
@@ -4636,20 +4691,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
 
-        args = [PYTHON, str(TOOLS_DIR / "firmware_write.py"), file,
-                "--expect-model", model, "--commit", "--json"]
+        # Invoke exactly the way run_tool() does. In the frozen download PYTHON is this
+        # helper's own executable and cannot run a .py file: without the "--tool" sentinel
+        # frozen_entry.main() falls through to `import server; server.main()` and boots a
+        # SECOND backend instead of the flasher, so the stream stays empty and the watch is
+        # never touched. Only reproducible in the packaged build - a source checkout has a
+        # real interpreter here, which is why this survived to v0.2.2.
+        tool = str(TOOLS_DIR / "firmware_write.py")
+        args = ([PYTHON, "--tool", tool] if FROZEN else [PYTHON, tool])
+        args += [file, "--expect-model", model, "--commit", "--json"]
+        env = os.environ.copy()
+        if SELECTED_PRODUCT_ID is not None:
+            env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
+        else:
+            env.pop("AMBIT_PRODUCT_ID", None)
+        events = 0
+        noise = []
         with WATCH_LOCK:
             proc = subprocess.Popen(args, cwd=TOOLS_DIR, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                    stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
             try:
                 for line in proc.stdout:
                     line = line.strip()
                     if not line:
                         continue
-                    try:  # forward only real JSON events; skip the tools' own log lines
+                    try:  # forward only real JSON events; keep the tools' own log lines
                         json.loads(line)
                     except json.JSONDecodeError:
+                        noise.append(line)      # keep a bounded tail for diagnosis
+                        del noise[:-40]
                         continue
+                    events += 1
                     try:
                         self.wfile.write((line + "\n").encode("utf-8"))
                         self.wfile.flush()
@@ -4660,6 +4732,21 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 if proc.poll() is None:
                     proc.kill()
+
+        # A 200 carrying an empty stream is indistinguishable from success to the client,
+        # which is exactly how the bug above stayed invisible. If the flasher emitted no
+        # events, or exited nonzero, report it in-band as a phase the page understands.
+        if events == 0 or proc.returncode not in (0, None):
+            detail = "\n".join(noise[-20:])
+            try:
+                self.wfile.write((json.dumps({
+                    "phase": "error",
+                    "message": f"the flasher produced no progress (exit {proc.returncode})",
+                    "detail": detail,
+                }) + "\n").encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def _handle_backup_create(self, body=None):
         """Read-only against the watch (`nav` never writes), safe to call any time - the

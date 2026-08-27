@@ -63,7 +63,19 @@ if (REPO / "assets" / "sportmode_rows.json").is_file():
 # to is imported by runpy at runtime, so name them all as hidden imports to make sure their
 # code (and their own transitive deps like `hid` and `bleak`) is actually bundled - except the
 # excluded RE/corpus tools, which the backend never runs.
-hiddenimports = ["server", "ble_bridge"]
+# certifi's cacert.pem: without it the frozen build has NO CA store at all and every
+# Python-side HTTPS call fails CERTIFICATE_VERIFY_FAILED (real bug on the macOS .dmg,
+# 2026-08-27: /api/firmware and /api/firmware/download both dead, so the firmware feature
+# could not even download an image). frozen_entry._install_ca_bundle() points SSL_CERT_FILE
+# at what this collects. Qt has its own TLS stack and was never affected.
+try:
+    from PyInstaller.utils.hooks import collect_data_files as _collect_data_files
+
+    datas += _collect_data_files("certifi")
+except Exception:
+    pass
+
+hiddenimports = ["server", "ble_bridge", "certifi"]
 for _p in glob.glob(str(REPO / "tools" / "*.py")):
     if Path(_p).name not in EXCLUDE_TOOLS:
         hiddenimports.append(Path(_p).stem)
@@ -88,6 +100,24 @@ if _hidapi_dll and Path(_hidapi_dll).is_file():
 _hidapi_dylib = os.environ.get("HIDAPI_DYLIB")
 if _hidapi_dylib and Path(_hidapi_dylib).is_file():
     binaries.append((_hidapi_dylib, "."))
+
+# ambit_legacy_cli: the compiled helper tools/legacy_link.py shells out to for Ambit1/2
+# (routes, POIs, personal settings). It was never referenced here at all, so no packaged build
+# on any platform has ever shipped it and every Ambit1/2 endpoint returned "ambit_legacy_cli is
+# not built" (real bug, macOS hardware test 2026-08-27 with an Ambit2 connected). It must land
+# at tools/vendor/ambit_legacy_cli/ because legacy_link._binary_path() resolves it relative to
+# the bundled tools/ dir. Its libambit dylib/so goes to the root, where the loader finds it.
+_legacy_dir = REPO / "tools" / "vendor" / "ambit_legacy_cli"
+for _name in ("ambit_legacy_cli", "ambit_legacy_cli.exe"):
+    _legacy_cli = _legacy_dir / _name
+    if _legacy_cli.is_file():
+        binaries.append((str(_legacy_cli), "tools/vendor/ambit_legacy_cli"))
+        break
+_libambit_build = REPO / "tools" / "vendor" / "openambit_libambit" / "build"
+if _libambit_build.is_dir():
+    for _lib in sorted(_libambit_build.glob("libambit*")):
+        if _lib.is_file() and not _lib.is_symlink():
+            binaries.append((str(_lib), "."))
 
 a = Analysis(
     [str(BACKEND / "frozen_entry.py")],

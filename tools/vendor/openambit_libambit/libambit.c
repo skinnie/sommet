@@ -723,6 +723,16 @@ static ambit_device_info_t * ambit_device_info_new(const struct hid_device_info 
 
     hid = hid_open_path(device->path);
     if (hid) {
+        /* Same non-blocking mode libambit_new() sets on its handle. Without it
+         * protocol_read_packet()'s hid_read() is a BLOCKING read with no timeout, so if the
+         * watch does not answer the enumeration-time device_info_get() below, hid_read()
+         * parks in cond_wait() forever and libambit_enumerate() never returns. That is a
+         * hard hang on macOS (observed against an Ambit2, hidapi 0.15.0: enumeration finds
+         * the device with a valid IOService path, then blocks indefinitely). With
+         * non-blocking set, the existing READ_POLL_RETRY/READ_POLL_INTERVAL loop in
+         * protocol_read_packet() does what it was written to do and gives up cleanly. */
+        hid_set_nonblocking(hid, true);
+
         /* HACK ALERT: minimally initialize an ambit object so we can
          * call device_info_get().  Note that this function sets the
          * device's model and serial string fields.  Above the latter

@@ -529,6 +529,25 @@ PageFlickable {
             }
             onVisibleChanged: if (visible && waypoints.length === 0 && error === "" && !loading) refresh()
 
+            // Re-read when the connected watch actually changes (see RoutesPage's legacy card):
+            // after a hot-swap the backend heals the stale pin (#16) but this card can be stuck
+            // on its stale-window error, since onVisibleChanged won't re-fetch past a non-empty
+            // error. Keying on serial fires only on a real change, not every poll.
+            property string _lastWatchKey: ""
+            Connections {
+                target: DeviceService
+                function onDeviceInfoChanged() {
+                    const key = DeviceService.deviceInfoOk ? DeviceService.serial : ""
+                    if (key === legacyPoiCard._lastWatchKey)
+                        return
+                    legacyPoiCard._lastWatchKey = key
+                    legacyPoiCard.error = ""
+                    legacyPoiCard.waypoints = []
+                    if (legacyPoiCard.visible && !legacyPoiCard.loading)
+                        legacyPoiCard.refresh()
+                }
+            }
+
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall

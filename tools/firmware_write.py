@@ -112,7 +112,13 @@ def read_ack(link, total_timeout=15.0, per_read_ms=1000):
                     break
                 body += bytes(more[8:8 + min(54, total - len(body))])
             return body
-    raise RuntimeError(f"no reply within {total_timeout:.0f}s")
+    # A timed-out ack IS a stall, and must be raised as one: stream_with_restart
+    # only catches ChunkStall. Because ack_to (20s) is deliberately shorter than
+    # the SIGALRM watchdog (30s), and this loop returns every per_read_ms rather
+    # than blocking, the wall-clock deadline here ALWAYS trips before the alarm -
+    # so raising RuntimeError made the restart path unreachable for the commonest
+    # stall, and a single hiccup killed the whole flash instead of restarting it.
+    raise ChunkStall(f"no reply within {total_timeout:.0f}s")
 
 
 def raw_command(link, command, payload=b"", send_recv=5, fmt=9, ack_timeout=15.0):

@@ -194,10 +194,29 @@ static int protocol_write_packet(ambit_object_t *object, uint8_t *data)
     return 0;
 }
 
+/* READ_TIMEOUT is the budget for ONE report. Commands this watch does not answer at all
+ * (unsupported opcodes probed during identification) burn the whole budget each, so on a
+ * device with several of them a single device-info call spends minutes in usleep(): 167s
+ * measured against an Ambit2 on macOS, well past the 120s legacy_link.py allows the CLI.
+ * The watch answers in milliseconds when it answers, so the budget only ever pays for
+ * silence. Env override, defaulting to the historical 20000, so Linux behaviour is
+ * unchanged unless a caller opts in. */
+static int read_timeout_ms(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = getenv("AMBIT_READ_TIMEOUT_MS");
+        int v = env ? atoi(env) : 0;
+        cached = (v > 0) ? v : READ_TIMEOUT;
+    }
+    return cached;
+}
+
 static int protocol_read_packet(ambit_object_t *object, uint8_t *data)
 {
     int i, res = -1;
-    for (i=0; i<READ_POLL_RETRY; i++) {
+    const int retries = read_timeout_ms() / READ_POLL_INTERVAL;
+    for (i=0; i<retries; i++) {
         res = hid_read(object->handle, data, 64);
         if (res != 0) {
             break;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.1 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,6 +42,11 @@ set_target_properties(ambitapp PROPERTIES
     # so align the bundle identity to match (spotted on the first Mac build, 2026-08-27).
     MACOSX_BUNDLE_GUI_IDENTIFIER com.sommet.Sommet
     MACOSX_BUNDLE_BUNDLE_NAME Sommet
+    # Qt defaults CFBundleShortVersionString to major.minor only ("0.2"), so 0.2.0/0.2.1/0.2.2
+    # all showed as "0.2" in Finder Get Info and the About box - users couldn't tell builds
+    # apart when reporting bugs. Stamp the full project version into both version keys.
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
 )
 
 # Pure-QML singletons - see qml/Theme.qml's own header comment for why these are QML, not

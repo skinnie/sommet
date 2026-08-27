@@ -305,7 +305,14 @@ static io_service_t hidapi_IOHIDDeviceGetService(IOHIDDeviceRef device)
      * and the fallback method will be used.
      */
     if (iokit_framework == NULL) {
-        iokit_framework = dlopen("/System/Library/IOKit.framework/IOKit", RTLD_LAZY);
+        /* The framework lives under /System/Library/Frameworks/, not /System/Library/.
+         * With the wrong path dlopen() always failed, dynamic_IOHIDDeviceGetService stayed
+         * NULL, and every caller silently fell through to the OS X 10.5 struct-offset hack
+         * below - which returns a bogus io_service_t on any modern macOS. That made
+         * IORegistryEntryGetPath() fail, left every enumerated device's path "", and so
+         * hid_open_path()/hid_open() could never open anything: devices enumerated fine and
+         * nothing could be talked to. */
+        iokit_framework = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
 
         if (iokit_framework != NULL)
             dynamic_IOHIDDeviceGetService = (dynamic_IOHIDDeviceGetService_t) dlsym(iokit_framework, "IOHIDDeviceGetService");
@@ -461,10 +468,27 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
             /* Fill in the path (IOService plane) */
             iokit_dev = hidapi_IOHIDDeviceGetService(dev);
             res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, path);
-            if (res == KERN_SUCCESS)
+            if (res == KERN_SUCCESS) {
                 cur_dev->path = strdup(path);
-            else
-                cur_dev->path = strdup("");
+            }
+            else {
+                /* IORegistryEntryGetPath writes into a fixed 512-byte io_string_t and fails
+                 * on modern macOS whenever the IOService path is longer than that - which it
+                 * routinely is. The old code then left path "", and since hid_open() resolves
+                 * through this same field, NO device could ever be opened: enumeration listed
+                 * the watch correctly and every open failed. Fall back to the registry entry
+                 * ID, which is stable, short, and resolvable via IORegistryEntryIDMatching. */
+                uint64_t entry_id = 0;
+                if (IORegistryEntryGetRegistryEntryID(iokit_dev, &entry_id) == KERN_SUCCESS) {
+                    char idbuf[32];
+                    snprintf(idbuf, sizeof(idbuf), "IOSERVICEID:%llu",
+                             (unsigned long long) entry_id);
+                    cur_dev->path = strdup(idbuf);
+                }
+                else {
+                    cur_dev->path = strdup("");
+                }
+            }
 
             /* Serial Number */
             get_serial_number(dev, buf, BUF_LEN);
@@ -703,7 +727,15 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
     dev = new_hid_device();
 
     /* Get the IORegistry entry for the given path */
-    entry = IORegistryEntryFromPath(kIOMasterPortDefault, path);
+    if (path && strncmp(path, "IOSERVICEID:", 12) == 0) {
+        /* Registry-entry-ID form produced by the enumerate() fallback above. */
+        unsigned long long entry_id = strtoull(path + 12, NULL, 10);
+        entry = IOServiceGetMatchingService(kIOMasterPortDefault,
+                                            IORegistryEntryIDMatching((uint64_t) entry_id));
+    }
+    else {
+        entry = IORegistryEntryFromPath(kIOMasterPortDefault, path);
+    }
     if (entry == MACH_PORT_NULL) {
         /* Path wasn't valid (maybe device was removed?) */
         goto return_error;
