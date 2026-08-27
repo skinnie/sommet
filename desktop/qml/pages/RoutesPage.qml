@@ -277,6 +277,26 @@ PageFlickable {
             }
             onVisibleChanged: if (visible && routes.length === 0 && error === "" && !loading) refresh()
 
+            // Re-read when the connected watch actually changes. After a hot-swap the backend
+            // heals the stale pin (issue #16) and DeviceService reports the new watch, but this
+            // card may have cached a stale-window error and onVisibleChanged won't re-fetch past
+            // a non-empty error - so it would stay blank until a manual Retry. Keying on the
+            // serial fires only on a real change, not every poll (a ~30s legacy read otherwise).
+            property string _lastWatchKey: ""
+            Connections {
+                target: DeviceService
+                function onDeviceInfoChanged() {
+                    const key = DeviceService.deviceInfoOk ? DeviceService.serial : ""
+                    if (key === legacyRoutesCard._lastWatchKey)
+                        return
+                    legacyRoutesCard._lastWatchKey = key
+                    legacyRoutesCard.error = ""
+                    legacyRoutesCard.routes = []
+                    if (legacyRoutesCard.visible && !legacyRoutesCard.loading)
+                        legacyRoutesCard.refresh()
+                }
+            }
+
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
