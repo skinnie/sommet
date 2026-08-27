@@ -1537,27 +1537,6 @@ class Handler(BaseHTTPRequestHandler):
         if not gpx_text:
             self._send_json(400, {"error": "missing \"gpx\" (GPX file text)"})
             return
-        # Never push one watch's regions at a different watch. This project's own standing rule
-        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]),
-        # and until now the backup list had no idea which watch each entry came from - an Ambit3
-        # nav backup and a Kailash archive sat side by side, both offering Restore.
-        # A backup with no stamp predates it (2026-08-27) and is treated as unknown: allowed,
-        # because refusing every older backup would be worse, and write_nav.py's own per-region
-        # "this watch does not declare it" check still stands behind this.
-        want_model, want_serial = self._backup_device(prefix)
-        if want_serial:
-            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
-            di = self._parse_last_json_line(di_out)
-            have_serial = str((di or {}).get("serial") or "")
-            have_model = str((di or {}).get("model") or "")
-            if have_serial and have_serial != want_serial:
-                self._send_json(400, {"error": (
-                    f"That backup was taken from a {want_model or 'different'} "
-                    f"(serial {want_serial}); the watch connected now is a "
-                    f"{have_model or 'different watch'} (serial {have_serial}). "
-                    "Restoring one watch's data onto another is refused.")})
-                return
-
         confirm = bool(body.get("confirm", False))
 
         with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
@@ -4635,7 +4614,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
             di = self._parse_last_json_line(di_out)
-            if di and di.get("ok"):
+            # device_info.py's own JSON carries no "ok" key - /api/device adds that wrapper
+            # itself. Gate on the identity actually being there instead (caught 2026-08-27:
+            # checking .get("ok") here silently stamped nothing at all).
+            if di and (di.get("serial") or di.get("model")):
                 dev_model = str(di.get("model") or "")
                 dev_serial = str(di.get("serial") or "")
                 Path(f"{prefix}-device.json").write_text(json.dumps({
@@ -4733,6 +4715,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         has_routes_backup = (Path(f"{prefix}-routes.bin").exists()
                               and Path(f"{prefix}-waypoints.bin").exists())
+        # A Kailash archive can carry -routes.bin/-waypoints.bin if it was taken before
+        # `nav --save` was skipped on that watch (2026-08-27) - but those files are the blank
+        # 0xFF regions that started this whole thread, and writing them back is meaningless.
+        # Treat the archive as having no nav half at all; its Ember half still restores.
+        if self._backup_hint(prefix) == "kailash":
+            has_routes_backup = False
         has_ember_backup = Path(f"{prefix}-ember.json").exists()
         if not (has_routes_backup or has_ember_backup):
             # A Kailash archive is deliberately one-way: this project has no proven write
@@ -4747,6 +4735,37 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(400, {"error": f"no backup found at prefix {prefix!r}"})
             return
+
+        # Never push one watch's regions at a different watch. This project's own standing rule
+        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]),
+        # and until now the backup list had no idea which watch each entry came from - an Ambit3
+        # nav backup and a Kailash archive sat side by side, both offering Restore.
+        # A backup with no stamp predates it (2026-08-27) and is treated as unknown: allowed,
+        # because refusing every older backup would be worse, and write_nav.py's own per-region
+        # "this watch does not declare it" check still stands behind this.
+        want_model, want_serial = self._backup_device(prefix)
+        # No serial: fall back to the family hint, which is all an older backup can offer.
+        # An Ambit-family nav backup must not be pushed at a Kailash - it does not declare
+        # those regions at all, so "restoring" it is meaningless at best.
+        if not want_serial and self._backup_hint(prefix) == "ambit" and selected_is_kailash():
+            self._send_json(400, {"error": (
+                "That backup holds Ambit sport modes, apps and navigation regions, which a "
+                "Kailash does not have. It was saved before backups recorded which watch "
+                "they came from, so it cannot be matched by serial - refusing rather than "
+                "writing one watch's data to another.")})
+            return
+        if want_serial:
+            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+            di = self._parse_last_json_line(di_out)
+            have_serial = str((di or {}).get("serial") or "")
+            have_model = str((di or {}).get("model") or "")
+            if have_serial and have_serial != want_serial:
+                self._send_json(400, {"error": (
+                    f"That backup was taken from a {want_model or 'different'} "
+                    f"(serial {want_serial}); the watch connected now is a "
+                    f"{have_model or 'different watch'} (serial {have_serial}). "
+                    "Restoring one watch's data onto another is refused.")})
+                return
 
         confirm = bool(body.get("confirm", False))
         # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to

@@ -182,7 +182,11 @@ PageFlickable {
                         Text {
                             text: modelData.deviceModel
                                   ? qsTr("From %1").arg(HomeViewModel.displayNameForModel(modelData.deviceModel))
-                                  : qsTr("From an unknown watch (saved before backups recorded this)")
+                                  : modelData.deviceHint === "kailash"
+                                    ? qsTr("From a Kailash (identified by its contents)")
+                                    : modelData.deviceHint === "ambit"
+                                      ? qsTr("From an Ambit (identified by its contents)")
+                                      : qsTr("From an unknown watch (saved before backups recorded this)")
                             color: modelData.deviceSerial && DeviceService.serial
                                    && modelData.deviceSerial !== DeviceService.serial
                                    ? Theme.error : Theme.mutedText
@@ -221,6 +225,13 @@ PageFlickable {
                                 visible: (modelData.hasRoutes === true || modelData.hasEmber === true)
                                          && !(modelData.deviceSerial && DeviceService.serial
                                               && modelData.deviceSerial !== DeviceService.serial)
+                                         // Older, unstamped backups can still be told apart by
+                                         // what is in them: Ambit regions have no meaning on a
+                                         // Kailash, so don't offer to write them there.
+                                         && !(modelData.deviceHint === "ambit"
+                                              && DeviceCapabilities.supportsTravelArchive)
+                                         // A Kailash archive is one-way whatever else is in it.
+                                         && modelData.deviceHint !== "kailash"
                                 text: qsTr("Restore")
                                 onClicked: BackupService.restoreBackup(modelData.prefix, true)
                             }
