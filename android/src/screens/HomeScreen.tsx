@@ -61,6 +61,13 @@ const isKailash = (info: AmbitDeviceInfo | null) => info?.model === 'Hoopoe';
 // (confirmed in the real traverse pcaps), so they can't hold planned moves. Used to hide
 // Intervals for them, same as it's already hidden for the Kailash. André, 2026-08-18.
 const isTraverse = (info: AmbitDeviceInfo | null) => info?.model === 'Jabiru' || info?.model === 'Loon';
+// Ambit 1 / Ambit 2 family (Bluebird / Duck / Colibri / Greentit codenames - openambit
+// device_support.c). These use the LEGACY ambit driver: no SBEM 0x0b21 region map, so no App
+// Zone / Apps region and no guided-workout support at all. Intervals + the Workout Calendar are
+// App-Zone features, so they must be hidden for this family (André, 2026-08-27: "not sure ambit
+// 1 and 2 support workouts" - they don't).
+const isAmbit12 = (info: AmbitDeviceInfo | null) =>
+  info?.model === 'Bluebird' || info?.model === 'Duck' || info?.model === 'Colibri' || info?.model === 'Greentit';
 
 // Multi-watch switcher (2026-08-16): one unified entry per pickable watch, spanning both
 // transports — a cabled watch (USB, keyed by its stable USB path) or a paired one (BLE, keyed
@@ -787,7 +794,7 @@ export default function HomeScreen() {
     // features). Intervals rides the Suunto App-Zone/CustomModes mechanism, so it's Ambit-only
     // and needs a connected watch, same gating as the desktop's NavRail. Smart Sensor is a
     // standalone BLE HR belt, so it shows whenever enabled. André, 2026-08-17.
-    ...(expFeatures.intervals && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo)
+    ...(expFeatures.intervals && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
       ? [{ id: 'intervals', label: t.experimentalIntervals, icon: 'chart' as const, onPress: () => navigation.navigate('Intervals') }]
       : []),
     ...(expFeatures.smartSensor
@@ -795,7 +802,7 @@ export default function HomeScreen() {
       : []),
     // Workout Calendar - same Apps/CustomModes mechanism as Intervals (guided-workout binaries
     // in the WORKOUT menu), so it's gated identically: Ambit-only, connected, not Kailash/Traverse.
-    ...(expFeatures.workoutCalendar && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo)
+    ...(expFeatures.workoutCalendar && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
       ? [{ id: 'workoutCalendar', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar') }]
       : []),
     // Gear tracker (v3): derived from the local gear DB + intervals.icu, so it's always

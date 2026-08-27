@@ -147,6 +147,10 @@ Rectangle {
             visible: (DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
                      && HomeViewModel.anyDevice
                      && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
+                     // Ambit1/2 (Bluebird/Duck/Colibri/Greentit) predate the SBEM App Zone -
+                     // legacy driver, no Apps region - so the workout/app builders don't apply
+                     // (André, 2026-08-27: "not sure ambit 1 and 2 support workouts" - they don't).
+                     && DeviceCapabilities.supportsApps
             glyph: Icons.apps
             label: qsTr("Apps")
             selected: root.currentPage === "appZone"
