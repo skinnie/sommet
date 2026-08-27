@@ -833,11 +833,65 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_nav_ble()
             return
+        if selected_is_legacy():
+            self._handle_nav_legacy()
+            return
         code, out, err = run_tool("write_nav.py", ["nav", "--json"])
         routes = self._parse_last_json_line(out)  # same "last JSON line" convention
         self._send_json(200 if code == 0 else 502, {
             "ok": code == 0, "raw_output": out, "stderr": err,
             "routes": (routes or {}).get("routes", [])})
+
+    @staticmethod
+    def _legacy_route_groups(waypoints):
+        """Ambit1/2 routes are waypoints sharing a route_name; libambit reads them as waypoints
+        and never fills routes (so /api/nav's SBEM path shows 0). Group them: a route_name with
+        >=2 waypoints is a route (its turn-points ordered by index); the rest stay POIs. Same
+        rule as the Android NavigationService/PoiService port. Returns (routes, loose_waypoints).
+        """
+        import math
+        groups = {}
+        loose = []
+        for w in waypoints:
+            rn = str(w.get("route_name", "")).strip()
+            if rn:
+                groups.setdefault(rn, []).append(w)
+            else:
+                loose.append(w)
+        routes = []
+        for name, pts in groups.items():
+            if len(pts) < 2:
+                loose.extend(pts)
+                continue
+            pts.sort(key=lambda w: w.get("index", 0))
+            track = [{"lat": w.get("lat", 0.0), "lon": w.get("lon", 0.0), "ele": None} for w in pts]
+            dist = 0.0
+            for a, b in zip(track, track[1:]):
+                R, r = 6371000.0, math.radians
+                dlat, dlon = r(b["lat"] - a["lat"]), r(b["lon"] - a["lon"])
+                h = (math.sin(dlat / 2) ** 2
+                     + math.cos(r(a["lat"])) * math.cos(r(b["lat"])) * math.sin(dlon / 2) ** 2)
+                dist += 2 * R * math.asin(min(1.0, math.sqrt(h)))
+            routes.append({"name": name, "pointCount": len(track), "waypointCount": len(track),
+                           "distanceMeters": round(dist), "ascentMeters": 0, "descentMeters": 0,
+                           "track": track})
+        return routes, loose
+
+    def _handle_nav_legacy(self):
+        """GET /api/nav for Ambit1/2: the SBEM route region is empty on this family. Read the
+        legacy waypoints (tools/legacy_link.py settings, which now carries each waypoint's
+        route_name) and reconstruct routes from them - so the desktop matches the Android app
+        (both showed 0 legacy routes before, 2026-08-27)."""
+        code, out, err = run_tool("legacy_link.py", ["settings"])
+        info = self._parse_last_json_line(out)
+        if info is None or not info.get("ok"):
+            self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced no "
+                                   "parseable JSON", "raw_output": out, "stderr": err})
+            return
+        routes, _loose = self._legacy_route_groups(info.get("waypoints", []))
+        self._send_json(200, {"ok": True, "routes": routes,
+                               "raw_output": "legacy Ambit1/2 - %d route(s) reconstructed from "
+                               "route-tagged waypoints\n" % len(routes)})
 
     def _handle_nav_ble(self):
         """The BLE path for GET /api/nav - tools/ble_routes.py's read_nav_summary(). Real
@@ -1311,7 +1365,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
-        waypoints = info.get("waypoints", [])
+        # Route turn-points (route_name shared by >=2 waypoints) belong to the Routes page,
+        # not here - keep only the standalone POIs, same split as /api/nav and the Android app.
+        _routes, waypoints = self._legacy_route_groups(info.get("waypoints", []))
         lines = [f"  watch: legacy Ambit1/2 - {len(waypoints)} waypoint(s) via PMEM 2.0"]
         for wp in waypoints:
             name = str(wp.get("name", "")).replace("'", "")

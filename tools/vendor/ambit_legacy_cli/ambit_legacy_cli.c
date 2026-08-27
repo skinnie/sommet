@@ -319,9 +319,20 @@ static int cmd_settings(void) {
             wname[15] = '\0';
             json_str(stdout, wname);
         }
-        printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": %u, \"type\": %u}%s\n",
+        printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": %u, \"type\": %u, "
+               "\"index\": %u, \"route_name\": ",
                w->latitude / 10000000.0, w->longitude / 10000000.0, w->altitude, w->type,
-               (i + 1 < ps->waypoints.count) ? "," : "");
+               w->index);
+        /* On the Ambit1/2 a "route" is a set of waypoints sharing a route_name (libambit
+         * reads them as waypoints, never fills ps->routes) - surface it so the backend can
+         * regroup them into routes. Same strncpy(15)-no-terminator bound as name above. */
+        {
+            char rname[16];
+            memcpy(rname, w->route_name, 15);
+            rname[15] = '\0';
+            json_str(stdout, rname);
+        }
+        printf("}%s\n", (i + 1 < ps->waypoints.count) ? "," : "");
     }
     printf("  ], \"routes_count\": %u, \"routes\": [\n", ps->routes.count);
     for (uint8_t i = 0; i < ps->routes.count; i++) {
