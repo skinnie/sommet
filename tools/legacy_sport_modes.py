@@ -163,10 +163,19 @@ def read_region_live():
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
         path = f.name
     try:
+        # Cap ambit_legacy_cli's per-report read budget and give the call room to finish.
+        # Its 20s default is spent in full on every command the watch never answers, so a
+        # region-dump ran ~167s and blew the old 120s subprocess timeout - the exception
+        # escaped _handle_legacy_sport_modes_read after it had already sent HTTP 200, so the
+        # Sport Modes page got an empty body and showed nothing. Same fix legacy_link.py
+        # already carries (AMBIT_READ_TIMEOUT_MS=3000 -> ~28s); do it here too and give the
+        # subprocess a margin above that.
+        env = os.environ.copy()
+        env.setdefault("AMBIT_READ_TIMEOUT_MS", "3000")
         proc = subprocess.run(
             [str(binary), *device_args, "region-dump", hex(REGION_ADDR), path,
              str(REGION_BYTES)],
-            capture_output=True, timeout=120)
+            capture_output=True, timeout=90, env=env)
         if proc.returncode != 0:
             raise RuntimeError(
                 "region-dump failed (exit %d): %s"
