@@ -182,8 +182,25 @@ PageFlickable {
                                 "break your device.")
                 }
 
+                // Uploading rebuilds the whole SBEM Routes region, which Ambit1/2 predate -
+                // reading and exporting their legacy routes works, writing one back does not.
+                // Say so rather than offering a button that cannot succeed.
+                Text {
+                    visible: RouteService.pendingRoute.name !== undefined
+                             && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRouteWrite
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("%1 can't have routes written to it from this app yet - its " +
+                                "routes are legacy waypoints, and only adding POIs is " +
+                                "supported. You can still export this one.")
+                        .arg(HomeViewModel.deviceDisplayName)
+                }
+
                 Row {
                     visible: RouteService.pendingRoute.name !== undefined
+                             && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRouteWrite)
                     spacing: Theme.spacingSmall
 
                     RoundedButton {

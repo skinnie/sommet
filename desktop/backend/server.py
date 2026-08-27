@@ -1805,6 +1805,8 @@ class Handler(BaseHTTPRequestHandler):
         if (Path(f"{prefix}-kailash-history.json").exists()
                 or Path(f"{prefix}-kailash-tracklog.json").exists()):
             return "kailash"
+        if Path(f"{prefix}-legacy-settings.json").exists():
+            return "legacy"
         for region in ("custommodes", "apps", "trainingprogram"):
             if Path(f"{prefix}-{region}.bin").exists():
                 return "ambit"
@@ -1842,6 +1844,7 @@ class Handler(BaseHTTPRequestHandler):
                 "deviceModel": self._backup_device(prefix)[0],
                 "deviceSerial": self._backup_device(prefix)[1],
                 "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
             seen_prefixes.add(prefix)
         # Ember-only backups (no watch connected when the backup was made - a Garmin owner, or
@@ -1862,11 +1865,26 @@ class Handler(BaseHTTPRequestHandler):
                 "deviceModel": self._backup_device(prefix)[0],
                 "deviceSerial": self._backup_device(prefix)[1],
                 "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
             seen_prefixes.add(prefix)
         # Kailash archives have neither -routes.bin nor -ember.json, so neither loop above
         # finds them - they would be written successfully and then be invisible forever, the
         # same trap the Ember-only loop exists to avoid.
+        # Ambit1/2 archives, same reason as the Kailash loop below: no -routes.bin, no
+        # -ember.json, so nothing above would ever list them.
+        for lg_file in sorted(BACKUP_DIR.glob("*-legacy-settings.json"), reverse=True):
+            prefix = str(lg_file)[:-len("-legacy-settings.json")]
+            if prefix in seen_prefixes:
+                continue
+            model, serial = self._backup_device(prefix)
+            backups.append({
+                "prefix": prefix, "label": Path(prefix).name,
+                "createdAt": lg_file.stat().st_mtime,
+                "hasEmber": False, "hasRoutes": False, "hasKailash": False, "hasLegacy": True,
+                "deviceModel": model, "deviceSerial": serial, "deviceHint": "legacy",
+            })
+            seen_prefixes.add(prefix)
         for kail_file in sorted(BACKUP_DIR.glob("*-kailash-history.json"), reverse=True):
             prefix = str(kail_file)[:-len("-kailash-history.json")]
             if prefix in seen_prefixes:
@@ -1881,6 +1899,7 @@ class Handler(BaseHTTPRequestHandler):
                 "deviceModel": self._backup_device(prefix)[0],
                 "deviceSerial": self._backup_device(prefix)[1],
                 "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
             seen_prefixes.add(prefix)
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
@@ -4630,7 +4649,12 @@ class Handler(BaseHTTPRequestHandler):
         # contain. This is a ~250 KB flash read over USB that comes back blank on that watch,
         # so it costs real seconds to produce three useless files.
         is_kailash = selected_is_kailash()
-        if is_kailash:
+        # Ambit1/2 skip it for the same reason, one family earlier: their routes and POIs are
+        # real, they just live in the legacy PMEM waypoint region rather than the SBEM object
+        # model write_nav.py speaks (André, 2026-08-27: "the ambit 1 has routes... it is just
+        # legacy not sbem.. same for ambit 2"). `nav --save` against one is a 502, not a backup.
+        is_legacy = selected_is_legacy()
+        if is_kailash or is_legacy:
             code, out, err = 0, "", ""
             routes_ok = False
         else:
@@ -4698,11 +4722,50 @@ class Handler(BaseHTTPRequestHandler):
             elif not kailash_err:
                 kailash_err = (trk_err or trk_out or "kailash_tracklog.py produced no JSON")
 
-        ok = routes_ok or has_ember or has_kailash
+        # The Ambit1/2 archive: their waypoints ARE their navigation database - a route is
+        # simply the waypoints sharing a route_name (see _legacy_route_groups) - and
+        # legacy_link.py settings returns them alongside the watch's settings in one reply.
+        # Saved verbatim, plus a .gpx of every waypoint so the data is usable outside this app,
+        # matching what the Kailash archive above does for its own regions.
+        #
+        # An archive, not a restore point: POI writing is wired for this family
+        # (legacy_link.py poi-add) but there is no whole-region legacy restore, and inventing
+        # one is not this change.
+        has_legacy = False
+        legacy_err = ""
+        if is_legacy:
+            lg_code, lg_out, lg_err = run_tool("legacy_link.py", ["settings"])
+            lg = self._parse_last_json_line(lg_out)
+            if lg and lg.get("ok"):
+                Path(f"{prefix}-legacy-settings.json").write_text(json.dumps(lg, indent=2))
+                has_legacy = True
+                wpts = lg.get("waypoints") or []
+                if wpts:
+                    routes_g, loose = self._legacy_route_groups(wpts)
+                    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                             '<gpx version="1.1" creator="ambit-app legacy_link.py">']
+                    for w in wpts:
+                        nm = str(w.get("name", "")).replace("&", "&amp;").replace("<", "&lt;")
+                        lines.append('  <wpt lat="%s" lon="%s"><name>%s</name></wpt>'
+                                     % (w.get("lat", 0.0), w.get("lon", 0.0), nm))
+                    for r in routes_g:
+                        rn = str(r.get("name", "")).replace("&", "&amp;").replace("<", "&lt;")
+                        lines.append('  <rte><name>%s</name>' % rn)
+                        for pt in r.get("track", []):
+                            lines.append('    <rtept lat="%s" lon="%s"/>'
+                                         % (pt.get("lat", 0.0), pt.get("lon", 0.0)))
+                        lines.append('  </rte>')
+                    lines.append('</gpx>')
+                    Path(f"{prefix}-legacy-nav.gpx").write_text("\n".join(lines))
+            else:
+                legacy_err = (lg_err or lg_out or "legacy_link.py settings produced no JSON")
+
+        ok = routes_ok or has_ember or has_kailash or has_legacy
         self._send_json(200 if ok else 502, {
             "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
             "hasRoutes": routes_ok, "hasKailash": has_kailash,
             "deviceModel": dev_model, "deviceSerial": dev_serial,
+            "hasLegacy": has_legacy, "legacyError": legacy_err,
             "kailashError": kailash_err, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):
@@ -4719,13 +4782,19 @@ class Handler(BaseHTTPRequestHandler):
         # `nav --save` was skipped on that watch (2026-08-27) - but those files are the blank
         # 0xFF regions that started this whole thread, and writing them back is meaningless.
         # Treat the archive as having no nav half at all; its Ember half still restores.
-        if self._backup_hint(prefix) == "kailash":
+        if self._backup_hint(prefix) in ("kailash", "legacy"):
             has_routes_backup = False
         has_ember_backup = Path(f"{prefix}-ember.json").exists()
         if not (has_routes_backup or has_ember_backup):
             # A Kailash archive is deliberately one-way: this project has no proven write
             # path for DeviceHistory or TrackLog and does not invent one for a restore.
             # Say that, rather than the generic "no backup found" it would otherwise get.
+            if Path(f"{prefix}-legacy-settings.json").exists():
+                self._send_json(400, {"error": (
+                    "This is an Ambit1/2 archive - its waypoints, routes and settings, kept "
+                    "as a record. POIs can be added back one at a time, but there is no "
+                    "whole-region restore for this family, so it cannot be restored.")})
+                return
             if (Path(f"{prefix}-kailash-history.json").exists()
                     or Path(f"{prefix}-kailash-tracklog.json").exists()):
                 self._send_json(400, {"error": "This is a Kailash archive - travel history "

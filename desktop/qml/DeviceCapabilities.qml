@@ -40,8 +40,22 @@ QtObject {
     // model rides out a blip and the rail stays still.
     readonly property bool _isKailash: DeviceService.model === "Hoopoe"
 
-    property bool supportsRoutes: !_isLegacy && !_isKailash
-    property bool supportsPOIs: !_isLegacy && !_isKailash
+    // Ambit1/2 DO have routes and POIs - André, 2026-08-27: "the ambit 1 has routes... it is
+    // just legacy not sbem.. same for ambit 2". They live in the legacy PMEM waypoint region,
+    // not the SBEM object model, and this file's header above (written before that path
+    // existed) concluded "no routes/POIs" from the SBEM queries coming back empty. That was a
+    // statement about the protocol, not about the watch. /api/nav and /api/pois now dispatch
+    // to tools/legacy_link.py for this family - a route being simply the waypoints that share
+    // a route_name - so both are real here and must be reachable.
+    property bool supportsRoutes: !_isKailash
+    property bool supportsPOIs: !_isKailash
+
+    // Route WRITING is the part that is still SBEM-only: _handle_route_write rebuilds the
+    // whole Routes region through write_nav.py, which this family predates, and no legacy
+    // equivalent is wired. POI writing IS - legacy_link.py poi-add, hardware-validated
+    // 2026-08-22 against openambit's libambit_navigation_write - so only the upload button
+    // is gated, not the page. Reading, exporting and POI add all work.
+    property bool supportsRouteWrite: !_isLegacy && !_isKailash
 
     // Backup & Restore is write_nav.py's nav --save/restore over the SBEM flash regions.
     // BackupPage used to read supportsRoutes for this, which was fine while the two were the
@@ -75,6 +89,13 @@ QtObject {
     // One-way on purpose: there is no proven write path back for either region, so this is
     // an archive, not a restore point, and the UI must not offer to restore it.
     property bool supportsTravelArchive: _isKailash
+
+    // The Ambit1/2 equivalent. Their waypoints ARE their navigation database (a route is the
+    // waypoints sharing a route_name), and legacy_link.py reads them plus the watch settings
+    // in one go - real data that `nav --save` could never reach, so Backup used to offer this
+    // family nothing at all. Archive only: POIs can be written back one at a time, but there
+    // is no whole-region legacy restore.
+    property bool supportsLegacyArchive: _isLegacy
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see

@@ -61,10 +61,55 @@ PageFlickable {
             visible: HomeViewModel.connected && !HomeViewModel.isGarmin
                      && !DeviceCapabilities.supportsWatchBackup
                      && !DeviceCapabilities.supportsTravelArchive
+                     && !DeviceCapabilities.supportsLegacyArchive
             width: 480
             wrapMode: Text.WordWrap
             color: Theme.mutedText
             text: qsTr("%1 doesn't support Backup & Restore on this app yet.").arg(HomeViewModel.deviceDisplayName)
+        }
+
+        // Ambit1/2's own backup - their nav database is legacy waypoints, not SBEM regions.
+        Card {
+            width: parent.width
+            visible: DeviceCapabilities.supportsLegacyArchive
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("Waypoints, routes & settings"); font.bold: true; color: Theme.text }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Saves this watch's waypoints and the routes built from them, " +
+                                "plus its settings - as JSON and as a .gpx you can open " +
+                                "anywhere.")
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("An archive, not a restore point - POIs can be added back one " +
+                                "at a time, but this family has no whole-region restore.")
+                }
+
+                RoundedButton {
+                    text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                    enabled: !BackupService.loading
+                    onClicked: BackupService.createBackup()
+                }
+
+                Text {
+                    visible: BackupService.lastActionText.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: BackupService.lastActionOk ? Theme.success : Theme.error
+                    text: BackupService.lastActionText
+                }
+            }
         }
 
         // Kailash's own backup. Deliberately NOT the "Backup & Restore" card below: it saves
@@ -150,7 +195,8 @@ PageFlickable {
         Card {
             width: parent.width
             visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
-                                                 || DeviceCapabilities.supportsTravelArchive)
+                                                 || DeviceCapabilities.supportsTravelArchive
+                                                 || DeviceCapabilities.supportsLegacyArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -187,6 +233,8 @@ PageFlickable {
                                   ? qsTr("From %1").arg(HomeViewModel.displayNameForModel(modelData.deviceModel))
                                   : modelData.deviceHint === "kailash"
                                     ? qsTr("Looks like a Kailash backup - no watch recorded, so it can't be restored")
+                                    : modelData.deviceHint === "legacy"
+                                      ? qsTr("Looks like an Ambit1/2 archive - no watch recorded, so it can't be restored")
                                     : modelData.deviceHint === "ambit"
                                       ? qsTr("Looks like an Ambit backup - no watch recorded, so it can't be restored")
                                       : qsTr("No watch recorded, so it can't be restored")
@@ -232,6 +280,7 @@ PageFlickable {
                                 // just keeps the button from being there to press.
                                 visible: (modelData.hasRoutes === true || modelData.hasEmber === true)
                                          && modelData.deviceHint !== "kailash"
+                                         && modelData.deviceHint !== "legacy"
                                          && !!modelData.deviceModel
                                          && DeviceService.model === modelData.deviceModel
                                          && !(modelData.deviceSerial && DeviceService.serial
@@ -251,7 +300,8 @@ PageFlickable {
         Card {
             width: parent.width
             visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
-                                                 || DeviceCapabilities.supportsTravelArchive)
+                                                 || DeviceCapabilities.supportsTravelArchive
+                                                 || DeviceCapabilities.supportsLegacyArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
