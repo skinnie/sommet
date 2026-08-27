@@ -630,6 +630,11 @@ const fr = {
   backupRestoreUnavailable:
     'La restauration nécessite une fonction native pas encore construite sur Android - ' +
     'ces sauvegardes sont pour l\'instant en lecture seule (utilisez le bureau pour restaurer).',
+  backupRestoreBtn: 'Restaurer',
+  backupRestoreConfirmTitle: 'Restaurer les itinéraires ?',
+  backupRestoreConfirmMsg:
+    'Ceci remplace TOUS les itinéraires de la montre par ceux de cette sauvegarde. Continuer ?',
+  backupRestoreDoneMsg: (n: number) => `Restauré : ${n} itinéraire${n === 1 ? '' : 's'} réécrit${n === 1 ? '' : 's'} sur la montre.`,
   backupKailashTitle: 'Historique de voyage & trace GPS',
   backupKailashDesc:
     'Sauvegarde les lieux visités, les statistiques de voyage et la trace GPS passive de cette ' +
@@ -1416,6 +1421,11 @@ const en: typeof fr = {
   backupRestoreUnavailable:
     'Restore needs a native capability not built on Android yet - these backups are ' +
     'read-only for now (use the desktop app to restore).',
+  backupRestoreBtn: 'Restore',
+  backupRestoreConfirmTitle: 'Restore routes?',
+  backupRestoreConfirmMsg:
+    'This replaces ALL routes on the watch with the ones in this backup. Continue?',
+  backupRestoreDoneMsg: (n: number) => `Restored: ${n} route${n === 1 ? '' : 's'} written back to the watch.`,
   backupKailashTitle: 'Travel history & GPS track',
   backupKailashDesc:
     'Saves this watch\'s visited places, travel stats and passive GPS track - the only ' +

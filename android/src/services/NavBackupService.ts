@@ -1,6 +1,9 @@
 import RNFS from 'react-native-fs';
-import { connect, disconnect, readRegion, saveFileAs } from '../native/AmbitUsbModule';
+import { connect, disconnect, readRegion, saveFileAs, getDeviceInfo } from '../native/AmbitUsbModule';
 import { readNavBases } from './MemoryMap';
+import { isAmbit12 } from './AmbitSettingsService';
+import { backupLegacyRoutes, restoreLegacyRoutes } from './AmbitLegacyNav';
+import { base64ToBytes, bytesToBase64 } from './Base64';
 
 // v3.0 UI port (2026-08-09, "re do... backup to match entirely desktop") - real "Backup &
 // Restore" card from desktop's own BackupPage.qml ("the backup that milestone 4 asked for
@@ -23,7 +26,12 @@ const BACKUPS_DIR = `${RNFS.DocumentDirectoryPath}/backups`;
 export interface BackupEntry {
   prefix: string;
   createdAt: number;
+  legacy?: boolean;     // an Ambit1/2 route-region backup ({prefix}_legacy-routes.bin) - restorable
 }
+
+// Ambit1/2 codenames - these use the legacy route region, not the SBEM nav regions.
+const LEGACY_MODELS = ['Bluebird', 'Duck', 'Colibri', 'Greentit'];
+const isLegacyModel = (model?: string) => !!model && LEGACY_MODELS.includes(model);
 
 async function ensureDir(): Promise<void> {
   if (!(await RNFS.exists(BACKUPS_DIR))) {
@@ -31,11 +39,18 @@ async function ensureDir(): Promise<void> {
   }
 }
 
-/** Reads Waypoints+Routes off the watch and saves them as raw binary files locally - the
- * exact same two regions exportNavigationToGpx() already reads, just kept as raw bytes
- * instead of being parsed into a GPX. Read-only, no risk to the watch. */
-export async function createNavBackup(): Promise<void> {
+/** Reads the watch's navigation database and saves it locally. Ambit3/Traverse: Waypoints+Routes
+ * SBEM regions (read-only, restore not built there). Ambit1/2: the legacy route region 0x041EB0
+ * (restorable - see restoreNavBackup). `deviceModel` (from Home) selects the path. */
+export async function createNavBackup(deviceModel?: string): Promise<void> {
   await ensureDir();
+  const prefix = String(Date.now());
+  if (isLegacyModel(deviceModel)) {
+    const rb = await backupLegacyRoutes();          // self-connects; null when no routes
+    if (!rb) throw new Error('This watch has no routes to back up.');
+    await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_legacy-routes.bin`, bytesToBase64(rb.bytes), 'base64');
+    return;
+  }
   await connect();
   try {
     const bases = await readNavBases();
@@ -43,7 +58,6 @@ export async function createNavBackup(): Promise<void> {
       readRegion(bases.waypointBase, bases.waypointSize),
       readRegion(bases.routeBase, bases.routeSize),
     ]);
-    const prefix = String(Date.now());
     await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_waypoints.bin`, waypointsB64, 'base64');
     await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_routes.bin`, routesB64, 'base64');
   } finally {
@@ -51,18 +65,29 @@ export async function createNavBackup(): Promise<void> {
   }
 }
 
-/** Every backup created so far, newest first - grouped by the shared timestamp prefix
- * createNavBackup() names both files with. */
+/** Restore a legacy route backup to the connected Ambit1/2 (destructive: replaces its routes).
+ * Only legacy backups are restorable - Ambit3 restore needs a raw SBEM region write that doesn't
+ * exist yet (see this file's header). */
+export async function restoreNavBackup(prefix: string): Promise<{ routeCount: number }> {
+  const path = `${BACKUPS_DIR}/${prefix}_legacy-routes.bin`;
+  if (!(await RNFS.exists(path))) throw new Error('This backup cannot be restored (not a legacy route backup).');
+  const bytes = base64ToBytes(await RNFS.readFile(path, 'base64'));
+  return restoreLegacyRoutes(bytes);
+}
+
+/** Every backup created so far, newest first - grouped by the shared timestamp prefix. */
 export async function listNavBackups(): Promise<BackupEntry[]> {
   await ensureDir();
   const files = await RNFS.readDir(BACKUPS_DIR);
-  const prefixes = new Set<string>();
+  const prefixes = new Map<string, boolean>(); // prefix -> legacy?
   for (const f of files) {
     const m = /^(\d+)_(waypoints|routes)\.bin$/.exec(f.name);
-    if (m) prefixes.add(m[1]);
+    if (m) { if (!prefixes.has(m[1])) prefixes.set(m[1], false); continue; }
+    const l = /^(\d+)_legacy-routes\.bin$/.exec(f.name);
+    if (l) prefixes.set(l[1], true);
   }
-  return Array.from(prefixes)
-    .map(prefix => ({ prefix, createdAt: parseInt(prefix, 10) }))
+  return Array.from(prefixes.entries())
+    .map(([prefix, legacy]) => ({ prefix, createdAt: parseInt(prefix, 10), legacy }))
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 

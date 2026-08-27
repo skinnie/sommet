@@ -6,7 +6,7 @@ import {
   runFirmwareCheck, downloadFirmware, BackupState,
 } from '../services/FirmwareBackupService';
 import {
-  createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile,
+  createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile, restoreNavBackup,
 } from '../services/NavBackupService';
 import {
   createKailashArchive, listKailashArchives, KailashArchiveEntry,
@@ -39,6 +39,9 @@ export default function BackupScreen() {
   // handed in from Home, which already knows the connected watch.
   const route = useRoute<RouteProp<RootStackParamList, 'Backup'>>();
   const isKailash = route.params?.deviceModel === 'Hoopoe';
+  // Ambit1/2 back up (and restore) the legacy route region, not the SBEM nav regions.
+  const isLegacy = ['Bluebird', 'Duck', 'Colibri', 'Greentit'].includes(route.params?.deviceModel ?? '');
+  const [restoreBusy, setRestoreBusy] = useState(false);
 
   const [archives, setArchives] = useState<KailashArchiveEntry[]>([]);
   const [archiveBusy, setArchiveBusy] = useState(false);
@@ -113,7 +116,7 @@ export default function BackupScreen() {
     setNavBackupBusy(true);
     setNavBackupError(undefined);
     try {
-      await createNavBackup();
+      await createNavBackup(route.params?.deviceModel);
       refreshBackups();
     } catch (e: any) {
       setNavBackupError(e?.message ?? t.unknownError);
@@ -123,11 +126,33 @@ export default function BackupScreen() {
   }
 
   async function handleShareBackup(entry: BackupEntry) {
+    const name = entry.legacy ? `${entry.prefix}_legacy-routes.bin` : `${entry.prefix}_routes.bin`;
     try {
-      await shareFile(`${backupsFolderPath()}/${entry.prefix}_routes.bin`, 'application/octet-stream');
+      await shareFile(`${backupsFolderPath()}/${name}`, 'application/octet-stream');
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
     }
+  }
+
+  // Restore a legacy route backup - destructive (replaces the watch's routes), so confirm first.
+  function handleRestore(entry: BackupEntry) {
+    Alert.alert(t.backupRestoreConfirmTitle, t.backupRestoreConfirmMsg, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.backupRestoreBtn, style: 'destructive',
+        onPress: async () => {
+          setRestoreBusy(true);
+          try {
+            const r = await restoreNavBackup(entry.prefix);
+            Alert.alert(t.backupNavSection, t.backupRestoreDoneMsg(r.routeCount));
+          } catch (e: any) {
+            Alert.alert(t.error, e?.message ?? t.unknownError);
+          } finally {
+            setRestoreBusy(false);
+          }
+        },
+      },
+    ]);
   }
 
   const busy = state.phase === 'connecting' || state.phase === 'reading' ||
@@ -210,15 +235,21 @@ export default function BackupScreen() {
         {backups.length === 0 && <StatusLine text={t.backupExistingEmpty} />}
         {backups.map(b => (
           <View key={b.prefix} style={styles.backupRow}>
-            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}</Text>
+            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}{b.legacy ? ' · routes' : ''}</Text>
             <View style={styles.backupRowBtns}>
+              {b.legacy && (
+                <TouchableOpacity style={styles.shareBtn} disabled={restoreBusy} onPress={() => handleRestore(b)}>
+                  <Text style={styles.shareBtnText}>{restoreBusy ? t.workoutCalendarSyncing : t.backupRestoreBtn}</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={styles.shareBtn} onPress={() => handleShareBackup(b)}>
                 <Text style={styles.shareBtnText}>{t.backupShareBtn}</Text>
               </TouchableOpacity>
             </View>
           </View>
         ))}
-        <Text style={styles.restoreNote}>{t.backupRestoreUnavailable}</Text>
+        {/* Restore is available for Ambit1/2 route backups; the SBEM (Ambit3) restore isn't built. */}
+        {!isLegacy && <Text style={styles.restoreNote}>{t.backupRestoreUnavailable}</Text>}
       </Section>
 
       {/* ── Backup database to folder - keyless replacement for the cloud-OAuth upload
