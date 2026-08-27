@@ -1068,6 +1068,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
+        # Reconstruct routes the same way _handle_nav_legacy() does. libambit never fills
+        # `routes` on this family - it returns every point as a waypoint carrying a
+        # route_name - so the CLI's own routes list is always empty and this endpoint used
+        # to hand the Routes page routes:[] no matter what was on the watch. The page's
+        # legacy card reads THIS endpoint (not /api/nav), so the reconstruction added for
+        # /api/nav never reached the UI: a watch with two real routes still showed none.
+        # Only fills a genuinely empty list, so a future firmware that does populate it wins.
+        if info.get("ok") and not info.get("routes"):
+            routes, _loose = self._legacy_route_groups(info.get("waypoints", []))
+            if routes:
+                info["routes"] = routes
+                info["routes_count"] = len(routes)
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_legacy_sport_mode_write_presets(self, body):
