@@ -7,6 +7,7 @@ import {
   StyleSheet, Alert, ScrollView, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
 import { ExerciseMode, FIELD_TYPES, fieldTypeLabel, builtInScreenName } from '../services/CustomModesReader';
+import { writeLegacySportMode, LegacyModePatch } from '../services/AmbitLegacySportModes';
 import {
   readCustomModes, renameCustomMode, writeCustomModeField, writeCustomModeDisplayField,
 } from '../services/CustomModesService';
@@ -206,9 +207,21 @@ export default function SportModesScreen() {
     await handleRead();
   }
 
+  // Ambit1/2 (legacy) edits go through the 0x2000 region read-modify-write, not the Ambit3
+  // CustomModes path. Same {ok,error} contract as the Ambit3 writers so withWrite() is shared.
+  function legacyWrite(modeName: string, patch: LegacyModePatch) {
+    const idx = (modes ?? []).findIndex(m => m.settings.name === modeName);
+    if (idx < 0) { Alert.alert(t.error, `Sport mode "${modeName}" not found.`); return; }
+    withWrite(modeName, async () => {
+      try { await writeLegacySportMode(idx, patch); return { ok: true }; }
+      catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+    });
+  }
+
   function handleRename(originalName: string) {
     const newName = (nameEdits[originalName] ?? '').trim();
     if (!newName || newName === originalName) return;
+    if (isLegacy) { legacyWrite(originalName, { name: newName.slice(0, 16) }); setSelectedName(newName.slice(0, 16)); return; }
     withWrite(originalName, () =>
       renameCustomMode(originalName, newName, () => {}, overBle));
     setSelectedName(newName);
@@ -217,6 +230,7 @@ export default function SportModesScreen() {
   function handleSetAutolap(modeName: string) {
     const value = parseInt(autolapEdits[modeName] ?? '', 10);
     if (!Number.isFinite(value)) return;
+    if (isLegacy) { legacyWrite(modeName, { autolapM: value }); return; }
     withWrite(modeName, () =>
       writeCustomModeField(modeName, { Autolap: value }, () => {}, overBle));
   }
@@ -225,6 +239,7 @@ export default function SportModesScreen() {
     const low = parseInt(hrLowEdits[modeName] ?? '', 10);
     const high = parseInt(hrHighEdits[modeName] ?? '', 10);
     if (!Number.isFinite(low) || !Number.isFinite(high)) return;
+    if (isLegacy) { legacyWrite(modeName, { heartrateMin: low, heartrateMax: high, useHrLimits: !!hrLimitsEdits[modeName] }); return; }
     withWrite(modeName, () =>
       writeCustomModeField(modeName, {
         HrLow: low, HrHigh: high, HrLimitsUse: hrLimitsEdits[modeName] ? 1 : 0,
@@ -233,6 +248,7 @@ export default function SportModesScreen() {
 
   function handleTogglePod(modeName: string, currentUseHw: number, bit: number, enabled: boolean) {
     const newUseHw = enabled ? (currentUseHw | bit) : (currentUseHw & ~bit);
+    if (isLegacy) { legacyWrite(modeName, { useHw: newUseHw }); return; }
     withWrite(modeName, () =>
       writeCustomModeField(modeName, { UseHw: newUseHw }, () => {}, overBle));
   }

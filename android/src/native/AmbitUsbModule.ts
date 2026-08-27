@@ -267,6 +267,17 @@ export function readLegacyRegion(address: number, length: number): Promise<strin
 }
 
 /**
+ * Ambit 1/2 (Bluebird) raw flash-region WRITE (chunked 0x0b16, native libambit_pmem20_data_write).
+ * `dataB64` is the FULL region bytes to write - read the region with readLegacyRegion, patch in JS,
+ * write it back here. Used for legacy sport-mode field edits (0x2000) and nav restore. Guarded to
+ * the Bluebird family natively. Resolves true when the write was sent OK - the caller re-reads to
+ * confirm the watch applied it.
+ */
+export function writeLegacyRegion(address: number, dataB64: string, tailExtra: number): Promise<boolean> {
+  return NativeAmbit.writeLegacyRegion(address, dataB64, tailExtra);
+}
+
+/**
  * Ambit 1/2 (Bluebird) legacy personal-settings WRITE (0x0b01), reverse-engineered from a
  * real SuuntoLink<->Ambit2 USB capture (2026-08-26, docs/ambit2_protocol_findings.md). The
  * native side does the read-modify-write: read the whole struct (188 B on Ambit2 / 132 on

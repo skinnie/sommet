@@ -14,6 +14,12 @@
 #include "libambit/libambit.h"
 #include "libambit/libambit_int.h"
 #include "device_driver_ambit3_navigation.h"
+// pmem20.h has no extern "C" guard (like protocol.h) - wrap it so its libambit_pmem20_data_write
+// (the chunked 0x0b16 raw flash write) links against the C libambit.a. Used by
+// nativeAmbitWriteLegacyRegion for the Ambit1/2 sport-mode + nav restore writes.
+extern "C" {
+#include "libambit/pmem20.h"
+}
 
 // libambit_protocol_command lives in protocol.h, which (unlike libambit.h) has no extern "C"
 // guard - including it from this C++ TU would mangle the name and fail to link against the C
@@ -1027,6 +1033,69 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWritePersonalSetting(
         LOGE("nativeAmbitWritePersonalSetting: 0x0b01 write rc %d", rc);
         return JNI_FALSE;
     }
+    return JNI_TRUE;
+}
+
+/*
+ * nativeAmbitWriteLegacyRegion
+ *
+ * Ambit 1/2 (Bluebird) raw flash-region WRITE - the chunked 0x0b16 data_write followed by the
+ * 0x0b18 COMMIT tail. Both are required: without the 0x0b18 tail the watch acknowledges the 0x0b16
+ * chunks but DISCARDS them (they read back correct in-session but revert after a reconnect - the
+ * exact bug this fixed, 2026-08-27). Reverse-engineered from the real SuuntoLink<->Ambit2 capture
+ * assets/pcap/ambit2_suuntolink_settings_sportmodes.pcap: 1024-byte 0x0b16 chunks to 0x2000, then
+ * 0x0b18 [u32 addr][u32 tailExtra] (no hash). `tailExtra` is region-specific and constant per
+ * region (0xffffffff for the sport-mode region - proven content-independent across 160 real writes
+ * in the pcap; the region CRC for nav), so the JS caller supplies it. The caller passes the FULL
+ * region bytes (read with nativeAmbitReadLegacyRegion, patch in JS, write back) - a read-modify-
+ * write only changes what JS asked to. Guarded to the Bluebird family. Returns JNI_TRUE on success.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyRegion(
+        JNIEnv *env, jobject /*thiz*/, jlong address, jbyteArray data, jlong tailExtra)
+{
+    if (!g_device) { LOGE("nativeAmbitWriteLegacyRegion: Not connected"); return JNI_FALSE; }
+    uint16_t pid = g_device->device_info.product_id;
+    if (pid != 0x0010 && pid != 0x0019 && pid != 0x001A && pid != 0x001D) {
+        LOGE("nativeAmbitWriteLegacyRegion: not an Ambit1/2 (pid 0x%04x)", pid);
+        return JNI_FALSE;
+    }
+    if (!data) { LOGE("nativeAmbitWriteLegacyRegion: null data"); return JNI_FALSE; }
+    jsize len = env->GetArrayLength(data);
+    if (len <= 0) { LOGE("nativeAmbitWriteLegacyRegion: empty data"); return JNI_FALSE; }
+    jbyte *bytes = env->GetByteArrayElements(data, nullptr);
+
+    // A local pmem20 over the connected device, 0x400 (1024 B) chunking - the Bluebird driver's own
+    // driver_param (device_support.c) and what SuuntoLink uses in the capture. Self-contained so we
+    // don't reach into the private driver_data struct.
+    libambit_pmem20_t pm;
+    memset(&pm, 0, sizeof(pm));
+    int ir = libambit_pmem20_init(&pm, g_device, 0x400);
+    int rc = -1;
+    if (ir == 0) {
+        rc = libambit_pmem20_data_write(&pm, (uint32_t)address, (const uint8_t *)bytes, (size_t)len);
+        libambit_pmem20_deinit(&pm);
+    }
+    env->ReleaseByteArrayElements(data, bytes, JNI_ABORT); // read-only, don't copy back
+    if (ir != 0 || rc != 0) {
+        LOGE("nativeAmbitWriteLegacyRegion: init %d / data_write %d at 0x%06llx", ir, rc, (long long)address);
+        return JNI_FALSE;
+    }
+
+    // 0x0b18 COMMIT tail - [u32 addr][u32 tailExtra], no hash (the sport-mode / nav variant).
+    uint32_t addr = (uint32_t)address, ex = (uint32_t)tailExtra;
+    uint8_t tail[8] = {
+        (uint8_t)(addr & 0xff), (uint8_t)((addr >> 8) & 0xff), (uint8_t)((addr >> 16) & 0xff), (uint8_t)((addr >> 24) & 0xff),
+        (uint8_t)(ex & 0xff),   (uint8_t)((ex >> 8) & 0xff),   (uint8_t)((ex >> 16) & 0xff),   (uint8_t)((ex >> 24) & 0xff),
+    };
+    uint8_t *treply = nullptr; size_t tlen = 0;
+    int trc = libambit_protocol_command(g_device, 0x0b18, tail, sizeof(tail), &treply, &tlen, 0);
+    if (treply) free(treply);
+    if (trc != 0) {
+        LOGE("nativeAmbitWriteLegacyRegion: 0x0b18 commit tail rc %d at 0x%06llx", trc, (long long)address);
+        return JNI_FALSE;
+    }
+    LOGI("nativeAmbitWriteLegacyRegion: wrote+committed %d bytes at 0x%06llx (tail 0x%08x)", (int)len, (long long)address, ex);
     return JNI_TRUE;
 }
 
