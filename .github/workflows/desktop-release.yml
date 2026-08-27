@@ -202,12 +202,21 @@ jobs:
           # Ship libhidapi.dylib next to the helper so the app can point DYLD_LIBRARY_PATH at this
           # dir (see backendprocess.cpp) and the frozen `hid` can dlopen it - no brew or env needed
           # on the user's Mac. -L copies the real lib through the Homebrew symlink, named exactly
-          # "libhidapi.dylib" (the name `hid` requests). codesign --deep below then signs it too.
+          # "libhidapi.dylib" (the name `hid` requests).
           cp -L "$(brew --prefix hidapi)/lib/libhidapi.dylib" "$APP/Contents/Resources/backend/libhidapi.dylib"
           # The copied lib still carries Homebrew's install id (/opt/homebrew/opt/hidapi/...),
           # a path that won't exist on a user's Mac - harmless today because `hid` dlopens it by
           # path, but a latent trap. Rewrite it to be self-describing relative to its loader.
           install_name_tool -id "@loader_path/libhidapi.dylib" "$APP/Contents/Resources/backend/libhidapi.dylib"
+          # CRITICAL: install_name_tool invalidates the dylib's (Homebrew ad-hoc) signature, and the
+          # app-level `codesign --deep` below will NOT fix it - a dylib under Contents/Resources is
+          # sealed as a bundle RESOURCE (by hash), never re-signed as nested code. Left broken, dyld
+          # SIGKILLs the helper the moment `hid` dlopen()s it ("Code Signature Invalid"), and
+          # `codesign --verify --deep` on the .app still PASSES (it only checks the resource seal).
+          # So re-sign the dylib itself here, and gate on verifying the dylib directly. (Regression
+          # shipped in the first RC, 2026-08-27; caught on-device.)
+          codesign --force --sign - "$APP/Contents/Resources/backend/libhidapi.dylib"
+          codesign --verify --strict "$APP/Contents/Resources/backend/libhidapi.dylib"
           # Ad-hoc sign the WHOLE bundle last (after macdeployqt rewrote the frameworks and we
           # added the backend, both of which invalidate any signature). Apple Silicon refuses
           # to launch a binary with a broken/absent signature - it shows a 🚫 and reads as
@@ -215,6 +224,10 @@ jobs:
           # turns "damaged, needs Terminal" into a normal unsigned app (right-click -> Open).
           # A fully double-click-clean app would additionally need a Developer ID + notarization.
           codesign --force --deep --sign - "$APP"
+          # Final gate: prove the shipped dylib is still individually loadable AFTER the bundle seal
+          # (the .app-level --deep pass must not have disturbed it). This is the check that would
+          # have caught the RC regression; `--verify --deep` on the .app alone would not.
+          codesign --verify --strict "$APP/Contents/Resources/backend/libhidapi.dylib"
           mkdir -p dist
           hdiutil create -volname Sommet -srcfolder "$APP" -ov -format UDZO dist/Sommet-macos.dmg
 
