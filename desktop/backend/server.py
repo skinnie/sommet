@@ -1537,6 +1537,27 @@ class Handler(BaseHTTPRequestHandler):
         if not gpx_text:
             self._send_json(400, {"error": "missing \"gpx\" (GPX file text)"})
             return
+        # Never push one watch's regions at a different watch. This project's own standing rule
+        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]),
+        # and until now the backup list had no idea which watch each entry came from - an Ambit3
+        # nav backup and a Kailash archive sat side by side, both offering Restore.
+        # A backup with no stamp predates it (2026-08-27) and is treated as unknown: allowed,
+        # because refusing every older backup would be worse, and write_nav.py's own per-region
+        # "this watch does not declare it" check still stands behind this.
+        want_model, want_serial = self._backup_device(prefix)
+        if want_serial:
+            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+            di = self._parse_last_json_line(di_out)
+            have_serial = str((di or {}).get("serial") or "")
+            have_model = str((di or {}).get("model") or "")
+            if have_serial and have_serial != want_serial:
+                self._send_json(400, {"error": (
+                    f"That backup was taken from a {want_model or 'different'} "
+                    f"(serial {want_serial}); the watch connected now is a "
+                    f"{have_model or 'different watch'} (serial {have_serial}). "
+                    "Restoring one watch's data onto another is refused.")})
+                return
+
         confirm = bool(body.get("confirm", False))
 
         with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
@@ -1792,6 +1813,34 @@ class Handler(BaseHTTPRequestHandler):
         result["wrote"] = any(result[k].get("wrote") for k in ("gps", "glonass"))
         self._send_json(200 if not failed else 502, result)
 
+    @staticmethod
+    def _backup_hint(prefix):
+        """A device FAMILY guess for a backup with no -device.json - i.e. every backup made
+        before 2026-08-27. Not a serial and not pretending to be one, but enough to stop the
+        UI offering to restore an Ambit3's regions onto a Kailash, which is the actual risk
+        André pointed at. Keyed on files only one family ever produces:
+          kailash-*.json         only the Kailash archive path writes these
+          custommodes/apps/
+          trainingprogram .bin   SBEM regions a Kailash does not declare at all
+        Returns "kailash", "ambit", or "" when neither is decidable."""
+        if (Path(f"{prefix}-kailash-history.json").exists()
+                or Path(f"{prefix}-kailash-tracklog.json").exists()):
+            return "kailash"
+        for region in ("custommodes", "apps", "trainingprogram"):
+            if Path(f"{prefix}-{region}.bin").exists():
+                return "ambit"
+        return ""
+
+    @staticmethod
+    def _backup_device(prefix):
+        """The watch a backup was taken from: {"model","serial"} from its -device.json, or
+        empty strings when it predates that stamp (2026-08-27) - "unknown", not "mine"."""
+        try:
+            d = json.loads(Path(f"{prefix}-device.json").read_text())
+            return str(d.get("model") or ""), str(d.get("serial") or "")
+        except Exception:  # noqa: BLE001 - missing or unreadable both mean "unknown"
+            return "", ""
+
     def _handle_backups_list(self):
         """Every backup made so far - just a directory listing, real prefixes `nav --save`/
         `restore` already understand, nothing invented here."""
@@ -1811,6 +1860,9 @@ class Handler(BaseHTTPRequestHandler):
                 "hasRoutes": True,
                 "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
                               or Path(f"{prefix}-kailash-tracklog.json").exists(),
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
             })
             seen_prefixes.add(prefix)
         # Ember-only backups (no watch connected when the backup was made - a Garmin owner, or
@@ -1828,6 +1880,9 @@ class Handler(BaseHTTPRequestHandler):
                 "hasRoutes": False,
                 "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
                               or Path(f"{prefix}-kailash-tracklog.json").exists(),
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
             })
             seen_prefixes.add(prefix)
         # Kailash archives have neither -routes.bin nor -ember.json, so neither loop above
@@ -1844,6 +1899,9 @@ class Handler(BaseHTTPRequestHandler):
                 "hasEmber": False,
                 "hasRoutes": False,
                 "hasKailash": True,
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
             })
             seen_prefixes.add(prefix)
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
@@ -4566,6 +4624,26 @@ class Handler(BaseHTTPRequestHandler):
         target.mkdir(parents=True, exist_ok=True)
         label = time.strftime("%Y%m%d-%H%M%S")
         prefix = str(target / label)
+
+        # Which watch this backup came off, written alongside it (André, 2026-08-27: "I see
+        # various backups, be sure that they are not from other device"). Nothing recorded it
+        # before, so an Ambit3's nav regions and a Kailash's archive sat in one undifferentiated
+        # list - and Restore would happily push either at whatever happened to be plugged in.
+        # Serial is the genuinely unique key (device_key()'s own comment says so); model is
+        # what the UI shows. Best-effort: a backup must not fail because identity didn't answer.
+        dev_model = dev_serial = ""
+        try:
+            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+            di = self._parse_last_json_line(di_out)
+            if di and di.get("ok"):
+                dev_model = str(di.get("model") or "")
+                dev_serial = str(di.get("serial") or "")
+                Path(f"{prefix}-device.json").write_text(json.dumps({
+                    "model": dev_model, "serial": dev_serial,
+                    "fw_version": di.get("fw_version"), "hw_version": di.get("hw_version"),
+                }, indent=2))
+        except Exception:  # noqa: BLE001 - identity is a label, never a reason to lose a backup
+            pass
         # Skipped entirely on a Kailash - see the branch below for what its regions actually
         # contain. This is a ~250 KB flash read over USB that comes back blank on that watch,
         # so it costs real seconds to produce three useless files.
@@ -4642,6 +4720,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if ok else 502, {
             "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
             "hasRoutes": routes_ok, "hasKailash": has_kailash,
+            "deviceModel": dev_model, "deviceSerial": dev_serial,
             "kailashError": kailash_err, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):

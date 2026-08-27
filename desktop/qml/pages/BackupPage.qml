@@ -170,13 +170,24 @@ PageFlickable {
                         width: parent.width
                         spacing: 4
                         Text {
-                            text: new Date(modelData.createdAt * 1000)
-                                .toLocaleString(Qt.locale(), Locale.ShortFormat)
+                            text: DateFormat.dateTime(new Date(modelData.createdAt * 1000))
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                         }
                         // Ember rides along in every backup automatically (André, 2026-08-26) -
                         // this just says so, so it isn't a silent surprise on restore.
+                        // Which watch this came off (André, 2026-08-27: "be sure that they
+                        // are not from other device"). Backups made before the stamp existed
+                        // say so honestly rather than claiming to be this watch's.
+                        Text {
+                            text: modelData.deviceModel
+                                  ? qsTr("From %1").arg(HomeViewModel.displayNameForModel(modelData.deviceModel))
+                                  : qsTr("From an unknown watch (saved before backups recorded this)")
+                            color: modelData.deviceSerial && DeviceService.serial
+                                   && modelData.deviceSerial !== DeviceService.serial
+                                   ? Theme.error : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                         Text {
                             visible: modelData.hasKailash === true
                             text: qsTr("+ travel history & GPS track")
@@ -203,8 +214,13 @@ PageFlickable {
                             // A Kailash archive (travel history + GPS track, no -routes.bin
                             // and no -ember.json) has no write path back to the watch - the
                             // backend refuses it with that reason, so don't offer the button.
+                            // Hidden for an archive (nothing to write back) and for a backup
+                            // from a DIFFERENT watch - the backend refuses that too, but the
+                            // button should not be there to press in the first place.
                             RoundedButton {
-                                visible: modelData.hasRoutes === true || modelData.hasEmber === true
+                                visible: (modelData.hasRoutes === true || modelData.hasEmber === true)
+                                         && !(modelData.deviceSerial && DeviceService.serial
+                                              && modelData.deviceSerial !== DeviceService.serial)
                                 text: qsTr("Restore")
                                 onClicked: BackupService.restoreBackup(modelData.prefix, true)
                             }
@@ -343,8 +359,7 @@ PageFlickable {
                         width: parent.width
                         spacing: 4
                         Text {
-                            text: new Date(modelData.createdAt * 1000)
-                                .toLocaleString(Qt.locale(), Locale.ShortFormat)
+                            text: DateFormat.dateTime(new Date(modelData.createdAt * 1000))
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                         }

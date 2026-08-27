@@ -37,10 +37,13 @@ QtObject {
         return WatchUnits.energy(kcal);
     }
 
+    // Every activity card, row and summary line comes through here, so this is the one place
+    // that had to change to make dates day-first app-wide - see DateFormat.qml for why the
+    // pattern is explicit instead of taken from Qt.locale().
     function formatDate(isoString) {
         if (!isoString) return qsTr("Unknown date");
-        const d = new Date(isoString);
-        return d.toLocaleDateString(Qt.locale(), Locale.ShortFormat);
+        const out = DateFormat.date(isoString);
+        return out === "" ? qsTr("Unknown date") : out;
     }
 
     // Track center for a map preview - a plain average, not a real bounding-box fit (good

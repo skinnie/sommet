@@ -77,6 +77,9 @@ set_source_files_properties(qml/TotalsFacts.qml PROPERTIES
 set_source_files_properties(qml/NavBus.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
+set_source_files_properties(qml/DateFormat.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE true
+)
 set_source_files_properties(qml/SunTimes.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
@@ -126,6 +129,7 @@ qt_add_qml_module(ambitapp
         qml/ActivityMetrics.qml
         qml/TotalsFacts.qml
         qml/NavBus.qml
+        qml/DateFormat.qml
         qml/SunTimes.qml
         qml/FunFacts.qml
         qml/components/TotalsCard.qml
