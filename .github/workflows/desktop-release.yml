@@ -147,9 +147,14 @@ jobs:
         with:
           version: "6.12.0"
 
+      # -DCMAKE_OSX_DEPLOYMENT_TARGET pins the app's minimum macOS. Without it, CMake stamps
+      # LSMinimumSystemVersion with the *build runner's* macOS (now newer than many users'
+      # Macs), so the .app refuses to launch with "you can't use this version of the
+      # application with this version of macOS" (Sommet v0.1.46 bug, hit on macOS 15.7.9).
+      # 12.0 (Monterey) is a safe floor for Qt 6.12; raise it only if the build complains.
       - name: Build (Release)
         run: |
-          cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release
+          cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           cmake --build desktop/build
 
       # Freeze the Python watch helper into a single ambit-backend (no Python needed on the
@@ -186,6 +191,13 @@ jobs:
           mkdir -p "$APP/Contents/Resources/backend"
           cp dist/backend/ambit-backend "$APP/Contents/Resources/backend/"
           chmod +x "$APP/Contents/Resources/backend/ambit-backend"
+          # Ad-hoc sign the WHOLE bundle last (after macdeployqt rewrote the frameworks and we
+          # added the backend, both of which invalidate any signature). Apple Silicon refuses
+          # to launch a binary with a broken/absent signature - it shows a 🚫 and reads as
+          # "damaged". "--sign -" is a free local signature (no Apple Developer account); it
+          # turns "damaged, needs Terminal" into a normal unsigned app (right-click -> Open).
+          # A fully double-click-clean app would additionally need a Developer ID + notarization.
+          codesign --force --deep --sign - "$APP"
           mkdir -p dist
           hdiutil create -volname Sommet -srcfolder "$APP" -ov -format UDZO dist/Sommet-macos.dmg
 
