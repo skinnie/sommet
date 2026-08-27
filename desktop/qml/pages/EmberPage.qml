@@ -79,6 +79,7 @@ PageFlickable {
     function streak() {
         var f = root.summary.fasts || [], days = {}
         for (var i = 0; i < f.length; ++i) days[Qt.formatDate(new Date(f[i].end), "yyyy-MM-dd")] = true
+        if (root.fasting) days[Qt.formatDate(new Date(), "yyyy-MM-dd")] = true // in-progress fast keeps today alive
         var n = 0, d = new Date()
         while (days[Qt.formatDate(d, "yyyy-MM-dd")]) { n++; d.setDate(d.getDate() - 1) }
         return n

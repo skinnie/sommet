@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
+import { EmberBars } from '../components/EmberBars';
 import {
   loadEmber, saveEmber, applyLog, emberSummary, EmberData, EmberSummary, LogBody,
 } from '../services/EmberStore';
@@ -86,8 +87,20 @@ export default function EmberScreen() {
 
   const series = (sel: (d: any) => number | undefined) =>
     summary.days.filter(d => sel(d) !== undefined).map(d => ({ date: d.date, value: sel(d) as number }));
-  const fastSeries = summary.fasts.map(f => ({
-    date: new Date(f.end).toISOString().slice(0, 10), value: f.hours }));
+  const ymd = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  };
+  const fastSeries = summary.fasts.map(f => ({ date: ymd(f.end), value: f.hours }));
+
+  // Streak = consecutive days back from today with a completed fast; avg fast over the window
+  // (mirrors EmberPage.qml streak()/avgFast()).
+  const avgFast = summary.fasts.length
+    ? Math.round((summary.fasts.reduce((s, f) => s + f.hours, 0) / summary.fasts.length) * 10) / 10 : 0;
+  const fastDays = new Set(summary.fasts.map(f => ymd(f.end)));
+  if (today.fastActive) fastDays.add(ymd(Date.now())); // an in-progress fast keeps today's streak alive
+  let streak = 0;
+  for (const d = new Date(); fastDays.has(ymd(d.getTime())); d.setDate(d.getDate() - 1)) streak++;
 
   function confirmStop() {
     Alert.alert('End fast?', fasting ? `You're at ${hhmm(elapsedMs)}.` : '', [
@@ -147,11 +160,28 @@ export default function EmberScreen() {
           <Text style={[styles.sub, { color: t.mutedText }]}>water</Text>
           <Text style={{ color: t.primary, fontSize: v3Type.tiny, fontWeight: '700' }}>tap +250</Text>
         </Pressable>
+
+        {/* Day streak */}
+        <View style={[styles.tile, nested]}>
+          <Text style={[styles.val, { color: t.text }]}>{streak}</Text>
+          <Text style={[styles.sub, { color: t.mutedText }]}>day streak</Text>
+        </View>
+
+        {/* Avg fast (14d) */}
+        <View style={[styles.tile, nested]}>
+          <Text style={[styles.val, { color: t.text }]}>{avgFast} h</Text>
+          <Text style={[styles.sub, { color: t.mutedText }]}>avg fast 14d</Text>
+        </View>
       </View>
 
-      {fastSeries.length > 1 && <MetricChart label="Fasting hours" unit=" h" decimals={1} series={fastSeries} />}
-      {series(d => d.kcal).length > 1 && <MetricChart label="Calories in" series={series(d => d.kcal)} />}
-      {series(d => d.waterL).length > 1 && <MetricChart label="Water" unit=" L" decimals={1} series={series(d => d.waterL)} />}
+      {/* Bars for fasting + calories, line for water - matches desktop EmberPage.qml */}
+      {fastSeries.length > 1 &&
+        <EmberBars label="Fasting hours" unit="h" decimals={1} goal={today.fastGoalHours || 16}
+          barColor={t.warning} series={fastSeries} />}
+      {series(d => d.kcal).length > 1 &&
+        <EmberBars label="Calories in" unit=" kcal" barColor={t.success} series={series(d => d.kcal)} />}
+      {series(d => d.waterL).length > 1 &&
+        <MetricChart label="Water (litres)" unit=" L" decimals={1} series={series(d => d.waterL)} />}
 
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
         Logged here and synced with the Ember store on your other devices.
@@ -189,7 +219,7 @@ export default function EmberScreen() {
 
 const styles = StyleSheet.create({
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: v3Spacing.small, marginBottom: v3Spacing.medium },
-  tile: { flexGrow: 1, flexBasis: '22%', minWidth: 78, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
+  tile: { flexGrow: 1, flexBasis: '15%', minWidth: 92, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
   ring: { width: 40, height: 40, borderRadius: 20, borderWidth: 3, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   val: { fontSize: v3Type.bodyLarge, fontWeight: '700' },
   sub: { fontSize: v3Type.tiny, fontWeight: '600' },
