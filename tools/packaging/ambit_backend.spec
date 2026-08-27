@@ -89,6 +89,24 @@ _hidapi_dylib = os.environ.get("HIDAPI_DYLIB")
 if _hidapi_dylib and Path(_hidapi_dylib).is_file():
     binaries.append((_hidapi_dylib, "."))
 
+# ambit_legacy_cli: the compiled helper tools/legacy_link.py shells out to for Ambit1/2
+# (routes, POIs, personal settings). It was never referenced here at all, so no packaged build
+# on any platform has ever shipped it and every Ambit1/2 endpoint returned "ambit_legacy_cli is
+# not built" (real bug, macOS hardware test 2026-08-27 with an Ambit2 connected). It must land
+# at tools/vendor/ambit_legacy_cli/ because legacy_link._binary_path() resolves it relative to
+# the bundled tools/ dir. Its libambit dylib/so goes to the root, where the loader finds it.
+_legacy_dir = REPO / "tools" / "vendor" / "ambit_legacy_cli"
+for _name in ("ambit_legacy_cli", "ambit_legacy_cli.exe"):
+    _legacy_cli = _legacy_dir / _name
+    if _legacy_cli.is_file():
+        binaries.append((str(_legacy_cli), "tools/vendor/ambit_legacy_cli"))
+        break
+_libambit_build = REPO / "tools" / "vendor" / "openambit_libambit" / "build"
+if _libambit_build.is_dir():
+    for _lib in sorted(_libambit_build.glob("libambit*")):
+        if _lib.is_file() and not _lib.is_symlink():
+            binaries.append((str(_lib), "."))
+
 a = Analysis(
     [str(BACKEND / "frozen_entry.py")],
     pathex=[str(BACKEND), str(REPO / "tools")],
