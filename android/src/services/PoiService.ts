@@ -73,11 +73,26 @@ export async function readPoisFromWatch(): Promise<WatchPoi[]> {
   try {
     if (isAmbit12((await getDeviceInfo()).name)) {
       const nav = JSON.parse(await readLegacyNav());
-      return (nav.waypoints ?? []).map((w: any) => ({
-        name: w.name || 'POI',
-        latitude: w.lat_e7 / 1e7,
-        longitude: w.lon_e7 / 1e7,
-      }));
+      const wps: any[] = nav.waypoints ?? [];
+      // A waypoint belongs to a route (shown on the Routes screen, not here) only if its
+      // route_name is shared by >=2 waypoints. A standalone POI has an empty route_name, or a
+      // route_name equal to its own name that no other waypoint shares - keep those as POIs so
+      // they don't vanish. Matches NavigationService's >=2-points route rule.
+      const rnCount = new Map<string, number>();
+      for (const w of wps) {
+        const rn = (w.routeName || '').trim();
+        if (rn) rnCount.set(rn, (rnCount.get(rn) ?? 0) + 1);
+      }
+      return wps
+        .filter((w: any) => {
+          const rn = (w.routeName || '').trim();
+          return !rn || (rnCount.get(rn) ?? 0) < 2;
+        })
+        .map((w: any) => ({
+          name: w.name || 'POI',
+          latitude: w.lat_e7 / 1e7,
+          longitude: w.lon_e7 / 1e7,
+        }));
     }
   } catch { /* not a legacy watch, or detection failed - fall through to the SBEM read */ }
 

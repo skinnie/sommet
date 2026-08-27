@@ -1068,7 +1068,10 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitReadLegacyNav(
         if (i) json << ",";
         json << "{\"name\":\"";
         jni_json_escape(json, w->name, sizeof(w->name));
-        json << "\",\"lat_e7\":" << (long)w->latitude
+        json << "\",\"routeName\":\"";
+        jni_json_escape(json, w->route_name, sizeof(w->route_name));
+        json << "\",\"index\":" << (int)w->index
+             << ",\"lat_e7\":" << (long)w->latitude
              << ",\"lon_e7\":" << (long)w->longitude
              << ",\"type\":" << (int)w->type << "}";
     }

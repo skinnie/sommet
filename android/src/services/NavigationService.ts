@@ -228,15 +228,45 @@ export async function readOnWatchNavigation(): Promise<WatchNavigation> {
     try {
       if (isAmbit12((await getDeviceInfo()).name)) {
         const nav = JSON.parse(await readLegacyNav());
+        const wps: any[] = nav.waypoints ?? [];
+        // On the Ambit1/2 a "route" is a set of waypoints sharing a route_name (libambit reads
+        // them as waypoints and never fills ps->routes - hence "0 routes" everywhere until now).
+        // Reconstruct: group the route-tagged waypoints by route name (ordered by their index),
+        // and keep the rest as standalone POIs/waypoints.
+        const byRoute = new Map<string, any[]>();
+        const loose: any[] = [];
+        for (const w of wps) {
+          const rn = (w.routeName || '').trim();
+          if (rn) { if (!byRoute.has(rn)) byRoute.set(rn, []); byRoute.get(rn)!.push(w); }
+          else loose.push(w);
+        }
+        const routes: WatchRoute[] = [];
+        for (const [name, pts] of byRoute) {
+          // A real route has >=2 points; a lone route-tagged waypoint is just a POI whose
+          // route_name happens to equal its own name - keep it as a waypoint, not a 1-pt route.
+          if (pts.length < 2) { loose.push(...pts); continue; }
+          pts.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+          const rpts = pts.map(w => ({ latitude: w.lat_e7 / 1e7, longitude: w.lon_e7 / 1e7, altitude: null }));
+          // Sum the great-circle distance between consecutive route waypoints (haversine).
+          // Legacy routes carry no stored distance - this is the length along the turn-points.
+          let distanceM = 0;
+          for (let i = 1; i < rpts.length; i++) {
+            const a = rpts[i - 1], b = rpts[i];
+            const R = 6371000, toRad = Math.PI / 180;
+            const dLat = (b.latitude - a.latitude) * toRad;
+            const dLon = (b.longitude - a.longitude) * toRad;
+            const h = Math.sin(dLat / 2) ** 2 +
+              Math.cos(a.latitude * toRad) * Math.cos(b.latitude * toRad) * Math.sin(dLon / 2) ** 2;
+            distanceM += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+          }
+          routes.push({ name, points: rpts, distanceM: Math.round(distanceM), ascentM: 0, descentM: 0 });
+        }
         const data: WatchNavigation = {
-          waypoints: (nav.waypoints ?? []).map((w: any) => ({
+          waypoints: loose.map((w: any) => ({
             name: w.name || 'Waypoint', routeName: '',
             latitude: w.lat_e7 / 1e7, longitude: w.lon_e7 / 1e7,
           })),
-          routes: (nav.routes ?? []).map((r: any) => ({
-            name: r.name || 'Route', points: [],
-            distanceM: r.distance ?? 0, ascentM: 0, descentM: 0,
-          })),
+          routes,
         };
         await AsyncStorage.setItem(NAV_CACHE_KEY, JSON.stringify(data)).catch(() => {});
         return data;
