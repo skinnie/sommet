@@ -34,6 +34,7 @@ import {
 } from '../services/ApiIntervalsIcu';
 import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
+import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
 import { CoordinatePicker } from '../components/CoordinatePicker';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
@@ -126,6 +127,12 @@ export default function SettingsScreen() {
   // Ember easter egg (2026-08-26, desktop parity): 10 taps on the version label reveal it.
   const [emberTaps, setEmberTaps]                   = useState(0);
   const [emberOn, setEmberOn]                       = useState(false);
+  // Ember NAS sync config (2026-08-27): the shared store URL + token the iPhone PWA and desktop
+  // use (desktop keeps it in ember/sync.json). Lets Android's interactive Ember merge across
+  // devices instead of logging local-only.
+  const [emberSyncUrl, setEmberSyncUrl]             = useState('');
+  const [emberSyncToken, setEmberSyncToken]         = useState('');
+  const [savingEmberSync, setSavingEmberSync]       = useState(false);
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
   const [coordPickKey, setCoordPickKey]             = useState<string | null>(null);
@@ -341,6 +348,7 @@ export default function SettingsScreen() {
     // the field - only whether one exists).
     hasAnthropicKey().then(setAnthropicSaved);
     isEmberUnlocked().then(setEmberOn);
+    getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
   }, []));
@@ -375,6 +383,19 @@ export default function SettingsScreen() {
     setSavedKey(null);
     setRunalyzeKey('');
     Alert.alert(t.deleted, t.keyDeleted);
+  }
+
+  async function handleSaveEmberSync() {
+    setSavingEmberSync(true);
+    try {
+      const url = emberSyncUrl.trim();
+      await setEmberSyncCfg(url ? { url, token: emberSyncToken.trim() } : null);
+      Alert.alert('Ember', url ? 'Ember sync saved.' : 'Ember sync cleared (local only).');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Failed to save');
+    } finally {
+      setSavingEmberSync(false);
+    }
   }
 
   async function handleSaveIntervals() {
@@ -1078,6 +1099,37 @@ export default function SettingsScreen() {
           />
         </View>
       </View>
+
+      {/* ── Ember sync (only once the egg is unlocked) ── */}
+      {emberOn && (
+        <View style={styles.section}>
+          <Text style={styles.cardTitle}>Ember sync</Text>
+          <Text style={styles.sectionDesc}>
+            Shared store URL + token so Ember logs merge with your other devices (the same
+            ember/sync.json the desktop uses). Leave blank to log on this device only.
+          </Text>
+          <FieldRow
+            icon="link"
+            value={emberSyncUrl}
+            onChangeText={setEmberSyncUrl}
+            placeholder="https://192.168.1.102/ember/sync.php"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <FieldRow
+            icon="key"
+            value={emberSyncToken}
+            onChangeText={setEmberSyncToken}
+            placeholder="token"
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+          />
+          <View style={styles.row}>
+            <Button label={t.saveBtn} variant="filled" loading={savingEmberSync} onPress={handleSaveEmberSync} />
+          </View>
+        </View>
+      )}
 
       {/* ── About / disclaimer ── */}
       <View style={styles.section}>
