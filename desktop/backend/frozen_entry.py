@@ -67,7 +67,35 @@ def _run_tool():
     runpy.run_path(tool, run_name="__main__")
 
 
+def _install_ca_bundle():
+    """Point OpenSSL at certifi's CA store.
+
+    A frozen build ships no CA bundle of its own, so Python's ssl falls back to the path
+    its OpenSSL was compiled with on the CI runner - which does not exist on a user's
+    machine. Every Python-side HTTPS request then dies with CERTIFICATE_VERIFY_FAILED
+    ("unable to get local issuer certificate"): on the macOS v0.2.2 .dmg that killed
+    /api/firmware AND /api/firmware/download, i.e. the whole firmware feature, on every
+    platform. Qt-side requests were unaffected - Qt carries its own TLS stack - which is
+    why maps kept working and this looked like a server outage rather than a packaging bug.
+
+    setdefault, so a user or test can still override it from the environment.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        import certifi
+    except ImportError:
+        return  # nothing to point at; ssl keeps its (broken) default rather than crashing
+    import os
+
+    where = certifi.where()
+    os.environ.setdefault("SSL_CERT_FILE", where)
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", where)
+
+
 def main():
+    _install_ca_bundle()
+
     if len(sys.argv) >= 2 and sys.argv[1] == "--workout-builder":
         _run_workout_builder()
         return

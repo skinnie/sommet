@@ -19,6 +19,7 @@ Three entry forms:
 """
 
 import argparse
+import os
 import pathlib
 import re
 import struct
@@ -31,13 +32,51 @@ REFERENCE_FW = "2.4.17"  # the reference watch, see tools/README.md
 MAGIC = b"SBEM0102"
 
 
-def default_descriptor():
+def suuntolink_dirs():
+    """Where SuuntoLink itself keeps its `descr+SERIAL+FW` files, per platform.
+
+    These are generated per watch AND per firmware, so they can never be shipped with
+    the app - they only exist on a machine where SuuntoLink has actually talked to that
+    watch. Packaging assets/ alone is therefore not a fix: in the frozen download
+    assets/ holds only sportmode_rows.json, which left POIs and Settings undecodable
+    (502s) even though the user's own descriptor was sitting in SuuntoLink's folder."""
+    home = pathlib.Path.home()
+    if sys.platform == "darwin":
+        return [home / "Library" / "Application Support" / "Suuntolink"]
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(home / "AppData" / "Roaming")
+        return [pathlib.Path(base) / "Suuntolink"]
+    return [home / ".local" / "share" / "Suuntolink",
+            home / ".config" / "Suuntolink",
+            home / ".Suuntolink"]
+
+
+def default_descriptor(serial=None, fw=None):
     """The `descr+SERIAL+FW` of SuuntoLink's data folder, found by globbing rather
     than named: the file name carries the watch serial, which is personal data and
-    is not written down in this repository. Keyed on the reference firmware, since
-    a data folder may hold descriptors for several watches."""
-    found = sorted(ASSETS.glob(f"descr+*+{REFERENCE_FW}"))
-    return found[0] if found else ASSETS / f"descr+<SERIAL>+{REFERENCE_FW}"
+    is not written down in this repository.
+
+    Searches SuuntoLink's own data folder first, then the repo's assets/ (which is all
+    a source checkout has). Pass the connected watch's serial/firmware - from
+    /api/device - to pin the exact file; a data folder may hold descriptors for several
+    watches. Deliberately never falls back to a descriptor at a DIFFERENT firmware:
+    that is the silent-wrong-schema bug already fixed twice here (Kailash 0x002A,
+    Traverse 0x002B/0x002D), where a mismatched descriptor decodes plausible nonsense
+    instead of failing loudly."""
+    fw = fw or REFERENCE_FW
+    for folder in [*suuntolink_dirs(), ASSETS]:
+        if not folder.is_dir():
+            continue
+        if serial:
+            exact = folder / f"descr+{serial}+{fw}"
+            if exact.is_file():
+                return exact
+        found = sorted(folder.glob(f"descr+*+{fw}"))
+        if found:
+            return found[0]
+    # Nothing anywhere: name SuuntoLink's folder, not assets/, so the caller's
+    # "descriptor is missing from {parent}" message points somewhere actionable.
+    return suuntolink_dirs()[0] / f"descr+{serial or '<SERIAL>'}+{fw}"
 
 
 # Types of the <FRM> tag. utf8 is NUL-terminated, the rest is little-endian.

@@ -4423,20 +4423,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
 
-        args = [PYTHON, str(TOOLS_DIR / "firmware_write.py"), file,
-                "--expect-model", model, "--commit", "--json"]
+        # Invoke exactly the way run_tool() does. In the frozen download PYTHON is this
+        # helper's own executable and cannot run a .py file: without the "--tool" sentinel
+        # frozen_entry.main() falls through to `import server; server.main()` and boots a
+        # SECOND backend instead of the flasher, so the stream stays empty and the watch is
+        # never touched. Only reproducible in the packaged build - a source checkout has a
+        # real interpreter here, which is why this survived to v0.2.2.
+        tool = str(TOOLS_DIR / "firmware_write.py")
+        args = ([PYTHON, "--tool", tool] if FROZEN else [PYTHON, tool])
+        args += [file, "--expect-model", model, "--commit", "--json"]
+        env = os.environ.copy()
+        if SELECTED_PRODUCT_ID is not None:
+            env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
+        else:
+            env.pop("AMBIT_PRODUCT_ID", None)
+        events = 0
+        noise = []
         with WATCH_LOCK:
             proc = subprocess.Popen(args, cwd=TOOLS_DIR, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                    stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
             try:
                 for line in proc.stdout:
                     line = line.strip()
                     if not line:
                         continue
-                    try:  # forward only real JSON events; skip the tools' own log lines
+                    try:  # forward only real JSON events; keep the tools' own log lines
                         json.loads(line)
                     except json.JSONDecodeError:
+                        noise.append(line)      # keep a bounded tail for diagnosis
+                        del noise[:-40]
                         continue
+                    events += 1
                     try:
                         self.wfile.write((line + "\n").encode("utf-8"))
                         self.wfile.flush()
@@ -4447,6 +4464,21 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 if proc.poll() is None:
                     proc.kill()
+
+        # A 200 carrying an empty stream is indistinguishable from success to the client,
+        # which is exactly how the bug above stayed invisible. If the flasher emitted no
+        # events, or exited nonzero, report it in-band as a phase the page understands.
+        if events == 0 or proc.returncode not in (0, None):
+            detail = "\n".join(noise[-20:])
+            try:
+                self.wfile.write((json.dumps({
+                    "phase": "error",
+                    "message": f"the flasher produced no progress (exit {proc.returncode})",
+                    "detail": detail,
+                }) + "\n").encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def _handle_backup_create(self, body=None):
         """Read-only against the watch (`nav` never writes), safe to call any time - the

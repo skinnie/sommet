@@ -63,7 +63,19 @@ if (REPO / "assets" / "sportmode_rows.json").is_file():
 # to is imported by runpy at runtime, so name them all as hidden imports to make sure their
 # code (and their own transitive deps like `hid` and `bleak`) is actually bundled - except the
 # excluded RE/corpus tools, which the backend never runs.
-hiddenimports = ["server", "ble_bridge"]
+# certifi's cacert.pem: without it the frozen build has NO CA store at all and every
+# Python-side HTTPS call fails CERTIFICATE_VERIFY_FAILED (real bug on the macOS .dmg,
+# 2026-08-27: /api/firmware and /api/firmware/download both dead, so the firmware feature
+# could not even download an image). frozen_entry._install_ca_bundle() points SSL_CERT_FILE
+# at what this collects. Qt has its own TLS stack and was never affected.
+try:
+    from PyInstaller.utils.hooks import collect_data_files as _collect_data_files
+
+    datas += _collect_data_files("certifi")
+except Exception:
+    pass
+
+hiddenimports = ["server", "ble_bridge", "certifi"]
 for _p in glob.glob(str(REPO / "tools" / "*.py")):
     if Path(_p).name not in EXCLUDE_TOOLS:
         hiddenimports.append(Path(_p).stem)
