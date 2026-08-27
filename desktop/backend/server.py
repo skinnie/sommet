@@ -334,11 +334,42 @@ def selected_is_kailash():
     return bool(info) and info.get("model") == "Hoopoe"
 
 
+def autopin_if_needed():
+    """Pin whichever Suunto watch is actually on the bus, when nothing has pinned one yet.
+
+    Without this the backend is only correct while the desktop app is driving it. Every tool
+    falls back to the Ambit3 Peak when no AMBIT_PRODUCT_ID is set - so with an Ambit1 plugged
+    in and nothing pinned, /api/device answers "no Ambit3 Peak (Emu) on the USB bus" and every
+    page built on it comes up empty. André, 2026-08-27: "ambit 1 doesn't show settings on
+    desktop... i believe that was ok" - it was, and what changed was that the backend had been
+    restarted underneath a running app, losing the pin it had been given.
+
+    The app's own DeviceService re-pins when it next polls /api/devices, so this is not a
+    replacement for that - it just means the API is right on its own, immediately, rather than
+    only after a client happens to correct it.
+
+    Silent and best-effort: a failure here leaves the pin unset, which is exactly where it was.
+    """
+    global SELECTED_PRODUCT_ID
+    if SELECTED_PRODUCT_ID is not None:
+        return
+    try:
+        proc = subprocess.run([PYTHON, str(TOOLS_DIR / "list_watches.py")],
+                              capture_output=True, text=True, timeout=60)
+        watches = json.loads(proc.stdout.strip().splitlines()[-1]).get("watches") or []
+        if watches:
+            SELECTED_PRODUCT_ID = int(watches[0]["productId"])
+    except Exception:  # noqa: BLE001 - never let auto-pinning break the call it precedes
+        pass
+
+
 def run_tool(script, args, timeout=180):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
     that means for the specific tool. Serialized across all callers via WATCH_LOCK - see its
     own comment for why."""
+    if script != "list_watches.py":
+        autopin_if_needed()
     env = os.environ.copy()
     if SELECTED_PRODUCT_ID is not None:
         env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
