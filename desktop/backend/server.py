@@ -1078,8 +1078,24 @@ class Handler(BaseHTTPRequestHandler):
         if info.get("ok") and not info.get("routes"):
             routes, _loose = self._legacy_route_groups(info.get("waypoints", []))
             if routes:
-                info["routes"] = routes
-                info["routes_count"] = len(routes)
+                # _legacy_route_groups() emits /api/nav's camelCase shape, which
+                # RouteService::parseOnWatchRoutesJson() consumes. THIS endpoint has a
+                # different contract: its routes[] come straight from ambit_legacy_cli, and
+                # RoutesPage.qml's legacy card binds to those native snake_case names
+                # (points_count / distance_m / altitude_asc_m / altitude_dec_m / points).
+                # Handing it the camelCase shape left every field undefined in the delegate,
+                # so a watch with two real routes still rendered nothing. Translate.
+                info["routes"] = [{
+                    "name": r["name"],
+                    "waypoint_count": r["waypointCount"],
+                    "points_count": r["pointCount"],
+                    "distance_m": int(round(r["distanceMeters"])),
+                    "altitude_asc_m": int(round(r["ascentMeters"])),
+                    "altitude_dec_m": int(round(r["descentMeters"])),
+                    "points": [{"lat": p["lat"], "lon": p["lon"],
+                                "altitude_m": int(p["ele"] or 0)} for p in r["track"]],
+                } for r in routes]
+                info["routes_count"] = len(info["routes"])
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_legacy_sport_mode_write_presets(self, body):
