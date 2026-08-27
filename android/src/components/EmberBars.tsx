@@ -90,6 +90,10 @@ export function EmberBars({
               return (
                 <React.Fragment key={j}>
                   <Path d={barPath(x, yy, bar, h, 3)} fill={barColor} />
+                  {/* value on top of each bar */}
+                  <SvgText x={x + bar / 2} y={yy - 3} fill={t.text} fontSize={9} fontWeight="600" textAnchor="middle">
+                    {p.value.toFixed(decimals)}
+                  </SvgText>
                   {showDay && (
                     <SvgText x={x + bar / 2} y={H - padB + 12} fill={gridColor} fontSize={9} textAnchor="middle">
                       {String(p.date).slice(8)}

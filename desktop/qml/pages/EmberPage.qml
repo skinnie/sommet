@@ -190,7 +190,7 @@ PageFlickable {
 
         // --- charts (mockup: bars + line) ---
         Card { width: parent.width
-            EmberBars { width: parent.width; label: qsTr("Fasting hours"); unit: "h"; goal: 16; barColor: Theme.warning; series: root.fastSeries() } }
+            EmberBars { width: parent.width; label: qsTr("Fasting hours"); unit: "h"; goal: 16; decimals: 1; barColor: Theme.warning; series: root.fastSeries() } }
         Card { width: parent.width
             EmberBars { width: parent.width; label: qsTr("Calories in"); unit: " kcal"; barColor: Theme.success; series: root.daySeries("kcal") } }
         Row {
