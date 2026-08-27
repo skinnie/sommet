@@ -77,7 +77,11 @@ function parseRegion(data: Uint8Array): LegacyMode[] {
       const ln = u16(b, o + 2);
       const body = b.subarray(o + 4, o + 4 + ln);
       if (body.length !== ln) break; // truncated tail
-      if (tag === TAG_SETTINGS && body.length >= 90) modes.push(decodeSettings(body));
+      // The settings blob is 90 bytes on the Ambit2 but only 76 on the Ambit1 (five capabilities
+      // dropped - see tools/legacy_sport_modes.py). decodeSettings reads only fields inside the
+      // blob length (all within the first 38 bytes), so accept both; the old >=90 gate silently
+      // dropped every Ambit1 mode (André, 2026-08-27: "ambit 1 sports mode android don't work").
+      if (tag === TAG_SETTINGS && body.length >= 38) modes.push(decodeSettings(body));
       else if (CONTAINERS.has(tag) && ln >= 4) walk(body);
       o += 4 + ln;
       if (tag === 0 && ln === 0) break;
