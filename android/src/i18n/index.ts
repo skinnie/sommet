@@ -631,10 +631,15 @@ const fr = {
     'La restauration nécessite une fonction native pas encore construite sur Android - ' +
     'ces sauvegardes sont pour l\'instant en lecture seule (utilisez le bureau pour restaurer).',
   backupRestoreBtn: 'Restaurer',
-  backupRestoreConfirmTitle: 'Restaurer les itinéraires ?',
+  backupRestoreConfirmTitle: 'Restaurer la navigation ?',
   backupRestoreConfirmMsg:
-    'Ceci remplace TOUS les itinéraires de la montre par ceux de cette sauvegarde. Continuer ?',
-  backupRestoreDoneMsg: (n: number) => `Restauré : ${n} itinéraire${n === 1 ? '' : 's'} réécrit${n === 1 ? '' : 's'} sur la montre.`,
+    'Ceci remplace TOUS les itinéraires et POI de la montre par ceux de cette sauvegarde. Continuer ?',
+  backupRestoreDoneMsg: (routes: number, waypoints: number) => {
+    const parts: string[] = [];
+    if (routes > 0) parts.push(`${routes} itinéraire${routes === 1 ? '' : 's'}`);
+    if (waypoints > 0) parts.push(`${waypoints} POI`);
+    return `Restauré : ${parts.join(' et ') || 'rien'} réécrit sur la montre.`;
+  },
   backupKailashTitle: 'Historique de voyage & trace GPS',
   backupKailashDesc:
     'Sauvegarde les lieux visités, les statistiques de voyage et la trace GPS passive de cette ' +
@@ -1422,10 +1427,15 @@ const en: typeof fr = {
     'Restore needs a native capability not built on Android yet - these backups are ' +
     'read-only for now (use the desktop app to restore).',
   backupRestoreBtn: 'Restore',
-  backupRestoreConfirmTitle: 'Restore routes?',
+  backupRestoreConfirmTitle: 'Restore navigation?',
   backupRestoreConfirmMsg:
-    'This replaces ALL routes on the watch with the ones in this backup. Continue?',
-  backupRestoreDoneMsg: (n: number) => `Restored: ${n} route${n === 1 ? '' : 's'} written back to the watch.`,
+    'This replaces ALL routes and POIs on the watch with the ones in this backup. Continue?',
+  backupRestoreDoneMsg: (routes: number, waypoints: number) => {
+    const parts: string[] = [];
+    if (routes > 0) parts.push(`${routes} route${routes === 1 ? '' : 's'}`);
+    if (waypoints > 0) parts.push(`${waypoints} POI${waypoints === 1 ? '' : 's'}`);
+    return `Restored: ${parts.join(' and ') || 'nothing'} written back to the watch.`;
+  },
   backupKailashTitle: 'Travel history & GPS track',
   backupKailashDesc:
     'Saves this watch\'s visited places, travel stats and passive GPS track - the only ' +

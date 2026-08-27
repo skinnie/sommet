@@ -107,6 +107,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitReadLegacyRegion(address: Long, length: Long): String?
     private external fun nativeAmbitWritePersonalSetting(offset: Int, width: Int, value: Int): Boolean
     private external fun nativeAmbitWriteLegacyRegion(address: Long, data: ByteArray, tailExtra: Long): Boolean
+    private external fun nativeAmbitWriteLegacyWaypoints(records: ByteArray): Int
     private external fun nativeAmbitWriteSettingsRaw(data: ByteArray): Boolean
     private external fun nativeAmbitSetDateTime(): Boolean
     private external fun nativeAmbitReadCustomModesRaw(): String?
@@ -926,6 +927,24 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 else promise.reject("LEGACY_REGION_WRITE_FAILED", "Failed to write legacy region (see logcat AmbitJNI)")
             } catch (e: Exception) {
                 promise.reject("LEGACY_REGION_WRITE_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun writeLegacyWaypoints(recordsB64: String, promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val bytes = Base64.decode(recordsB64, Base64.DEFAULT)
+                val n = nativeAmbitWriteLegacyWaypoints(bytes)
+                if (n >= 0) promise.resolve(n)
+                else promise.reject("LEGACY_WAYPOINT_WRITE_FAILED", "Failed to write legacy waypoints (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("LEGACY_WAYPOINT_WRITE_ERROR", e.message ?: "Unknown error")
             }
         }
     }

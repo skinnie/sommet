@@ -1,4 +1,4 @@
-import { readLegacyRegion, writeLegacyRegion, connect, disconnect, isBleTransportActive } from '../native/AmbitUsbModule';
+import { readLegacyRegion, writeLegacyRegion, writeLegacyWaypoints, readLegacyNav, connect, disconnect, isBleTransportActive } from '../native/AmbitUsbModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 
 // Ambit1/2 (Bluebird) route-region BACKUP + RESTORE (2026-08-27, André: "legacy nav backup +
@@ -76,6 +76,105 @@ export async function restoreLegacyRoutes(bytes: Uint8Array): Promise<{ routeCou
       throw new Error('Route region did not read back as written.');
     }
     return { routeCount: u16(bytes, 4) };
+  } finally {
+    if (!overBle) await disconnect().catch(() => {});
+  }
+}
+
+// ─── Waypoints (POIs) ────────────────────────────────────────────────────────
+// Legacy waypoints are NOT a flash region - they live in the command-accessible nav list
+// (readLegacyNav / 0x0b02/0x0b03). Write is the command path (native writeLegacyWaypoints:
+// 0x0b1b write_start, 0x0b04 nav_memory_delete, 0x0b05 per waypoint). Because 0x0b04 clears the
+// whole nav list and can drop the route region too, restoreLegacyWaypoints snapshots + re-writes
+// the routes around the waypoint write, so restoring POIs never destroys the watch's routes.
+
+export interface LegacyWaypoint {
+  name: string;
+  routeName: string;
+  lat_e7: number;
+  lon_e7: number;
+  type: number;                 // raw device type (0..17); round-tripped unchanged
+  ctime_year?: number; ctime_month?: number; ctime_day?: number;
+  ctime_hour?: number; ctime_minute?: number; ctime_second?: number;
+}
+
+const WP_RECORD_LEN = 48;
+
+function putLatin1(out: Uint8Array, off: number, s: string, max: number): void {
+  const n = Math.min(s.length, max - 1); // leave room for a NUL within the field
+  for (let i = 0; i < n; i++) out[off + i] = s.charCodeAt(i) & 0xff;
+}
+
+/** Encode waypoints to the flat 48-byte-per-record blob the native writeLegacyWaypoints expects. */
+export function encodeWaypoints(wps: LegacyWaypoint[]): Uint8Array {
+  const out = new Uint8Array(wps.length * WP_RECORD_LEN);
+  const dv = new DataView(out.buffer);
+  wps.forEach((w, i) => {
+    const o = i * WP_RECORD_LEN;
+    putLatin1(out, o + 0, w.name ?? '', 16);
+    putLatin1(out, o + 16, w.routeName ?? '', 16);
+    dv.setInt32(o + 32, w.lat_e7 | 0, true);
+    dv.setInt32(o + 36, w.lon_e7 | 0, true);
+    out[o + 40] = w.type & 0xff;
+    dv.setUint16(o + 41, (w.ctime_year ?? 0) & 0xffff, true);
+    out[o + 43] = (w.ctime_month ?? 0) & 0xff;
+    out[o + 44] = (w.ctime_day ?? 0) & 0xff;
+    out[o + 45] = (w.ctime_hour ?? 0) & 0xff;
+    out[o + 46] = (w.ctime_minute ?? 0) & 0xff;
+    out[o + 47] = (w.ctime_second ?? 0) & 0xff;
+  });
+  return out;
+}
+
+/** Back up the connected Ambit1/2's waypoints (POIs). Opens its own short-lived connection.
+ * Returns the waypoint list to save, or null when the watch has none. */
+export async function backupLegacyWaypoints(): Promise<LegacyWaypoint[] | null> {
+  const overBle = isBleTransportActive();
+  if (!overBle) await connect();
+  try {
+    const nav = JSON.parse(await readLegacyNav());
+    const wps: any[] = nav?.waypoints ?? [];
+    if (wps.length === 0) return null;
+    return wps.map((w) => ({
+      name: String(w.name ?? ''),
+      routeName: String(w.routeName ?? ''),
+      lat_e7: Number(w.lat_e7) | 0,
+      lon_e7: Number(w.lon_e7) | 0,
+      type: Number(w.type) & 0xff,
+      ctime_year: Number(w.ctime_year ?? 0),
+      ctime_month: Number(w.ctime_month ?? 0),
+      ctime_day: Number(w.ctime_day ?? 0),
+      ctime_hour: Number(w.ctime_hour ?? 0),
+      ctime_minute: Number(w.ctime_minute ?? 0),
+      ctime_second: Number(w.ctime_second ?? 0),
+    }));
+  } finally {
+    if (!overBle) await disconnect().catch(() => {});
+  }
+}
+
+/** Restore waypoints (POIs) to the connected Ambit1/2 (destructive: replaces all POIs). Route-safe:
+ * snapshots the route region, writes the waypoints (which clears the whole nav list), then re-writes
+ * the routes so they survive. Verifies the waypoint count read back. */
+export async function restoreLegacyWaypoints(wps: LegacyWaypoint[]): Promise<{ count: number }> {
+  const overBle = isBleTransportActive();
+  if (!overBle) await connect();
+  try {
+    // 1. snapshot current routes (the waypoint write's 0x0b04 may clear them)
+    const routeSnap = await readLegacyRouteRegion().catch(() => null);
+    // 2. write the waypoints (write_start + nav_memory_delete + per-waypoint)
+    const n = await writeLegacyWaypoints(bytesToBase64(encodeWaypoints(wps)));
+    if (n < 0) throw new Error('The watch did not accept the waypoint write.');
+    // 3. re-write the routes we snapshotted, so restoring POIs never destroys routes
+    if (routeSnap) {
+      const ok = await writeLegacyRegion(ROUTE_REGION, bytesToBase64(routeSnap.bytes), ROUTE_COMMIT_EXTRA);
+      if (!ok) throw new Error('POIs restored, but re-writing the routes failed - check the watch.');
+    }
+    // 4. verify: re-read the nav list, confirm the waypoint count matches
+    const back = JSON.parse(await readLegacyNav());
+    const got = (back?.waypoints ?? []).length;
+    if (got !== wps.length) throw new Error(`Waypoints did not read back (${got}/${wps.length}).`);
+    return { count: wps.length };
   } finally {
     if (!overBle) await disconnect().catch(() => {});
   }

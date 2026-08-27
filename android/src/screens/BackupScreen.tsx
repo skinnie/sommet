@@ -126,9 +126,13 @@ export default function BackupScreen() {
   }
 
   async function handleShareBackup(entry: BackupEntry) {
-    const name = entry.legacy ? `${entry.prefix}_legacy-routes.bin` : `${entry.prefix}_routes.bin`;
+    // Share a representative file: legacy routes.bin if present, else the POI json; SBEM routes.bin.
+    const name = entry.legacy
+      ? (entry.legacyRoutes ? `${entry.prefix}_legacy-routes.bin` : `${entry.prefix}_legacy-waypoints.json`)
+      : `${entry.prefix}_routes.bin`;
+    const mime = name.endsWith('.json') ? 'application/json' : 'application/octet-stream';
     try {
-      await shareFile(`${backupsFolderPath()}/${name}`, 'application/octet-stream');
+      await shareFile(`${backupsFolderPath()}/${name}`, mime);
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
     }
@@ -144,7 +148,7 @@ export default function BackupScreen() {
           setRestoreBusy(true);
           try {
             const r = await restoreNavBackup(entry.prefix);
-            Alert.alert(t.backupNavSection, t.backupRestoreDoneMsg(r.routeCount));
+            Alert.alert(t.backupNavSection, t.backupRestoreDoneMsg(r.routeCount, r.waypointCount));
           } catch (e: any) {
             Alert.alert(t.error, e?.message ?? t.unknownError);
           } finally {
@@ -235,7 +239,7 @@ export default function BackupScreen() {
         {backups.length === 0 && <StatusLine text={t.backupExistingEmpty} />}
         {backups.map(b => (
           <View key={b.prefix} style={styles.backupRow}>
-            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}{b.legacy ? ' · routes' : ''}</Text>
+            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}{b.legacy ? ` · ${[b.legacyRoutes && 'routes', b.legacyWaypoints && 'POIs'].filter(Boolean).join(' + ')}` : ''}</Text>
             <View style={styles.backupRowBtns}>
               {b.legacy && (
                 <TouchableOpacity style={styles.shareBtn} disabled={restoreBusy} onPress={() => handleRestore(b)}>

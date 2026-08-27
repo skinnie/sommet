@@ -278,6 +278,18 @@ export function writeLegacyRegion(address: number, dataB64: string, tailExtra: n
 }
 
 /**
+ * Ambit 1/2 (Bluebird) waypoint (POI) WRITE - the command path (0x0b1b write_start, 0x0b04
+ * nav_memory_delete, then one 0x0b05 per waypoint), NOT a flash-region write. Legacy waypoints
+ * live in the nav list readLegacyNav reads, not the SBEM POI list addPoi uses (empty here).
+ * `recordsB64` is base64 of a flat 48-byte-per-waypoint blob (see AmbitLegacyNav.encodeWaypoints).
+ * DESTRUCTIVE: 0x0b04 clears the whole nav list (and may drop routes) - restoreLegacyWaypoints
+ * snapshots + re-writes routes around this. Resolves the number of waypoints written.
+ */
+export function writeLegacyWaypoints(recordsB64: string): Promise<number> {
+  return NativeAmbit.writeLegacyWaypoints(recordsB64);
+}
+
+/**
  * Ambit 1/2 (Bluebird) legacy personal-settings WRITE (0x0b01), reverse-engineered from a
  * real SuuntoLink<->Ambit2 USB capture (2026-08-26, docs/ambit2_protocol_findings.md). The
  * native side does the read-modify-write: read the whole struct (188 B on Ambit2 / 132 on
