@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { connect, disconnect, addPoi, pickGpxFile, readPoiListRaw, saveToDownloads } from '../native/AmbitUsbModule';
+import { connect, disconnect, addPoi, pickGpxFile, readPoiListRaw, saveToDownloads, getDeviceInfo, readLegacyNav } from '../native/AmbitUsbModule';
+import { isAmbit12 } from './AmbitSettingsService';
 import { parseGpxWaypoints } from './RouteGpxParser';
 import { base64ToBytes } from './Base64';
 
@@ -67,6 +68,19 @@ export interface WatchPoi {
 
 /** Reads and decodes the watch's current POI list. Read-only, no risk to the watch. */
 export async function readPoisFromWatch(): Promise<WatchPoi[]> {
+  // Ambit1/2 (Bluebird): the SBEM POI read (readPoiListRaw / 0x0b24) is empty on this family;
+  // waypoints come from libambit_navigation_read (readLegacyNav) instead - desktop parity.
+  try {
+    if (isAmbit12((await getDeviceInfo()).name)) {
+      const nav = JSON.parse(await readLegacyNav());
+      return (nav.waypoints ?? []).map((w: any) => ({
+        name: w.name || 'POI',
+        latitude: w.lat_e7 / 1e7,
+        longitude: w.lon_e7 / 1e7,
+      }));
+    }
+  } catch { /* not a legacy watch, or detection failed - fall through to the SBEM read */ }
+
   const b64 = await readPoiListRaw();
   if (!b64) return [];
   const bytes = base64ToBytes(b64);

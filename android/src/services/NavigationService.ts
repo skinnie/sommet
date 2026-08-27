@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { connect, disconnect, pickGpxFile, writeRoute, readRegion, saveToDownloads } from '../native/AmbitUsbModule';
+import { connect, disconnect, pickGpxFile, writeRoute, readRegion, saveToDownloads, getDeviceInfo, readLegacyNav } from '../native/AmbitUsbModule';
+import { isAmbit12 } from './AmbitSettingsService';
 import { parseRouteGpx, nearestPointIndex, RoutePoint } from './RouteGpxParser';
 import { simplifyRoute } from './RouteSimplify';
 import {
@@ -220,6 +221,28 @@ async function clearNavigationCache(): Promise<void> {
 export async function readOnWatchNavigation(): Promise<WatchNavigation> {
   await connect();
   try {
+    // Ambit1/2 (Bluebird): no SBEM memory map (readNavBases is empty/wrong here). Waypoints
+    // and routes come from libambit_navigation_read (readLegacyNav) instead - desktop parity.
+    // Legacy routes carry no per-point track here (this family rarely has routes; the Ambit2
+    // reports 0), so points is empty - waypoints are the real payload.
+    try {
+      if (isAmbit12((await getDeviceInfo()).name)) {
+        const nav = JSON.parse(await readLegacyNav());
+        const data: WatchNavigation = {
+          waypoints: (nav.waypoints ?? []).map((w: any) => ({
+            name: w.name || 'Waypoint', routeName: '',
+            latitude: w.lat_e7 / 1e7, longitude: w.lon_e7 / 1e7,
+          })),
+          routes: (nav.routes ?? []).map((r: any) => ({
+            name: r.name || 'Route', points: [],
+            distanceM: r.distance ?? 0, ascentM: 0, descentM: 0,
+          })),
+        };
+        await AsyncStorage.setItem(NAV_CACHE_KEY, JSON.stringify(data)).catch(() => {});
+        return data;
+      }
+    } catch { /* not legacy, or detection failed - fall through to the SBEM path */ }
+
     const bases = await readNavBases();
     const [waypointsB64, routesB64] = await Promise.all([
       readRegion(bases.waypointBase, bases.waypointSize),

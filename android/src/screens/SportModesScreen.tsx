@@ -80,6 +80,9 @@ export default function SportModesScreen() {
   const variant = route.params?.variant;
   const maxDisplays = maxDisplaysForVariant(variant);
   const [modes, setModes] = useState<ExerciseMode[] | null>(null);
+  // Ambit1/2: read via the legacy 0x2000 path, rendered read-only (no Ambit3 editor/structural
+  // read, which crashes on this family). See CustomModesService.readCustomModes.
+  const [isLegacy, setIsLegacy] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | undefined>();
   const [writingMode, setWritingMode] = useState<string | null>(null);
@@ -126,13 +129,21 @@ export default function SportModesScreen() {
   }
 
   async function handleRead() {
+    let legacy = false;
     await readCustomModes(s => {
       setPhase(s.phase);
       setError(s.error);
       if (s.modes) applyModes(s.modes);
+      if (s.legacy) legacy = true;
     }, overBle, maxDisplays);
-    // Also load the structural view (menu order, multisport combos, slot counts) via the
-    // full codec. Separate short read; best-effort so a failure here never blocks the editor.
+    setIsLegacy(legacy);
+    // Ambit1/2 have no Ambit3 structural view, and readSportModes() reads the same CustomModes
+    // region that crashes on this family - skip it entirely for legacy (the read-only list is
+    // all that's shown). Otherwise load the structural view (menu order, multisport, slots).
+    if (legacy) {
+      setSummary(null);
+      return;
+    }
     try {
       setSummary(await readSportModes(overBle));
     } catch {

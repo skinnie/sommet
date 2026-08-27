@@ -12,7 +12,7 @@ import { computeActivityClass } from './IntervalsStats';
 // personal-settings mechanism, not the Ambit3/Kailash SBEM 0x1100 - a different read path
 // (readPersonalSettings) and read-only (no write in libambit). Detected by the watch's own
 // name from getDeviceInfo()'s device list. USB-only family (no Bluetooth).
-function isAmbit12(name?: string): boolean {
+export function isAmbit12(name?: string): boolean {
   if (!name) return false;
   return name === 'Suunto Ambit' || name.startsWith('Suunto Ambit 2');
 }

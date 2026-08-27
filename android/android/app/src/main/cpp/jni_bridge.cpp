@@ -1030,6 +1030,112 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWritePersonalSetting(
     return JNI_TRUE;
 }
 
+// JSON-escape a fixed-length C string field (watch names are latin1; emit >=0x80 as \u00xx so
+// the payload stays valid UTF-8, the same discipline ambit_legacy_cli.c's json_str uses).
+static void jni_json_escape(std::ostringstream &o, const char *s, size_t maxlen) {
+    for (size_t i = 0; i < maxlen && s[i]; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '"' || c == '\\') { o << '\\' << (char)c; }
+        else if (c >= 0x20 && c < 0x7f) { o << (char)c; }
+        else { char buf[8]; snprintf(buf, sizeof buf, "\\u%04x", c); o << buf; }
+    }
+}
+
+/**
+ * nativeAmbitReadLegacyNav
+ *
+ * Ambit 1/2 (Bluebird) waypoints + routes. The legacy family answers 0x0b02/0x0b03, which
+ * libambit_navigation_read() drives (its driver has no navigation_read method, but the
+ * top-level function works - same call the desktop tools/vendor/ambit_legacy_cli `settings`
+ * makes). Android's SBEM POI read (0x0b24) is empty on this family, so PoiService/RouteReader
+ * route here instead for parity with desktop. lat/lon are emitted as raw int32 (degrees*1e7);
+ * TS divides. Null on failure.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitReadLegacyNav(
+        JNIEnv *env, jobject /* thiz */)
+{
+    if (!g_device) { LOGE("nativeAmbitReadLegacyNav: Not connected"); return nullptr; }
+    ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
+    if (!ps) return nullptr;
+    libambit_personal_settings_get(g_device, ps);       // populate base struct (match CLI order)
+    int nav_rc = libambit_navigation_read(g_device, ps); // fills ps->waypoints and ps->routes
+    std::ostringstream json;
+    json << "{\"ok\":" << (nav_rc == 0 ? "true" : "false")
+         << ",\"nav_rc\":" << nav_rc << ",\"waypoints\":[";
+    for (uint16_t i = 0; i < ps->waypoints.count; i++) {
+        ambit_waypoint_t *w = &ps->waypoints.data[i];
+        if (i) json << ",";
+        json << "{\"name\":\"";
+        jni_json_escape(json, w->name, sizeof(w->name));
+        json << "\",\"lat_e7\":" << (long)w->latitude
+             << ",\"lon_e7\":" << (long)w->longitude
+             << ",\"type\":" << (int)w->type << "}";
+    }
+    json << "],\"routes\":[";
+    for (uint8_t i = 0; i < ps->routes.count; i++) {
+        ambit_route_t *r = &ps->routes.data[i];
+        if (i) json << ",";
+        json << "{\"name\":\"";
+        jni_json_escape(json, r->name, sizeof(r->name));
+        json << "\",\"points_count\":" << (int)r->points_count
+             << ",\"activity_id\":" << (int)r->activity_id
+             << ",\"distance\":" << (long)r->distance << "}";
+    }
+    json << "]}";
+    libambit_personal_settings_free(ps);
+    return env->NewStringUTF(json.str().c_str());
+}
+
+/**
+ * nativeAmbitReadLegacyRegion
+ *
+ * Ambit 1/2 (Bluebird) raw flash read. nativeAmbitReadRegion uses ambit3_read_flash_region,
+ * which SIGSEGVs on this family - the Ambit3 flash protocol doesn't apply. This mirrors the
+ * desktop tools/vendor/ambit_legacy_cli cmd_region_dump exactly: 0x0b17 in 512-byte chunks
+ * ([u32 addr][u32 len] request; reply echoes 8 bytes then the data), stopping GRACEFULLY at
+ * the region end (a short/failed chunk = end of region, returns the partial - not an error,
+ * same as the desktop). Returns base64 of what was read (empty string if nothing). Used by
+ * AmbitLegacySportModes.ts for region 0x2000.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitReadLegacyRegion(
+        JNIEnv *env, jobject /* thiz */, jlong address, jlong length)
+{
+    if (!g_device) { LOGE("nativeAmbitReadLegacyRegion: Not connected"); return nullptr; }
+    if (length <= 0 || length > 2 * 1024 * 1024) {
+        LOGE("nativeAmbitReadLegacyRegion: implausible length %lld", (long long)length);
+        return nullptr;
+    }
+    const uint32_t CHUNK = 512;
+    uint32_t total = (uint32_t)length, base = (uint32_t)address, got = 0;
+    std::vector<uint8_t> out;
+    out.reserve(total);
+    while (got < total) {
+        uint32_t want = total - got;
+        if (want > CHUNK) want = CHUNK;
+        uint8_t send[8];
+        uint32_t addr = base + got;
+        send[0] = addr & 0xff;        send[1] = (addr >> 8) & 0xff;
+        send[2] = (addr >> 16) & 0xff; send[3] = (addr >> 24) & 0xff;
+        send[4] = want & 0xff;        send[5] = (want >> 8) & 0xff;
+        send[6] = (want >> 16) & 0xff; send[7] = (want >> 24) & 0xff;
+        uint8_t *reply = nullptr;
+        size_t replylen = 0;
+        if (libambit_protocol_command(g_device, 0x0b17, send, sizeof(send), &reply, &replylen, 0) != 0
+            || replylen < (size_t)want + 8) {
+            if (reply) free(reply);
+            break;  // region ended (partial) - graceful, matches desktop cmd_region_dump
+        }
+        out.insert(out.end(), reply + 8, reply + 8 + want);
+        free(reply);
+        got += want;
+    }
+    LOGI("nativeAmbitReadLegacyRegion: 0x%06x, got %zu of %u bytes", base, out.size(), total);
+    std::string b64 = out.empty() ? std::string() : base64Encode(out.data(), out.size());
+    return env->NewStringUTF(b64.c_str());
+}
+
 /**
  * nativeAmbitWriteSettingsRaw
  *

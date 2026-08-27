@@ -1,6 +1,8 @@
-import { connect, disconnect, readCustomModesRaw } from '../native/AmbitUsbModule';
+import { connect, disconnect, getDeviceInfo, readCustomModesRaw } from '../native/AmbitUsbModule';
 import { base64ToBytes } from './Base64';
 import { decode, ExerciseMode } from './CustomModesReader';
+import { isAmbit12 } from './AmbitSettingsService';
+import { readLegacySportModes, LegacyMode } from './AmbitLegacySportModes';
 import {
   renameMode as renameModeRaw, RenameModeResult,
   writeField as writeFieldRaw, WriteFieldResult,
@@ -28,7 +30,31 @@ import {
 export interface ReadCustomModesState {
   phase: 'idle' | 'connecting' | 'reading' | 'done' | 'error';
   modes?: ExerciseMode[];
+  // True when the connected watch is an Ambit1/2 read via the legacy path (region 0x2000),
+  // not the Ambit3 CustomModes region. The screen renders these read-only and skips the
+  // Ambit3-only structural/summary read (which would crash on this family).
+  legacy?: boolean;
   error?: string;
+}
+
+// Ambit1/2 legacy mode -> the ExerciseMode shape the Sport Modes screen renders. displays is
+// left empty (legacy display config isn't decoded here); useHw carries the raw hrbelt/pods
+// bitfield so the pod row shows.
+function legacyToExerciseMode(m: LegacyMode): ExerciseMode {
+  return {
+    settings: {
+      name: m.name,
+      activityId: m.activityId,
+      useHw: m.useHw,
+      altiBaroMode: m.altiBaroMode,
+      recordingInterval: m.recordingInterval,
+      autolap: m.autolapM,
+      hrHigh: m.heartrateMax,
+      hrLow: m.heartrateMin,
+      hrLimitsUse: m.useHrLimits ? 1 : 0,
+    },
+    displays: [],
+  };
 }
 
 /** Real, read-only (0x0b17 flash read) - safe any time the watch is connected. Over BLE
@@ -47,6 +73,18 @@ export async function readCustomModes(
   }
   onState({ phase: 'reading' });
   try {
+    // Ambit1/2 (Bluebird): the Ambit3 CustomModes region (readCustomModesRaw) doesn't exist
+    // here and reading/decoding it crashes the Sport Modes screen. Read the legacy 90-byte
+    // modes off region 0x2000 instead (desktop parity). USB-only family, so only over cable.
+    if (!overBle) {
+      let legacy = false;
+      try { legacy = isAmbit12((await getDeviceInfo()).name); } catch { /* assume Ambit3 */ }
+      if (legacy) {
+        const modes = (await readLegacySportModes()).map(legacyToExerciseMode);
+        onState({ phase: 'done', modes, legacy: true });
+        return;
+      }
+    }
     const bytes = base64ToBytes(await readCustomModesRaw());
     const decoded = decode(bytes, maxUserDisplays);
     onState({ phase: 'done', modes: decoded.exerciseModes });

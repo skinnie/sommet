@@ -248,6 +248,25 @@ export function readPersonalSettings(): Promise<string> {
 }
 
 /**
+ * Ambit 1/2 (Bluebird) waypoints + routes (libambit_navigation_read), as JSON
+ * {ok, nav_rc, waypoints:[{name, lat_e7, lon_e7, type}], routes:[{name, points_count,
+ * activity_id, distance}]}. The SBEM POI read (readPoiListRaw / 0x0b24) is empty on this
+ * family; PoiService and RouteReader use this for desktop parity. The watch must be connected.
+ */
+export function readLegacyNav(): Promise<string> {
+  return NativeAmbit.readLegacyNav();
+}
+
+/**
+ * Ambit 1/2 (Bluebird) raw flash read (0x0b17, 512-byte chunks) - the legacy equivalent of
+ * readRegion(), whose Ambit3 path (ambit3_read_flash_region) SIGSEGVs on this family. Stops
+ * gracefully at the region end (returns the partial). Base64. Used for sport modes (0x2000).
+ */
+export function readLegacyRegion(address: number, length: number): Promise<string> {
+  return NativeAmbit.readLegacyRegion(address, length);
+}
+
+/**
  * Ambit 1/2 (Bluebird) legacy personal-settings WRITE (0x0b01), reverse-engineered from a
  * real SuuntoLink<->Ambit2 USB capture (2026-08-26, docs/ambit2_protocol_findings.md). The
  * native side does the read-modify-write: read the whole struct (188 B on Ambit2 / 132 on

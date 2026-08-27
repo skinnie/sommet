@@ -103,6 +103,8 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitReadDeviceLogRaw(): String?
     private external fun nativeAmbitReadSettingsRaw(): String?
     private external fun nativeAmbitReadPersonalSettings(): String?
+    private external fun nativeAmbitReadLegacyNav(): String?
+    private external fun nativeAmbitReadLegacyRegion(address: Long, length: Long): String?
     private external fun nativeAmbitWritePersonalSetting(offset: Int, width: Int, value: Int): Boolean
     private external fun nativeAmbitWriteSettingsRaw(data: ByteArray): Boolean
     private external fun nativeAmbitSetDateTime(): Boolean
@@ -882,6 +884,46 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 else promise.reject("PERSONAL_SETTINGS_READ_FAILED", "Failed to read personal settings (see logcat AmbitJNI)")
             } catch (e: Exception) {
                 promise.reject("PERSONAL_SETTINGS_READ_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    // Ambit 1/2 (Bluebird) raw flash read (0x0b17, 512-byte chunks) - the legacy equivalent of
+    // readRegion, whose Ambit3 path SIGSEGVs on this family. Used for sport modes (region
+    // 0x2000). Stops gracefully at the region end. Base64.
+    @ReactMethod
+    fun readLegacyRegion(address: Double, length: Double, promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val b64 = nativeAmbitReadLegacyRegion(address.toLong(), length.toLong())
+                if (b64 != null) promise.resolve(b64)
+                else promise.reject("LEGACY_REGION_READ_FAILED", "Failed to read legacy region (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("LEGACY_REGION_READ_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    // Ambit 1/2 (Bluebird) waypoints + routes (libambit_navigation_read, 0x0b02/0x0b03),
+    // returned as JSON. The SBEM POI read (0x0b24) is empty on this family; PoiService and
+    // RouteReader use this for desktop parity. Read-only.
+    @ReactMethod
+    fun readLegacyNav(promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val json = nativeAmbitReadLegacyNav()
+                if (json != null) promise.resolve(json)
+                else promise.reject("LEGACY_NAV_READ_FAILED", "Failed to read legacy nav (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("LEGACY_NAV_READ_ERROR", e.message ?: "Unknown error")
             }
         }
     }
