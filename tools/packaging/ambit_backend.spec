@@ -52,6 +52,12 @@ if (REPO / "data" / "suunto_apps").is_dir():
     datas.append((str(REPO / "data" / "suunto_apps"), "data/suunto_apps"))
 if (BACKEND / "demo_data").is_dir():
     datas.append((str(BACKEND / "demo_data"), "backend/demo_data"))
+# assets/sportmode_rows.json: the SuuntoLink DisplayRow enum table that tools/row_bridge.py loads
+# at runtime (it reads ../assets/sportmode_rows.json). assets/ is NOT bundled wholesale - it holds
+# large, not-for-release material - so collect just this one file. Absent -> FileNotFoundError /
+# repeated 500s on the sport-mode/demo endpoints (real bug on the macOS .dmg, 2026-08-27).
+if (REPO / "assets" / "sportmode_rows.json").is_file():
+    datas.append((str(REPO / "assets" / "sportmode_rows.json"), "assets"))
 
 # server.py and ble_bridge sit next to the entry script; every tool the backend can shell out
 # to is imported by runpy at runtime, so name them all as hidden imports to make sure their
@@ -68,11 +74,20 @@ for _p in glob.glob(str(REPO / "tools" / "*.py")):
 # then throws on a clean user PC and no watch is ever detected (real bug, Sommet v0.1.46).
 # The Windows CI step downloads hidapi.dll and points HIDAPI_DLL at it; bundle it at the
 # bundle root so Windows' DLL search order (which includes sys._MEIPASS) finds it at runtime.
-# No-op on macOS/Linux, where hidapi comes in as a normal dependency of the `hid` wheel.
+# macOS has the SAME problem - the earlier "hidapi comes in as a normal dependency of the `hid`
+# wheel" note was WRONG: the `hid` wheel is a pure ctypes binding and bundles NO libhidapi.dylib,
+# so PyInstaller ships none and /api/devices dies with "Unable to load ... libhidapi.dylib" -> the
+# watch is invisible on the .dmg (real bug, first Mac hardware test 2026-08-27, Apple Silicon).
 binaries = []
 _hidapi_dll = os.environ.get("HIDAPI_DLL")
 if _hidapi_dll and Path(_hidapi_dll).is_file():
     binaries.append((_hidapi_dll, "."))
+# macOS CI runs `brew install hidapi` and points HIDAPI_DYLIB at libhidapi.dylib; bundle it at the
+# root, where PyInstaller's ctypes loader resolves the bare `libhidapi.dylib` name the `hid`
+# package asks for (same mechanism as the Windows DLL above).
+_hidapi_dylib = os.environ.get("HIDAPI_DYLIB")
+if _hidapi_dylib and Path(_hidapi_dylib).is_file():
+    binaries.append((_hidapi_dylib, "."))
 
 a = Analysis(
     [str(BACKEND / "frozen_entry.py")],
