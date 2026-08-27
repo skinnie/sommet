@@ -25,16 +25,7 @@ Item {
 
     // Activities come from whichever device is connected, exactly as the Activities page
     // decides it - one source of truth for "what have I got", reused rather than re-derived.
-    readonly property var allActivities:
-        HomeViewModel.isGarmin ? GarminService.activities
-        : HomeViewModel.isKailash ? KailashService.sessions.map(function(s) {
-              return {
-                  name: qsTr("Walk"), startTime: s.when,
-                  distanceMeters: s.distanceMeters, durationSeconds: s.durationSeconds,
-                  ascentMeters: 0, energyKcal: 0, track: [],
-              }
-          })
-        : ActivityService.activities
+    readonly property var allActivities: ActivityViewModel.feed
 
     Component.onCompleted: {
         ActivityService.refresh()

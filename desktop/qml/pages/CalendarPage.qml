@@ -15,16 +15,7 @@ Item {
 
     // Same device-aware activity source TotalsPage.qml already established as the one
     // place to read this from - not re-derived per page.
-    readonly property var allActivities:
-        HomeViewModel.isGarmin ? GarminService.activities
-        : HomeViewModel.isKailash ? KailashService.sessions.map(function(s) {
-              return {
-                  name: qsTr("Walk"), startTime: s.when,
-                  distanceMeters: s.distanceMeters, durationSeconds: s.durationSeconds,
-                  ascentMeters: 0, energyKcal: 0, track: [],
-              }
-          })
-        : ActivityService.activities
+    readonly property var allActivities: ActivityViewModel.feed
 
     Component.onCompleted: {
         ActivityService.refresh()

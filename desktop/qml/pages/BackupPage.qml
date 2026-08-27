@@ -38,7 +38,7 @@ PageFlickable {
     // Whether the watch-backup card below is showing - if it is, it already backs up Ember
     // too (the backend writes an -ember.json alongside every watch backup, silently), so the
     // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
-    readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+    readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
 
     Column {
         id: column
@@ -58,7 +58,7 @@ PageFlickable {
         // connected Ambit1 got a real 502 (skipped every SBEM region, "this watch does not
         // declare it") - same fix as Watch Settings/Sport Modes/Routes/POIs.
         Text {
-            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsWatchBackup
             width: 480
             wrapMode: Text.WordWrap
             color: Theme.mutedText
@@ -67,7 +67,7 @@ PageFlickable {
 
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -102,7 +102,7 @@ PageFlickable {
 
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -161,7 +161,7 @@ PageFlickable {
         // and the backup lands there; the desktop sync client carries it to the cloud. ---
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall

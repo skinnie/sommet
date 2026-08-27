@@ -754,14 +754,15 @@ PageFlickable {
                     width: parent.width
                     visible: activityCount > 0
 
-                    // Same per-device source rule as Last Activity below - the year is
-                    // whatever the newest activity's year is, matching TotalsPage's own
-                    // "most recent year with data" default rather than the wall clock, so
-                    // a January visit still shows last year's real story instead of zeros.
-                    readonly property var _activities: HomeViewModel.isKailash
-                        ? (KailashService.trackLogOk ? KailashService.trackLogActivities : [])
-                        : (HomeViewModel.isGarmin ? GarminService.activities
-                                                  : ActivityService.activities)
+                    // The whole history (ActivityViewModel.feed), NOT just the connected
+                    // watch's own log - this card is a year total, and plugging in a Kailash
+                    // used to collapse it to whatever that watch still held (André,
+                    // 2026-08-26, the same report that fixed Activities/Totals/Calendar).
+                    // The year is whatever the newest activity's year is, matching
+                    // TotalsPage's own "most recent year with data" default rather than the
+                    // wall clock, so a January visit still shows last year's real story
+                    // instead of zeros.
+                    readonly property var _activities: ActivityViewModel.feed
                     readonly property int year: {
                         let best = -1
                         for (const a of _activities) {

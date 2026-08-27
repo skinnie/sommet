@@ -27,8 +27,29 @@ QtObject {
     readonly property var _legacyModels: (["Bluebird", "Duck", "Colibri", "Greentit"])
     readonly property bool _isLegacy: _legacyModels.indexOf(DeviceService.model) !== -1
 
-    property bool supportsRoutes: !_isLegacy
-    property bool supportsPOIs: !_isLegacy
+    // Kailash (Hoopoe) is a GPS travel/adventure watch with no route-following and no POI
+    // feature at all - see KAILASH-SCOPING-NOTE.md's own "What this project is (and isn't)".
+    // That is not a gap in the Routes/POIs pages, it is the hardware.
+    //
+    // Keyed off DeviceService.model, NOT HomeViewModel.isKailash, which is where NavRail read
+    // it before: isKailash is `connected && model === "Hoopoe"`, so every blip in the 10s
+    // connection heartbeat flashed Routes and POIs back into the rail on a watch that has
+    // never supported either (André, 2026-08-26: "if kailash, routes and pois should not
+    // show, since it is not supported" - seen while the link had dropped). deviceservice.cpp
+    // only ever ASSIGNS m_model on a successful read and never clears it, so the last-known
+    // model rides out a blip and the rail stays still.
+    readonly property bool _isKailash: DeviceService.model === "Hoopoe"
+
+    property bool supportsRoutes: !_isLegacy && !_isKailash
+    property bool supportsPOIs: !_isLegacy && !_isKailash
+
+    // Backup & Restore is write_nav.py's nav --save/restore over the SBEM flash regions.
+    // BackupPage used to read supportsRoutes for this, which was fine while the two were the
+    // same predicate - excluding Kailash above would silently have taken Backup away from it
+    // as a side effect, so the two are separated here and this one keeps its exact previous
+    // value. Whether a Kailash backup actually round-trips is a real open question (its
+    // regions are not the Ambit3's), deliberately NOT answered by this change.
+    property bool supportsWatchBackup: !_isLegacy
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see

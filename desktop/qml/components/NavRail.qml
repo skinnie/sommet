@@ -39,9 +39,10 @@ Rectangle {
         NavItem {
             width: parent.width
             // Kailash excluded, real 2026-08-09 - it's a GPS travel/adventure watch with no
-            // route-following feature at all (KAILASH-SCOPING-NOTE.md's own "What this
-            // project is (and isn't)" section), not a gap in this page.
-            visible: !HomeViewModel.isKailash
+            // route-following feature at all. Asked of the CAPABILITY, not of the model:
+            // AMBITAPP_SPEC.md's "never hardcode watch models" rule, and the capability also
+            // survives a connection blip where `isKailash` did not. See DeviceCapabilities.
+            visible: DeviceCapabilities.supportsRoutes
             glyph: Icons.routes
             label: qsTr("Routes")
             selected: root.currentPage === "routes"
@@ -50,7 +51,7 @@ Rectangle {
         NavItem {
             width: parent.width
             // Kailash excluded, real 2026-08-09, same reasoning as Routes above.
-            visible: !HomeViewModel.isKailash
+            visible: DeviceCapabilities.supportsPOIs
             glyph: Icons.pois
             label: qsTr("POIs")
             selected: root.currentPage === "pois"
