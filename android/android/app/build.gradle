@@ -110,10 +110,11 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            manifestPlaceholders = [usesCleartextTraffic: "true"]
         }
         release {
-            manifestPlaceholders = [usesCleartextTraffic: "false"]
+            // Cleartext policy now lives in res/xml/network_security_config.xml
+            // (LAN hosts allowed, internet TLS-only) - same in debug and release,
+            // so the NAS Ember sync works in the shipped build too.
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug

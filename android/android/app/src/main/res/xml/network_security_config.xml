@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is off by default (internet traffic must be TLS), but André's home
+  services - the Synology NAS (Ember sync, Runalyze, Kan, intervals bridge) and
+  the dev host - are plain http:// on the LAN. Permit cleartext only for those
+  hosts so the release build can reach them while everything else stays HTTPS.
+  Replaces the old per-build usesCleartextTraffic flag, which blocked the NAS in
+  release and let the Ember sync fail silently.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false" />
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">192.168.1.102</domain>
+    <domain includeSubdomains="true">192.168.1.179</domain>
+    <domain includeSubdomains="true">localhost</domain>
+    <domain includeSubdomains="true">127.0.0.1</domain>
+    <domain includeSubdomains="true">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>
