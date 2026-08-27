@@ -1,12 +1,16 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useRoute, RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../../App';
 import {
   runFirmwareCheck, downloadFirmware, BackupState,
 } from '../services/FirmwareBackupService';
 import {
   createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile,
 } from '../services/NavBackupService';
+import {
+  createKailashArchive, listKailashArchives, KailashArchiveEntry,
+} from '../services/KailashBackupService';
 import { shareFile } from '../native/AmbitUsbModule';
 import { t, fmtDateTime } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
@@ -29,6 +33,17 @@ export default function BackupScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
 
+  // A Kailash (Hoopoe) has no Routes/Waypoints database to back up - what's irreplaceable is its
+  // travel history + GPS track, so it gets its own archive card instead of the nav-backup cards
+  // (parity with the desktop's DeviceCapabilities.supportsTravelArchive gating). The model is
+  // handed in from Home, which already knows the connected watch.
+  const route = useRoute<RouteProp<RootStackParamList, 'Backup'>>();
+  const isKailash = route.params?.deviceModel === 'Hoopoe';
+
+  const [archives, setArchives] = useState<KailashArchiveEntry[]>([]);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | undefined>();
+
   const [state, setState] = useState<BackupState>({ phase: 'idle' });
   const [downloadPct, setDownloadPct] = useState(0);
   const [downloadedTo, setDownloadedTo] = useState<string | undefined>();
@@ -41,8 +56,35 @@ export default function BackupScreen() {
 
   const refreshBackups = useCallback(() => {
     listNavBackups().then(setBackups).catch(() => {});
+    listKailashArchives().then(setArchives).catch(() => {});
   }, []);
   useFocusEffect(useCallback(() => { refreshBackups(); }, [refreshBackups]));
+
+  async function handleCreateArchive() {
+    if (archiveBusy) return;
+    setArchiveBusy(true);
+    setArchiveError(undefined);
+    try {
+      const r = await createKailashArchive();
+      refreshBackups();
+      Alert.alert(t.backupKailashTitle,
+        t.backupKailashSavedMsg(r.historySaved ? 1 : 0, r.trackPoints));
+    } catch (e: any) {
+      setArchiveError(e?.message ?? t.unknownError);
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  async function handleShareArchive(entry: KailashArchiveEntry, kind: 'history' | 'track') {
+    const name = kind === 'history' ? `${entry.prefix}_kailash-history.json` : `${entry.prefix}_kailash-track.gpx`;
+    const mime = kind === 'history' ? 'application/json' : 'application/gpx+xml';
+    try {
+      await shareFile(`${backupsFolderPath()}/${name}`, mime);
+    } catch (e: any) {
+      Alert.alert(t.error, e?.message ?? t.unknownError);
+    }
+  }
 
   // ── Backup database to folder - replaces the cloud-OAuth upload (André, 2026-08-16). Reads
   // the nav DB and hands it to the system "Save as" picker so the user can drop it in any
@@ -122,7 +164,40 @@ export default function BackupScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
 
-      {/* ── Navigation backup - real "Backup & Restore" card (BackupPage.qml parity) ── */}
+      {/* ── Kailash travel archive - its own backup (no Routes/Waypoints DB to save; parity with
+          the desktop's supportsTravelArchive card). One-way archive: history + GPS track. ── */}
+      {isKailash && (
+        <Section title={t.backupKailashTitle} description={t.backupKailashDesc} style={{ marginTop: 16 }}>
+          <View style={styles.row}>
+            <Button label={t.backupKailashSaveBtn} variant="filled" loading={archiveBusy} disabled={archiveBusy} onPress={handleCreateArchive} />
+          </View>
+          {archiveBusy && <StatusLine text={t.backupNavWorking} />}
+          {!!archiveError && <StatusLine text={archiveError} tone="alert" />}
+          {archives.length === 0 && !archiveBusy && <StatusLine text={t.backupExistingEmpty} />}
+          {archives.map(a => (
+            <View key={a.prefix} style={styles.backupRow}>
+              <Text style={styles.backupDate}>{fmtDateTime(a.createdAt)}</Text>
+              <View style={styles.backupRowBtns}>
+                {a.hasHistory && (
+                  <TouchableOpacity style={styles.shareBtn} onPress={() => handleShareArchive(a, 'history')}>
+                    <Text style={styles.shareBtnText}>{t.backupKailashHistoryBtn}</Text>
+                  </TouchableOpacity>
+                )}
+                {a.hasTrack && (
+                  <TouchableOpacity style={styles.shareBtn} onPress={() => handleShareArchive(a, 'track')}>
+                    <Text style={styles.shareBtnText}>{t.backupKailashTrackBtn}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          ))}
+          <Text style={styles.restoreNote}>{t.backupKailashArchiveNote}</Text>
+        </Section>
+      )}
+
+      {/* ── Navigation backup - real "Backup & Restore" card (BackupPage.qml parity). Not for a
+          Kailash: it has no Routes/Waypoints regions to save (they read back empty). ── */}
+      {!isKailash && (<>
       <Section title={t.backupNavSection} description={t.backupNavDesc} style={{ marginTop: 16 }}>
         <View style={styles.row}>
           <Button label={t.backupNavCreateBtn} variant="filled" loading={navBackupBusy} disabled={navBackupBusy} onPress={handleCreateNavBackup} />
@@ -164,6 +239,7 @@ export default function BackupScreen() {
         {folderBusy && <StatusLine text={t.backupNavWorking} />}
         {!!folderError && <StatusLine text={folderError} tone="alert" />}
       </Section>
+      </>)}
 
       <WarningNote>{t.backupWarning}</WarningNote>
 

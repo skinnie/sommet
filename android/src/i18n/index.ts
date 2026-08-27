@@ -630,9 +630,22 @@ const fr = {
   backupRestoreUnavailable:
     'La restauration nécessite une fonction native pas encore construite sur Android - ' +
     'ces sauvegardes sont pour l\'instant en lecture seule (utilisez le bureau pour restaurer).',
+  backupKailashTitle: 'Historique de voyage & trace GPS',
+  backupKailashDesc:
+    'Sauvegarde les lieux visités, les statistiques de voyage et la trace GPS passive de cette ' +
+    'montre - les seules données irremplaçables d\'un Kailash (il n\'a pas de base d\'itinéraires ' +
+    'ou de points à sauvegarder).',
+  backupKailashSaveBtn: 'Enregistrer l\'archive',
+  backupKailashSavedMsg: (h: number, pts: number) =>
+    `Archive enregistrée : ${h ? 'historique' : 'pas d\'historique'}, ${pts} point${pts === 1 ? '' : 's'} GPS.`,
+  backupKailashHistoryBtn: 'Historique',
+  backupKailashTrackBtn: 'Trace GPS',
+  backupKailashArchiveNote:
+    'Ceci est une archive, pas un point de restauration : il n\'existe aucun moyen connu de ' +
+    'réécrire ces données sur la montre.',
   backupWarning:
-    "⚠️ Sauvegarde uniquement : ce fichier ne peut PAS être réinstallé sur la montre depuis " +
-    "cette app. Pour mettre à jour le firmware, utilisez l'app officielle Suunto ou SuuntoLink.",
+    "⚠️ Ceci enregistre le fichier firmware de Suunto pour archivage. Pour le flasher sur la " +
+    "montre, utilisez l'outil Firmware de cette app (avancé et irréversible).",
   backupCheckSection: 'Vérifier le firmware disponible',
   backupCheckDesc: "Interroge les serveurs Suunto pour connaître la dernière version de firmware disponible pour votre montre.",
   backupCheckBtn:  'Vérifier',
@@ -1403,9 +1416,21 @@ const en: typeof fr = {
   backupRestoreUnavailable:
     'Restore needs a native capability not built on Android yet - these backups are ' +
     'read-only for now (use the desktop app to restore).',
+  backupKailashTitle: 'Travel history & GPS track',
+  backupKailashDesc:
+    'Saves this watch\'s visited places, travel stats and passive GPS track - the only ' +
+    'irreplaceable data on a Kailash (it has no routes/waypoints database to back up).',
+  backupKailashSaveBtn: 'Save archive',
+  backupKailashSavedMsg: (h: number, pts: number) =>
+    `Archive saved: ${h ? 'history' : 'no history'}, ${pts} GPS point${pts === 1 ? '' : 's'}.`,
+  backupKailashHistoryBtn: 'History',
+  backupKailashTrackBtn: 'GPS track',
+  backupKailashArchiveNote:
+    'This is an archive, not a restore point - there is no known way to write this data back ' +
+    'onto the watch.',
   backupWarning:
-    "⚠️ Backup only: this file CANNOT be flashed back onto the watch from this app. " +
-    "To update the firmware, use the official Suunto app or SuuntoLink.",
+    "⚠️ This saves Suunto's firmware file for safekeeping. To flash it onto the watch, use " +
+    "this app's Firmware tool (advanced and irreversible).",
   backupCheckSection: 'Check available firmware',
   backupCheckDesc: "Asks Suunto's servers for the latest firmware version available for your watch.",
   backupCheckBtn:  'Check',
