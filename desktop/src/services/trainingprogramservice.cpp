@@ -161,3 +161,84 @@ void TrainingProgramService::install(const QVariantMap &plan, int mode, int disp
         emit lastInstallResultChanged();
     });
 }
+
+void TrainingProgramService::importFromIntervals(const QString &start, const QString &end,
+                                                 const QString &mode, const QString &athleteId,
+                                                 const QString &apiKey)
+{
+    setLoading(true);
+
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/intervals/workouts")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QJsonObject body;
+    body[QStringLiteral("athlete_id")] = athleteId;
+    body[QStringLiteral("api_key")] = apiKey;
+    body[QStringLiteral("start")] = start;
+    body[QStringLiteral("end")] = end;
+    body[QStringLiteral("mode")] = mode;
+
+    QNetworkReply *reply = m_network.post(
+        request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        setLoading(false);
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool ok = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+        if (!ok) {
+            setLastError(reply->error() != QNetworkReply::NoError
+                ? QStringLiteral("POST /api/intervals/workouts: %1").arg(reply->errorString())
+                : obj.value(QStringLiteral("error")).toString());
+            return;
+        }
+        emit intervalsImported(obj.value(QStringLiteral("entries")).toArray().toVariantList(),
+                               obj.value(QStringLiteral("skipped")).toArray().toVariantList(),
+                               obj.value(QStringLiteral("resolvedToWatch")).toBool());
+    });
+}
+
+void TrainingProgramService::syncCalendar(const QVariantList &entries, bool write)
+{
+    setInstalling(true);
+
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/trainingprogram/sync-calendar")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QJsonObject body;
+    body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
+    body[QStringLiteral("write")] = write;
+
+    QNetworkReply *reply = m_network.post(
+        request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, write] {
+        reply->deleteLater();
+        setInstalling(false);
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool ok = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+
+        QVariantMap result;
+        result[QStringLiteral("ok")] = ok;
+        result[QStringLiteral("dryRun")] = !write;
+        result[QStringLiteral("rotation")] = true;
+        for (const auto key : {"today", "removed", "added", "displaysAdded", "failed"}) {
+            const QString k = QString::fromLatin1(key);
+            if (obj.contains(k)) {
+                if (obj.value(k).isArray())
+                    result[k] = obj.value(k).toArray().toVariantList();
+                else
+                    result[k] = obj.value(k).toVariant();
+            }
+        }
+        if (!ok) {
+            result[QStringLiteral("error")] = reply->error() != QNetworkReply::NoError
+                ? QStringLiteral("POST /api/trainingprogram/sync-calendar: %1")
+                      .arg(reply->errorString())
+                : obj.value(QStringLiteral("error")).toString();
+            setLastError(result[QStringLiteral("error")].toString());
+        }
+        m_lastInstallResult = result;
+        emit lastInstallResultChanged();
+    });
+}

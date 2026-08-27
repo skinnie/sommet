@@ -749,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_stats_to_watch(body)
         elif self.path == "/api/intervals/upload":
             self._handle_intervals_upload(body)
+        elif self.path == "/api/intervals/workouts":
+            self._handle_intervals_workouts(body)
         elif self.path == "/api/ember/log":
             self._handle_ember_log(body)
         elif self.path == "/api/garmin/weight/login":
@@ -809,6 +811,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_trainingprogram_delete(body)
         elif self.path == "/api/trainingprogram/install":
             self._handle_trainingprogram_install(body)
+        elif self.path == "/api/trainingprogram/sync-calendar":
+            self._handle_trainingprogram_sync_calendar(body)
         elif self.path == "/api/legacy/sport-modes/write-presets":
             self._handle_legacy_sport_mode_write_presets(body)
         elif self.path == "/api/legacy/sport-modes":
@@ -2497,6 +2501,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    def _handle_intervals_workouts(self, body):
+        """POST /api/intervals/workouts. Body: {athlete_id, api_key, start, end, mode}. Pull the
+        athlete's PLANNED workouts from intervals.icu in [start, end] and return them as dated plan
+        entries [{date, mode, workout}] for the Training Program calendar. Reuses
+        intervals_workout.py --from-intervals (the same tool a terminal user runs): it reconstructs
+        each workout's HR bands from the athlete's own zones and, when the watch is on the cable,
+        resolves them to the watch's max/rest (Karvonen) - otherwise it returns the intervals.icu
+        bands. Read-only against the watch; nothing is written here (install is the calendar's own
+        Install step)."""
+        athlete_id = body.get("athlete_id")
+        api_key = body.get("api_key")
+        start = body.get("start")
+        end = body.get("end")
+        mode = body.get("mode")
+        missing = [k for k, v in (("athlete_id", athlete_id), ("api_key", api_key),
+                                  ("start", start), ("end", end), ("mode", mode)) if not v]
+        if missing:
+            self._send_json(400, {"ok": False, "error": "missing: " + ", ".join(missing)})
+            return
+        args = ["--from-intervals", "--json",
+                "--athlete-id", str(athlete_id), "--api-key", str(api_key),
+                "--start", str(start), "--end", str(end), "--mode", str(mode)]
+        code, out, err = run_tool("intervals_workout.py", args)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": ("intervals_workout produced no JSON: "
+                                   + (err or out or "")).strip()[:200]})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
     def _handle_intervals_upload(self, body):
         """POST /api/intervals/upload. Body: {athlete_id, api_key, name?, fit_base64? | gpx?}.
         Push one activity file to intervals.icu via tools/intervals_upload.py (reuses the same
@@ -3976,6 +4010,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         path.unlink(missing_ok=True)
         self._send_json(200, {"ok": True})
+
+    def _handle_trainingprogram_sync_calendar(self, body):
+        """POST /api/trainingprogram/sync-calendar. Body: {entries:[{date,mode,workout}], write}.
+        Install the plan as native guided workouts in each entry's sport-mode WORKOUT menu,
+        rotating by date (upcoming installed, past erased) via tools/training_calendar.py --sync -
+        the current design (2026-08-21) that supersedes the date-gated App-Zone install. write:false
+        is a real dry-run (compile + diff, no watch write). Same shell-the-tool shape as the
+        standalone calendar GUI's own sync handler."""
+        entries = body.get("entries")
+        if not entries:
+            self._send_json(400, {"ok": False, "error": 'need a non-empty "entries" list'})
+            return
+        missing = [i for i, e in enumerate(entries)
+                   if not (e.get("date") and e.get("mode") and e.get("workout"))]
+        if missing:
+            self._send_json(400, {"ok": False,
+                                   "error": f"entries {missing} are missing date/mode/workout"})
+            return
+        plan = {"name": body.get("name", "Calendar"), "entries": entries}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(plan, f)
+            plan_path = f.name
+        try:
+            args = [plan_path, "--sync", "--json"]
+            if body.get("write"):
+                args.append("--write")
+            code, out, err = run_tool("training_calendar.py", args, timeout=300)
+        finally:
+            try:
+                os.unlink(plan_path)
+            except OSError:
+                pass
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False,
+                                   "error": ("training_calendar produced no JSON: "
+                                             + (err or out or "")).strip()[:200],
+                                   "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_trainingprogram_install(self, body):
         """POST /api/trainingprogram/install. Body: {"plan": {...}, "mode": int,

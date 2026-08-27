@@ -22,6 +22,39 @@ Item {
     // [{date: "YYYY-MM-DD", workout: {name, steps: [...]}}]
     property var entries: []
     property bool dirty: false
+    property string importStatus: ""
+
+    // Merge intervals.icu-imported entries into the plan, replacing any existing entry on the
+    // same date (dedupe by date) and keeping the list date-sorted. Imported entries carry their
+    // own {mode}, which the guided-workout rotation sync uses.
+    // The plan entries with a sport mode guaranteed on each: imported entries already carry one;
+    // hand-added ones inherit the mode chosen in the Install card. training_calendar needs it.
+    function entriesWithMode(fallbackMode) {
+        return root.entries.map(function (e) {
+            return { date: e.date, mode: e.mode || fallbackMode, workout: e.workout }
+        })
+    }
+
+    function mergeImported(imported) {
+        const byDate = {}
+        for (const e of root.entries) byDate[e.date] = e
+        let added = 0
+        for (const e of imported) { if (!(e.date in byDate)) added++; byDate[e.date] = e }
+        root.entries = Object.keys(byDate).sort().map(d => byDate[d])
+        root.dirty = true
+        return added
+    }
+
+    Connections {
+        target: TrainingProgramService
+        function onIntervalsImported(imported, skipped, resolvedToWatch) {
+            const added = root.mergeImported(imported)
+            root.importStatus = qsTr("Added %1 of %2 workout(s)").arg(added).arg(imported.length)
+                + (resolvedToWatch ? qsTr(" — HR matched to the watch's zones.")
+                                   : qsTr(" — HR from intervals.icu zones."))
+                + (skipped && skipped.length ? qsTr(" Skipped %1.").arg(skipped.length) : "")
+        }
+    }
 
     function entryForDate(iso) {
         for (const e of root.entries)
@@ -177,6 +210,91 @@ Item {
                                    + "runs it from its own clock - it does not need to be "
                                    + "connected on the day.")
                         color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                    }
+                }
+            }
+
+            // ---- import from intervals.icu ------------------------------------------
+            Card {
+                width: parent.width
+
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingMedium
+
+                    Text {
+                        text: qsTr("Import from intervals.icu")
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeHeading
+                        font.bold: true
+                    }
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        text: ConnectionsService.intervalsIcuConnected
+                            ? qsTr("Pull your planned workouts straight from intervals.icu into "
+                                   + "the calendar below. HR targets are matched to the watch's "
+                                   + "own zones when it's connected.")
+                            : qsTr("Connect intervals.icu in Settings first, then your planned "
+                                   + "workouts can be pulled in here.")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingMedium
+
+                        RoundedTextField {
+                            id: importFrom
+                            width: parent.width * 0.22
+                            placeholderText: qsTr("From YYYY-MM-DD")
+                            text: root.isoFor(root.today.getFullYear(),
+                                              root.today.getMonth(), root.today.getDate())
+                        }
+                        RoundedTextField {
+                            id: importTo
+                            width: parent.width * 0.22
+                            placeholderText: qsTr("To YYYY-MM-DD")
+                            text: {
+                                const d = new Date(root.today)
+                                d.setDate(d.getDate() + 56)
+                                return root.isoFor(d.getFullYear(), d.getMonth(), d.getDate())
+                            }
+                        }
+                        RoundedComboBox {
+                            id: importMode
+                            width: parent.width * 0.28
+                            model: CustomModesService.modes.map(m => m.name)
+                            Component.onCompleted: CustomModesService.refresh()
+                        }
+                        RoundedButton {
+                            text: TrainingProgramService.loading
+                                  ? qsTr("Fetching…") : qsTr("Fetch")
+                            enabled: ConnectionsService.intervalsIcuConnected
+                                     && !TrainingProgramService.loading
+                                     && importMode.currentText.length > 0
+                            onClicked: {
+                                root.importStatus = ""
+                                TrainingProgramService.importFromIntervals(
+                                    importFrom.text, importTo.text, importMode.currentText,
+                                    ConnectionsService.intervalsIcuAthleteId,
+                                    ConnectionsService.intervalsIcuApiKey())
+                            }
+                        }
+                        LoadingPill {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: TrainingProgramService.loading
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        visible: root.importStatus.length > 0
+                        wrapMode: Text.WordWrap
+                        text: root.importStatus
+                        color: Theme.primary
                         font.pixelSize: Theme.fontSizeCaption
                     }
                 }
@@ -378,12 +496,12 @@ Item {
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("The program installs as date-gated apps on one display "
-                                   + "row of a sport mode (up to 2 workouts per app, up to "
-                                   + "5 apps per mode - the watch's own limits). On a "
-                                   + "planned day, recording in that sport mode runs the "
-                                   + "workout; on other days the row counts down the days "
-                                   + "to the next one.")
+                        text: qsTr("Each workout installs as a native guided workout in the "
+                                   + "sport mode's WORKOUT menu (hold [Next] to pick it). On "
+                                   + "every sync the watch keeps what's still upcoming and "
+                                   + "erases anything dated before today - a sport mode holds "
+                                   + "only a few at once, so the calendar rotates them in as "
+                                   + "their dates approach.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
                     }
@@ -392,35 +510,26 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingMedium
 
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Install into")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                         RoundedComboBox {
                             id: modePicker
                             width: parent.width * 0.3
                             model: CustomModesService.modes.map(m => m.name)
                             Component.onCompleted: CustomModesService.refresh()
                         }
-                        RoundedComboBox {
-                            id: displayPicker
-                            width: parent.width * 0.25
-                            model: {
-                                const mode = CustomModesService.modes[modePicker.currentIndex]
-                                if (!mode || !mode.displays) return []
-                                return mode.displays.map(
-                                    (d, i) => qsTr("Display %1").arg(i + 1))
-                            }
-                        }
-                        RoundedComboBox {
-                            id: fieldPicker
-                            width: parent.width * 0.25
-                            model: {
-                                const mode = CustomModesService.modes[modePicker.currentIndex]
-                                const disp = mode && mode.displays
-                                    ? mode.displays[displayPicker.currentIndex] : null
-                                if (!disp || !disp.fields) return []
-                                const rows = [qsTr("Top"), qsTr("Center"), qsTr("Bottom")]
-                                return disp.fields.map(
-                                    (f, i) => (rows[i] || qsTr("Row %1").arg(i + 1))
-                                              + " - " + (f.typeName || f.type))
-                            }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width * 0.5
+                            wrapMode: Text.WordWrap
+                            text: qsTr("Workouts imported from intervals.icu keep their own "
+                                       + "sport mode; this is the mode for any you add by hand.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
 
@@ -428,24 +537,20 @@ Item {
                         spacing: Theme.spacingMedium
 
                         RoundedButton {
-                            text: qsTr("Preview packing")
+                            text: qsTr("Preview sync")
                             enabled: root.entries.length > 0
                                      && !TrainingProgramService.installing
-                            onClicked: TrainingProgramService.install(
-                                { name: root.planName, entries: root.entries },
-                                modePicker.currentIndex, displayPicker.currentIndex,
-                                fieldPicker.currentIndex, false)
+                            onClicked: TrainingProgramService.syncCalendar(
+                                root.entriesWithMode(modePicker.currentText), false)
                         }
                         RoundedButton {
                             text: TrainingProgramService.installing
-                                  ? qsTr("Working…") : qsTr("Install to watch")
+                                  ? qsTr("Working…") : qsTr("Sync to watch")
                             enabled: root.entries.length > 0
                                      && !TrainingProgramService.installing
                                      && HomeViewModel.anyDevice
-                            onClicked: TrainingProgramService.install(
-                                { name: root.planName, entries: root.entries },
-                                modePicker.currentIndex, displayPicker.currentIndex,
-                                fieldPicker.currentIndex, true)
+                            onClicked: TrainingProgramService.syncCalendar(
+                                root.entriesWithMode(modePicker.currentText), true)
                         }
                         LoadingPill {
                             anchors.verticalCenter: parent.verticalCenter
@@ -453,38 +558,58 @@ Item {
                         }
                     }
 
-                    // Result of the last preview/install - the real packing, app by app.
+                    // Result of the last preview/sync - the rotation diff (erase past, install
+                    // upcoming) reported by training_calendar.py.
                     Column {
                         width: parent.width
                         spacing: Theme.spacingSmall
-                        visible: {
-                            const r = TrainingProgramService.lastInstallResult
-                            return r.apps !== undefined || r.installed !== undefined
-                        }
+                        visible: TrainingProgramService.lastInstallResult.rotation === true
 
-                        Repeater {
-                            model: {
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: {
                                 const r = TrainingProgramService.lastInstallResult
-                                return r.installed || r.apps || []
+                                const inst = (r.added || [])
+                                return qsTr("Install: ") + (inst.length ? inst.join(", ")
+                                                                        : qsTr("(none)"))
                             }
-                            delegate: Text {
-                                required property var modelData
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: "• " + modelData.name + " - "
-                                      + qsTr("%n workout(s)", "", modelData.dates.length)
-                                      + " (" + modelData.dates.join(", ") + "), "
-                                      + modelData.binaryLength + " B"
-                                color: Theme.text
-                                font.pixelSize: Theme.fontSizeCaption
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: {
+                                const r = TrainingProgramService.lastInstallResult
+                                const rem = (r.removed || [])
+                                return qsTr("Erase past: ") + (rem.length ? rem.join(", ")
+                                                                          : qsTr("(none)"))
                             }
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: {
+                                const r = TrainingProgramService.lastInstallResult
+                                return (r.failed || []).length > 0
+                            }
+                            text: {
+                                const r = TrainingProgramService.lastInstallResult
+                                return qsTr("Could not compile: ")
+                                    + (r.failed || []).map(f => f.name).join(", ")
+                            }
+                            color: Theme.warning
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                         Text {
                             visible: {
                                 const r = TrainingProgramService.lastInstallResult
                                 return r.ok === true && r.dryRun === false
                             }
-                            text: qsTr("Installed on the watch.")
+                            text: qsTr("Synced to the watch's WORKOUT menu.")
                             color: Theme.primary
                             font.pixelSize: Theme.fontSizeCaption
                             font.bold: true

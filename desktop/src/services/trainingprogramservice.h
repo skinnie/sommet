@@ -60,6 +60,22 @@ public:
     Q_INVOKABLE void install(const QVariantMap &plan, int mode, int display, int field,
                              bool confirm);
 
+    // POST /api/intervals/workouts - pull the athlete's PLANNED workouts from intervals.icu in
+    // [start, end] and hand them back as dated plan entries {date, mode, workout} via the
+    // intervalsImported() signal (HR bands reconstructed from the athlete's zones, resolved to
+    // the watch when it's on the cable). Read-only; nothing is written. Credentials come from the
+    // caller (ConnectionsService) so this service stays unaware of where they're stored.
+    Q_INVOKABLE void importFromIntervals(const QString &start, const QString &end,
+                                         const QString &mode, const QString &athleteId,
+                                         const QString &apiKey);
+
+    // POST /api/trainingprogram/sync-calendar - install the plan as native guided workouts in the
+    // sport mode's WORKOUT menu, rotating by date (upcoming installed, past erased) via
+    // tools/training_calendar.py. This is the current design (2026-08-21) that supersedes the
+    // date-gated App-Zone install() above. write:false is a real dry-run (compile + diff, no
+    // watch write). Result lands in lastInstallResult, same as install().
+    Q_INVOKABLE void syncCalendar(const QVariantList &entries, bool write);
+
 signals:
     void loadingChanged();
     void lastErrorChanged();
@@ -67,6 +83,8 @@ signals:
     void installingChanged();
     void lastInstallResultChanged();
     void planSaved(const QString &planId);
+    void intervalsImported(const QVariantList &entries, const QVariantList &skipped,
+                           bool resolvedToWatch);
 
 private:
     QNetworkAccessManager m_network;
