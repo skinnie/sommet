@@ -9,10 +9,13 @@ import math
 import tempfile
 import unittest
 
+import astro
 import geo_util
 import poi_search
 import route_plan
 import track_color
+import weather_route
+from datetime import date
 
 
 class GeoUtil(unittest.TestCase):
@@ -101,6 +104,45 @@ class PoiSearch(unittest.TestCase):
         along = poi_search.search_along(con, route, buffer_m=300)
         self.assertTrue(any("Goûter" in r["name"] for r in along))
         con.close()
+
+
+class Astro(unittest.TestCase):
+    def test_selftest(self):
+        self.assertEqual(astro._selftest(), 0)
+
+    def test_events_ordered(self):
+        r = astro.events(date(2026, 8, 29), 40.32, -7.61, 1.0)
+        sm = r["sun_min"]
+        order = [sm["civil_dawn"], sm["sunrise"], sm["solar_noon"], sm["sunset"], sm["civil_dusk"]]
+        self.assertEqual(order, sorted(order))
+        self.assertTrue(0.0 <= r["moon_illumination"] <= 1.0)
+
+    def test_polar_day_no_sunset(self):
+        r = astro.events(date(2026, 6, 21), 78.0, 15.0, 1.0)
+        self.assertIsNone(r["sun_min"]["sunset"])
+
+
+class WeatherRoute(unittest.TestCase):
+    def test_selftest(self):
+        self.assertEqual(weather_route._selftest(), 0)
+
+    def test_wind_relation(self):
+        # heading east (90): wind FROM east is a headwind, FROM west a tailwind
+        self.assertEqual(weather_route._wind_relation(90, 90), "headwind")
+        self.assertEqual(weather_route._wind_relation(270, 90), "tailwind")
+        self.assertEqual(weather_route._wind_relation(0, 90), "crosswind")
+
+    def test_eta_increases_and_weather_present(self):
+        r = weather_route.plan(weather_route._synthetic_route(), start="09:00",
+                               date=date(2026, 8, 29), pace_kmh=4.5, tz_offset_h=1.0,
+                               fetch=weather_route._synthetic_fetch)
+        self.assertTrue(r["ok"])
+        etas = [p["eta_min"] for p in r["profile"]]
+        self.assertEqual(etas, sorted(etas))
+        self.assertTrue(all("temp_c" in p and "rain_mm" in p for p in r["profile"]))
+
+    def test_too_few_points(self):
+        self.assertFalse(weather_route.plan([{"lat": 1, "lon": 2}])["ok"])
 
 
 if __name__ == "__main__":

@@ -33,6 +33,22 @@ Item {
     property string poiQuery: ""
     property var poiResults: []
 
+    // Weather + sun/moon along the planned route (online: Open-Meteo via the backend). Same
+    // shape family as the climb colouring - temp-coloured `weatherSegments` feed the map's
+    // coloredSegments, `weatherProfile` feeds a profile canvas - plus wind, a sun/moon summary
+    // and a plain-language verdict. `weatherMode` toggles whether the map paints weather or climb.
+    property var weatherSegments: []    // [{color, coords:[[lat,lon],...]}] coloured by temp
+    property var weatherProfile: []     // [{dist_m,eta,ele_m,temp_c,feels_c,rain_mm,wind_kmh,wind_rel,color}]
+    property var windArrows: []
+    property var weatherAstro: ({})
+    property var weatherVerdict: ({})
+    property var weatherSummary: ({})
+    property bool weatherMode: false
+    property bool weatherBusy: false
+    property string startTime: "09:00"
+    property string paceText: "4.5"
+    property string planDate: ""        // "" = today (YYYY-MM-DD)
+
     readonly property var profiles: ["trekking", "fastbike", "gravel", "mtb", "hiking-mountain"]
     readonly property string backend: "http://127.0.0.1:8766"
 
@@ -88,9 +104,37 @@ Item {
             })
     }
 
+    function forecastWeather() {
+        if (!plannedGpx) { statusMsg = qsTr("Plan a route first"); return }
+        var pace = parseFloat(paceText)
+        if (!(pace > 0)) { statusMsg = qsTr("Enter a pace in km/h"); return }
+        weatherBusy = true
+        statusMsg = qsTr("Fetching forecast…")
+        var tz = -(new Date().getTimezoneOffset()) / 60   // JS offset is inverted, in minutes
+        var body = { gpx: plannedGpx, start: startTime, pace: pace, tz: tz }
+        if (planDate.length) body.date = planDate
+        api("POST", "/api/weather/route", body, function(status, res) {
+            weatherBusy = false
+            if (!res || !res.ok) {
+                statusMsg = (res && res.error) ? res.error : qsTr("Weather forecast failed")
+                return
+            }
+            weatherSegments = res.segments || []
+            weatherProfile = res.profile || []
+            windArrows = res.wind_arrows || []
+            weatherAstro = res.astro || ({})
+            weatherVerdict = res.verdict || ({})
+            weatherSummary = res.summary || ({})
+            weatherMode = true            // show the weather-coloured track once we have it
+            statusMsg = ""
+        })
+    }
+
     function clearAll() {
         waypoints = []; coloredSegments = []; legendRows = []; profileRows = []
         summary = ({}); plannedGpx = ""; statusMsg = ""
+        weatherSegments = []; weatherProfile = []; windArrows = []
+        weatherAstro = ({}); weatherVerdict = ({}); weatherSummary = ({}); weatherMode = false
     }
 
     function undoWaypoint() {
@@ -144,7 +188,8 @@ Item {
                 showZoomControls: true
                 zoomLevel: 12
                 markers: root.waypoints
-                coloredSegments: root.coloredSegments
+                coloredSegments: (root.weatherMode && root.weatherSegments.length > 0)
+                                 ? root.weatherSegments : root.coloredSegments
 
                 // Tap = drop the next waypoint (start, then vias, then end). Same inverse
                 // projection the tiles are drawn with.
@@ -361,6 +406,192 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Weather + sun/moon along the route (online forecast at each point's ETA)
+                    Column {
+                        width: parent.width
+                        visible: root.plannedGpx.length > 0
+                        spacing: Theme.spacingSmall
+                        Rectangle { width: parent.width; height: 1; color: Theme.border }
+                        Text {
+                            text: qsTr("Weather along route")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeLabel
+                        }
+                        // start time + pace inputs
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            Column {
+                                width: (parent.width - Theme.spacingSmall) / 2
+                                spacing: 2
+                                Text { text: qsTr("Start (HH:MM)"); color: Theme.mutedText
+                                       font.pixelSize: Theme.fontSizeTiny }
+                                RoundedTextField {
+                                    width: parent.width
+                                    text: root.startTime
+                                    placeholderText: "09:00"
+                                    onTextChanged: root.startTime = text
+                                }
+                            }
+                            Column {
+                                width: (parent.width - Theme.spacingSmall) / 2
+                                spacing: 2
+                                Text { text: qsTr("Pace (km/h)"); color: Theme.mutedText
+                                       font.pixelSize: Theme.fontSizeTiny }
+                                RoundedTextField {
+                                    width: parent.width
+                                    text: root.paceText
+                                    placeholderText: "4.5"
+                                    onTextChanged: root.paceText = text
+                                    onAccepted: root.forecastWeather()
+                                }
+                            }
+                        }
+                        RoundedButton {
+                            width: parent.width
+                            text: root.weatherBusy ? qsTr("Fetching…") : qsTr("Forecast weather")
+                            enabled: !root.weatherBusy && root.plannedGpx.length > 0
+                            onClicked: root.forecastWeather()
+                        }
+
+                        // verdict strip
+                        Rectangle {
+                            width: parent.width
+                            visible: !!(root.weatherVerdict && root.weatherVerdict.headline)
+                            height: vcol.implicitHeight + Theme.spacingMedium
+                            radius: Theme.radiusSmall
+                            property string vstate: (root.weatherVerdict && root.weatherVerdict.state) || "ok"
+                            color: vstate === "ok" ? Qt.rgba(0.18, 0.62, 0.42, 0.14)
+                                 : vstate === "critical" ? Qt.rgba(0.84, 0.27, 0.25, 0.16)
+                                 : Qt.rgba(0.88, 0.57, 0.18, 0.16)
+                            border.width: 1
+                            border.color: vstate === "ok" ? Theme.success
+                                        : vstate === "critical" ? Theme.error : "#E0912F"
+                            Column {
+                                id: vcol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.margins: Theme.spacingSmall
+                                spacing: 2
+                                Text {
+                                    width: parent.width
+                                    text: (root.weatherVerdict && root.weatherVerdict.headline) || ""
+                                    color: Theme.text
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    font.bold: true
+                                    wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    width: parent.width
+                                    visible: !!(root.weatherVerdict && root.weatherVerdict.detail)
+                                    text: (root.weatherVerdict && root.weatherVerdict.detail) || ""
+                                    color: Theme.mutedText
+                                    font.pixelSize: Theme.fontSizeTiny
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
+                        // sun/moon quick summary + map colour toggle
+                        Row {
+                            width: parent.width
+                            visible: root.weatherProfile.length > 1
+                            spacing: Theme.spacingMedium
+                            Text {
+                                text: "☀ " + qsTr("set %1").arg((root.weatherAstro.sun && root.weatherAstro.sun.sunset) || "–")
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeCaption
+                            }
+                            Text {
+                                text: "🌙 " + (root.weatherAstro.moon_illumination !== undefined
+                                      ? Math.round(root.weatherAstro.moon_illumination * 100) + "%" : "–")
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeCaption
+                            }
+                            Item { width: 1; height: 1 }
+                        }
+                        RoundedButton {
+                            width: parent.width
+                            visible: root.weatherSegments.length > 0 && root.coloredSegments.length > 0
+                            text: root.weatherMode ? qsTr("Map: showing weather — switch to climb")
+                                                   : qsTr("Map: showing climb — switch to weather")
+                            onClicked: root.weatherMode = !root.weatherMode
+                        }
+
+                        // weather profile: temp-coloured elevation line + rain bars + wind line
+                        Canvas {
+                            id: wxCanvas
+                            width: parent.width
+                            height: 120
+                            visible: root.weatherProfile.length > 1
+                            onPaint: {
+                                var ctx = getContext("2d"); ctx.reset()
+                                var rows = root.weatherProfile
+                                if (!rows || rows.length < 2) return
+                                var W = width, H = height
+                                var maxD = rows[rows.length - 1].dist_m || 1
+                                var xOf = function(d) { return (d / maxD) * (W - 2) + 1 }
+                                var eles = rows.filter(function(r){ return r.ele_m !== null })
+                                                .map(function(r){ return r.ele_m })
+                                var lo = eles.length ? Math.min.apply(null, eles) : 0
+                                var hi = eles.length ? Math.max.apply(null, eles) : 1
+                                var span = Math.max(1, hi - lo)
+                                var yEle = function(e) { return (H - 3) - ((e - lo) / span) * (H - 22) }
+                                var rmax = Math.max(0.6, Math.max.apply(null,
+                                            rows.map(function(r){ return r.rain_mm || 0 })))
+                                var wmax = Math.max(10, Math.max.apply(null,
+                                            rows.map(function(r){ return r.wind_kmh || 0 })))
+                                var yWind = function(w) { return (H - 3) - (Math.min(w, wmax) / wmax) * (H - 22) }
+                                var bw = Math.max(2, (W / rows.length) * 0.55)
+                                // rain bars from the baseline
+                                ctx.globalAlpha = 0.5
+                                ctx.fillStyle = "#4e7cc4"
+                                for (var i = 0; i < rows.length; i++) {
+                                    var rmm = rows[i].rain_mm || 0
+                                    if (rmm < 0.05) continue
+                                    var rh = (rmm / rmax) * (H * 0.5)
+                                    ctx.fillRect(xOf(rows[i].dist_m) - bw / 2, (H - 3) - rh, bw, rh)
+                                }
+                                ctx.globalAlpha = 1
+                                // elevation line, coloured by temperature bucket
+                                ctx.lineWidth = 1.6; ctx.lineCap = "round"
+                                for (i = 1; i < rows.length; i++) {
+                                    if (rows[i].ele_m === null || rows[i - 1].ele_m === null) continue
+                                    ctx.strokeStyle = rows[i].color
+                                    ctx.beginPath()
+                                    ctx.moveTo(xOf(rows[i - 1].dist_m), yEle(rows[i - 1].ele_m))
+                                    ctx.lineTo(xOf(rows[i].dist_m), yEle(rows[i].ele_m))
+                                    ctx.stroke()
+                                }
+                                // wind line, coloured by head/cross/tail
+                                var relCol = { headwind: "#d6453f", crosswind: "#e0912f", tailwind: "#2e9e6b" }
+                                for (i = 1; i < rows.length; i++) {
+                                    ctx.strokeStyle = relCol[rows[i].wind_rel] || Theme.mutedText
+                                    ctx.beginPath()
+                                    ctx.moveTo(xOf(rows[i - 1].dist_m), yWind(rows[i - 1].wind_kmh))
+                                    ctx.lineTo(xOf(rows[i].dist_m), yWind(rows[i].wind_kmh))
+                                    ctx.stroke()
+                                }
+                            }
+                            Connections {
+                                target: root
+                                function onWeatherProfileChanged() { wxCanvas.requestPaint() }
+                            }
+                            onWidthChanged: requestPaint()
+                        }
+                        Text {
+                            width: parent.width
+                            visible: root.weatherProfile.length > 1
+                            text: qsTr("line = elevation coloured by temp · bars = rain mm · wind: ")
+                                  + "<font color='#2e9e6b'>tail</font> <font color='#e0912f'>cross</font> <font color='#d6453f'>head</font>"
+                            textFormat: Text.RichText
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeTiny
+                            wrapMode: Text.WordWrap
                         }
                     }
 

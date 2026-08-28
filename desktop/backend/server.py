@@ -741,6 +741,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_router_color(body)
         elif self.path == "/api/poi/search":
             self._handle_poi_search(body)
+        elif self.path == "/api/weather/route":
+            self._handle_weather_route(body)
         elif self.path == "/api/agps/update":
             self._handle_agps_update(body)
         elif self.path == "/api/firmware/download":
@@ -1525,6 +1527,39 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         return self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
+
+    def _handle_weather_route(self, body):
+        """Body: {"points":[{lat,lon,ele?}] (>=2) OR "gpx": str, "start"?:"HH:MM",
+        "date"?:"YYYY-MM-DD", "pace"?:float km/h, "tz"?:float UTC-offset-hours}. Forecasts
+        weather + sun/moon along the planned route at the ETA of each point (weather_route.py).
+        This one talks to Open-Meteo, so unlike the router/POI tools it needs network."""
+        gpx = body.get("gpx")
+        pts = body.get("points") or []
+        if not gpx and (not isinstance(pts, list) or len(pts) < 2):
+            self._send_json(400, {"error": '"points" (>=2 {lat,lon}) or "gpx" is required'})
+            return
+        tz = body.get("tz")
+        if tz is None:
+            off = datetime.now().astimezone().utcoffset()
+            tz = (off.total_seconds() / 3600.0) if off else 0.0
+        if gpx:
+            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+                f.write(gpx)
+                path = f.name
+        else:
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump({"points": pts}, f)
+                path = f.name
+        try:
+            args = [path, "--start", str(body.get("start") or "09:00"),
+                    "--pace", str(body.get("pace") or 4.5), "--tz", str(tz)]
+            if body.get("date"):
+                args += ["--date", str(body["date"])]
+            code, out, err = run_tool("weather_route.py", args)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "weather failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_poi_search(self, body):
         """Body: {"db": path, one of "name"|"near":[lon,lat]|"along":[{lat,lon}], plus
