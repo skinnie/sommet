@@ -570,7 +570,20 @@ PageFlickable {
                     delegate: Column {
                         width: parent.width
                         spacing: 2
-                        Text { color: Theme.text; font.bold: true; text: modelData.name }
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            // The POI's own watch icon, per type (André: "we miss the icons of
+                            // type of poi"). type is the Ambit waypoint type byte off the watch.
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: Icons.fontFamily
+                                font.pixelSize: Theme.fontSizeBody + 3
+                                color: Theme.primary
+                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                            }
+                            Text { anchors.verticalCenter: parent.verticalCenter; color: Theme.text; font.bold: true; text: modelData.name }
+                        }
                         Text {
                             color: Theme.mutedText
                             text: qsTr("%1, %2  (%3 m)")
@@ -671,8 +684,18 @@ PageFlickable {
                             width: parent.width
                             spacing: Theme.spacingSmall
 
+                            // The POI's own watch icon, per type (André: "we miss the icons of
+                            // type of poi").
                             Text {
-                                width: parent.width - poiExportButton.width - Theme.spacingSmall
+                                id: onWatchPoiGlyph
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: Icons.fontFamily
+                                font.pixelSize: Theme.fontSizeBody + 3
+                                color: Theme.primary
+                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                            }
+                            Text {
+                                width: parent.width - onWatchPoiGlyph.width - poiExportButton.width - Theme.spacingSmall * 2
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
                                 text: modelData.name

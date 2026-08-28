@@ -60,4 +60,10 @@ QtObject {
     // to the font subset by tools/subset_material_symbols.py - see it for the
     // type->glyph->codepoint table (Cave/Rock use elevation / filter_hdr, no exact glyph).
     readonly property var poiTypeGlyphs: ["\uea40", "\uf6e7", "\uea68", "\ue531", "\uebac", "\ue57b", "\uf06e", "\ue56c", "\uea99", "\ue87a", "\ue53a", "\uf205", "\ue3f7", "\ue3b0", "\ueacd", "\ue3df", "\ue798", "\ue0c8"]
+    // Bounds-safe lookup: a watch can carry a POI type id outside the known 0-17 range
+    // (seen on an Ambit2: type 26); fall back to the default Waypoint glyph (17, "place")
+    // rather than render tofu. Used by the POI lists so each row shows the watch's own icon.
+    function poiTypeGlyph(t) {
+        return (t >= 0 && t < poiTypeGlyphs.length) ? poiTypeGlyphs[t] : poiTypeGlyphs[17];
+    }
 }

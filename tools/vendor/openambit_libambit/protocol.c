@@ -217,11 +217,19 @@ static int protocol_read_packet(ambit_object_t *object, uint8_t *data)
     int i, res = -1;
     const int retries = read_timeout_ms() / READ_POLL_INTERVAL;
     for (i=0; i<retries; i++) {
-        res = hid_read(object->handle, data, 64);
+        /* Blocking read with a per-iteration timeout instead of non-blocking hid_read +
+         * usleep(READ_POLL_INTERVAL). hid_read_timeout returns the instant a report lands,
+         * so a normal read costs milliseconds; only genuine silence pays the timeout, and
+         * the total budget (retries * READ_POLL_INTERVAL) is unchanged, so the clean-giveup
+         * behaviour the non-blocking handle was set up for still holds (see libambit.c).
+         * The old poll+sleep burned a full 100ms tick PER report on macOS's HID backend -
+         * a 16KB region read (~256 reports) sat ~25s+ in usleep; on Linux's libusb backend
+         * hid_read returned fast so it barely showed. Explicit timeout works regardless of
+         * the handle's non-blocking flag. */
+        res = hid_read_timeout(object->handle, data, 64, READ_POLL_INTERVAL);
         if (res != 0) {
             break;
         }
-        usleep(READ_POLL_INTERVAL * 1000);
     }
 
     return (res > 0 ? 0 : -1);

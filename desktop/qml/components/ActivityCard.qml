@@ -84,14 +84,14 @@ Card {
             // though Kailash/Garmin are named "Walk" the same way an Ambit "Walk" sport mode
             // is and so already resolve to the exact same "Walking" entry via forName()).
             ActivityBadge {
-                activityId: ActivityTypes.forName(activity.name).id
+                activityId: ActivityTypes.displayId(activity.name, activity.sportTypeRaw)
                 size: 20
             }
 
             Column {
                 spacing: 2
                 Text {
-                    text: activity.name || qsTr("Untitled activity")
+                    text: ActivityTypes.displayName(activity.name, activity.sportTypeRaw) || qsTr("Untitled activity")
                     font.bold: true
                     color: Theme.text
                     font.pixelSize: Theme.fontSizeBodyLarge
