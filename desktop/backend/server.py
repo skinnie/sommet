@@ -298,6 +298,59 @@ def device_key():
     return hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else "watch"
 
 
+# ---- Per-connection read cache -----------------------------------------------------------
+# Ambit1/2 flash reads over USB are slow on macOS (~30s for a 16KB region): Apple's IOHIDManager
+# hands over each 64-byte input report ~100ms apart, vs ~1ms on Linux's libusb, and that pacing
+# is the IOKit floor - not our code. libusb can't replace it on macOS (the kernel HID driver
+# claims the device) and the linked hidapi is already the newest (0.15.0), so the transport can't
+# be made faster. Instead we cache each slow watch read and reuse it, so the user pays the ~30s
+# ONCE per connection rather than on every page navigation. Correctness: the cache belongs to the
+# connected watch's identity (refreshed from /api/device, which the desktop polls) so a hot-swap
+# never serves the previous watch's data; it is cleared on any watch-mutating write; and a
+# ?force=1 query (the pages' manual Refresh) bypasses it. Linux stays fast either way.
+_READ_CACHE = {}                       # tag -> last successful response payload
+_READ_CACHE_DEVICE = None              # identity of the watch _READ_CACHE currently belongs to
+_READ_CACHE_LOCK = threading.Lock()
+
+
+def _read_cache_device_identity(info):
+    """A stable identity for the connected watch from a device_info dict: its serial if it
+    reports one, else model/product id. When this changes, the cache is dropped."""
+    if not info:
+        return None
+    pid = info.get("product_id")
+    return info.get("serial") or info.get("model") or (hex(pid) if pid is not None else None)
+
+
+def read_cache_note_device(info):
+    """Point the cache at the currently-connected watch, dropping it if the watch changed.
+    Called from /api/device (polled by the desktop), so a hot-swap invalidates within one poll."""
+    global _READ_CACHE_DEVICE
+    ident = _read_cache_device_identity(info)
+    if ident is None:
+        return
+    with _READ_CACHE_LOCK:
+        if ident != _READ_CACHE_DEVICE:
+            _READ_CACHE.clear()
+            _READ_CACHE_DEVICE = ident
+
+
+def read_cache_get(tag):
+    with _READ_CACHE_LOCK:
+        return _READ_CACHE.get(tag)
+
+
+def read_cache_put(tag, payload):
+    with _READ_CACHE_LOCK:
+        _READ_CACHE[tag] = payload
+
+
+def read_cache_clear():
+    """Drop the cached reads (keeps the device identity - same watch, just stale data now)."""
+    with _READ_CACHE_LOCK:
+        _READ_CACHE.clear()
+
+
 def selected_is_legacy():
     """True when the pinned watch (or, with none pinned, whichever is plugged) is an
     Ambit1/2. Falls back to a real device_info.py query when nothing is pinned - cheap (one
@@ -398,6 +451,44 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        # If this response is being served under _cached_get, store a SUCCESSFUL read so the
+        # next visit to that page is instant (see the per-connection read cache above). Only
+        # ok:true 200s are cached - an error/empty read must not be remembered as the answer.
+        tag = getattr(self, "_cache_store_tag", None)
+        if tag and status == 200 and isinstance(payload, dict) and payload.get("ok"):
+            read_cache_put(tag, payload)
+
+    def _cached_get(self, tag, handler):
+        """Serve a slow watch read from the per-connection cache when we have one; otherwise run
+        `handler` and let _send_json remember its successful response. ?force=1 (the pages' manual
+        Refresh) skips the cache and forces a fresh read."""
+        force = "force=1" in (urllib.parse.urlparse(self.path).query or "")
+        if not force:
+            cached = read_cache_get(tag)
+            if cached is not None:
+                self._send_json(200, cached)
+                return
+        self._cache_store_tag = tag
+        try:
+            handler()
+        finally:
+            self._cache_store_tag = None
+
+    @staticmethod
+    def _post_mutates_watch(path):
+        """True for POSTs that change what's on the watch, so the read cache must be dropped.
+        Every sport-mode edit (/api/customodes/*) plus the other on-watch writers. Deliberately
+        errs toward clearing (a re-read is cheap); pure cloud/phone posts (ember, intervals,
+        garmin, ble/*) are left out so they don't needlessly discard a good cache."""
+        p = path.split("?", 1)[0]
+        if p.startswith("/api/customodes/"):
+            return True
+        return p in {
+            "/api/pois", "/api/routes", "/api/settings", "/api/device/select",
+            "/api/time/sync", "/api/apps/install", "/api/apps/logging", "/api/apps/import",
+            "/api/hrv/install", "/api/workout/install", "/api/restore",
+            "/api/firmware/flash", "/api/gpstrackpod/retrieve", "/api/suuntot6/retrieve",
+        }
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -669,8 +760,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True})
         elif self.path == "/api/ember":
             self._handle_ember_get()
-        elif self.path == "/api/nav":
-            self._handle_nav()
+        elif self.path == "/api/nav" or self.path.startswith("/api/nav?"):
+            self._cached_get("nav", self._handle_nav)
         elif self.path == "/api/activities" or self.path.startswith("/api/activities?"):
             self._handle_activities()
         elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
@@ -703,10 +794,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_kailash_tracklog()
         elif self.path == "/api/settings" or self.path.startswith("/api/settings?"):
             self._handle_settings_read()
-        elif self.path == "/api/legacy/settings":
-            self._handle_legacy_settings()
-        elif self.path == "/api/customodes":
-            self._handle_customodes_read()
+        elif self.path == "/api/legacy/settings" or self.path.startswith("/api/legacy/settings?"):
+            self._cached_get("legacy_settings", self._handle_legacy_settings)
+        elif self.path == "/api/customodes" or self.path.startswith("/api/customodes?"):
+            self._cached_get("customodes", self._handle_customodes_read)
         elif self.path == "/api/customodes/field-types":
             self._handle_customodes_field_types()
         elif self.path.startswith("/api/customodes/row-menu"):
@@ -769,6 +860,12 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
+
+        # A write that changes what's ON the watch makes the cached reads stale - drop them so the
+        # next page read reflects the change (André writes sport modes; a stale cache would show
+        # the pre-write mode). Coarse by design: an extra re-read after a write is cheap safety.
+        if self._post_mutates_watch(self.path):
+            read_cache_clear()
 
         if self.path == "/api/ble/connect":
             self._handle_ble_connect(body)
@@ -2127,6 +2224,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "device_info.py --json produced "
                                    "no parseable JSON", "raw_output": out})
             return
+        # Tie the per-connection read cache to whichever watch is actually on the bus now; if it
+        # changed since the last poll (hot-swap), this drops the previous watch's cached reads.
+        read_cache_note_device(info)
         self._send_json(200, {"ok": True, **info})
 
     def _handle_devices_list(self):
