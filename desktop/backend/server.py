@@ -1564,10 +1564,19 @@ class Handler(BaseHTTPRequestHandler):
         them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..` text (lat/lon as
         1e7 integers) that PoiService::parseOnWatchPois already parses, so the same on-watch POI
         card works unchanged - same raw_output contract as the SBEM and BLE branches above."""
-        code, out, err = run_tool("legacy_link.py", ["waypoints"])
-        info = self._parse_last_json_line(out)
+        # The waypoints read occasionally aborts mid-output inside libambit under the tight
+        # per-read timeout (intermittent SIGABRT ~1/7, a cold-start/first-open race), truncating
+        # the JSON. It's transient, so retry once before surfacing a 502 - a clean re-read almost
+        # always follows. stdout is pure JSON now (libambit INFO logging moved to stderr), so a
+        # non-parseable result really is a crash, not debug noise.
+        info = out = err = None
+        for _attempt in range(2):
+            _code, out, err = run_tool("legacy_link.py", ["waypoints"])
+            info = self._parse_last_json_line(out)
+            if info is not None and info.get("ok"):
+                break
         if info is None or not info.get("ok"):
-            self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
+            self._send_json(502, {"ok": False, "error": "legacy_link.py waypoints produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
         # Route turn-points (route_name shared by >=2 waypoints) belong to the Routes page,
