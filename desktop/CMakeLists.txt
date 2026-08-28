@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.10 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.11 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -183,7 +183,6 @@ qt_add_qml_module(ambitapp
         qml/pages/SmartSensorPage.qml
         qml/pages/SettingsPage.qml
         qml/pages/SportModesPage.qml
-        qml/pages/IntervalsPage.qml
         qml/pages/WeightPage.qml
         qml/pages/HealthPage.qml
         qml/pages/EmberPage.qml
