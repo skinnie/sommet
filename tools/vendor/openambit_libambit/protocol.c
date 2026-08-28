@@ -35,7 +35,15 @@
  * Local definitions
  */
 #define READ_TIMEOUT       20000 // ms
-#define READ_POLL_INTERVAL 100  // ms
+// Per-report poll granularity for protocol_read_packet's hid_read_timeout loop. Kept SMALL
+// because macOS's IOHIDManager hidapi backend does NOT return hid_read_timeout early when a
+// report is already queued - it runs the CFRunLoop for the full timeout - so this interval is
+// effectively the per-report cost of a multi-report read on Mac. At 100ms a 16KB region read
+// (~256 reports) sat ~25s; at 10ms it's ~2.5s (measured 27.5s->target few-sec on an Ambit2,
+// 2026-08-28). The total budget (retries * interval) is unchanged, so timeout behaviour and
+// clean-giveup are identical; Linux's libusb backend returns on data regardless so it's
+// unaffected either way. Don't raise this without re-checking Mac read times.
+#define READ_POLL_INTERVAL 10   // ms
 #define READ_POLL_RETRY    (READ_TIMEOUT / READ_POLL_INTERVAL)
 
 typedef struct __attribute__((__packed__)) ambit_msg_header_s {

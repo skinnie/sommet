@@ -1372,8 +1372,11 @@ PageFlickable {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
                         Text {
+                            // displayName resolves a legacy activity's bare-timestamp name to its
+                            // sport (same as the Activities page/rows) - the Home card was the one
+                            // last-activity view still showing the raw "2026-..." string.
                             text: lastActivityColumn.activity
-                                  ? (lastActivityColumn.activity.name || qsTr("Untitled activity"))
+                                  ? (ActivityTypes.displayName(lastActivityColumn.activity.name, lastActivityColumn.activity.sportTypeRaw) || qsTr("Untitled activity"))
                                   : ""
                             font.bold: true
                             color: Theme.text

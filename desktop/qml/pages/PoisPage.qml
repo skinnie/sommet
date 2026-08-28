@@ -210,6 +210,31 @@ PageFlickable {
                                 }
                             }
                         }
+                        // Per-row icon in the dropdown popup too, not just the selected box: the
+                        // shared RoundedComboBox delegate is text-only, so override it here so every
+                        // type in the list carries its own watch glyph (André: "we miss the icons of
+                        // type of poi"). index is the type id (0-17), matching poiTypeNames order.
+                        delegate: ItemDelegate {
+                            width: poiTypeBox.width
+                            height: 34
+                            highlighted: poiTypeBox.highlightedIndex === index
+                            contentItem: Row {
+                                spacing: Theme.spacingSmall
+                                Icon {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    glyph: Icons.poiTypeGlyph(index)
+                                    size: 20
+                                    color: Theme.text
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData
+                                    color: Theme.text
+                                    font.pixelSize: Theme.fontSizeBody
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
                     }
                     // Name - between the type and the search on the same line.
                     RoundedTextField {
