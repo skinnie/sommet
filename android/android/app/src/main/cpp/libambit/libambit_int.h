@@ -74,4 +74,28 @@ int device_info_get(ambit_object_t *object, ambit_device_info_t *info);
  */
 void libambit_ble_transport_close(ambit_object_t *object);
 
+/*
+ * BLE outgoing-write callback (2026-08-28 iOS port). The transport-agnostic
+ * framing in protocol_ble.c hands each <=20-byte GATT chunk of a fully-built
+ * frame, in order, to this host-supplied callback. On iOS the callback performs
+ * a CBPeripheral writeValue(_:for:type:.withoutResponse) to the watch's NSP
+ * write characteristic; the Android build uses JNI (bleWriteChunk) instead and
+ * does not use this seam. `userdata` is the pointer passed to
+ * libambit_ble_transport_new / libambit_new_from_ble_ios.
+ */
+typedef void (*ambit_ble_write_fn)(void *userdata, const uint8_t *data, size_t len);
+
+#ifndef __ANDROID__
+/*
+ * iOS / generic-host BLE constructors, mirroring libambit_android.c's
+ * libambit_new_from_ble() but with a plain C write callback instead of a
+ * JavaVM/jobject. transport_new attaches the BLE transport to an existing
+ * object; new_from_ble_ios allocates the object, selects the driver by vid/pid,
+ * and runs the watch-driven device-info handshake. Defined in libambit_ios.c.
+ */
+int libambit_ble_transport_new(ambit_object_t *object, ambit_ble_write_fn write_cb, void *write_ud);
+ambit_object_t *libambit_new_from_ble_ios(ambit_ble_write_fn write_cb, void *write_ud,
+                                          uint16_t vid, uint16_t pid);
+#endif
+
 #endif /* __LIBAMBIT_INT_H__ */

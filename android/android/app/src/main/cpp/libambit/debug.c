@@ -23,19 +23,32 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#ifdef __ANDROID__
 #include <android/log.h>
+#endif
 
 /*
  * This Android build of libambit has no stdout/stderr attached to logcat,
  * so the original fprintf-based implementation was silently invisible.
- * Route through __android_log_vprint instead (tag "libambit").
+ * Route through __android_log_vprint instead (tag "libambit"). On iOS (and any
+ * non-Android host) there is no logcat, so fall back to stderr — the original
+ * upstream behavior. (2026-08-28 iOS port: guarded so the shared file builds on
+ * both platforms; the Android path is unchanged.)
  */
 void debug_printf(debug_level_t level, const char *file, int line, const char *func, const char *fmt, ...)
 {
-    android_LogPriority prio;
     char prefixed[512];
     va_list ap;
 
+#ifdef DEBUG_PRINT_FILE_LINE
+    snprintf(prefixed, sizeof(prefixed), "%s:%d %s(): %s", file, line, func, fmt);
+#else
+    (void)file; (void)line;
+    snprintf(prefixed, sizeof(prefixed), "%s(): %s", func, fmt);
+#endif
+
+#ifdef __ANDROID__
+    android_LogPriority prio;
     if (level == debug_level_err) {
         prio = ANDROID_LOG_ERROR;
     }
@@ -45,15 +58,14 @@ void debug_printf(debug_level_t level, const char *file, int line, const char *f
     else {
         prio = ANDROID_LOG_INFO;
     }
-
-#ifdef DEBUG_PRINT_FILE_LINE
-    snprintf(prefixed, sizeof(prefixed), "%s:%d %s(): %s", file, line, func, fmt);
-#else
-    (void)file; (void)line;
-    snprintf(prefixed, sizeof(prefixed), "%s(): %s", func, fmt);
-#endif
-
     va_start(ap, fmt);
     __android_log_vprint(prio, "libambit", prefixed, ap);
     va_end(ap);
+#else
+    (void)level;
+    va_start(ap, fmt);
+    vfprintf(stderr, prefixed, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+#endif
 }
