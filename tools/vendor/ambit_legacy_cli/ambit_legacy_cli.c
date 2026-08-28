@@ -234,6 +234,48 @@ static int cmd_device_info(void) {
     return 0;
 }
 
+/* Fast waypoint read: 0x0b02 (count) + 0x0b03 per-waypoint (~55B each) - the exact structured
+ * sequence SuuntoLink uses on the Ambit2 (confirmed in André's own USB capture, decoded by
+ * tools/ambit_pcap.py: 0x0b03 request = [u32 index][template], reply = index + name[16] +
+ * route_name[16] + lat/lon i32*1e7). libambit_navigation_read already implements exactly this.
+ * Deliberately does NOT call libambit_personal_settings_get: /api/pois and /api/nav only need
+ * waypoints/routes, and it's the personal-settings PMEM region read (not this fast 0x0b03 loop)
+ * that made those endpoints ~30s on macOS's ~90ms/report HID delivery. Emits the SAME waypoint
+ * shape cmd_settings does, so the backend's existing parser is unchanged. */
+static int cmd_waypoints(void) {
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
+
+    ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
+    int nav_rc = ps ? libambit_navigation_read(dev, ps) : -1;
+    if (!ps || nav_rc != 0) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"navigation_read failed, rc=%d\"}\n", nav_rc);
+        if (ps) libambit_personal_settings_free(ps);
+        libambit_close(dev);
+        libambit_free_enumeration(devices);
+        return 1;
+    }
+    fputs("@@JSON@@\n", stdout);
+    printf("{\"ok\": true, \"waypoints_count\": %u, \"waypoints\": [\n", ps->waypoints.count);
+    for (uint16_t i = 0; i < ps->waypoints.count; i++) {
+        ambit_waypoint_t *w = &ps->waypoints.data[i];
+        printf("    {\"name\": ");
+        { char wname[16]; memcpy(wname, w->name, 15); wname[15] = '\0'; json_str(stdout, wname); }
+        printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": %u, \"type\": %u, "
+               "\"index\": %u, \"route_name\": ",
+               w->latitude / 10000000.0, w->longitude / 10000000.0, w->altitude, w->type, w->index);
+        { char rname[16]; memcpy(rname, w->route_name, 15); rname[15] = '\0'; json_str(stdout, rname); }
+        printf("}%s\n", (i + 1 < ps->waypoints.count) ? "," : "");
+    }
+    printf("  ]}\n");
+    libambit_personal_settings_free(ps);
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return 0;
+}
+
 static int cmd_settings(void) {
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
@@ -1246,6 +1288,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "device-info") == 0) return cmd_device_info();
     if (strcmp(argv[1], "settings") == 0) return cmd_settings();
+    if (strcmp(argv[1], "waypoints") == 0) return cmd_waypoints();
     if (strcmp(argv[1], "logs") == 0) {
         if (argc < 3) { fprintf(stderr, "usage: %s logs OUTDIR\n", argv[0]); return 2; }
         return cmd_logs(argv[2]);

@@ -1557,12 +1557,14 @@ class Handler(BaseHTTPRequestHandler):
         back EMPTY on this family - they predate SBEM (see legacy_link.py) - so an Ambit2
         with real waypoints showed none in the app (found 2026-08-26 against a 14-waypoint
         Ambit2; the 2026-08-22 Ambit1 test had 0 waypoints, so this gap was never hit). The
-        waypoints ARE read by legacy_link.py's `settings` (PMEM 2.0). Reuse that read and
-        re-emit them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..`
-        text (lat/lon as 1e7 integers) that PoiService::parseOnWatchPois already parses, so
-        the same on-watch POI card works unchanged - same raw_output contract as the SBEM
-        and BLE branches above."""
-        code, out, err = run_tool("legacy_link.py", ["settings"])
+        waypoints ARE read by legacy_link.py's `waypoints` - 0x0b02 count + 0x0b03 per-waypoint,
+        the fast structured sequence SuuntoLink itself uses (confirmed in André's own capture,
+        tools/ambit_pcap.py). It skips the slow personal_settings_get PMEM region read that made
+        this endpoint ~30s on macOS, so a legacy POI read is now single-digit seconds. Re-emit
+        them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..` text (lat/lon as
+        1e7 integers) that PoiService::parseOnWatchPois already parses, so the same on-watch POI
+        card works unchanged - same raw_output contract as the SBEM and BLE branches above."""
+        code, out, err = run_tool("legacy_link.py", ["waypoints"])
         info = self._parse_last_json_line(out)
         if info is None or not info.get("ok"):
             self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "

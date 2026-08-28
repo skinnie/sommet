@@ -122,6 +122,16 @@ def settings():
     return run(["settings"])
 
 
+def waypoints():
+    """Fast waypoint/POI read: the CLI's `waypoints` does ONLY libambit_navigation_read
+    (0x0b02 count + 0x0b03 per-waypoint, ~55B each - SuuntoLink's own structured sequence,
+    confirmed in André's capture), SKIPPING the slow personal_settings_get PMEM region read.
+    Same waypoints[] shape as settings(); use this for /api/pois and /api/nav, which only need
+    waypoints/routes, so a legacy POI/route read is single-digit seconds instead of ~30s on
+    macOS. settings() stays for the Watch Settings page, which needs the personal block too."""
+    return run(["waypoints"])
+
+
 def logs(outdir):
     # A full watch of activities is read one move at a time over slow USB; a real 32-move
     # Ambit2 outran the old 120s, so allow generously (30 min) rather than truncate a sync.
@@ -337,7 +347,7 @@ def sport_mode_write(modes, dry_run=False):
         pathlib.Path(path).unlink(missing_ok=True)
 
 
-_COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear",
+_COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-clear",
              "sport-mode-write-presets", "routes",
              "route-region-save", "route-region-restore", "nav-restore-json")
 
