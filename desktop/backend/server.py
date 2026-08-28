@@ -3081,20 +3081,44 @@ class Handler(BaseHTTPRequestHandler):
                         ("footPod", 0x0100), ("bikePod", 0x0800))
 
     def _customodes_read_ambit2(self):
-        """The Ambit2 half of GET /api/customodes: read region 0x2000's 90-byte sport modes
-        (legacy_sport_modes.read_app_modes) and map them into the SAME exerciseModes shape the
-        Ambit1 path produces, so the rich list/detail editor renders the Ambit2 too. Fields the
-        Ambit2 decode doesn't carry (displays, rules, interval timer, HR limits) are reported
-        honestly-empty, same discipline as the Ambit1 mapping above."""
+        """The Ambit2 half of GET /api/customodes, mapped onto the SAME exerciseModes shape the
+        Ambit1 path produces so the rich list/detail editor renders the Ambit2 too.
+
+        Region 0x2000 is BXML - the SAME nested format the Ambit3 CustomModes region uses (root
+        0x0003 -> modes 0x0100 -> mode 0x0101 -> settings 0x0102 + display config 0x0105-0x010a,
+        with the SAME field-type/template ids as custom_modes.py's FIELD_TYPES). So two proven
+        decoders split the work on ONE region read: legacy_sport_modes.read_app_modes for the
+        90-byte SETTINGS (name/activity/pods/autolap/gps - custom_modes.py mis-reads those on the
+        Ambit2's blob), and custom_modes.py for the DISPLAYS (its 90-byte settings decode is
+        wrong here but its BXML display decode is exactly right - HW-confirmed against André's
+        Ambit2, 2026-08-28). Merged by file order (both walk the region top-to-bottom)."""
         sys.path.insert(0, str(TOOLS_DIR))
         import legacy_sport_modes                               # noqa: PLC0415
         env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
         old = os.environ.get("AMBIT_PRODUCT_ID")
         if env_pid:
             os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        cm_modes = []
         try:
             with WATCH_LOCK:
-                app_modes = legacy_sport_modes.read_app_modes()
+                region = legacy_sport_modes.read_region_live()  # ONE region-dump off the watch
+            # Settings from the 90-byte reader; displays from the BXML reader - both off the same
+            # bytes, no second watch read (write region to a temp file custom_modes.py --from can
+            # decode without touching USB).
+            with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+                tf.write(region)
+                tmp = tf.name
+            try:
+                app_modes = legacy_sport_modes.read_app_modes(from_file=tmp)
+                cm_code, cm_out, cm_err = run_tool("custom_modes.py", ["--json", "--from", tmp])
+                cm = self._parse_last_json_line(cm_out)
+                if cm and cm.get("ok"):
+                    cm_modes = cm.get("exerciseModes") or []
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
         except (RuntimeError, OSError) as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
@@ -3111,6 +3135,7 @@ class Handler(BaseHTTPRequestHandler):
             for key, bit in self._AMBIT2_POD_BITS:
                 if m.get(key):
                     use_hw |= bit
+            displays = cm_modes[i].get("displays", []) if i < len(cm_modes) else []
             modes.append({
                 "name": m.get("name", ""),
                 "activityId": m.get("activityId", 0),
@@ -3127,7 +3152,7 @@ class Handler(BaseHTTPRequestHandler):
                 "intervalTimer": {"enabled": False, "type": "time",
                                   "high": 0, "low": 0, "repetitions": 0},
                 "backlightMode": 0, "displayMode": 0, "quickNavigation": 0,
-                "displays": [], "rules": [],
+                "displays": displays, "rules": [],
             })
         self._send_json(200, {
             "ok": True, "formatType": "ambit2",
