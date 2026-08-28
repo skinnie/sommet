@@ -105,14 +105,22 @@ Item {
     }
 
     function forecastWeather() {
-        if (!plannedGpx) { statusMsg = qsTr("Plan a route first"); return }
         var pace = parseFloat(paceText)
         if (!(pace > 0)) { statusMsg = qsTr("Enter a pace in km/h"); return }
+        // Prefer the routed track (it carries elevation); fall back to the tapped waypoints so
+        // weather works even without a BRouter route (straight legs between the points).
+        var body = { start: startTime, pace: pace, tz: -(new Date().getTimezoneOffset()) / 60 }
+        if (plannedGpx) {
+            body.gpx = plannedGpx
+        } else if (waypoints.length >= 2) {
+            body.points = waypoints.map(function(w) { return { lat: w.lat, lon: w.lon } })
+        } else {
+            statusMsg = qsTr("Tap at least two points (or plan a route) first")
+            return
+        }
+        if (planDate.length) body.date = planDate
         weatherBusy = true
         statusMsg = qsTr("Fetching forecast…")
-        var tz = -(new Date().getTimezoneOffset()) / 60   // JS offset is inverted, in minutes
-        var body = { gpx: plannedGpx, start: startTime, pace: pace, tz: tz }
-        if (planDate.length) body.date = planDate
         api("POST", "/api/weather/route", body, function(status, res) {
             weatherBusy = false
             if (!res || !res.ok) {
@@ -459,7 +467,7 @@ Item {
                     // Weather + sun/moon along the route (online forecast at each point's ETA)
                     Column {
                         width: parent.width
-                        visible: root.plannedGpx.length > 0
+                        visible: root.waypoints.length > 0 || root.plannedGpx.length > 0
                         spacing: Theme.spacingSmall
                         Rectangle { width: parent.width; height: 1; color: Theme.border }
                         Text {
@@ -500,8 +508,25 @@ Item {
                         RoundedButton {
                             width: parent.width
                             text: root.weatherBusy ? qsTr("Fetching…") : qsTr("Forecast weather")
-                            enabled: !root.weatherBusy && root.plannedGpx.length > 0
+                            enabled: !root.weatherBusy
+                                     && (root.plannedGpx.length > 0 || root.waypoints.length >= 2)
                             onClicked: root.forecastWeather()
+                        }
+                        Text {
+                            width: parent.width
+                            visible: root.plannedGpx.length === 0 && root.waypoints.length < 2
+                            text: qsTr("Tap at least two points on the map (or plan a route), then forecast.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeTiny
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            width: parent.width
+                            visible: root.plannedGpx.length === 0 && root.waypoints.length >= 2
+                            text: qsTr("No routed track yet — forecasting along your tapped points.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeTiny
+                            wrapMode: Text.WordWrap
                         }
 
                         // verdict strip
