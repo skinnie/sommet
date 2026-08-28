@@ -244,6 +244,16 @@ static int cmd_device_info(void) {
  * [ctime 7][i32 lat*1e7][i32 lon*1e7][u8 type]... (offsets confirmed vs the capture:
  * "Arras Town Hall" 50.29067/2.77784). Emits the same waypoints[] shape cmd_settings does. */
 static int cmd_waypoints(void) {
+    /* Empty waypoint SLOTS don't reply to 0x0b03 - the read blocks for the whole per-read
+     * timeout (measured: a valid slot answers in ~7ms, an empty one times out). At the default
+     * ~3s that's ~3s PER empty slot -> the ~28s. Cap the per-read timeout LOW so an empty slot
+     * fails in ~400ms while valid slots (7ms) have a huge margin. Set BEFORE the first read
+     * (the device open below) so protocol.c caches this value. Used waypoints are NOT contiguous
+     * (route waypoints + POIs interleave with empties), so we can't stop at the first empty; we
+     * read every slot up to the capacity and SKIP the empty/failed ones. ~capacity reads, most
+     * ~7ms and the few empties ~400ms -> single-digit seconds, complete. */
+    setenv("AMBIT_READ_TIMEOUT_MS", "400", 1);
+
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
@@ -273,7 +283,7 @@ static int cmd_waypoints(void) {
             || replylen < 55) {
             libambit_protocol_free(reply);
             reply = NULL;
-            break;                                      /* no more / error -> done */
+            continue;                                   /* empty/failed slot -> SKIP, keep going */
         }
         char wname[16];
         memcpy(wname, reply + 4, 15);
@@ -282,10 +292,10 @@ static int cmd_waypoints(void) {
                                 | ((uint32_t)reply[45] << 16) | ((uint32_t)reply[46] << 24));
         int32_t lon = (int32_t)((uint32_t)reply[47] | ((uint32_t)reply[48] << 8)
                                 | ((uint32_t)reply[49] << 16) | ((uint32_t)reply[50] << 24));
-        if (wname[0] == '\0' && lat == 0 && lon == 0) {  /* empty slot -> contiguous end */
+        if (wname[0] == '\0' && lat == 0 && lon == 0) {  /* empty record -> skip, keep going */
             libambit_protocol_free(reply);
             reply = NULL;
-            break;
+            continue;
         }
         uint16_t widx = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
         uint8_t type = reply[51];
