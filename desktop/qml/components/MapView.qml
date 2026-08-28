@@ -52,6 +52,12 @@ Item {
     // length. Empty by default, so every existing MapView caller renders exactly as before.
     property var coloredSegments: []
 
+    // Wind arrows overlay (PlanRoutePage weather layer) - one short arrow per sampled point,
+    // pointing the way the wind blows (meteorological "from" direction + 180), sized by speed
+    // and coloured by its relation to your heading (head/cross/tail), each labelled with its
+    // speed. Additive: empty by default, so no other MapView caller is affected.
+    property var windArrows: []   // [{lat, lon, wind_kmh, wind_dir_deg, rel, color}]
+
     clip: true
 
     readonly property int tileSize: 256
@@ -347,6 +353,61 @@ Item {
             function onOriginYChanged() { colorCanvas.requestPaint() }
             function onWidthChanged() { colorCanvas.requestPaint() }
             function onHeightChanged() { colorCanvas.requestPaint() }
+        }
+    }
+
+    // Wind arrows (weather layer) - drawn above the coloured route with the same
+    // world-pixel projection, so they track pan/zoom. Halo-then-stroke like the route, plus a
+    // small speed label. Empty by default; only PlanRoutePage's weather mode fills it.
+    Canvas {
+        id: windCanvas
+        anchors.fill: parent
+        visible: root.windArrows.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const arrows = root.windArrows
+            if (!arrows || arrows.length === 0) return
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            ctx.font = "600 10px monospace"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            for (const a of arrows) {
+                const px = root.lonToWorldX(a.lon) - root.originX
+                const py = root.latToWorldY(a.lat) - root.originY
+                const beta = (a.wind_dir_deg + 180) * Math.PI / 180   // "blows toward" bearing
+                const dx = Math.sin(beta), dy = -Math.cos(beta)       // screen unit vector (N up)
+                const L = 10 + Math.min(a.wind_kmh, 40) * 0.5
+                const x0 = px - dx * L / 2, y0 = py - dy * L / 2
+                const x1 = px + dx * L / 2, y1 = py + dy * L / 2
+                const ang = Math.atan2(dy, dx), hl = 5
+                const b1 = ang + Math.PI - 0.44, b2 = ang + Math.PI + 0.44
+                const col = a.color || Theme.mapAccent
+                for (let pass = 0; pass < 2; pass++) {           // halo pass, then colour pass
+                    ctx.strokeStyle = pass === 0 ? "rgba(255,255,255,0.9)" : col
+                    ctx.lineWidth = pass === 0 ? 4 : 2.2
+                    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke()
+                    ctx.beginPath()
+                    ctx.moveTo(x1, y1); ctx.lineTo(x1 + Math.cos(b1) * hl, y1 + Math.sin(b1) * hl)
+                    ctx.moveTo(x1, y1); ctx.lineTo(x1 + Math.cos(b2) * hl, y1 + Math.sin(b2) * hl)
+                    ctx.stroke()
+                }
+                const label = Math.round(a.wind_kmh).toString()
+                ctx.lineWidth = 3
+                ctx.strokeStyle = "rgba(255,255,255,0.95)"
+                ctx.strokeText(label, px, py - 11)
+                ctx.fillStyle = col
+                ctx.fillText(label, px, py - 11)
+            }
+        }
+        Connections {
+            target: root
+            function onWindArrowsChanged() { windCanvas.requestPaint() }
+            function onOriginXChanged() { windCanvas.requestPaint() }
+            function onOriginYChanged() { windCanvas.requestPaint() }
+            function onWidthChanged() { windCanvas.requestPaint() }
+            function onHeightChanged() { windCanvas.requestPaint() }
         }
     }
 

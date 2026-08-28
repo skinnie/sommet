@@ -190,6 +190,7 @@ Item {
                 markers: root.waypoints
                 coloredSegments: (root.weatherMode && root.weatherSegments.length > 0)
                                  ? root.weatherSegments : root.coloredSegments
+                windArrows: (root.weatherMode && root.windArrows.length > 0) ? root.windArrows : []
 
                 // Tap = drop the next waypoint (start, then vias, then end). Same inverse
                 // projection the tiles are drawn with.
