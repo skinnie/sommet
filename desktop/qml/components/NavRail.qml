@@ -49,6 +49,18 @@ Rectangle {
         }
         NavItem {
             width: parent.width
+            // Offline planner (André, 2026-08-28). Route-following feature, so gated to the
+            // same devices as Routes (Kailash excluded, same reasoning). Reuses the route
+            // glyph - the icon font is a fixed subset (see Icons.qml), so a new codepoint
+            // can't be invented here without adding it to the font first.
+            visible: !HomeViewModel.isKailash
+            glyph: Icons.routes
+            label: qsTr("Plan")
+            selected: root.currentPage === "planRoute"
+            onClicked: root.pageSelected("planRoute")
+        }
+        NavItem {
+            width: parent.width
             // Kailash excluded, real 2026-08-09, same reasoning as Routes above.
             visible: !HomeViewModel.isKailash
             glyph: Icons.pois

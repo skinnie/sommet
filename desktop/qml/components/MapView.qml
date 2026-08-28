@@ -45,6 +45,13 @@ Item {
     // may carry an optional `label` (shown nowhere yet - reserved for a future tap/tooltip).
     property var markers: []       // [{lat, lon, label?}, ...] - each drawn as its own pin
 
+    // Climb-coloured route overlay (the offline planner, PlanRoutePage) - each entry is
+    // { color: "#rrggbb", coords: [[lat, lon], ...] }, one contiguous stretch of the route
+    // in its gradient-bucket colour. Drawn with the same white-halo-then-stroke cartography
+    // as trackPoints, but one stroke per segment so a single route changes colour along its
+    // length. Empty by default, so every existing MapView caller renders exactly as before.
+    property var coloredSegments: []
+
     clip: true
 
     readonly property int tileSize: 256
@@ -56,6 +63,11 @@ Item {
     // latitude/longitude/zoomLevel as before.
     readonly property var _trackBounds: {
         const points = (trackPoints || []).concat(markers || [])
+        // A coloured route (planner) has no trackPoints - fold its own vertices in so the
+        // view still auto-fits to the whole planned route, not just its waypoint pins.
+        for (const seg of (coloredSegments || []))
+            for (const c of (seg.coords || []))
+                points.push({ lat: c[0], lon: c[1] })
         if (points.length < 2) return null
         let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180
         for (const p of points) {
@@ -127,6 +139,7 @@ Item {
     Component.onCompleted: Qt.callLater(_refitZoom)
     onTrackPointsChanged: Qt.callLater(_refitZoom)
     onMarkersChanged: Qt.callLater(_refitZoom)
+    onColoredSegmentsChanged: Qt.callLater(_refitZoom)
     onWidthChanged: _refitZoom()
     onHeightChanged: _refitZoom()
 
@@ -288,6 +301,52 @@ Item {
             function onOriginYChanged() { trackCanvas.requestPaint() }
             function onWidthChanged() { trackCanvas.requestPaint() }
             function onHeightChanged() { trackCanvas.requestPaint() }
+        }
+    }
+
+    // Climb-coloured route (coloredSegments) - same halo-then-stroke technique as
+    // trackCanvas, but the halo is drawn for every segment first so the coloured strokes
+    // then sit on one continuous white outline (no halo seams where two colours meet), and
+    // each segment strokes in its own gradient-bucket colour. Sits above trackCanvas; a
+    // caller uses one or the other, not both.
+    Canvas {
+        id: colorCanvas
+        anchors.fill: parent
+        visible: root.coloredSegments.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const segs = root.coloredSegments
+            if (!segs || segs.length === 0) return
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            const trace = (seg) => {
+                const coords = seg.coords
+                if (!coords || coords.length < 2) return false
+                ctx.beginPath()
+                for (let i = 0; i < coords.length; i++) {
+                    const px = root.lonToWorldX(coords[i][1]) - root.originX
+                    const py = root.latToWorldY(coords[i][0]) - root.originY
+                    if (i === 0) ctx.moveTo(px, py)
+                    else ctx.lineTo(px, py)
+                }
+                return true
+            }
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.85)"
+            ctx.lineWidth = 7
+            for (const seg of segs) { if (trace(seg)) ctx.stroke() }
+            ctx.lineWidth = 4
+            for (const seg of segs) {
+                if (trace(seg)) { ctx.strokeStyle = seg.color || Theme.mapAccent; ctx.stroke() }
+            }
+        }
+        Connections {
+            target: root
+            function onColoredSegmentsChanged() { colorCanvas.requestPaint() }
+            function onOriginXChanged() { colorCanvas.requestPaint() }
+            function onOriginYChanged() { colorCanvas.requestPaint() }
+            function onWidthChanged() { colorCanvas.requestPaint() }
+            function onHeightChanged() { colorCanvas.requestPaint() }
         }
     }
 

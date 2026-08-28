@@ -28,6 +28,7 @@ ApplicationWindow {
         home: "pages/HomePage.qml",
         activities: "pages/ActivitiesPage.qml",
         routes: "pages/RoutesPage.qml",
+        planRoute: "pages/PlanRoutePage.qml",
         pois: "pages/PoisPage.qml",
         backup: "pages/BackupPage.qml",
         firmware: "pages/FirmwarePage.qml",
