@@ -5,6 +5,7 @@
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QQmlEngine>
+#include <QSet>
 #include <QSettings>
 #include <QSqlDatabase>
 #include <QVariantList>
@@ -104,6 +105,7 @@ private:
     void computeReadiness();                   // the real CTL/ATL/TSB pass over activities.db
     static QString intensityBucket(double intensityFactor);   // mirrors systmLibrary.ts bucket()
     static QString intensityForLight(const QString &light);   // mirrors coach.ts recommend()
+    static QString normalizeName(const QString &s);           // for matching completed vs catalogue
     QList<CatalogueRow> loadSampleCatalogue() const;
     void refreshCatalogueLive(std::function<void()> onDone);  // GET systmMcpUrl, async
     QVariantList pickWorkouts(const QString &intensity, int maxMinutes, int limit = 2) const;
@@ -118,6 +120,10 @@ private:
     QNetworkAccessManager m_net;
     QSettings m_settings;
     QList<CatalogueRow> m_sampleCatalogue;   // coach/data/systm-sample.json, cached at startup
+    // Normalized names of workouts completed in the last 7 days — pickWorkouts() drops these
+    // so the coach stops re-recommending a session you've just done. Refreshed in
+    // computeReadiness() (which already has activities.db open).
+    QSet<QString> m_recentDone;
 
     QVariantMap m_readiness;
     QVariantList m_chartSeries;

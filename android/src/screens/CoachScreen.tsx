@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import Svg, { Path, Line } from 'react-native-svg';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
-import { loadCoachData, CoachData, ReadinessLight } from '../services/CoachService';
+import { loadCoachData, CoachData, ReadinessLight, WorkoutPick } from '../services/CoachService';
 import {
   sendCoachMessage, hasAnthropicKey, ChatMessage, ChatBackend,
 } from '../services/CoachChat';
@@ -19,7 +19,7 @@ import {
 
 export default function CoachScreen() {
   const t = useV3Theme();
-  const [data, setData] = useState<CoachData>({ readiness: null, chart: [] });
+  const [data, setData] = useState<CoachData>({ readiness: null, chart: [], picks: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -129,6 +129,25 @@ export default function CoachScreen() {
               ))}
             </View>
           </View>
+
+          {data.picks.length > 0 && (
+            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
+              <Text style={[styles.label, { color: t.mutedText, marginBottom: v3Spacing.small }]}>Today's picks</Text>
+              {data.picks.map((p: WorkoutPick, i) => (
+                <View key={i} style={[styles.pick, { backgroundColor: t.cardNested, borderRadius: v3Radius.small }]}>
+                  <View style={styles.pickHead}>
+                    <Text style={[styles.pickName, { color: t.text }]} numberOfLines={2}>{p.name}</Text>
+                    <Text style={[styles.pickDur, { color: t.mutedText }]}>
+                      {p.durationSec ? Math.round(p.durationSec / 60) + 'min' : ''}
+                    </Text>
+                  </View>
+                  <Text style={[styles.pickMeta, { color: t.mutedText }]}>
+                    {p.intensity} · IF {p.intensityFactor ? p.intensityFactor.toFixed(2) : '—'} · {p.load ? Math.round(p.load) : '—'} TSS
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
 
           {data.chart.length > 1 && (
             <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
@@ -265,6 +284,11 @@ const styles = StyleSheet.create({
   tile: { flex: 1, paddingVertical: 10, alignItems: 'center', marginHorizontal: 3 },
   tileLabel: { fontSize: v3Type.tiny, fontWeight: '600' },
   tileValue: { fontSize: v3Type.bodyLarge, fontWeight: '700' },
+  pick: { padding: 10, marginBottom: v3Spacing.small },
+  pickHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  pickName: { flex: 1, fontSize: v3Type.label, fontWeight: '700', marginRight: v3Spacing.small },
+  pickDur: { fontSize: v3Type.caption },
+  pickMeta: { fontSize: v3Type.caption, marginTop: 3 },
   legend: { flexDirection: 'row', alignItems: 'center', marginBottom: v3Spacing.small },
   bubble: { maxWidth: '85%', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, marginBottom: v3Spacing.small },
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: v3Spacing.medium },
