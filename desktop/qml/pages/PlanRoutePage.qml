@@ -554,20 +554,24 @@ Item {
     ThemedDialog {
         id: sendDialog
         anchors.centerIn: parent
+        width: 400
         title: qsTr("Add route to watch")
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: root.doSend()
+        // Column width is fixed (not derived from the dialog) so the dialog's implicitWidth
+        // doesn't feed back into its own content width - that feedback is a binding loop.
         contentItem: Column {
+            width: 360
             spacing: Theme.spacingSmall
             Text {
-                width: 320
+                width: parent.width
                 wrapMode: Text.WordWrap
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeBody
                 text: qsTr("Send this planned route to the connected watch? Your existing routes are kept.")
             }
             Text {
-                width: 320
+                width: parent.width
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeCaption
