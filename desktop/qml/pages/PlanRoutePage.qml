@@ -187,6 +187,13 @@ Item {
                 scrollZoom: true
                 showZoomControls: true
                 zoomLevel: 12
+                // Open centered on the detected location (André, 2026-08-29: "center by
+                // localization") - WeatherService is the app's own IP-detected position, the
+                // same one the weather card uses. Only used while the map has no route/markers;
+                // once a route exists MapView auto-fits to it (and the locate button below
+                // returns here on demand).
+                latitude: WeatherService.latitude
+                longitude: WeatherService.longitude
                 markers: root.waypoints
                 coloredSegments: (root.weatherMode && root.weatherSegments.length > 0)
                                  ? root.weatherSegments : root.coloredSegments
@@ -223,6 +230,45 @@ Item {
                 HoverHandler {
                     cursorShape: panner.active ? Qt.ClosedHandCursor : Qt.CrossCursor
                 }
+            }
+
+            // "Locate me" - centre the map on the detected location (André, 2026-08-29:
+            // "center by localization"). WeatherService.latitude/longitude is the app's own
+            // IP-detected position (the same one the weather card uses), so this needs no new
+            // GPS/Positioning dependency. Sits just below MapView's own +/- zoom controls.
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.rightMargin: 8
+                anchors.topMargin: 84
+                width: 34; height: 34; radius: 17
+                color: "#CCFFFFFF"
+                Canvas {
+                    anchors.centerIn: parent
+                    width: 20; height: 20
+                    onPaint: {
+                        var ctx = getContext("2d"); ctx.reset()
+                        ctx.strokeStyle = "#333333"; ctx.fillStyle = "#333333"; ctx.lineWidth = 1.6
+                        var c = 10
+                        ctx.beginPath(); ctx.arc(c, c, 5, 0, 2 * Math.PI); ctx.stroke()
+                        ctx.beginPath(); ctx.arc(c, c, 1.6, 0, 2 * Math.PI); ctx.fill()
+                        var ticks = [[c, 0, c, 3], [c, 17, c, 20], [0, c, 3, c], [17, c, 20, c]]
+                        for (var i = 0; i < ticks.length; i++) {
+                            ctx.beginPath(); ctx.moveTo(ticks[i][0], ticks[i][1])
+                            ctx.lineTo(ticks[i][2], ticks[i][3]); ctx.stroke()
+                        }
+                    }
+                }
+                TapHandler {
+                    onTapped: {
+                        var la = WeatherService.latitude, lo = WeatherService.longitude
+                        if (!isNaN(la) && !isNaN(lo) && (la !== 0 || lo !== 0))
+                            map.centerOn(la, lo, 14)
+                        else
+                            root.statusMsg = qsTr("Location not detected yet")
+                    }
+                }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
             }
 
             // On-map hint / status, bottom-left (attribution owns bottom-right)

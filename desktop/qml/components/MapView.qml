@@ -214,6 +214,25 @@ Item {
         onWheel: (event) => root.zoomBy(event.angleDelta.y > 0 ? 1 : -1)
     }
 
+    // Trackpad pinch to zoom (André, 2026-08-29: "allow zoom by trackpad pinch"). macOS
+    // delivers a native magnify gesture, which a PinchHandler picks up; we translate its
+    // continuous scale into the same discrete zoom steps as the wheel, so pinch and scroll
+    // agree and the pan-anchoring in zoomBy() is reused. Same opt-in as scrollZoom (a picture
+    // thumbnail shouldn't grab the gesture). target:null so it zooms the map, not transforms
+    // the Item.
+    PinchHandler {
+        enabled: root.scrollZoom
+        target: null
+        property int _startZoom: 12
+        onActiveChanged: if (active) _startZoom = root.currentZoom
+        onActiveScaleChanged: {
+            if (!active) return
+            const want = Math.round(_startZoom + Math.log2(activeScale))
+            const steps = want - root.currentZoom
+            if (steps !== 0) root.zoomBy(steps)
+        }
+    }
+
     // Zoom a step, keeping the panned view anchored: pan is measured in pixels at the
     // current zoom, so it has to be rescaled when that zoom changes or the map jumps.
     function zoomBy(steps) {
@@ -232,6 +251,19 @@ Item {
         panY = 0
         userControlled = false
         _refitZoom()
+    }
+
+    // Center the view on a specific coordinate at an optional zoom, regardless of any track
+    // the map is currently auto-fitting to - used by the Plan page's "locate me" button to
+    // jump to the detected location (André, 2026-08-29: "center by localization"). Works by
+    // panning in world pixels relative to the current fit-center, then marking the view
+    // user-controlled so the auto-fit doesn't snap back under it.
+    function centerOn(lat, lon, zoom) {
+        if (zoom !== undefined)
+            currentZoom = Math.max(1, Math.min(19, zoom))
+        userControlled = true
+        panX = lonToWorldX(lon) - lonToWorldX(_centerLon)
+        panY = latToWorldY(lat) - latToWorldY(_centerLat)
     }
 
     Repeater {
