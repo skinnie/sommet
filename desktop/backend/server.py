@@ -3001,9 +3001,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with WATCH_LOCK:
                 info = legacy_link.ambit1_sport_mode_read()
-        except RuntimeError as exc:
-            self._send_json(502, {"ok": False, "error": str(exc)})
-            return
+        except RuntimeError:
+            info = None    # not an Ambit1 (0x0010) - fall through to the Ambit2 reader below
         finally:
             if env_pid:
                 if old is None:
@@ -3011,8 +3010,13 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     os.environ["AMBIT_PRODUCT_ID"] = old
 
-        if not info.get("ok"):
-            self._send_json(502, info)
+        # Ambit2 (and the rest of the Bluebird family): ambit1_sport_mode_read is 0x0010-only.
+        # legacy_sport_modes.read_app_modes reads region 0x2000's 90-byte layout
+        # (docs/ambit2_protocol_findings.md); map those modes into the SAME exerciseModes shape
+        # so the rich list/detail editor renders them too - extends the 2026-08-23 "all watches
+        # look like ambit 3" Ambit1 intent (this method's own docstring) to the Ambit2.
+        if not (info and info.get("ok") and info.get("modes")):
+            self._customodes_read_ambit2()
             return
 
         app_names = self._ambit1_app_names()
@@ -3059,6 +3063,64 @@ class Handler(BaseHTTPRequestHandler):
             })
         self._send_json(200, {
             "ok": True, "formatType": "ambit1",
+            "exerciseModes": modes, "sportModes": []})
+
+    # Bit values for the Ambit2 hrbelt_and_pods field, matching tools/legacy_sport_modes.POD_BITS
+    # and SportModesPage.qml's podBits - so useHw round-trips through the same rich editor.
+    _AMBIT2_POD_BITS = (("hrBelt", 0x0001), ("powerPod", 0x0040), ("cadencePod", 0x0080),
+                        ("footPod", 0x0100), ("bikePod", 0x0800))
+
+    def _customodes_read_ambit2(self):
+        """The Ambit2 half of GET /api/customodes: read region 0x2000's 90-byte sport modes
+        (legacy_sport_modes.read_app_modes) and map them into the SAME exerciseModes shape the
+        Ambit1 path produces, so the rich list/detail editor renders the Ambit2 too. Fields the
+        Ambit2 decode doesn't carry (displays, rules, interval timer, HR limits) are reported
+        honestly-empty, same discipline as the Ambit1 mapping above."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_sport_modes                               # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            with WATCH_LOCK:
+                app_modes = legacy_sport_modes.read_app_modes()
+        except (RuntimeError, OSError) as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            if env_pid:
+                if old is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old
+
+        modes = []
+        for i, m in enumerate(app_modes or []):
+            use_hw = 0
+            for key, bit in self._AMBIT2_POD_BITS:
+                if m.get(key):
+                    use_hw |= bit
+            modes.append({
+                "name": m.get("name", ""),
+                "activityId": m.get("activityId", 0),
+                "appCount": 0,
+                "customModeId": i,
+                "useHw": use_hw,
+                "altiBaroMode": m.get("altiBaroMode", 0),
+                "recordingInterval": m.get("recordingInterval", 0),
+                "gpsInterval": m.get("gpsInterval", 0),
+                "autolap": m.get("autolapM", 0),
+                "hrHigh": 0, "hrLow": 0, "hrLimitsUse": 0,
+                "autoStart": 0, "autoPause": 0, "autoScrolling": 0,
+                "intTimerFlags": 0, "intTimerCount": 0,
+                "intervalTimer": {"enabled": False, "type": "time",
+                                  "high": 0, "low": 0, "repetitions": 0},
+                "backlightMode": 0, "displayMode": 0, "quickNavigation": 0,
+                "displays": [], "rules": [],
+            })
+        self._send_json(200, {
+            "ok": True, "formatType": "ambit2",
             "exerciseModes": modes, "sportModes": []})
 
     # Ambit1 Apps region. Base/size come from SuuntoLink's own Devices.xml per-device record
