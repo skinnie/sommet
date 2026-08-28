@@ -772,8 +772,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_garmin_sync("health")
         elif self.path.startswith("/api/garmin/sleep"):
             self._handle_garmin_sync("sleep")
-        elif self.path == "/api/pois":
-            self._handle_pois_read()
+        elif self.path == "/api/pois" or self.path.startswith("/api/pois?"):
+            self._cached_get("pois", self._handle_pois_read)
         elif self.path == "/api/backups":
             self._handle_backups_list()
         elif self.path == "/api/device":
