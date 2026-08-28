@@ -234,43 +234,76 @@ static int cmd_device_info(void) {
     return 0;
 }
 
-/* Fast waypoint read: 0x0b02 (count) + 0x0b03 per-waypoint (~55B each) - the exact structured
- * sequence SuuntoLink uses on the Ambit2 (confirmed in André's own USB capture, decoded by
- * tools/ambit_pcap.py: 0x0b03 request = [u32 index][template], reply = index + name[16] +
- * route_name[16] + lat/lon i32*1e7). libambit_navigation_read already implements exactly this.
- * Deliberately does NOT call libambit_personal_settings_get: /api/pois and /api/nav only need
- * waypoints/routes, and it's the personal-settings PMEM region read (not this fast 0x0b03 loop)
- * that made those endpoints ~30s on macOS's ~90ms/report HID delivery. Emits the SAME waypoint
- * shape cmd_settings does, so the backend's existing parser is unchanged. */
+/* Fast waypoint read: raw 0x0b02 + 0x0b03 per index, STOPPING at the first empty slot - the
+ * structured sequence SuuntoLink uses (confirmed in André's own capture, tools/ambit_pcap.py).
+ * KEY (measured 2026-08-29): the Ambit2's 0x0b02 returns the slot CAPACITY (~250-300), NOT the
+ * used count, so libambit_navigation_read (which reads EVERY slot) spends ~28s scanning empty
+ * slots on macOS's ~90ms/report HID. Waypoints are stored contiguously from index 0 (SuuntoLink
+ * reads 0..N-1), so we read sequentially and stop at the first empty one -> only ~N+1 reads,
+ * single-digit seconds. 55-byte 0x0b03 record: [u16 index][u16 unk][name 16][route_name 16]
+ * [ctime 7][i32 lat*1e7][i32 lon*1e7][u8 type]... (offsets confirmed vs the capture:
+ * "Arras Town Hall" 50.29067/2.77784). Emits the same waypoints[] shape cmd_settings does. */
 static int cmd_waypoints(void) {
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
-    ambit_personal_settings_t *ps = libambit_personal_settings_alloc();
-    int nav_rc = ps ? libambit_navigation_read(dev, ps) : -1;
-    if (!ps || nav_rc != 0) {
-        fputs("@@JSON@@\n", stdout);
-        printf("{\"ok\": false, \"error\": \"navigation_read failed, rc=%d\"}\n", nav_rc);
-        if (ps) libambit_personal_settings_free(ps);
-        libambit_close(dev);
-        libambit_free_enumeration(devices);
-        return 1;
+    /* 0x0b02 -> upper bound only (it's the capacity, not the used count). */
+    uint8_t *reply = NULL;
+    size_t replylen = 0;
+    uint32_t cap = 512;
+    if (libambit_protocol_command(dev, 0x0b02, NULL, 0, &reply, &replylen, 0) == 0 && replylen >= 2) {
+        uint32_t c = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8);
+        if (c > 0 && c < cap) cap = c;
     }
+    libambit_protocol_free(reply);
+    reply = NULL;
+
     fputs("@@JSON@@\n", stdout);
-    printf("{\"ok\": true, \"waypoints_count\": %u, \"waypoints\": [\n", ps->waypoints.count);
-    for (uint16_t i = 0; i < ps->waypoints.count; i++) {
-        ambit_waypoint_t *w = &ps->waypoints.data[i];
-        printf("    {\"name\": ");
-        { char wname[16]; memcpy(wname, w->name, 15); wname[15] = '\0'; json_str(stdout, wname); }
-        printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": %u, \"type\": %u, "
+    printf("{\"ok\": true, \"waypoints\": [\n");
+    int emitted = 0;
+    for (uint32_t x = 0; x < cap; x++) {
+        uint8_t req[55];
+        memset(req, 0, sizeof(req));
+        req[0] = x & 0xff;
+        req[1] = (x >> 8) & 0xff;                       /* [u16 index] in a zeroed record */
+        reply = NULL;
+        replylen = 0;
+        if (libambit_protocol_command(dev, 0x0b03, req, sizeof(req), &reply, &replylen, 0) != 0
+            || replylen < 55) {
+            libambit_protocol_free(reply);
+            reply = NULL;
+            break;                                      /* no more / error -> done */
+        }
+        char wname[16];
+        memcpy(wname, reply + 4, 15);
+        wname[15] = '\0';
+        int32_t lat = (int32_t)((uint32_t)reply[43] | ((uint32_t)reply[44] << 8)
+                                | ((uint32_t)reply[45] << 16) | ((uint32_t)reply[46] << 24));
+        int32_t lon = (int32_t)((uint32_t)reply[47] | ((uint32_t)reply[48] << 8)
+                                | ((uint32_t)reply[49] << 16) | ((uint32_t)reply[50] << 24));
+        if (wname[0] == '\0' && lat == 0 && lon == 0) {  /* empty slot -> contiguous end */
+            libambit_protocol_free(reply);
+            reply = NULL;
+            break;
+        }
+        uint16_t widx = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
+        uint8_t type = reply[51];
+        char rname[16];
+        memcpy(rname, reply + 20, 15);
+        rname[15] = '\0';
+        printf("%s    {\"name\": ", emitted ? ",\n" : "");
+        json_str(stdout, wname);
+        printf(", \"lat\": %.7f, \"lon\": %.7f, \"altitude_m\": 0, \"type\": %u, "
                "\"index\": %u, \"route_name\": ",
-               w->latitude / 10000000.0, w->longitude / 10000000.0, w->altitude, w->type, w->index);
-        { char rname[16]; memcpy(rname, w->route_name, 15); rname[15] = '\0'; json_str(stdout, rname); }
-        printf("}%s\n", (i + 1 < ps->waypoints.count) ? "," : "");
+               lat / 10000000.0, lon / 10000000.0, type, widx);
+        json_str(stdout, rname);
+        printf("}");
+        emitted++;
+        libambit_protocol_free(reply);
+        reply = NULL;
     }
-    printf("  ]}\n");
-    libambit_personal_settings_free(ps);
+    printf("\n  ], \"waypoints_count\": %d}\n", emitted);
     libambit_close(dev);
     libambit_free_enumeration(devices);
     return 0;
