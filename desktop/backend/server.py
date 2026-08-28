@@ -2965,7 +2965,17 @@ class Handler(BaseHTTPRequestHandler):
         # docs/ambit1_sport_mode_format.md), so ONLY the decoder differs; every consumer
         # above this line is shared.
         if selected_is_legacy():
-            self._handle_customodes_read_ambit1()
+            # Dispatch by product_id so an Ambit2 (0x0019 etc.) goes STRAIGHT to its 90-byte
+            # reader and never runs the Ambit1 76-byte reader first. That reader opens the
+            # device only to reject a non-0x0010 pid, which is pure USB churn on a family whose
+            # region reads are already fragile - and the crash the Mac session hit (a SIGSEGV in
+            # the HID set_report on a wedged watch, now crash-hardened in hid-libusb.c) is likelier
+            # the more times the watch is opened/read in a row. 0x0010 keeps its own path (which
+            # still falls through to the Ambit2 reader if the Ambit1 read itself comes back empty).
+            if SELECTED_PRODUCT_ID == 0x0010:
+                self._handle_customodes_read_ambit1()
+            else:
+                self._customodes_read_ambit2()
             return
 
         # Testing mode decodes the fixture through the SAME tool, via its own --from, so
