@@ -3,6 +3,21 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.16 (2026-08-30)
+
+### Weather along a route — map + GPX import (iOS + Android)
+
+- **Map of the coloured track.** The route now renders on a real Leaflet map (OSM tiles),
+  drawn as one polyline per temperature run — the same temperature palette as the elevation
+  profile — with per-point **wind arrows** (tinted head/cross/tailwind, pointing where the wind
+  blows) and ● start / ● finish markers, auto-fit to the route. Leaflet and tiles load over the
+  network, which this screen already needs for the forecast (no offline dependency added).
+- **Load a GPX.** A **Load GPX** button imports a route/track file to plan against, replacing
+  the demo route. On iOS this is a new native `UIDocumentPicker` implementation of
+  `pickGpxFile` (`asCopy`, returns a real on-disk path the JS layer reads with RNFS) — the same
+  entry point route upload already uses; cancel is a silent no-op. `<rte>` and `<trk>` GPX are
+  both accepted (via the existing route parser).
+
 ## 0.2.15 (2026-08-29)
 
 ### New, stable (iOS + Android)

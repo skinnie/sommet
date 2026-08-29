@@ -1,13 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Alert,
 } from 'react-native';
-import Svg, { Path, Line, Rect, Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Line, Rect, Text as SvgText } from 'react-native-svg';
+import { WebView } from 'react-native-webview';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { useV3Theme, v3Spacing, v3Radius, v3Type, V3Colors } from '../theme/v3';
 import { Card } from '../components/ui/Card';
 import { Button, Chip } from '../components/ui/primitives';
 import { planWeatherRoute, WeatherRoutePlan, RoutePoint } from '../services/WeatherRoute';
+import { pickGpxFile } from '../native/AmbitUsbModule';
+import { readGpxFile } from '../services/GpxService';
+import { parseRouteGpx } from '../services/RouteGpxParser';
 
 // Weather + sun/moon along a route — the "what am I walking into?" layer, ported from the
 // desktop Plan page's Weather panel (weather_route.py + astro.py, both verified equal in TS).
@@ -30,8 +34,6 @@ export default function RouteWeatherScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
   const params = (useRoute<RouteProp<Params, 'RouteWeather'>>().params) || {};
-  const route: RoutePoint[] = (params.route && params.route.length >= 2) ? params.route : DEMO_ROUTE;
-  const routeName = params.name || 'Demo route (Serra da Estrela)';
 
   const [start, setStart] = useState('09:00');
   const [pace, setPace] = useState('4.5');
@@ -39,6 +41,35 @@ export default function RouteWeatherScreen() {
   const [error, setError] = useState<string | undefined>();
   const [result, setResult] = useState<WeatherRoutePlan | undefined>();
   const [twilightOpen, setTwilightOpen] = useState(false);
+  // A GPX the user imported this session takes priority over any nav param, which takes
+  // priority over the built-in demo route. Kept as {route,name} so importing clears any stale
+  // forecast for the previous route.
+  const [imported, setImported] = useState<{ route: RoutePoint[]; name: string } | undefined>();
+  const [importing, setImporting] = useState(false);
+
+  const route: RoutePoint[] = imported?.route
+    ?? ((params.route && params.route.length >= 2) ? params.route : DEMO_ROUTE);
+  const routeName = imported?.name ?? params.name ?? 'Demo route (Serra da Estrela)';
+
+  async function handleImportGpx() {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const path = await pickGpxFile(); // rejects GPX_PICK_CANCELLED if the user backs out
+      const xml = await readGpxFile(path);
+      const fallback = (path.split('/').pop() ?? 'Route').replace(/\.gpx$/i, '');
+      const parsed = parseRouteGpx(xml, fallback);
+      const pts: RoutePoint[] = parsed.points.map(p => ({ lat: p.latitude, lon: p.longitude, ele: p.elevation }));
+      if (pts.length < 2) { Alert.alert('GPX', 'That file has no usable route points.'); return; }
+      setImported({ route: pts, name: parsed.name || fallback });
+      setResult(undefined); setError(undefined); // stale forecast is for the old route
+    } catch (e: any) {
+      if (e?.code === 'GPX_PICK_CANCELLED') return; // user cancelled — silent
+      Alert.alert('GPX import failed', e?.message ?? 'Could not read that file.');
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const tzOffsetH = -new Date().getTimezoneOffset() / 60;
 
@@ -85,6 +116,8 @@ export default function RouteWeatherScreen() {
         </View>
         <Button label={loading ? 'Fetching forecast…' : 'Forecast'} icon="sun" variant="filled"
           onPress={handleForecast} loading={loading} style={{ marginTop: v3Spacing.medium }} />
+        <Button label={importing ? 'Opening…' : 'Load GPX'} icon="route" variant="outline"
+          onPress={handleImportGpx} loading={importing} style={{ marginTop: v3Spacing.small }} />
         {error && <Text style={[s.muted, { color: theme.warning, marginTop: 8 }]}>{error}</Text>}
       </Card>
 
@@ -121,6 +154,26 @@ export default function RouteWeatherScreen() {
               ))}
             </View>
           </Card>
+
+          {/* Map — the track coloured by temperature, wind arrows, start/finish markers */}
+          {result.segments && result.segments.length > 0 && (
+            <Card style={{ marginTop: v3Spacing.medium }}>
+              <Text style={s.cardTitle}>Map</Text>
+              <Text style={s.muted}>Track coloured by temperature · wind arrows · ● start / ● finish.</Text>
+              <View style={s.mapWrap}>
+                <WebView
+                  style={{ flex: 1, backgroundColor: theme.cardNested }}
+                  originWhitelist={['*']}
+                  source={{ html: buildRouteMapHtml(result.segments!, result.wind_arrows) }}
+                  javaScriptEnabled
+                  domStorageEnabled={false}
+                  // OSM's tile policy wants an identifying UA on every request (same as MapScreen).
+                  userAgent="Sommet/2.0"
+                  androidLayerType="hardware"
+                />
+              </View>
+            </Card>
+          )}
 
           {/* Sun / moon */}
           <Card style={{ marginTop: v3Spacing.medium }}>
@@ -159,6 +212,47 @@ export default function RouteWeatherScreen() {
       )}
     </ScrollView>
   );
+}
+
+// A self-contained Leaflet page (WebView) that draws the route coloured by temperature, one
+// polyline per colour run, plus wind arrows and start/finish markers. Leaflet + OSM tiles load
+// over the network — this whole screen already needs network for the forecast, so no offline
+// dependency is added here (unlike MapScreen's Android-only vendored/offline setup). Only our
+// own numeric coords and palette hex colours are interpolated into the page.
+function buildRouteMapHtml(
+  segments: NonNullable<WeatherRoutePlan['segments']>,
+  windArrows: WeatherRoutePlan['wind_arrows'],
+): string {
+  const segJson = JSON.stringify(segments.map(s => ({ c: s.color, p: s.coords })));
+  const windJson = JSON.stringify(
+    (windArrows ?? []).map((w: any) => ({ lat: w.lat, lon: w.lon, dir: w.wind_dir_deg, col: w.color })),
+  );
+  return `<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}.wind{color:#333;font-size:15px;line-height:15px;text-align:center}</style>
+</head><body><div id="map"></div><script>
+var segs = ${segJson}, winds = ${windJson};
+var map = L.map('map', { zoomControl: true, attributionControl: true });
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+var all = [];
+segs.forEach(function(s){ if(!s.p.length) return; L.polyline(s.p, { color: s.c, weight: 5, opacity: 0.95 }).addTo(map); s.p.forEach(function(pt){ all.push(pt); }); });
+// stitch the gap between adjacent colour runs so the line reads as continuous
+for (var i=0;i<segs.length-1;i++){ var a=segs[i].p[segs[i].p.length-1], b=segs[i+1].p[0]; if(a&&b) L.polyline([a,b], { color: segs[i+1].c, weight: 5, opacity: 0.95 }).addTo(map); }
+winds.forEach(function(w){
+  // rotate a ↓ glyph to point where the wind blows TO (from-direction + 180°); tinted head/cross/tail
+  var html = '<div class="wind" style="transform:rotate(' + w.dir + 'deg);color:' + w.col + '">&#8595;</div>';
+  L.marker([w.lat, w.lon], { icon: L.divIcon({ html: html, className: '', iconSize: [15,15] }) }).addTo(map);
+});
+if (all.length) {
+  map.fitBounds(L.latLngBounds(all), { padding: [22,22] });
+  var st = all[0], en = all[all.length-1];
+  L.circleMarker(st, { radius: 6, color: '#fff', weight: 2, fillColor: '#2e9e6b', fillOpacity: 1 }).addTo(map);
+  L.circleMarker(en, { radius: 6, color: '#fff', weight: 2, fillColor: '#d73027', fillOpacity: 1 }).addTo(map);
+} else { map.setView([40.32,-7.6], 12); }
+</script></body></html>`;
 }
 
 // SVG profile: temperature-coloured elevation line, rain bars along the bottom, a sunset marker.
@@ -227,6 +321,7 @@ const styles = (t: V3Colors) => StyleSheet.create({
   verdict: { marginTop: v3Spacing.medium, padding: v3Spacing.medium, borderRadius: v3Radius.card, borderWidth: 1.5, backgroundColor: t.card },
   verdictHead: { fontSize: v3Type.bodyLarge, fontWeight: '700' as const },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: v3Spacing.medium },
+  mapWrap: { height: 260, marginTop: 8, borderRadius: v3Radius.small, overflow: 'hidden', borderWidth: 1, borderColor: t.border },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   swatch: { width: 12, height: 12, borderRadius: 3 },
