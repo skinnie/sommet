@@ -19,7 +19,7 @@ Application Android personnelle (React Native Bare Workflow) pour connecter une 
 | 5 | Intégration libambit NDK (vrai hardware) | ✅ |
 | 6 | Fix crash double-free + architecture hardware-agnostique | ✅ |
 | 7 | Partage GPX via share sheet Android | ✅ |
-| 8 | Icône personnalisée (tracé GPS cyan sur fond #16213e) | ✅ |
+| 8 | Icône personnalisée « Summit sync » (sommet enneigé + anneau de sync sur fond #14181c) | ✅ |
 | 9 | Export Runalyze (FIT) + SettingsScreen | ✅ |
 | 10 | i18n EN/FR | ✅ |
 | 11 | Sécurité : Keychain credentials, PKCE S256, WebView hardening | ✅ |
@@ -134,7 +134,7 @@ Application Android personnelle (React Native Bare Workflow) pour connecter une 
 ### UI
 - HomeScreen : dashboard sportif, bouton SYNC circulaire, anneau pulsant, tracé GPS en filigrane
 - Thème sombre cohérent (`#16213e` / `#00e5ff` cyan)
-- Icône personnalisée générée par script Python (5 tailles mipmap)
+- Icône personnalisée « Summit sync » générée par script Python (`android/scripts/generate_icons.py`, artwork partagé dans `tools/packaging/sommet_icon.py`) : launcher carré + rond + foreground adaptatif, 5 densités mipmap
 
 ---
 

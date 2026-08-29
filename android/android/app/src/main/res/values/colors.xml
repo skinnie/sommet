@@ -1,4 +1,5 @@
 <resources>
-    <!-- Sampled from iconv6.png's own background -->
-    <color name="ic_launcher_background">#0E1116</color>
+    <!-- Adaptive-icon background: the "Summit sync" device-tile colour (#14181c). Must match
+         BG in tools/packaging/sommet_icon.py, which draws the ic_launcher_foreground summit. -->
+    <color name="ic_launcher_background">#14181C</color>
 </resources>
