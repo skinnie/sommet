@@ -3,6 +3,24 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.15 (2026-08-29)
+
+### New, stable (iOS + Android)
+
+- **Weather along a route.** The weather/weather-analysis half of the desktop Plan page, ported
+  to mobile. Give a start time and pace; the app resamples the route by ETA, fetches the live
+  Open-Meteo hourly forecast at each point, and shows: a plain-language **verdict** (e.g. "bring
+  a headlamp — you finish after sunset"), summary chips (finish time, temp range, rain, wind),
+  a **temperature-coloured elevation profile** with rain bars and a sunset marker, and a full
+  **sun/moon panel** (sunrise/sunset, the three twilights, solar noon, moonrise/set/transit,
+  phase + illumination). Wind is classified head/cross/tailwind relative to travel bearing.
+  Reached from Home → **Weather**; ships with a demo route so it works with no watch and no GPX.
+  - The two computation cores are **faithful ports verified against their Python references**:
+    `src/services/Astro.ts` (byte-identical to `tools/astro.py`, Schlyter sun/moon formulae) and
+    `src/services/WeatherRoute.ts` (matches `tools/weather_route.py`'s self-test).
+  - Offline routing is intentionally **not** on mobile (no on-device engine on iOS); only the
+    weather/analysis portion of the Plan page is delivered here.
+
 ## 0.1.1 (2026-08-14)
 
 Desktop→Android feature parity, plus an opt-in **Experimental** batch (App Zone, Intervals,

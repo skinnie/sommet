@@ -786,6 +786,8 @@ export default function HomeScreen() {
     // (read the local activity DB, no watch needed) - like the desktop nav.
     { id: 'totals', label: 'Totals', icon: 'chart', onPress: () => navigation.navigate('Totals') },
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
+    // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
+    { id: 'routeweather', label: 'Weather', icon: 'sun', onPress: () => navigation.navigate('RouteWeather') },
     ...(!connected ? [] : deviceType === 'garmin'
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
