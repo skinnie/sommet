@@ -299,4 +299,8 @@ target_include_directories(ambitapp PRIVATE
 # guessed at runtime.
 target_compile_definitions(ambitapp PRIVATE
     AMBITAPP_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
+    # Single source of truth for the app version: the CMake project() version,
+    # surfaced to QML via QCoreApplication::applicationVersion (Qt.application.version).
+    # Previously the About card hardcoded "v0.2.1" and silently drifted from PROJECT_VERSION.
+    APP_VERSION="${PROJECT_VERSION}"
 )

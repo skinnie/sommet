@@ -93,6 +93,9 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("Sommet"));
     app.setApplicationName(QStringLiteral("Sommet"));
+    // Surfaces to QML as Qt.application.version (used by the About card) so the
+    // shown version tracks CMake's PROJECT_VERSION instead of a hardcoded string.
+    app.setApplicationVersion(QStringLiteral(APP_VERSION));
 
     // Start the bundled watch helper if this is a packaged download (no-op in a dev build,
     // where run-desktop.sh starts the Python backend instead). See BackendProcess for why.

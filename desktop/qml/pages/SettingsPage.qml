@@ -1240,7 +1240,7 @@ PageFlickable {
                         // version label is just a plain label again.
                         Text {
                             id: versionLabel
-                            text: qsTr("Sommet v0.2.1")
+                            text: qsTr("Sommet v") + Qt.application.version
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                             font.bold: true
