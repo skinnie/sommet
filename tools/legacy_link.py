@@ -180,6 +180,23 @@ def routes():
     return {"ok": True, "routes": parsed["routes"], "routepoint_count": parsed["routepoint_count"]}
 
 
+def route_head():
+    """Cheap route-region probe: read ONLY the 32-byte head (~1s, one flash read) and return
+    route_count/point_count/checksum, so the backend can decide an on-disk route-track cache
+    hit/miss WITHOUT the ~13.5KB full point read. The head's checksum is crc16 over the info
+    entries + the track points (legacy_route), so it changes on any route or point edit - a
+    correct, cheap cache key. head layout <HBBHHIH...>: route_count@4, point_count@8, checksum@12."""
+    import legacy_route                                      # noqa: PLC0415
+    head = flash_read(legacy_route.ROUTE_REGION_ADDR, legacy_route.HEAD_LEN)
+    magic = int.from_bytes(head[:2], "little")
+    if magic != legacy_route.HEAD_MAGIC:
+        return {"ok": True, "empty": True, "note": f"no route region (magic 0x{magic:04X})"}
+    return {"ok": True,
+            "route_count": int.from_bytes(head[4:6], "little"),
+            "point_count": int.from_bytes(head[8:12], "little"),
+            "checksum": int.from_bytes(head[12:14], "little")}
+
+
 def settings_write(key, value, dry_run=False):
     """Writes ONE personal-settings field on an Ambit1.
 
@@ -348,7 +365,7 @@ def sport_mode_write(modes, dry_run=False):
 
 
 _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-clear",
-             "sport-mode-write-presets", "routes",
+             "sport-mode-write-presets", "routes", "route-head",
              "route-region-save", "route-region-restore", "nav-restore-json")
 
 
@@ -367,6 +384,8 @@ def main():
             result = poi_add(sys.argv[2], sys.argv[3], sys.argv[4])
         elif cmd == "routes":
             result = routes()
+        elif cmd == "route-head":
+            result = route_head()
         elif cmd == "route-region-save":
             # route-region-save OUTFILE : write the raw route-region bytes to OUTFILE for a
             # byte-exact backup. {ok, empty:true} when the watch has no routes.

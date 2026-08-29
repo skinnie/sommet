@@ -122,6 +122,12 @@ GPSTRACKPOD_DIR = Path.home() / "AmbitAppBackups" / "gpstrackpod"
 SUUNTOT6_DIR = Path.home() / "AmbitAppBackups" / "suuntot6"
 SUUNTOX6HR_DIR = Path.home() / "AmbitAppBackups" / "suuntox6hr"
 LEGACYMERGE_DIR = Path.home() / "AmbitAppBackups" / "legacy-merged"
+# Persistent on-disk cache of decoded legacy route tracks (André 2026-08-29). The full route
+# read is ~79s on macOS (data volume: ~13.5KB of track points at the ~90ms/report floor), and
+# the in-memory read cache dies on reconnect/app restart. Keyed by the route region's head
+# checksum (crc16 over info+points -> changes on any route edit), so a hit is correct; only a
+# miss pays the full read. Survives restart AND replug, keeps full-track map previews.
+ROUTE_CACHE_DIR = Path.home() / "AmbitAppBackups" / "routecache"
 
 # Confirmed live and fully unauthenticated, 2026-08-05 (docs/sgee_andre.md) - no AppKey/account
 # needed, unlike the rest of that host's API surface.
@@ -1039,6 +1045,23 @@ class Handler(BaseHTTPRequestHandler):
         # route-tagged waypoints instead, which only ever recovers the A/B markers, never the
         # track. Hardware-confirmed on André's Ambit1 the same day: 3 routes, 1695 points,
         # region CRC matching, "Gare du Nord" decoding to 48.88097,2.35613.
+        # On-disk route-track cache: probe the 32-byte head (~1s) for its checksum and reuse a
+        # previously-decoded track set from disk instead of the ~79s full read. Only a miss (or a
+        # changed route region -> new checksum) pays the full read, which we then persist. Unlike
+        # the in-memory cache this survives app restart AND replug, and it keeps full-track previews.
+        cache_file = None
+        head = self._parse_last_json_line(run_tool("legacy_link.py", ["route-head"])[1])
+        if head and head.get("ok") and not head.get("empty") and head.get("point_count"):
+            key = "%s_%d_%d_%04x" % (device_key(), head.get("route_count", 0),
+                                     head["point_count"], head.get("checksum", 0))
+            cache_file = ROUTE_CACHE_DIR / (key + ".json")
+            if cache_file.is_file():
+                try:
+                    self._send_json(200, json.loads(cache_file.read_text()))
+                    return
+                except (OSError, ValueError):
+                    pass  # unreadable cache -> fall through to a fresh read
+
         code, out, err = run_tool("legacy_link.py", ["routes"], timeout=900)
         info = self._parse_last_json_line(out)
         if info and info.get("ok") and info.get("routes"):
@@ -1050,9 +1073,16 @@ class Handler(BaseHTTPRequestHandler):
                 "ascentMeters": 0, "descentMeters": 0,
                 "track": [{"lat": la, "lon": lo, "ele": None} for la, lo in r["points"]],
             } for r in info["routes"]]
-            self._send_json(200, {"ok": True, "routes": routes,
-                                   "raw_output": "legacy Ambit1/2 - %d route(s) read from the "
-                                   "route region\n" % len(routes)})
+            resp = {"ok": True, "routes": routes,
+                    "raw_output": "legacy Ambit1/2 - %d route(s) read from the route region\n"
+                    % len(routes)}
+            if cache_file is not None:  # persist for instant reads after restart/replug
+                try:
+                    ROUTE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    cache_file.write_text(json.dumps(resp))
+                except OSError:
+                    pass
+            self._send_json(200, resp)
             return
 
         # Fall back to the waypoint reconstruction - a watch whose route region was never
