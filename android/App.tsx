@@ -57,7 +57,7 @@ export type RootStackParamList = {
   // screens per André's feedback.
   GarminRoute: { info: GarminConnectResult };
   GarminPoi: { info: GarminConnectResult };
-  Backup: undefined;
+  Backup: { deviceModel?: string } | undefined;
   // Real, 2026-08-08 - Ambit3-only (Kailash's own memory map has no CustomModes region),
   // HomeScreen only routes here for that device type - see SportModesScreen.tsx.
   // overBle: the watch is connected over Bluetooth, so the sport-mode reads/writes must run on

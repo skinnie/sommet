@@ -75,6 +75,15 @@ QtObject {
         Ibisbill: "Suunto Ambit 3 Run", Kaka: "Suunto Ambit 3 Vertical",
         Jabiru: "Suunto Traverse", Loon: "Suunto Traverse Alpha", Hoopoe: "Suunto Kailash",
     })
+    // The friendly name for ANY model codename, not just the connected one - the backup list
+    // needs to name the watch each saved backup came from (André, 2026-08-27: "be sure that
+    // they are not from other device"), which may well not be the one plugged in now. Reuses
+    // the same _modelNames table deviceDisplayName reads, so a new model is still added once.
+    function displayNameForModel(model) {
+        if (!model) return "";
+        return _modelNames[model] || model;
+    }
+
     readonly property string deviceDisplayName:
         DeviceService.deviceInfoOk
             ? (_modelNames[DeviceService.model] || DeviceService.model)

@@ -38,7 +38,7 @@ PageFlickable {
     // Whether the watch-backup card below is showing - if it is, it already backs up Ember
     // too (the backend writes an -ember.json alongside every watch backup, silently), so the
     // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
-    readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+    readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
 
     Column {
         id: column
@@ -58,16 +58,108 @@ PageFlickable {
         // connected Ambit1 got a real 502 (skipped every SBEM region, "this watch does not
         // declare it") - same fix as Watch Settings/Sport Modes/Routes/POIs.
         Text {
-            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
+            visible: HomeViewModel.connected && !HomeViewModel.isGarmin
+                     && !DeviceCapabilities.supportsWatchBackup
+                     && !DeviceCapabilities.supportsTravelArchive
+                     && !DeviceCapabilities.supportsLegacyArchive
             width: 480
             wrapMode: Text.WordWrap
             color: Theme.mutedText
             text: qsTr("%1 doesn't support Backup & Restore on this app yet.").arg(HomeViewModel.deviceDisplayName)
         }
 
+        // Ambit1/2's own backup - their nav database is legacy waypoints, not SBEM regions.
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: DeviceCapabilities.supportsLegacyArchive
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("Routes & POIs"); font.bold: true; color: Theme.text }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Backs up this watch's routes and POIs (its whole navigation " +
+                                "database) and can restore them - plus a .gpx and JSON copy " +
+                                "you can open anywhere.")
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("Restore is under Existing backups below, and only for a backup " +
+                                "taken from this same watch.")
+                }
+
+                RoundedButton {
+                    text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                    enabled: !BackupService.loading
+                    onClicked: BackupService.createBackup()
+                }
+
+                Text {
+                    visible: BackupService.lastActionText.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: BackupService.lastActionOk ? Theme.success : Theme.error
+                    text: BackupService.lastActionText
+                }
+            }
+        }
+
+        // Kailash's own backup. Deliberately NOT the "Backup & Restore" card below: it saves
+        // different regions, and it is one-way. See DeviceCapabilities.supportsTravelArchive.
+        Card {
+            width: parent.width
+            visible: DeviceCapabilities.supportsTravelArchive
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Text { text: qsTr("Travel history & GPS track"); font.bold: true; color: Theme.text }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Saves this watch's visited places, travel stats and " +
+                                "activity log, plus the passive GPS track as .gpx files. " +
+                                "A firmware update erases all of it, so keep a copy first.")
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("This is an archive, not a restore point - there is no way to " +
+                                "write either back to the watch.")
+                }
+
+                RoundedButton {
+                    text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                    enabled: !BackupService.loading
+                    onClicked: BackupService.createBackup()
+                }
+
+                Text {
+                    visible: BackupService.lastActionText.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: BackupService.lastActionOk ? Theme.success : Theme.error
+                    text: BackupService.lastActionText
+                }
+            }
+        }
+
+        Card {
+            width: parent.width
+            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -102,7 +194,9 @@ PageFlickable {
 
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
+                                                 || DeviceCapabilities.supportsTravelArchive
+                                                 || DeviceCapabilities.supportsLegacyArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -122,13 +216,39 @@ PageFlickable {
                         width: parent.width
                         spacing: 4
                         Text {
-                            text: new Date(modelData.createdAt * 1000)
-                                .toLocaleString(Qt.locale(), Locale.ShortFormat)
+                            text: DateFormat.dateTime(new Date(modelData.createdAt * 1000))
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                         }
                         // Ember rides along in every backup automatically (André, 2026-08-26) -
                         // this just says so, so it isn't a silent surprise on restore.
+                        // Which watch this came off (André, 2026-08-27: "be sure that they
+                        // are not from other device"). Backups made before the stamp existed
+                        // say so honestly rather than claiming to be this watch's.
+                        Text {
+                            // The contents hint LABELS an old backup; it never decides whether
+                            // it may be restored - "Ambit" spans Ambit1/2/3 and Traverse, which
+                            // do not share layouts. Only a recorded model/serial authorises.
+                            text: modelData.deviceModel
+                                  ? qsTr("From %1").arg(HomeViewModel.displayNameForModel(modelData.deviceModel))
+                                  : modelData.deviceHint === "kailash"
+                                    ? qsTr("Looks like a Kailash backup - no watch recorded, so it can't be restored")
+                                    : modelData.deviceHint === "legacy"
+                                      ? qsTr("Looks like an Ambit1/2 archive - no watch recorded, so it can't be restored")
+                                    : modelData.deviceHint === "ambit"
+                                      ? qsTr("Looks like an Ambit backup - no watch recorded, so it can't be restored")
+                                      : qsTr("No watch recorded, so it can't be restored")
+                            color: modelData.deviceSerial && DeviceService.serial
+                                   && modelData.deviceSerial !== DeviceService.serial
+                                   ? Theme.error : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text {
+                            visible: modelData.hasKailash === true
+                            text: qsTr("+ travel history & GPS track")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                         Text {
                             visible: modelData.hasEmber === true
                             text: qsTr("+ Ember data")
@@ -146,7 +266,30 @@ PageFlickable {
                                 text: qsTr("Open backup folder")
                                 onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
                             }
+                            // A Kailash archive (travel history + GPS track, no -routes.bin
+                            // and no -ember.json) has no write path back to the watch - the
+                            // backend refuses it with that reason, so don't offer the button.
+                            // Hidden for an archive (nothing to write back) and for a backup
+                            // from a DIFFERENT watch - the backend refuses that too, but the
+                            // button should not be there to press in the first place.
                             RoundedButton {
+                                // Restorable only when this backup records the watch it came
+                                // from AND that is the watch connected now - model first
+                                // (families are not interchangeable), serial to tell two of the
+                                // same model apart. The backend enforces the same rule; this
+                                // just keeps the button from being there to press.
+                                // Ambit1/2 (hasLegacy) restore routes+POIs via the legacy
+                                // command/flash-write path; Ambit3/Traverse (hasRoutes) via the
+                                // SBEM path; Ember-only backups restore Ember. Kailash stays
+                                // one-way (no write path). Model+serial must match the connected
+                                // watch either way - the backend enforces the same rule.
+                                visible: (modelData.hasRoutes === true || modelData.hasLegacy === true
+                                          || modelData.hasEmber === true)
+                                         && modelData.deviceHint !== "kailash"
+                                         && !!modelData.deviceModel
+                                         && DeviceService.model === modelData.deviceModel
+                                         && !(modelData.deviceSerial && DeviceService.serial
+                                              && modelData.deviceSerial !== DeviceService.serial)
                                 text: qsTr("Restore")
                                 onClicked: BackupService.restoreBackup(modelData.prefix, true)
                             }
@@ -161,7 +304,9 @@ PageFlickable {
         // and the backup lands there; the desktop sync client carries it to the cloud. ---
         Card {
             width: parent.width
-            visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsRoutes
+            visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
+                                                 || DeviceCapabilities.supportsTravelArchive
+                                                 || DeviceCapabilities.supportsLegacyArchive)
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -227,7 +372,9 @@ PageFlickable {
         // keys, nothing for André (or anyone self-hosting Sommet) to register with a provider.
         Card {
             width: parent.width
-            visible: Theme.emberUnlocked && !root.watchBackupShown
+            // 2026-08-28: was gated on the retired `emberUnlocked` easter egg; now on the
+            // ordinary Ember toggle, so the backup card appears when Ember is enabled.
+            visible: Theme.emberEnabled && !root.watchBackupShown
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -284,8 +431,7 @@ PageFlickable {
                         width: parent.width
                         spacing: 4
                         Text {
-                            text: new Date(modelData.createdAt * 1000)
-                                .toLocaleString(Qt.locale(), Locale.ShortFormat)
+                            text: DateFormat.dateTime(new Date(modelData.createdAt * 1000))
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                         }

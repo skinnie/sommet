@@ -32,8 +32,12 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
         QSettings().value(QStringLiteral("experimental/appZone"), false).toBool();
     m_smartSensorEnabled =
         QSettings().value(QStringLiteral("experimental/smartSensor"), false).toBool();
+    // On by default since 2026-08-28 (UX audit item 3): the Coach was buried behind an
+    // experimental toggle almost nobody found, yet it works offline for the basics (readiness
+    // beacon + chat over local history). It now shows for everyone by default; the Settings
+    // toggle still lets a user hide it, and an existing install keeps whatever it persisted.
     m_coachEnabled =
-        QSettings().value(QStringLiteral("experimental/coach"), false).toBool();
+        QSettings().value(QStringLiteral("experimental/coach"), true).toBool();
     // Off by default - see this property's own header comment (built blind, never
     // hardware-confirmed).
     m_gpsTrackPodExperimentEnabled =

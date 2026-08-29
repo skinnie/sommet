@@ -125,6 +125,26 @@ WORKOUT menu gets whatever's still upcoming, named <code>dd/mm_name</code> so yo
 entries apart — anything dated before today gets erased first. No on-watch date logic is
 involved; you pick the right one by hand.</p>
 
+<h2>Import from intervals.icu</h2>
+<p class="hint">Pull your planned workouts straight from intervals.icu. Your athlete id and API
+key are kept in this browser only (never sent anywhere but intervals.icu). Find them in
+intervals.icu → Settings → Developer.</p>
+<div class="meta">
+  <div class="field"><label>Athlete id</label><input id="iAthlete" placeholder="i12345 or 12345"></div>
+  <div class="field" style="flex:2 1 240px"><label>API key</label>
+    <input id="iKey" type="password" placeholder="intervals.icu API key"></div>
+</div>
+<div class="meta">
+  <div class="field"><label>From</label><input type="date" id="iStart"></div>
+  <div class="field"><label>To</label><input type="date" id="iEnd"></div>
+  <div class="field"><label>Install into mode</label>
+    <select id="iMode"><option value="">(loading modes...)</option></select></div>
+</div>
+<div class="row-buttons">
+  <button class="primary" onclick="importFromIntervals()">Fetch planned workouts</button>
+</div>
+<div id="importResult"></div>
+
 <h2>New calendar entry</h2>
 
 <div class="meta">
@@ -335,17 +355,69 @@ function currentWorkout() {
 
 // --- sport modes, fetched once from the watch ---
 async function loadModes() {
-  const sel = document.getElementById("emode");
+  const sels = ["emode", "iMode"].map(id => document.getElementById(id)).filter(Boolean);
   try {
     const resp = await fetch("/api/modes");
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || "couldn't read the watch");
-    sel.innerHTML = data.modes.map(m => `<option value="${m.name}">${m.name}</option>`).join("");
+    const opts = data.modes.map(m => `<option value="${m.name}">${m.name}</option>`).join("");
+    sels.forEach(sel => { sel.innerHTML = opts; });
+    const savedMode = localStorage.getItem(IMPORT_MODE_KEY);
+    if (savedMode) { const im = document.getElementById("iMode"); if (im) im.value = savedMode; }
   } catch (e) {
-    sel.innerHTML = '<option value="">(watch unreachable)</option>';
+    sels.forEach(sel => { sel.innerHTML = '<option value="">(watch unreachable)</option>'; });
   }
 }
 loadModes();
+
+// --- intervals.icu import (credentials kept in this browser only) ---
+const IMPORT_ATH_KEY = "ambit_intervals_athlete";
+const IMPORT_KEY_KEY = "ambit_intervals_apikey";
+const IMPORT_MODE_KEY = "ambit_intervals_mode";
+(function restoreImportForm() {
+  const a = localStorage.getItem(IMPORT_ATH_KEY); if (a) document.getElementById("iAthlete").value = a;
+  const k = localStorage.getItem(IMPORT_KEY_KEY); if (k) document.getElementById("iKey").value = k;
+})();
+async function importFromIntervals() {
+  const athlete = document.getElementById("iAthlete").value.trim();
+  const key = document.getElementById("iKey").value.trim();
+  const start = document.getElementById("iStart").value;
+  const end = document.getElementById("iEnd").value;
+  const mode = document.getElementById("iMode").value;
+  const out = document.getElementById("importResult");
+  if (!athlete || !key) { out.innerHTML = '<p class="result-err">enter your athlete id and API key</p>'; return; }
+  if (!start || !end) { out.innerHTML = '<p class="result-err">pick a From and To date</p>'; return; }
+  if (!mode) { out.innerHTML = '<p class="result-err">pick a sport mode to install into</p>'; return; }
+  localStorage.setItem(IMPORT_ATH_KEY, athlete);
+  localStorage.setItem(IMPORT_KEY_KEY, key);
+  localStorage.setItem(IMPORT_MODE_KEY, mode);
+  out.innerHTML = '<p class="hint">fetching from intervals.icu...</p>';
+  try {
+    const resp = await fetch("/api/intervals-fetch", {method: "POST", body: JSON.stringify({
+      athlete_id: athlete, api_key: key, start, end, mode,
+    })});
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) { out.innerHTML = `<p class="result-err">${data.error || "fetch failed"}</p>`; return; }
+    const plan = loadPlan();
+    const seen = new Set(plan.map(e => e.date + "|" + e.workout.name));
+    let added = 0;
+    for (const e of data.entries) {
+      if (seen.has(e.date + "|" + e.workout.name)) continue;   // skip duplicates already in the plan
+      plan.push(e); added++;
+    }
+    savePlan(plan);
+    let html = `<p class="result-ok">Added ${added} of ${data.entries.length} workout(s) to the plan`
+      + `${data.resolvedToWatch ? " (HR bands resolved to the watch)" : " (HR bands from intervals.icu zones)"}.</p>`;
+    if (data.skipped && data.skipped.length) {
+      html += `<details><summary class="secondary">Skipped ${data.skipped.length}</summary><pre>`
+        + data.skipped.map(s => `${s.date} ${s.name}: ${s.reason}`).join("\n").replace(/</g, "&lt;")
+        + `</pre></details>`;
+    }
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = `<p class="result-err">${e.message || e}</p>`;
+  }
+}
 
 // --- plan (localStorage) ---
 const PLAN_KEY = "ambit_calendar_plan";
@@ -463,7 +535,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != "/api/sync-calendar":
+        if self.path not in ("/api/sync-calendar", "/api/intervals-fetch"):
             self.send_response(404)
             self.end_headers()
             return
@@ -473,7 +545,10 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
-        self._handle_sync_calendar(body)
+        if self.path == "/api/intervals-fetch":
+            self._handle_intervals_fetch(body)
+        else:
+            self._handle_sync_calendar(body)
 
     def _handle_list_modes(self):
         """GET /api/modes — same idea as workout_gui.py's own: the connected watch's own sport
@@ -513,6 +588,29 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False,
                                    "error": "training_calendar.py produced no parseable JSON - "
                                    "is the watch connected and on the time screen?",
+                                   "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_intervals_fetch(self, body):
+        """POST /api/intervals-fetch. Body: {athlete_id, api_key, start, end, mode}. Shells
+        intervals_workout.py --from-intervals (same as a terminal user), which pulls the planned
+        workouts from intervals.icu, reconstructs HR bands from the athlete's zones, resolves them
+        to the watch when it's reachable, and prints the dated plan entries as JSON."""
+        need = ("athlete_id", "api_key", "start", "end", "mode")
+        missing = [k for k in need if not body.get(k)]
+        if missing:
+            self._send_json(400, {"ok": False, "error": "missing: " + ", ".join(missing)})
+            return
+        args = ["--from-intervals", "--json",
+                "--athlete-id", str(body["athlete_id"]), "--api-key", str(body["api_key"]),
+                "--start", str(body["start"]), "--end", str(body["end"]),
+                "--mode", str(body["mode"])]
+        code, out, err = run_tool("intervals_workout.py", args, timeout=120)
+        info = parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False,
+                                   "error": "intervals_workout.py produced no parseable JSON",
                                    "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)

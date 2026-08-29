@@ -10,6 +10,7 @@ Item {
     property string unit: ""
     property real goal: 0
     property color barColor: Theme.warning
+    property int decimals: 0
     implicitHeight: 210
 
     onSeriesChanged: canvas.requestPaint()
@@ -50,6 +51,10 @@ Item {
                         ctx.moveTo(x, yy + rr); ctx.arcTo(x, yy, x + rr, yy, rr)
                         ctx.lineTo(x + bar - rr, yy); ctx.arcTo(x + bar, yy, x + bar, yy + rr, rr)
                         ctx.lineTo(x + bar, padT + pH); ctx.lineTo(x, padT + pH); ctx.closePath(); ctx.fill()
+                        // value on top of each bar
+                        ctx.fillStyle = Theme.text; ctx.textAlign = "center"; ctx.textBaseline = "bottom"
+                        ctx.font = "bold 9px sans-serif"; ctx.fillText(s[j].value.toFixed(root.decimals), x + bar / 2, yy - 2)
+                        ctx.font = "10px sans-serif"
                         if (j % 2 === 0 || j === s.length - 1) {
                             ctx.fillStyle = Theme.mutedText; ctx.textAlign = "center"; ctx.textBaseline = "top"
                             ctx.fillText(("" + s[j].date).slice(8), x + bar / 2, H - padB + 4)

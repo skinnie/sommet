@@ -14,7 +14,7 @@ import {
 import { readGpxFile, listGpxFiles } from '../services/GpxService';
 import { extractGpxMetadata, GpxMetadata } from '../services/GpxParser';
 import RNFS from 'react-native-fs';
-import { t, dateLocale } from '../i18n';
+import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
 import { ActivityThumbnail } from '../components/ActivityThumbnail';
 import Icon, { IconName } from '../components/ui/Icon';
@@ -415,9 +415,8 @@ function capitalize(s: string): string {
 
 function formatDate(iso: string): string {
   if (!iso) return t.unknownDate;
-  return new Date(iso).toLocaleDateString(dateLocale, {
-    weekday: 'short', day: 'numeric', month: 'long', year: 'numeric',
-  });
+  // Day-first dd/MM/yyyy, matching the desktop activity rows (ActivityViewModel.formatDate).
+  return fmtDate(iso) || t.unknownDate;
 }
 
 function formatDuration(seconds: number): string {

@@ -79,6 +79,7 @@ PageFlickable {
     function streak() {
         var f = root.summary.fasts || [], days = {}
         for (var i = 0; i < f.length; ++i) days[Qt.formatDate(new Date(f[i].end), "yyyy-MM-dd")] = true
+        if (root.fasting) days[Qt.formatDate(new Date(), "yyyy-MM-dd")] = true // in-progress fast keeps today alive
         var n = 0, d = new Date()
         while (days[Qt.formatDate(d, "yyyy-MM-dd")]) { n++; d.setDate(d.getDate() - 1) }
         return n
@@ -189,14 +190,16 @@ PageFlickable {
 
         // --- charts (mockup: bars + line) ---
         Card { width: parent.width
-            EmberBars { width: parent.width; label: qsTr("Fasting hours"); unit: "h"; goal: 16; barColor: Theme.warning; series: root.fastSeries() } }
+            EmberBars { width: parent.width; label: qsTr("Fasting hours"); unit: "h"; goal: 16; decimals: 1; barColor: Theme.warning; series: root.fastSeries() } }
+        Card { width: parent.width
+            EmberBars { width: parent.width; label: qsTr("Calories in"); unit: " kcal"; barColor: Theme.success; series: root.daySeries("kcal") } }
         Row {
             width: parent.width; spacing: Theme.spacingMedium
             property real cw: (width - Theme.spacingMedium) / 2
             Card { width: parent.cw
-                EmberBars { width: parent.width; label: qsTr("Calories in"); unit: " kcal"; barColor: Theme.success; series: root.daySeries("kcal") } }
+                EmberBars { width: parent.width; label: qsTr("Coffee (cups/day)"); barColor: Theme.hard; series: root.daySeries("coffee") } }
             Card { width: parent.cw
-                MetricChart { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; lineColor: Theme.accent; series: root.daySeries("waterL") } }
+                EmberBars { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; goal: 2.5; decimals: 1; barColor: Theme.accent; series: root.daySeries("waterL") } }
         }
     }
 

@@ -24,6 +24,12 @@ ApplicationWindow {
     // one place that's genuinely app-wide (every page sits on this window's background).
     Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
+    // Collapsible nav rail (2026-08-29, André): the ☰ at the top of NavRail hides it to reclaim
+    // the width; a floating ☰ over the content brings it back. Docked-collapse on desktop, the
+    // same "one hamburger, hide the sidebar" idea the Android app uses (as an overlay drawer on
+    // phones, a docked collapse on tablets). Expanded by default - there's room on the desktop.
+    property bool navExpanded: true
+
     readonly property var pageSources: ({
         home: "pages/HomePage.qml",
         activities: "pages/ActivitiesPage.qml",
@@ -35,7 +41,6 @@ ApplicationWindow {
         smartSensor: "pages/SmartSensorPage.qml",
         settings: "pages/SettingsPage.qml",
         sportModes: "pages/SportModesPage.qml",
-        intervals: "pages/IntervalsPage.qml",
         appZone: "pages/AppZonePage.qml",
         totals: "pages/TotalsPage.qml",
         calendar: "pages/CalendarPage.qml",
@@ -147,8 +152,11 @@ ApplicationWindow {
         NavRail {
             id: navRail
             height: parent.height
+            width: window.navExpanded ? 220 : 0
+            Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
             currentPage: "home"
             onPageSelected: (pageId) => currentPage = pageId
+            onCollapseRequested: window.navExpanded = false
 
             // Pages navigating on their own (Home's Last Activity -> Activities, This
             // year -> Totals) - see NavBus.qml's own header for why a bus and not a
@@ -175,6 +183,34 @@ ApplicationWindow {
             Loader {
                 anchors.fill: parent
                 source: window.pageSources[navRail.currentPage]
+            }
+        }
+    }
+
+    // Floating ☰ to bring the rail back once it's collapsed. Sits over the content's top-left
+    // (where the rail's own ☰ was), on a card chip with a hairline so it reads as a control over
+    // whatever page is loaded. Only shown while collapsed; three bars, same as the rail's ☰.
+    Rectangle {
+        id: floatingMenu
+        visible: !window.navExpanded
+        z: 100
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: Theme.spacingSmall
+        width: 40; height: 40
+        radius: Theme.radiusSmall
+        color: floatMenuHover.hovered ? Theme.cardNested : Theme.card
+        border.width: 1
+        border.color: Theme.border
+        Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        HoverHandler { id: floatMenuHover }
+        TapHandler { onTapped: window.navExpanded = true }
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+            Repeater {
+                model: 3
+                Rectangle { width: 18; height: 2; radius: 1; color: Theme.text }
             }
         }
     }

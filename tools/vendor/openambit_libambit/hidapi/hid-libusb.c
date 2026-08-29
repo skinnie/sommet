@@ -1009,6 +1009,10 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
     int res;
+    /* Crash-harden (2026-08-28): same NULL device_handle / data guard as
+     * hid_send_feature_report - a failed/wedged open must fail the write, never SIGSEGV. */
+    if (!dev || !dev->device_handle || !data || length == 0)
+        return -1;
     int report_number = data[0];
     int skipped_report_id = 0;
 
@@ -1082,6 +1086,11 @@ static void cleanup_mutex(void *param)
 int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
 {
     int bytes_read = -1;
+
+    /* Crash-harden (2026-08-28): a NULL/half-open dev would SIGSEGV at the mutex lock below;
+     * fail the read cleanly instead so a wedged watch never crashes the CLI. */
+    if (!dev || !data)
+        return -1;
 
 #if 0
     int transferred;
@@ -1181,6 +1190,12 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 {
     int res = -1;
     int skipped_report_id = 0;
+    /* Crash-harden (2026-08-28): a wedged/half-open Bluebird can reach here with a NULL
+     * device_handle (or a caller with NULL/empty data), and dereferencing data[0] or handing
+     * a NULL handle to libusb_control_transfer SIGSEGVs the whole CLI - which then leaves the
+     * watch wedged. Return an error instead so the region-dump fails cleanly and recovers. */
+    if (!dev || !dev->device_handle || !data || length == 0)
+        return -1;
     int report_number = data[0];
 
     if (report_number == 0x0) {

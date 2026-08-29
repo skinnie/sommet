@@ -24,6 +24,28 @@ export const isFrench = locale.toLowerCase().startsWith('fr');
 // Kept in sync with the forced English `t` above (see note there).
 export const dateLocale = 'en-GB';
 
+// Day-first dates, everywhere, regardless of the device locale - the Android counterpart of the
+// desktop DateFormat.qml singleton (André, 2026-08-27: "it should be DD/MM/YYYY everywhere").
+// The pattern is explicit rather than taken from the locale, so a date never silently changes
+// shape. Numeric only - spelled-out headers (the Calendar's "August 2026", the weather strip's
+// "Mon") are words and are left to the locale, exactly as on the desktop.
+function _asDate(value: string | number | Date): Date | null {
+  const d = value instanceof Date ? value : new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+/** 27/08/2026 - the everyday activity date (desktop DateFormat.date). '' on an invalid input. */
+export function fmtDate(value: string | number | Date): string {
+  const d = _asDate(value);
+  if (!d) return '';
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+/** 27/08/2026 14:05 - when the time matters, e.g. backups (desktop DateFormat.dateTime). */
+export function fmtDateTime(value: string | number | Date): string {
+  const d = _asDate(value);
+  if (!d) return '';
+  return `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 // ─── Traductions ──────────────────────────────────────────────────────────────
 
 const fr = {
@@ -432,7 +454,7 @@ const fr = {
   ambitSettingsReadBtn: 'Lire les réglages',
   ambitSettingsRefreshBtn: 'Actualiser',
   ambitSettingsReading: 'Lecture des réglages…',
-  ambitSettingsReadOnly: 'Lecture seule pour le moment — les réglages sont affichés mais leur modification n\'est pas encore prise en charge pour ce modèle.',
+  ambitSettingsReadOnly: 'Modifiables via le câble USB — vérifié sur du matériel réel. Quelques réglages sans offset d\'écriture connu restent en lecture seule.',
   orbitalDataTitle: 'Données orbitales',
   ephemerisGpsOnly: 'Éphémérides GPS uniquement',
   ephemerisGpsOnlyInfo: 'Cette montre peut aussi utiliser les satellites GLONASS et dispose de sa propre mémoire pour leurs données orbitales. Les logiciels Suunto ne les lui envoient jamais, donc ces satellites démarrent « à froid » à chaque fois. Sommet envoie les données orbitales GPS et GLONASS, ce qui peut accélérer l\'acquisition d\'une position. Cochez pour n\'envoyer que le GPS.',
@@ -608,9 +630,32 @@ const fr = {
   backupRestoreUnavailable:
     'La restauration nécessite une fonction native pas encore construite sur Android - ' +
     'ces sauvegardes sont pour l\'instant en lecture seule (utilisez le bureau pour restaurer).',
+  backupRestoreBtn: 'Restaurer',
+  backupRestoreConfirmTitle: 'Restaurer la navigation ?',
+  backupRestoreConfirmMsg:
+    'Ceci remplace TOUS les itinéraires et POI de la montre par ceux de cette sauvegarde. Continuer ?',
+  backupRestoreDoneMsg: (routes: number, waypoints: number) => {
+    const parts: string[] = [];
+    if (routes > 0) parts.push(`${routes} itinéraire${routes === 1 ? '' : 's'}`);
+    if (waypoints > 0) parts.push(`${waypoints} POI`);
+    return `Restauré : ${parts.join(' et ') || 'rien'} réécrit sur la montre.`;
+  },
+  backupKailashTitle: 'Historique de voyage & trace GPS',
+  backupKailashDesc:
+    'Sauvegarde les lieux visités, les statistiques de voyage et la trace GPS passive de cette ' +
+    'montre - les seules données irremplaçables d\'un Kailash (il n\'a pas de base d\'itinéraires ' +
+    'ou de points à sauvegarder).',
+  backupKailashSaveBtn: 'Enregistrer l\'archive',
+  backupKailashSavedMsg: (h: number, pts: number) =>
+    `Archive enregistrée : ${h ? 'historique' : 'pas d\'historique'}, ${pts} point${pts === 1 ? '' : 's'} GPS.`,
+  backupKailashHistoryBtn: 'Historique',
+  backupKailashTrackBtn: 'Trace GPS',
+  backupKailashArchiveNote:
+    'Ceci est une archive, pas un point de restauration : il n\'existe aucun moyen connu de ' +
+    'réécrire ces données sur la montre.',
   backupWarning:
-    "⚠️ Sauvegarde uniquement : ce fichier ne peut PAS être réinstallé sur la montre depuis " +
-    "cette app. Pour mettre à jour le firmware, utilisez l'app officielle Suunto ou SuuntoLink.",
+    "⚠️ Ceci enregistre le fichier firmware de Suunto pour archivage. Pour le flasher sur la " +
+    "montre, utilisez l'outil Firmware de cette app (avancé et irréversible).",
   backupCheckSection: 'Vérifier le firmware disponible',
   backupCheckDesc: "Interroge les serveurs Suunto pour connaître la dernière version de firmware disponible pour votre montre.",
   backupCheckBtn:  'Vérifier',
@@ -747,6 +792,17 @@ const fr = {
     'remplacé par ce qui vient ensuite.',
   workoutCalendarDateLabel: 'Date',
   workoutCalendarModeLabel: 'Mode sportif',
+  workoutCalendarImportTitle: 'Importer depuis intervals.icu',
+  workoutCalendarImportDesc:
+    'Récupère tes séances planifiées sur une plage de dates et les ajoute au plan (cibles FC ' +
+    'reconstruites depuis tes zones). Choisis d\'abord un mode sportif ci-dessous, puis compile chaque séance en attente.',
+  workoutCalendarImportFrom: 'Du',
+  workoutCalendarImportTo: 'Au',
+  workoutCalendarImportBtn: 'Importer les séances planifiées',
+  workoutCalendarImportNone: 'Aucune séance planifiée sur cette plage',
+  workoutCalendarImportedPrefix: 'Importées',
+  workoutCalendarImportCompileHint: 'Compile chaque séance en attente ci-dessous.',
+  workoutCalendarCompilingRow: 'Compilation…',
   workoutCalendarAddBtn: 'Ajouter au calendrier',
   workoutCalendarAddedMsg: 'Ajouté au calendrier.',
   workoutCalendarPlanTitle: 'Calendrier',
@@ -1197,7 +1253,7 @@ const en: typeof fr = {
   ambitSettingsReadBtn: 'Read Settings',
   ambitSettingsRefreshBtn: 'Refresh',
   ambitSettingsReading: 'Reading settings...',
-  ambitSettingsReadOnly: 'Read-only for now — settings are shown but changing them isn\'t supported yet for this model.',
+  ambitSettingsReadOnly: 'Editable over the USB cable — verified on real hardware. A few fields with no known write offset stay read-only.',
   orbitalDataTitle: 'Orbital data',
   ephemerisGpsOnly: 'Ephemeris GPS only',
   ephemerisGpsOnlyInfo: 'This watch can also use GLONASS satellites, and has its own storage for their orbital data. Suunto\'s software never sends it to this model, so those satellites start cold every time. Sommet sends both GPS and GLONASS orbital data, which can speed up getting a fix. Tick this to send GPS only.',
@@ -1370,9 +1426,31 @@ const en: typeof fr = {
   backupRestoreUnavailable:
     'Restore needs a native capability not built on Android yet - these backups are ' +
     'read-only for now (use the desktop app to restore).',
+  backupRestoreBtn: 'Restore',
+  backupRestoreConfirmTitle: 'Restore navigation?',
+  backupRestoreConfirmMsg:
+    'This replaces ALL routes and POIs on the watch with the ones in this backup. Continue?',
+  backupRestoreDoneMsg: (routes: number, waypoints: number) => {
+    const parts: string[] = [];
+    if (routes > 0) parts.push(`${routes} route${routes === 1 ? '' : 's'}`);
+    if (waypoints > 0) parts.push(`${waypoints} POI${waypoints === 1 ? '' : 's'}`);
+    return `Restored: ${parts.join(' and ') || 'nothing'} written back to the watch.`;
+  },
+  backupKailashTitle: 'Travel history & GPS track',
+  backupKailashDesc:
+    'Saves this watch\'s visited places, travel stats and passive GPS track - the only ' +
+    'irreplaceable data on a Kailash (it has no routes/waypoints database to back up).',
+  backupKailashSaveBtn: 'Save archive',
+  backupKailashSavedMsg: (h: number, pts: number) =>
+    `Archive saved: ${h ? 'history' : 'no history'}, ${pts} GPS point${pts === 1 ? '' : 's'}.`,
+  backupKailashHistoryBtn: 'History',
+  backupKailashTrackBtn: 'GPS track',
+  backupKailashArchiveNote:
+    'This is an archive, not a restore point - there is no known way to write this data back ' +
+    'onto the watch.',
   backupWarning:
-    "⚠️ Backup only: this file CANNOT be flashed back onto the watch from this app. " +
-    "To update the firmware, use the official Suunto app or SuuntoLink.",
+    "⚠️ This saves Suunto's firmware file for safekeeping. To flash it onto the watch, use " +
+    "this app's Firmware tool (advanced and irreversible).",
   backupCheckSection: 'Check available firmware',
   backupCheckDesc: "Asks Suunto's servers for the latest firmware version available for your watch.",
   backupCheckBtn:  'Check',
@@ -1507,6 +1585,17 @@ const en: typeof fr = {
     'is erased from the watch and replaced with whatever comes next.',
   workoutCalendarDateLabel: 'Date',
   workoutCalendarModeLabel: 'Sport mode',
+  workoutCalendarImportTitle: 'Import from intervals.icu',
+  workoutCalendarImportDesc:
+    'Pull your planned workouts for a date range and drop them into the plan (HR targets ' +
+    'reconstructed from your zones). Pick a sport mode below first; then compile each pending one.',
+  workoutCalendarImportFrom: 'From',
+  workoutCalendarImportTo: 'To',
+  workoutCalendarImportBtn: 'Import planned workouts',
+  workoutCalendarImportNone: 'No planned workouts in that range',
+  workoutCalendarImportedPrefix: 'Imported',
+  workoutCalendarImportCompileHint: 'Compile each pending one below.',
+  workoutCalendarCompilingRow: 'Compiling…',
   workoutCalendarAddBtn: 'Add to Calendar',
   workoutCalendarAddedMsg: 'Added to the calendar.',
   workoutCalendarPlanTitle: 'Calendar',

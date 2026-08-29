@@ -182,8 +182,25 @@ PageFlickable {
                                 "break your device.")
                 }
 
+                // Uploading rebuilds the whole SBEM Routes region, which Ambit1/2 predate -
+                // reading and exporting their legacy routes works, writing one back does not.
+                // Say so rather than offering a button that cannot succeed.
+                Text {
+                    visible: RouteService.pendingRoute.name !== undefined
+                             && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRouteWrite
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("%1 can't have routes written to it from this app yet - its " +
+                                "routes are legacy waypoints, and only adding POIs is " +
+                                "supported. You can still export this one.")
+                        .arg(HomeViewModel.deviceDisplayName)
+                }
+
                 Row {
                     visible: RouteService.pendingRoute.name !== undefined
+                             && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRouteWrite)
                     spacing: Theme.spacingSmall
 
                     RoundedButton {
@@ -276,6 +293,26 @@ PageFlickable {
                 xhr.send()
             }
             onVisibleChanged: if (visible && routes.length === 0 && error === "" && !loading) refresh()
+
+            // Re-read when the connected watch actually changes. After a hot-swap the backend
+            // heals the stale pin (issue #16) and DeviceService reports the new watch, but this
+            // card may have cached a stale-window error and onVisibleChanged won't re-fetch past
+            // a non-empty error - so it would stay blank until a manual Retry. Keying on the
+            // serial fires only on a real change, not every poll (a ~30s legacy read otherwise).
+            property string _lastWatchKey: ""
+            Connections {
+                target: DeviceService
+                function onDeviceInfoChanged() {
+                    const key = DeviceService.deviceInfoOk ? DeviceService.serial : ""
+                    if (key === legacyRoutesCard._lastWatchKey)
+                        return
+                    legacyRoutesCard._lastWatchKey = key
+                    legacyRoutesCard.error = ""
+                    legacyRoutesCard.routes = []
+                    if (legacyRoutesCard.visible && !legacyRoutesCard.loading)
+                        legacyRoutesCard.refresh()
+                }
+            }
 
             Column {
                 width: parent.width

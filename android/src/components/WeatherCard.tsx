@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Card } from './ui/Card';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { useWeather, weatherEmoji } from '../services/WeatherService';
-import { t } from '../i18n';
+import { t, dateLocale } from '../i18n';
 
 // Same real WMO code ranges as WeatherService.ts's own weatherEmoji() / desktop's
 // WeatherViewModel.qml labelFor() - kept here (not in WeatherService.ts) so it can use this
@@ -86,7 +86,7 @@ export function WeatherCard() {
             {weather.data.forecast.map((day, i) => (
               <View key={day.date} style={styles.forecastCol}>
                 <Text style={[styles.forecastDay, { color: theme.mutedText }]}>
-                  {i === 0 ? t.weatherToday : new Date(day.date).toLocaleDateString(undefined, { weekday: 'short' })}
+                  {i === 0 ? t.weatherToday : new Date(day.date).toLocaleDateString(dateLocale, { weekday: 'short' })}
                 </Text>
                 <Text style={styles.forecastEmoji}>{weatherEmoji(day.code)}</Text>
                 <Text style={[styles.forecastTemp, { color: theme.text }]}>

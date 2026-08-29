@@ -33,6 +33,7 @@ memory), so there's nothing safe to send for THAT specific piece yet.
 import json
 import os
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -121,6 +122,16 @@ def settings():
     return run(["settings"])
 
 
+def waypoints():
+    """Fast waypoint/POI read: the CLI's `waypoints` does ONLY libambit_navigation_read
+    (0x0b02 count + 0x0b03 per-waypoint, ~55B each - SuuntoLink's own structured sequence,
+    confirmed in André's capture), SKIPPING the slow personal_settings_get PMEM region read.
+    Same waypoints[] shape as settings(); use this for /api/pois and /api/nav, which only need
+    waypoints/routes, so a legacy POI/route read is single-digit seconds instead of ~30s on
+    macOS. settings() stays for the Watch Settings page, which needs the personal block too."""
+    return run(["waypoints"])
+
+
 def logs(outdir):
     # A full watch of activities is read one move at a time over slow USB; a real 32-move
     # Ambit2 outran the old 120s, so allow generously (30 min) rather than truncate a sync.
@@ -135,6 +146,57 @@ def poi_clear():
     return run(["poi-clear"])
 
 
+def flash_read(address, length):
+    """Raw region read over 0x0b17 - READ ONLY. Returns bytes.
+
+    Goes through the C CLI because this family answers libambit's transport and not the
+    Ambit3 dialect write_nav.py speaks: every command through that path, device_info
+    included, comes back empty on a Bluebird (checked live, 2026-08-27).
+    """
+    info = run(["flash-read", str(int(address)), str(int(length))], timeout=600)
+    if not info.get("ok"):
+        raise RuntimeError(info.get("error", "flash-read failed"))
+    return bytes.fromhex(info["hex"])
+
+
+def routes():
+    """The watch's REAL routes, off the route region - full point tracks, not the A/B
+    waypoint markers /api/nav had to infer them from before.
+
+    Two reads: the 32-byte head first, because it carries route_count and routepoint_count and
+    those decide how much there is to fetch - the region is 16 KB and reading all of it when a
+    watch holds one short route would be slow for nothing.
+    """
+    import legacy_route                                      # noqa: PLC0415
+
+    head = flash_read(legacy_route.ROUTE_REGION_ADDR, legacy_route.HEAD_LEN)
+    magic = int.from_bytes(head[:2], "little")
+    if magic != legacy_route.HEAD_MAGIC:
+        return {"ok": True, "routes": [], "note": f"no route region (magic 0x{magic:04X})"}
+    point_count = int.from_bytes(head[8:12], "little")
+    total = legacy_route.POINTS_OFFSET + legacy_route.POINT_LEN * point_count
+    blob = flash_read(legacy_route.ROUTE_REGION_ADDR, total)
+    parsed = legacy_route.parse(blob)
+    return {"ok": True, "routes": parsed["routes"], "routepoint_count": parsed["routepoint_count"]}
+
+
+def route_head():
+    """Cheap route-region probe: read ONLY the 32-byte head (~1s, one flash read) and return
+    route_count/point_count/checksum, so the backend can decide an on-disk route-track cache
+    hit/miss WITHOUT the ~13.5KB full point read. The head's checksum is crc16 over the info
+    entries + the track points (legacy_route), so it changes on any route or point edit - a
+    correct, cheap cache key. head layout <HBBHHIH...>: route_count@4, point_count@8, checksum@12."""
+    import legacy_route                                      # noqa: PLC0415
+    head = flash_read(legacy_route.ROUTE_REGION_ADDR, legacy_route.HEAD_LEN)
+    magic = int.from_bytes(head[:2], "little")
+    if magic != legacy_route.HEAD_MAGIC:
+        return {"ok": True, "empty": True, "note": f"no route region (magic 0x{magic:04X})"}
+    return {"ok": True,
+            "route_count": int.from_bytes(head[4:6], "little"),
+            "point_count": int.from_bytes(head[8:12], "little"),
+            "checksum": int.from_bytes(head[12:14], "little")}
+
+
 def settings_write(key, value, dry_run=False):
     """Writes ONE personal-settings field on an Ambit1.
 
@@ -145,6 +207,96 @@ def settings_write(key, value, dry_run=False):
     if dry_run:
         args.append("--dry-run")
     return run(args)
+
+
+def flash_write(address, data, extra):
+    """Raw flash-region WRITE: chunked 0x0b16 + the 0x0b18 commit tail (extra) that makes it
+    persist. `data` is bytes, `extra` the region's tail constant (routes 0xFFFFFA1A, sport
+    modes 0xFFFFFFFF). The C CLL picks the per-device chunk size (Ambit1 512 / Ambit2 1024).
+    Destructive - the caller must have a backup and confirm the device first."""
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+        tf.write(data)
+        path = tf.name
+    try:
+        info = run(["flash-write", str(int(address)), path, str(int(extra))], timeout=600)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    if not info.get("ok"):
+        raise RuntimeError(info.get("error", "flash-write failed"))
+    return info
+
+
+def _encode_waypoints(waypoints):
+    """Pack a waypoint list into the flat 48-byte-per-record blob the CLI's waypoints-restore
+    expects (same layout as the Android app's AmbitLegacyNav.encodeWaypoints): name[16],
+    route_name[16], lat i32 (deg*1e7), lon i32, type u8, ctime year u16/month/day/hour/min/sec.
+    Names are latin1 (this family's encoding), capped at 15 chars + a NUL within the 16 field."""
+    out = bytearray()
+    for w in waypoints:
+        rec = bytearray(48)
+
+        def _put(dst_off, text):
+            b = str(text or "").encode("latin-1", "replace")[:15]
+            rec[dst_off:dst_off + len(b)] = b
+
+        _put(0, w.get("name"))
+        _put(16, w.get("route_name"))
+        # `settings` gives lat/lon as float degrees; accept lat_e7/lon_e7 ints too.
+        lat_e7 = int(round(float(w["lat"]) * 1e7)) if "lat" in w else int(w.get("lat_e7", 0))
+        lon_e7 = int(round(float(w["lon"]) * 1e7)) if "lon" in w else int(w.get("lon_e7", 0))
+        struct.pack_into("<ii", rec, 32, lat_e7, lon_e7)
+        rec[40] = int(w.get("type", 0)) & 0xFF
+        struct.pack_into("<H", rec, 41, int(w.get("ctime_year", 0)) & 0xFFFF)
+        rec[43] = int(w.get("ctime_month", 0)) & 0xFF
+        rec[44] = int(w.get("ctime_day", 0)) & 0xFF
+        rec[45] = int(w.get("ctime_hour", 0)) & 0xFF
+        rec[46] = int(w.get("ctime_minute", 0)) & 0xFF
+        rec[47] = int(w.get("ctime_second", 0)) & 0xFF
+        out += rec
+    return bytes(out)
+
+
+def waypoints_restore(waypoints):
+    """Replace the whole on-device waypoint (POI) list with `waypoints` (a list of dicts, as the
+    `settings` reply lists them). Command path: write_start + nav_memory_delete + one
+    waypoint_write per point, type kept RAW so a backup round-trips byte-exact. 0x0b04 clears
+    only the waypoint list (not the route flash region), so this never endangers routes."""
+    blob = _encode_waypoints(waypoints)
+    with tempfile.NamedTemporaryFile(suffix=".wpts", delete=False) as tf:
+        tf.write(blob)
+        path = tf.name
+    try:
+        info = run(["waypoints-restore", path], timeout=600)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    if not info.get("ok"):
+        raise RuntimeError(info.get("error", "waypoints-restore failed"))
+    return info
+
+
+def read_route_region():
+    """The raw route-region bytes (used extent only), for a byte-exact backup. Returns None when
+    the watch has no routes (no head magic). Mirrors routes() but returns the raw blob, not a
+    parse, because restore writes it back verbatim via flash_write."""
+    import legacy_route                                      # noqa: PLC0415
+    head = flash_read(legacy_route.ROUTE_REGION_ADDR, legacy_route.HEAD_LEN)
+    if int.from_bytes(head[:2], "little") != legacy_route.HEAD_MAGIC:
+        return None
+    point_count = int.from_bytes(head[8:12], "little")
+    total = legacy_route.POINTS_OFFSET + legacy_route.POINT_LEN * point_count
+    return flash_read(legacy_route.ROUTE_REGION_ADDR, total)
+
+
+def restore_route_region(data):
+    """Write backed-up route-region bytes back to the watch (0x041EB0 + tail 0xFFFFFA1A)."""
+    import legacy_route                                      # noqa: PLC0415
+    return flash_write(legacy_route.ROUTE_REGION_ADDR, data, legacy_route.ROUTE_COMMIT_EXTRA)
 
 
 def ambit1_sport_mode_read():
@@ -212,8 +364,9 @@ def sport_mode_write(modes, dry_run=False):
         pathlib.Path(path).unlink(missing_ok=True)
 
 
-_COMMANDS = ("device-info", "settings", "logs", "poi-add", "poi-clear",
-             "sport-mode-write-presets")
+_COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-clear",
+             "sport-mode-write-presets", "routes", "route-head",
+             "route-region-save", "route-region-restore", "nav-restore-json")
 
 
 def main():
@@ -229,6 +382,33 @@ def main():
             if len(sys.argv) < 5:
                 sys.exit(f"usage: {sys.argv[0]} poi-add NAME LAT LON")
             result = poi_add(sys.argv[2], sys.argv[3], sys.argv[4])
+        elif cmd == "routes":
+            result = routes()
+        elif cmd == "route-head":
+            result = route_head()
+        elif cmd == "route-region-save":
+            # route-region-save OUTFILE : write the raw route-region bytes to OUTFILE for a
+            # byte-exact backup. {ok, empty:true} when the watch has no routes.
+            if len(sys.argv) < 3:
+                sys.exit(f"usage: {sys.argv[0]} route-region-save OUTFILE")
+            data = read_route_region()
+            if data is None:
+                result = {"ok": True, "empty": True, "bytes": 0}
+            else:
+                pathlib.Path(sys.argv[2]).write_bytes(data)
+                result = {"ok": True, "empty": False, "bytes": len(data)}
+        elif cmd == "route-region-restore":
+            # route-region-restore INFILE : write backed-up route-region bytes back to the watch.
+            if len(sys.argv) < 3:
+                sys.exit(f"usage: {sys.argv[0]} route-region-restore INFILE")
+            result = restore_route_region(pathlib.Path(sys.argv[2]).read_bytes())
+        elif cmd == "nav-restore-json":
+            # nav-restore-json INFILE : INFILE is the `settings` reply (or any {waypoints:[...]});
+            # replace the on-device POI list with its waypoints.
+            if len(sys.argv) < 3:
+                sys.exit(f"usage: {sys.argv[0]} nav-restore-json INFILE")
+            payload = json.loads(pathlib.Path(sys.argv[2]).read_text())
+            result = waypoints_restore(payload.get("waypoints", payload) if isinstance(payload, dict) else payload)
         elif cmd == "sport-mode-write-presets":
             result = sport_mode_write_presets(dry_run="--dry-run" in sys.argv[2:])
         else:

@@ -122,6 +122,12 @@ GPSTRACKPOD_DIR = Path.home() / "AmbitAppBackups" / "gpstrackpod"
 SUUNTOT6_DIR = Path.home() / "AmbitAppBackups" / "suuntot6"
 SUUNTOX6HR_DIR = Path.home() / "AmbitAppBackups" / "suuntox6hr"
 LEGACYMERGE_DIR = Path.home() / "AmbitAppBackups" / "legacy-merged"
+# Persistent on-disk cache of decoded legacy route tracks (André 2026-08-29). The full route
+# read is ~79s on macOS (data volume: ~13.5KB of track points at the ~90ms/report floor), and
+# the in-memory read cache dies on reconnect/app restart. Keyed by the route region's head
+# checksum (crc16 over info+points -> changes on any route edit), so a hit is correct; only a
+# miss pays the full read. Survives restart AND replug, keeps full-track map previews.
+ROUTE_CACHE_DIR = Path.home() / "AmbitAppBackups" / "routecache"
 
 # Confirmed live and fully unauthenticated, 2026-08-05 (docs/sgee_andre.md) - no AppKey/account
 # needed, unlike the rest of that host's API surface.
@@ -298,6 +304,59 @@ def device_key():
     return hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else "watch"
 
 
+# ---- Per-connection read cache -----------------------------------------------------------
+# Ambit1/2 flash reads over USB are slow on macOS (~30s for a 16KB region): Apple's IOHIDManager
+# hands over each 64-byte input report ~100ms apart, vs ~1ms on Linux's libusb, and that pacing
+# is the IOKit floor - not our code. libusb can't replace it on macOS (the kernel HID driver
+# claims the device) and the linked hidapi is already the newest (0.15.0), so the transport can't
+# be made faster. Instead we cache each slow watch read and reuse it, so the user pays the ~30s
+# ONCE per connection rather than on every page navigation. Correctness: the cache belongs to the
+# connected watch's identity (refreshed from /api/device, which the desktop polls) so a hot-swap
+# never serves the previous watch's data; it is cleared on any watch-mutating write; and a
+# ?force=1 query (the pages' manual Refresh) bypasses it. Linux stays fast either way.
+_READ_CACHE = {}                       # tag -> last successful response payload
+_READ_CACHE_DEVICE = None              # identity of the watch _READ_CACHE currently belongs to
+_READ_CACHE_LOCK = threading.Lock()
+
+
+def _read_cache_device_identity(info):
+    """A stable identity for the connected watch from a device_info dict: its serial if it
+    reports one, else model/product id. When this changes, the cache is dropped."""
+    if not info:
+        return None
+    pid = info.get("product_id")
+    return info.get("serial") or info.get("model") or (hex(pid) if pid is not None else None)
+
+
+def read_cache_note_device(info):
+    """Point the cache at the currently-connected watch, dropping it if the watch changed.
+    Called from /api/device (polled by the desktop), so a hot-swap invalidates within one poll."""
+    global _READ_CACHE_DEVICE
+    ident = _read_cache_device_identity(info)
+    if ident is None:
+        return
+    with _READ_CACHE_LOCK:
+        if ident != _READ_CACHE_DEVICE:
+            _READ_CACHE.clear()
+            _READ_CACHE_DEVICE = ident
+
+
+def read_cache_get(tag):
+    with _READ_CACHE_LOCK:
+        return _READ_CACHE.get(tag)
+
+
+def read_cache_put(tag, payload):
+    with _READ_CACHE_LOCK:
+        _READ_CACHE[tag] = payload
+
+
+def read_cache_clear():
+    """Drop the cached reads (keeps the device identity - same watch, just stale data now)."""
+    with _READ_CACHE_LOCK:
+        _READ_CACHE.clear()
+
+
 def selected_is_legacy():
     """True when the pinned watch (or, with none pinned, whichever is plugged) is an
     Ambit1/2. Falls back to a real device_info.py query when nothing is pinned - cheap (one
@@ -314,11 +373,62 @@ def selected_is_legacy():
     return bool(info) and info.get("model") in ("Bluebird", "Duck", "Colibri", "Greentit")
 
 
+# Kailash (Hoopoe). Its product id is the one this project had to add a fallback bucket for
+# ([[ambit_app_kailash_usb_crash_root_cause]]); named here so backup can dispatch on it the
+# same way selected_is_legacy() does for Ambit1/2.
+KAILASH_PRODUCT_IDS = {0x002A}
+
+
+def selected_is_kailash():
+    """True when the pinned watch (or, with none pinned, whichever is plugged) is a Kailash.
+    Same shape and same fallback as selected_is_legacy() above - one cheap device_info.py
+    round trip when nothing is pinned, rather than guessing from SELECTED_PRODUCT_ID alone."""
+    if SELECTED_PRODUCT_ID is not None:
+        return SELECTED_PRODUCT_ID in KAILASH_PRODUCT_IDS
+    code, out, err = run_tool("device_info.py", ["--json"])
+    try:
+        info = json.loads(out.strip().splitlines()[-1]) if out.strip() else None
+    except Exception:  # noqa: BLE001 - not parseable means "don't know", not Kailash
+        info = None
+    return bool(info) and info.get("model") == "Hoopoe"
+
+
+def autopin_if_needed():
+    """Pin whichever Suunto watch is actually on the bus, when nothing has pinned one yet.
+
+    Without this the backend is only correct while the desktop app is driving it. Every tool
+    falls back to the Ambit3 Peak when no AMBIT_PRODUCT_ID is set - so with an Ambit1 plugged
+    in and nothing pinned, /api/device answers "no Ambit3 Peak (Emu) on the USB bus" and every
+    page built on it comes up empty. André, 2026-08-27: "ambit 1 doesn't show settings on
+    desktop... i believe that was ok" - it was, and what changed was that the backend had been
+    restarted underneath a running app, losing the pin it had been given.
+
+    The app's own DeviceService re-pins when it next polls /api/devices, so this is not a
+    replacement for that - it just means the API is right on its own, immediately, rather than
+    only after a client happens to correct it.
+
+    Silent and best-effort: a failure here leaves the pin unset, which is exactly where it was.
+    """
+    global SELECTED_PRODUCT_ID
+    if SELECTED_PRODUCT_ID is not None:
+        return
+    try:
+        proc = subprocess.run([PYTHON, str(TOOLS_DIR / "list_watches.py")],
+                              capture_output=True, text=True, timeout=60)
+        watches = json.loads(proc.stdout.strip().splitlines()[-1]).get("watches") or []
+        if watches:
+            SELECTED_PRODUCT_ID = int(watches[0]["productId"])
+    except Exception:  # noqa: BLE001 - never let auto-pinning break the call it precedes
+        pass
+
+
 def run_tool(script, args, timeout=180):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
     that means for the specific tool. Serialized across all callers via WATCH_LOCK - see its
     own comment for why."""
+    if script != "list_watches.py":
+        autopin_if_needed()
     env = os.environ.copy()
     if SELECTED_PRODUCT_ID is not None:
         env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
@@ -347,6 +457,44 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        # If this response is being served under _cached_get, store a SUCCESSFUL read so the
+        # next visit to that page is instant (see the per-connection read cache above). Only
+        # ok:true 200s are cached - an error/empty read must not be remembered as the answer.
+        tag = getattr(self, "_cache_store_tag", None)
+        if tag and status == 200 and isinstance(payload, dict) and payload.get("ok"):
+            read_cache_put(tag, payload)
+
+    def _cached_get(self, tag, handler):
+        """Serve a slow watch read from the per-connection cache when we have one; otherwise run
+        `handler` and let _send_json remember its successful response. ?force=1 (the pages' manual
+        Refresh) skips the cache and forces a fresh read."""
+        force = "force=1" in (urllib.parse.urlparse(self.path).query or "")
+        if not force:
+            cached = read_cache_get(tag)
+            if cached is not None:
+                self._send_json(200, cached)
+                return
+        self._cache_store_tag = tag
+        try:
+            handler()
+        finally:
+            self._cache_store_tag = None
+
+    @staticmethod
+    def _post_mutates_watch(path):
+        """True for POSTs that change what's on the watch, so the read cache must be dropped.
+        Every sport-mode edit (/api/customodes/*) plus the other on-watch writers. Deliberately
+        errs toward clearing (a re-read is cheap); pure cloud/phone posts (ember, intervals,
+        garmin, ble/*) are left out so they don't needlessly discard a good cache."""
+        p = path.split("?", 1)[0]
+        if p.startswith("/api/customodes/"):
+            return True
+        return p in {
+            "/api/pois", "/api/routes", "/api/settings", "/api/device/select",
+            "/api/time/sync", "/api/apps/install", "/api/apps/logging", "/api/apps/import",
+            "/api/hrv/install", "/api/workout/install", "/api/restore",
+            "/api/firmware/flash", "/api/gpstrackpod/retrieve", "/api/suuntot6/retrieve",
+        }
 
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -618,8 +766,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True})
         elif self.path == "/api/ember":
             self._handle_ember_get()
-        elif self.path == "/api/nav":
-            self._handle_nav()
+        elif self.path == "/api/nav" or self.path.startswith("/api/nav?"):
+            self._cached_get("nav", self._handle_nav)
         elif self.path == "/api/activities" or self.path.startswith("/api/activities?"):
             self._handle_activities()
         elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
@@ -630,8 +778,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_garmin_sync("health")
         elif self.path.startswith("/api/garmin/sleep"):
             self._handle_garmin_sync("sleep")
-        elif self.path == "/api/pois":
-            self._handle_pois_read()
+        elif self.path == "/api/pois" or self.path.startswith("/api/pois?"):
+            self._cached_get("pois", self._handle_pois_read)
         elif self.path == "/api/backups":
             self._handle_backups_list()
         elif self.path == "/api/device":
@@ -652,10 +800,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_kailash_tracklog()
         elif self.path == "/api/settings" or self.path.startswith("/api/settings?"):
             self._handle_settings_read()
-        elif self.path == "/api/legacy/settings":
-            self._handle_legacy_settings()
-        elif self.path == "/api/customodes":
-            self._handle_customodes_read()
+        elif self.path == "/api/legacy/settings" or self.path.startswith("/api/legacy/settings?"):
+            self._cached_get("legacy_settings", self._handle_legacy_settings)
+        elif self.path == "/api/customodes" or self.path.startswith("/api/customodes?"):
+            self._cached_get("customodes", self._handle_customodes_read)
         elif self.path == "/api/customodes/field-types":
             self._handle_customodes_field_types()
         elif self.path.startswith("/api/customodes/row-menu"):
@@ -719,6 +867,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"invalid JSON body: {e}"})
             return
 
+        # A write that changes what's ON the watch makes the cached reads stale - drop them so the
+        # next page read reflects the change (André writes sport modes; a stale cache would show
+        # the pre-write mode). Coarse by design: an extra re-read after a write is cheap safety.
+        if self._post_mutates_watch(self.path):
+            read_cache_clear()
+        # A route write also invalidates the PERSISTENT on-disk route-track cache (the in-memory
+        # clear above doesn't reach it) so the next /api/nav re-reads the watch, not stale tracks.
+        _p = self.path.split("?", 1)[0]
+        if _p in ("/api/routes", "/api/routes/export") or _p.startswith("/api/nav"):
+            try:
+                for _f in ROUTE_CACHE_DIR.glob("*.json"):
+                    _f.unlink(missing_ok=True)
+            except OSError:
+                pass
+
         if self.path == "/api/ble/connect":
             self._handle_ble_connect(body)
         elif self.path == "/api/ble/disconnect":
@@ -749,6 +912,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_stats_to_watch(body)
         elif self.path == "/api/intervals/upload":
             self._handle_intervals_upload(body)
+        elif self.path == "/api/intervals/workouts":
+            self._handle_intervals_workouts(body)
         elif self.path == "/api/ember/log":
             self._handle_ember_log(body)
         elif self.path == "/api/garmin/weight/login":
@@ -809,6 +974,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_trainingprogram_delete(body)
         elif self.path == "/api/trainingprogram/install":
             self._handle_trainingprogram_install(body)
+        elif self.path == "/api/trainingprogram/sync-calendar":
+            self._handle_trainingprogram_sync_calendar(body)
         elif self.path == "/api/legacy/sport-modes/write-presets":
             self._handle_legacy_sport_mode_write_presets(body)
         elif self.path == "/api/legacy/sport-modes":
@@ -882,6 +1049,56 @@ class Handler(BaseHTTPRequestHandler):
         legacy waypoints (tools/legacy_link.py settings, which now carries each waypoint's
         route_name) and reconstruct routes from them - so the desktop matches the Android app
         (both showed 0 legacy routes before, 2026-08-27)."""
+        # The REAL route region first (0x041EB0). Until 2026-08-27 nothing could read it -
+        # openambit writes routes but has no reader - so this endpoint inferred routes from
+        # route-tagged waypoints instead, which only ever recovers the A/B markers, never the
+        # track. Hardware-confirmed on André's Ambit1 the same day: 3 routes, 1695 points,
+        # region CRC matching, "Gare du Nord" decoding to 48.88097,2.35613.
+        # Persistent on-disk route cache (option C, André 2026-08-29). The full route read is
+        # ~79-93s on macOS: the route region sits at a HIGH flash offset (0x41EB0 ≈ 270KB) and a
+        # 0x0b17 read there costs ~45s to REACH regardless of length (measured: even a 32-byte
+        # head read = 45s), so there is no cheap head-probe to key on. Instead cache the decoded
+        # tracks on disk per WATCH IDENTITY and reuse WITHOUT re-reading: the first read pays ~79s
+        # once, every read after is ~instant and survives app restart AND replug (unlike the
+        # in-memory cache). Invalidated when routes are written through the app (do_POST clears
+        # ROUTE_CACHE_DIR on /api/routes) and by ?force=1 (manual Refresh). A route edited ON THE
+        # WATCH itself needs a manual Refresh - rare, and the auto-detect (a head checksum probe)
+        # would cost 45s, defeating the whole point. Keeps full-track map previews.
+        force = "force=1" in (urllib.parse.urlparse(self.path).query or "")
+        _ident = str(_READ_CACHE_DEVICE or device_key())
+        _safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in _ident) or "watch"
+        cache_file = ROUTE_CACHE_DIR / (_safe + ".json")
+        if not force and cache_file.is_file():
+            try:
+                self._send_json(200, json.loads(cache_file.read_text()))
+                return
+            except (OSError, ValueError):
+                pass  # unreadable -> fall through to a fresh read
+
+        code, out, err = run_tool("legacy_link.py", ["routes"], timeout=900)
+        info = self._parse_last_json_line(out)
+        if info and info.get("ok") and info.get("routes"):
+            routes = [{
+                "name": r["name"].strip(),
+                "pointCount": r["point_count"],
+                "waypointCount": r["point_count"],
+                "distanceMeters": r["distance_m"],
+                "ascentMeters": 0, "descentMeters": 0,
+                "track": [{"lat": la, "lon": lo, "ele": None} for la, lo in r["points"]],
+            } for r in info["routes"]]
+            resp = {"ok": True, "routes": routes,
+                    "raw_output": "legacy Ambit1/2 - %d route(s) read from the route region\n"
+                    % len(routes)}
+            try:  # persist for instant reads after restart/replug
+                ROUTE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(resp))
+            except OSError:
+                pass
+            self._send_json(200, resp)
+            return
+
+        # Fall back to the waypoint reconstruction - a watch whose route region was never
+        # written has no magic there, and its route-tagged waypoints are still worth showing.
         code, out, err = run_tool("legacy_link.py", ["settings"])
         info = self._parse_last_json_line(out)
         if info is None or not info.get("ok"):
@@ -1382,15 +1599,26 @@ class Handler(BaseHTTPRequestHandler):
         back EMPTY on this family - they predate SBEM (see legacy_link.py) - so an Ambit2
         with real waypoints showed none in the app (found 2026-08-26 against a 14-waypoint
         Ambit2; the 2026-08-22 Ambit1 test had 0 waypoints, so this gap was never hit). The
-        waypoints ARE read by legacy_link.py's `settings` (PMEM 2.0). Reuse that read and
-        re-emit them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..`
-        text (lat/lon as 1e7 integers) that PoiService::parseOnWatchPois already parses, so
-        the same on-watch POI card works unchanged - same raw_output contract as the SBEM
-        and BLE branches above."""
-        code, out, err = run_tool("legacy_link.py", ["settings"])
-        info = self._parse_last_json_line(out)
+        waypoints ARE read by legacy_link.py's `waypoints` - 0x0b02 count + 0x0b03 per-waypoint,
+        the fast structured sequence SuuntoLink itself uses (confirmed in André's own capture,
+        tools/ambit_pcap.py). It skips the slow personal_settings_get PMEM region read that made
+        this endpoint ~30s on macOS, so a legacy POI read is now single-digit seconds. Re-emit
+        them in the exact `Name='..' Location.Latitude=.. Location.Longitude=..` text (lat/lon as
+        1e7 integers) that PoiService::parseOnWatchPois already parses, so the same on-watch POI
+        card works unchanged - same raw_output contract as the SBEM and BLE branches above."""
+        # The waypoints read occasionally aborts mid-output inside libambit under the tight
+        # per-read timeout (intermittent SIGABRT ~1/7, a cold-start/first-open race), truncating
+        # the JSON. It's transient, so retry once before surfacing a 502 - a clean re-read almost
+        # always follows. stdout is pure JSON now (libambit INFO logging moved to stderr), so a
+        # non-parseable result really is a crash, not debug noise.
+        info = out = err = None
+        for _attempt in range(2):
+            _code, out, err = run_tool("legacy_link.py", ["waypoints"])
+            info = self._parse_last_json_line(out)
+            if info is not None and info.get("ok"):
+                break
         if info is None or not info.get("ok"):
-            self._send_json(502, {"ok": False, "error": "legacy_link.py settings produced "
+            self._send_json(502, {"ok": False, "error": "legacy_link.py waypoints produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
         # Route turn-points (route_name shared by >=2 waypoints) belong to the Routes page,
@@ -1796,6 +2024,36 @@ class Handler(BaseHTTPRequestHandler):
         result["wrote"] = any(result[k].get("wrote") for k in ("gps", "glonass"))
         self._send_json(200 if not failed else 502, result)
 
+    @staticmethod
+    def _backup_hint(prefix):
+        """A device FAMILY guess for a backup with no -device.json - i.e. every backup made
+        before 2026-08-27. Not a serial and not pretending to be one, but enough to stop the
+        UI offering to restore an Ambit3's regions onto a Kailash, which is the actual risk
+        André pointed at. Keyed on files only one family ever produces:
+          kailash-*.json         only the Kailash archive path writes these
+          custommodes/apps/
+          trainingprogram .bin   SBEM regions a Kailash does not declare at all
+        Returns "kailash", "ambit", or "" when neither is decidable."""
+        if (Path(f"{prefix}-kailash-history.json").exists()
+                or Path(f"{prefix}-kailash-tracklog.json").exists()):
+            return "kailash"
+        if Path(f"{prefix}-legacy-settings.json").exists():
+            return "legacy"
+        for region in ("custommodes", "apps", "trainingprogram"):
+            if Path(f"{prefix}-{region}.bin").exists():
+                return "ambit"
+        return ""
+
+    @staticmethod
+    def _backup_device(prefix):
+        """The watch a backup was taken from: {"model","serial"} from its -device.json, or
+        empty strings when it predates that stamp (2026-08-27) - "unknown", not "mine"."""
+        try:
+            d = json.loads(Path(f"{prefix}-device.json").read_text())
+            return str(d.get("model") or ""), str(d.get("serial") or "")
+        except Exception:  # noqa: BLE001 - missing or unreadable both mean "unknown"
+            return "", ""
+
     def _handle_backups_list(self):
         """Every backup made so far - just a directory listing, real prefixes `nav --save`/
         `restore` already understand, nothing invented here."""
@@ -1813,6 +2071,12 @@ class Handler(BaseHTTPRequestHandler):
                 "createdAt": routes_file.stat().st_mtime,
                 "hasEmber": Path(f"{prefix}-ember.json").exists(),
                 "hasRoutes": True,
+                "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
+                              or Path(f"{prefix}-kailash-tracklog.json").exists(),
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
             seen_prefixes.add(prefix)
         # Ember-only backups (no watch connected when the backup was made - a Garmin owner, or
@@ -1828,7 +2092,48 @@ class Handler(BaseHTTPRequestHandler):
                 "createdAt": ember_file.stat().st_mtime,
                 "hasEmber": True,
                 "hasRoutes": False,
+                "hasKailash": Path(f"{prefix}-kailash-history.json").exists()
+                              or Path(f"{prefix}-kailash-tracklog.json").exists(),
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
+            seen_prefixes.add(prefix)
+        # Kailash archives have neither -routes.bin nor -ember.json, so neither loop above
+        # finds them - they would be written successfully and then be invisible forever, the
+        # same trap the Ember-only loop exists to avoid.
+        # Ambit1/2 archives, same reason as the Kailash loop below: no -routes.bin, no
+        # -ember.json, so nothing above would ever list them.
+        for lg_file in sorted(BACKUP_DIR.glob("*-legacy-settings.json"), reverse=True):
+            prefix = str(lg_file)[:-len("-legacy-settings.json")]
+            if prefix in seen_prefixes:
+                continue
+            model, serial = self._backup_device(prefix)
+            backups.append({
+                "prefix": prefix, "label": Path(prefix).name,
+                "createdAt": lg_file.stat().st_mtime,
+                "hasEmber": False, "hasRoutes": False, "hasKailash": False, "hasLegacy": True,
+                "deviceModel": model, "deviceSerial": serial, "deviceHint": "legacy",
+            })
+            seen_prefixes.add(prefix)
+        for kail_file in sorted(BACKUP_DIR.glob("*-kailash-history.json"), reverse=True):
+            prefix = str(kail_file)[:-len("-kailash-history.json")]
+            if prefix in seen_prefixes:
+                continue
+            backups.append({
+                "prefix": prefix,
+                "label": Path(prefix).name,
+                "createdAt": kail_file.stat().st_mtime,
+                "hasEmber": False,
+                "hasRoutes": False,
+                "hasKailash": True,
+                "deviceModel": self._backup_device(prefix)[0],
+                "deviceSerial": self._backup_device(prefix)[1],
+                "deviceHint": self._backup_hint(prefix),
+                "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
+            })
+            seen_prefixes.add(prefix)
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
         self._send_json(200, {"ok": True, "backups": backups})
 
@@ -1950,6 +2255,17 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_device_ble()
             return
+        # Heal a stale pin first (issue #16): after a hot-swap SELECTED_PRODUCT_ID may still
+        # point at the unplugged watch, and this endpoint is the model/connected source the UI
+        # uses to decide whether to show the legacy Routes/POIs cards. If it returned ok:false
+        # here, those cards vanished until /api/devices happened to be polled. Enumerate and
+        # heal so the very next /api/device poll after a swap already reports the right watch.
+        try:
+            _lc, _lo, _le = run_tool("list_watches.py", [])
+            _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
+            self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
+        except (json.JSONDecodeError, IndexError, ValueError):
+            pass  # enumeration hiccup - fall through to the read, which self-reports if it fails
         code, out, err = run_tool("device_info.py", ["--json"])
         if code != 0:
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
@@ -1961,6 +2277,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "device_info.py --json produced "
                                    "no parseable JSON", "raw_output": out})
             return
+        # Tie the per-connection read cache to whichever watch is actually on the bus now; if it
+        # changed since the last poll (hot-swap), this drops the previous watch's cached reads.
+        read_cache_note_device(info)
         self._send_json(200, {"ok": True, **info})
 
     def _handle_devices_list(self):
@@ -1968,6 +2287,7 @@ class Handler(BaseHTTPRequestHandler):
         (2026-08-16, porting the Android multi-watch picker). tools/list_watches.py mirrors
         write_nav.Link's own enumerate walk, so the list is exactly the set Link could open.
         Includes `selected` (the product_id currently pinned via /api/device/select, or null)."""
+        global SELECTED_PRODUCT_ID
         code, out, err = run_tool("list_watches.py", [])
         last_line = out.strip().splitlines()[-1] if out.strip() else ""
         try:
@@ -1976,8 +2296,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "list_watches.py produced no parseable "
                                    "JSON", "raw_output": out, "stderr": err})
             return
+        # Self-heal a stale pin (issue #16) - see _heal_stale_pin(). Polled by the Home
+        # switcher, so a swap heals on the next refresh; _handle_device heals too (below) so
+        # the model/connected signal the UI's legacy-card visibility depends on never spends
+        # a poll cycle reporting "not an Ambit1/2" and blanking Routes/POIs after a swap.
+        self._heal_stale_pin([w.get("productId") for w in info.get("watches", [])])
         info["selected"] = SELECTED_PRODUCT_ID
         self._send_json(200, info)
+
+    @staticmethod
+    def _heal_stale_pin(enumerated):
+        """Clear SELECTED_PRODUCT_ID if the pinned watch is no longer on the bus; adopt the
+        sole remaining watch if exactly one is present. Idempotent and cheap when the pin is
+        already valid. Central to issue #16: a stale pin makes every watch endpoint fail
+        ("no <that watch> on the USB bus") until it heals."""
+        global SELECTED_PRODUCT_ID
+        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
+            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
 
     def _handle_device_select(self, body):
         """POST /api/device/select {"productId": int|null} - pin which watch every subsequent
@@ -2525,6 +2860,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    def _handle_intervals_workouts(self, body):
+        """POST /api/intervals/workouts. Body: {athlete_id, api_key, start, end, mode}. Pull the
+        athlete's PLANNED workouts from intervals.icu in [start, end] and return them as dated plan
+        entries [{date, mode, workout}] for the Training Program calendar. Reuses
+        intervals_workout.py --from-intervals (the same tool a terminal user runs): it reconstructs
+        each workout's HR bands from the athlete's own zones and, when the watch is on the cable,
+        resolves them to the watch's max/rest (Karvonen) - otherwise it returns the intervals.icu
+        bands. Read-only against the watch; nothing is written here (install is the calendar's own
+        Install step)."""
+        athlete_id = body.get("athlete_id")
+        api_key = body.get("api_key")
+        start = body.get("start")
+        end = body.get("end")
+        mode = body.get("mode")
+        missing = [k for k, v in (("athlete_id", athlete_id), ("api_key", api_key),
+                                  ("start", start), ("end", end), ("mode", mode)) if not v]
+        if missing:
+            self._send_json(400, {"ok": False, "error": "missing: " + ", ".join(missing)})
+            return
+        args = ["--from-intervals", "--json",
+                "--athlete-id", str(athlete_id), "--api-key", str(api_key),
+                "--start", str(start), "--end", str(end), "--mode", str(mode)]
+        code, out, err = run_tool("intervals_workout.py", args)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": ("intervals_workout produced no JSON: "
+                                   + (err or out or "")).strip()[:200]})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
     def _handle_intervals_upload(self, body):
         """POST /api/intervals/upload. Body: {athlete_id, api_key, name?, fit_base64? | gpx?}.
         Push one activity file to intervals.icu via tools/intervals_upload.py (reuses the same
@@ -2753,7 +3118,17 @@ class Handler(BaseHTTPRequestHandler):
         # docs/ambit1_sport_mode_format.md), so ONLY the decoder differs; every consumer
         # above this line is shared.
         if selected_is_legacy():
-            self._handle_customodes_read_ambit1()
+            # Dispatch by product_id so an Ambit2 (0x0019 etc.) goes STRAIGHT to its 90-byte
+            # reader and never runs the Ambit1 76-byte reader first. That reader opens the
+            # device only to reject a non-0x0010 pid, which is pure USB churn on a family whose
+            # region reads are already fragile - and the crash the Mac session hit (a SIGSEGV in
+            # the HID set_report on a wedged watch, now crash-hardened in hid-libusb.c) is likelier
+            # the more times the watch is opened/read in a row. 0x0010 keeps its own path (which
+            # still falls through to the Ambit2 reader if the Ambit1 read itself comes back empty).
+            if SELECTED_PRODUCT_ID == 0x0010:
+                self._handle_customodes_read_ambit1()
+            else:
+                self._customodes_read_ambit2()
             return
 
         # Testing mode decodes the fixture through the SAME tool, via its own --from, so
@@ -2789,9 +3164,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with WATCH_LOCK:
                 info = legacy_link.ambit1_sport_mode_read()
-        except RuntimeError as exc:
-            self._send_json(502, {"ok": False, "error": str(exc)})
-            return
+        except RuntimeError:
+            info = None    # not an Ambit1 (0x0010) - fall through to the Ambit2 reader below
         finally:
             if env_pid:
                 if old is None:
@@ -2799,8 +3173,13 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     os.environ["AMBIT_PRODUCT_ID"] = old
 
-        if not info.get("ok"):
-            self._send_json(502, info)
+        # Ambit2 (and the rest of the Bluebird family): ambit1_sport_mode_read is 0x0010-only.
+        # legacy_sport_modes.read_app_modes reads region 0x2000's 90-byte layout
+        # (docs/ambit2_protocol_findings.md); map those modes into the SAME exerciseModes shape
+        # so the rich list/detail editor renders them too - extends the 2026-08-23 "all watches
+        # look like ambit 3" Ambit1 intent (this method's own docstring) to the Ambit2.
+        if not (info and info.get("ok") and info.get("modes")):
+            self._customodes_read_ambit2()
             return
 
         app_names = self._ambit1_app_names()
@@ -2847,6 +3226,89 @@ class Handler(BaseHTTPRequestHandler):
             })
         self._send_json(200, {
             "ok": True, "formatType": "ambit1",
+            "exerciseModes": modes, "sportModes": []})
+
+    # Bit values for the Ambit2 hrbelt_and_pods field, matching tools/legacy_sport_modes.POD_BITS
+    # and SportModesPage.qml's podBits - so useHw round-trips through the same rich editor.
+    _AMBIT2_POD_BITS = (("hrBelt", 0x0001), ("powerPod", 0x0040), ("cadencePod", 0x0080),
+                        ("footPod", 0x0100), ("bikePod", 0x0800))
+
+    def _customodes_read_ambit2(self):
+        """The Ambit2 half of GET /api/customodes, mapped onto the SAME exerciseModes shape the
+        Ambit1 path produces so the rich list/detail editor renders the Ambit2 too.
+
+        Region 0x2000 is BXML - the SAME nested format the Ambit3 CustomModes region uses (root
+        0x0003 -> modes 0x0100 -> mode 0x0101 -> settings 0x0102 + display config 0x0105-0x010a,
+        with the SAME field-type/template ids as custom_modes.py's FIELD_TYPES). So two proven
+        decoders split the work on ONE region read: legacy_sport_modes.read_app_modes for the
+        90-byte SETTINGS (name/activity/pods/autolap/gps - custom_modes.py mis-reads those on the
+        Ambit2's blob), and custom_modes.py for the DISPLAYS (its 90-byte settings decode is
+        wrong here but its BXML display decode is exactly right - HW-confirmed against André's
+        Ambit2, 2026-08-28). Merged by file order (both walk the region top-to-bottom)."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_sport_modes                               # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        cm_modes = []
+        try:
+            with WATCH_LOCK:
+                region = legacy_sport_modes.read_region_live()  # ONE region-dump off the watch
+            # Settings from the 90-byte reader; displays from the BXML reader - both off the same
+            # bytes, no second watch read (write region to a temp file custom_modes.py --from can
+            # decode without touching USB).
+            with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+                tf.write(region)
+                tmp = tf.name
+            try:
+                app_modes = legacy_sport_modes.read_app_modes(from_file=tmp)
+                cm_code, cm_out, cm_err = run_tool("custom_modes.py", ["--json", "--from", tmp])
+                cm = self._parse_last_json_line(cm_out)
+                if cm and cm.get("ok"):
+                    cm_modes = cm.get("exerciseModes") or []
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        except (RuntimeError, OSError) as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        finally:
+            if env_pid:
+                if old is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old
+
+        modes = []
+        for i, m in enumerate(app_modes or []):
+            use_hw = 0
+            for key, bit in self._AMBIT2_POD_BITS:
+                if m.get(key):
+                    use_hw |= bit
+            displays = cm_modes[i].get("displays", []) if i < len(cm_modes) else []
+            modes.append({
+                "name": m.get("name", ""),
+                "activityId": m.get("activityId", 0),
+                "appCount": 0,
+                "customModeId": i,
+                "useHw": use_hw,
+                "altiBaroMode": m.get("altiBaroMode", 0),
+                "recordingInterval": m.get("recordingInterval", 0),
+                "gpsInterval": m.get("gpsInterval", 0),
+                "autolap": m.get("autolapM", 0),
+                "hrHigh": 0, "hrLow": 0, "hrLimitsUse": 0,
+                "autoStart": 0, "autoPause": 0, "autoScrolling": 0,
+                "intTimerFlags": 0, "intTimerCount": 0,
+                "intervalTimer": {"enabled": False, "type": "time",
+                                  "high": 0, "low": 0, "repetitions": 0},
+                "backlightMode": 0, "displayMode": 0, "quickNavigation": 0,
+                "displays": displays, "rules": [],
+            })
+        self._send_json(200, {
+            "ok": True, "formatType": "ambit2",
             "exerciseModes": modes, "sportModes": []})
 
     # Ambit1 Apps region. Base/size come from SuuntoLink's own Devices.xml per-device record
@@ -4005,6 +4467,46 @@ class Handler(BaseHTTPRequestHandler):
         path.unlink(missing_ok=True)
         self._send_json(200, {"ok": True})
 
+    def _handle_trainingprogram_sync_calendar(self, body):
+        """POST /api/trainingprogram/sync-calendar. Body: {entries:[{date,mode,workout}], write}.
+        Install the plan as native guided workouts in each entry's sport-mode WORKOUT menu,
+        rotating by date (upcoming installed, past erased) via tools/training_calendar.py --sync -
+        the current design (2026-08-21) that supersedes the date-gated App-Zone install. write:false
+        is a real dry-run (compile + diff, no watch write). Same shell-the-tool shape as the
+        standalone calendar GUI's own sync handler."""
+        entries = body.get("entries")
+        if not entries:
+            self._send_json(400, {"ok": False, "error": 'need a non-empty "entries" list'})
+            return
+        missing = [i for i, e in enumerate(entries)
+                   if not (e.get("date") and e.get("mode") and e.get("workout"))]
+        if missing:
+            self._send_json(400, {"ok": False,
+                                   "error": f"entries {missing} are missing date/mode/workout"})
+            return
+        plan = {"name": body.get("name", "Calendar"), "entries": entries}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(plan, f)
+            plan_path = f.name
+        try:
+            args = [plan_path, "--sync", "--json"]
+            if body.get("write"):
+                args.append("--write")
+            code, out, err = run_tool("training_calendar.py", args, timeout=300)
+        finally:
+            try:
+                os.unlink(plan_path)
+            except OSError:
+                pass
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False,
+                                   "error": ("training_calendar produced no JSON: "
+                                             + (err or out or "")).strip()[:200],
+                                   "raw_output": out, "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
+
     def _handle_trainingprogram_install(self, body):
         """POST /api/trainingprogram/install. Body: {"plan": {...}, "mode": int,
         "display": int, "field": int, "confirm": bool}.
@@ -4511,8 +5013,44 @@ class Handler(BaseHTTPRequestHandler):
         target.mkdir(parents=True, exist_ok=True)
         label = time.strftime("%Y%m%d-%H%M%S")
         prefix = str(target / label)
-        code, out, err = run_tool("write_nav.py", ["nav", "--save", prefix])
-        routes_ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
+
+        # Which watch this backup came off, written alongside it (André, 2026-08-27: "I see
+        # various backups, be sure that they are not from other device"). Nothing recorded it
+        # before, so an Ambit3's nav regions and a Kailash's archive sat in one undifferentiated
+        # list - and Restore would happily push either at whatever happened to be plugged in.
+        # Serial is the genuinely unique key (device_key()'s own comment says so); model is
+        # what the UI shows. Best-effort: a backup must not fail because identity didn't answer.
+        dev_model = dev_serial = ""
+        try:
+            di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+            di = self._parse_last_json_line(di_out)
+            # device_info.py's own JSON carries no "ok" key - /api/device adds that wrapper
+            # itself. Gate on the identity actually being there instead (caught 2026-08-27:
+            # checking .get("ok") here silently stamped nothing at all).
+            if di and (di.get("serial") or di.get("model")):
+                dev_model = str(di.get("model") or "")
+                dev_serial = str(di.get("serial") or "")
+                Path(f"{prefix}-device.json").write_text(json.dumps({
+                    "model": dev_model, "serial": dev_serial,
+                    "fw_version": di.get("fw_version"), "hw_version": di.get("hw_version"),
+                }, indent=2))
+        except Exception:  # noqa: BLE001 - identity is a label, never a reason to lose a backup
+            pass
+        # Skipped entirely on a Kailash - see the branch below for what its regions actually
+        # contain. This is a ~250 KB flash read over USB that comes back blank on that watch,
+        # so it costs real seconds to produce three useless files.
+        is_kailash = selected_is_kailash()
+        # Ambit1/2 skip it for the same reason, one family earlier: their routes and POIs are
+        # real, they just live in the legacy PMEM waypoint region rather than the SBEM object
+        # model write_nav.py speaks (André, 2026-08-27: "the ambit 1 has routes... it is just
+        # legacy not sbem.. same for ambit 2"). `nav --save` against one is a 502, not a backup.
+        is_legacy = selected_is_legacy()
+        if is_kailash or is_legacy:
+            code, out, err = 0, "", ""
+            routes_ok = False
+        else:
+            code, out, err = run_tool("write_nav.py", ["nav", "--save", prefix])
+            routes_ok = code == 0 and Path(f"{prefix}-routes.bin").exists()
         # Ember rides along in the same backup (André, 2026-08-26: "afaik there is zero GUI
         # service to backup it somewhere" - this closes that gap the same keyless way, no new
         # mechanism). Best-effort and silent if Ember was never used (no log.json yet).
@@ -4527,10 +5065,113 @@ class Handler(BaseHTTPRequestHandler):
                 has_ember = True
         except Exception:
             pass
-        ok = routes_ok or has_ember
+        # A Kailash's backup is a different thing entirely, and this is the whole reason it
+        # gets its own branch (André, 2026-08-27: "try it" - so we did, against his watch).
+        # `nav --save` above is meaningless here: its routes region came back 129,968 of
+        # 130,000 bytes 0xFF with a header magic of 0x3008 against the 0x340c expected, and
+        # waypoints 16,380 of 16,384 bytes 0xFF - both simply blank, which is consistent,
+        # because this watch has no routes or POIs feature to fill them. CustomModes, Apps
+        # and TrainingProgram are not declared or short-reply. The only region with real
+        # bytes was GlonassSGEE, the GPS ephemeris, which expires and re-downloads itself.
+        #
+        # What IS irreplaceable on a Kailash is its DeviceHistory (visited cities/countries,
+        # travel stats, the activity-mode logbook) and its TrackLog (the passive GPS track) -
+        # and those are exactly what a firmware flash wipes
+        # ([[ambit_app_kailash_desktop_home_fix]]). Neither is touched by `nav --save`, so a
+        # Kailash backup that captured nothing is what this replaces.
+        #
+        # This is an ARCHIVE, not a restore point: there is no proven write path for either
+        # region and this project does not invent one. Written as JSON (the tools' own
+        # output, losslessly) plus a .gpx of the track so the data is usable outside this app
+        # at all - which is the actual point of keeping it.
+        has_kailash = False
+        kailash_err = ""
+        if is_kailash:
+            hist_code, hist_out, hist_err = run_tool("kailash_history.py", ["--json"])
+            hist = self._parse_last_json_line(hist_out)
+            if hist and hist.get("ok"):
+                Path(f"{prefix}-kailash-history.json").write_text(
+                    json.dumps(hist, indent=2))
+                has_kailash = True
+            else:
+                kailash_err = (hist_err or hist_out or "kailash_history.py produced no JSON")
+
+            # ~1.3 MB flash read over USB - the same longer timeout /api/kailash/tracklog uses.
+            trk_code, trk_out, trk_err = run_tool("kailash_tracklog.py", ["--json"], timeout=300)
+            trk = self._parse_last_json_line(trk_out)
+            if trk and trk.get("ok"):
+                Path(f"{prefix}-kailash-tracklog.json").write_text(
+                    json.dumps(trk, indent=2))
+                has_kailash = True
+                # Every correlated segment the tool already produced a GPX for, concatenated
+                # one file per activity. Skipped silently when a segment has no track (a
+                # session predating TrackLog's coverage) rather than writing an empty file.
+                for i, act in enumerate(trk.get("activities") or []):
+                    gpx = act.get("gpxText")
+                    if gpx:
+                        Path(f"{prefix}-kailash-track-{i + 1}.gpx").write_text(gpx)
+            elif not kailash_err:
+                kailash_err = (trk_err or trk_out or "kailash_tracklog.py produced no JSON")
+
+        # The Ambit1/2 archive: their waypoints ARE their navigation database - a route is
+        # simply the waypoints sharing a route_name (see _legacy_route_groups) - and
+        # legacy_link.py settings returns them alongside the watch's settings in one reply.
+        # Saved verbatim, plus a .gpx of every waypoint so the data is usable outside this app,
+        # matching what the Kailash archive above does for its own regions.
+        #
+        # A RESTORABLE backup for this family now (2026-08-27): its waypoints (POIs) go back via
+        # the command path and its route region via a chunked flash-write + commit tail, both in
+        # tools/legacy_link.py, HW-proven first on the Android port. Still saves the same JSON+GPX
+        # archive so the data is readable outside the app; adds -legacy-routes.bin so Restore can
+        # rewrite the route region byte-for-byte.
+        has_legacy = False
+        legacy_err = ""
+        if is_legacy:
+            lg_code, lg_out, lg_err = run_tool("legacy_link.py", ["settings"])
+            lg = self._parse_last_json_line(lg_out)
+            if lg and lg.get("ok"):
+                Path(f"{prefix}-legacy-settings.json").write_text(json.dumps(lg, indent=2))
+                has_legacy = True
+                # The route region as raw bytes, for a byte-exact restore (waypoints restore
+                # from the settings JSON above). Best-effort: a watch with no routes just skips
+                # it, and a route read that fails must not lose the waypoint archive.
+                try:
+                    rr_code, rr_out, rr_err = run_tool(
+                        "legacy_link.py", ["route-region-save", f"{prefix}-legacy-routes.bin"],
+                        timeout=900)
+                    rr = self._parse_last_json_line(rr_out)
+                    if not (rr and rr.get("ok")):
+                        legacy_err = (rr_err or rr_out or "route-region-save produced no JSON")
+                except Exception:  # noqa: BLE001 - routes are a bonus; never drop the archive
+                    pass
+                wpts = lg.get("waypoints") or []
+                if wpts:
+                    routes_g, loose = self._legacy_route_groups(wpts)
+                    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                             '<gpx version="1.1" creator="ambit-app legacy_link.py">']
+                    for w in wpts:
+                        nm = str(w.get("name", "")).replace("&", "&amp;").replace("<", "&lt;")
+                        lines.append('  <wpt lat="%s" lon="%s"><name>%s</name></wpt>'
+                                     % (w.get("lat", 0.0), w.get("lon", 0.0), nm))
+                    for r in routes_g:
+                        rn = str(r.get("name", "")).replace("&", "&amp;").replace("<", "&lt;")
+                        lines.append('  <rte><name>%s</name>' % rn)
+                        for pt in r.get("track", []):
+                            lines.append('    <rtept lat="%s" lon="%s"/>'
+                                         % (pt.get("lat", 0.0), pt.get("lon", 0.0)))
+                        lines.append('  </rte>')
+                    lines.append('</gpx>')
+                    Path(f"{prefix}-legacy-nav.gpx").write_text("\n".join(lines))
+            else:
+                legacy_err = (lg_err or lg_out or "legacy_link.py settings produced no JSON")
+
+        ok = routes_ok or has_ember or has_kailash or has_legacy
         self._send_json(200 if ok else 502, {
             "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
-            "hasRoutes": routes_ok, "raw_output": out, "stderr": err})
+            "hasRoutes": routes_ok, "hasKailash": has_kailash,
+            "deviceModel": dev_model, "deviceSerial": dev_serial,
+            "hasLegacy": has_legacy, "legacyError": legacy_err,
+            "kailashError": kailash_err, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):
         """Body: {"prefix": str, "confirm": bool}. Real hardware write when confirmed - same
@@ -4542,16 +5183,83 @@ class Handler(BaseHTTPRequestHandler):
             return
         has_routes_backup = (Path(f"{prefix}-routes.bin").exists()
                               and Path(f"{prefix}-waypoints.bin").exists())
+        # A Kailash archive can carry -routes.bin/-waypoints.bin if it was taken before
+        # `nav --save` was skipped on that watch (2026-08-27) - but those files are the blank
+        # 0xFF regions that started this whole thread, and writing them back is meaningless.
+        # Treat the archive as having no nav half at all; its Ember half still restores.
+        if self._backup_hint(prefix) in ("kailash", "legacy"):
+            has_routes_backup = False
         has_ember_backup = Path(f"{prefix}-ember.json").exists()
-        if not (has_routes_backup or has_ember_backup):
+        # Ambit1/2 legacy nav restore (2026-08-27): waypoints (POIs) via the command path +
+        # the route region via chunked flash-write + commit tail (tools/legacy_link.py). A
+        # legacy backup always has -legacy-settings.json (its waypoints); -legacy-routes.bin
+        # rides along when the watch had routes.
+        has_legacy_backup = Path(f"{prefix}-legacy-settings.json").exists()
+        if not (has_routes_backup or has_ember_backup or has_legacy_backup):
+            # A Kailash archive is deliberately one-way: this project has no proven write
+            # path for DeviceHistory or TrackLog and does not invent one for a restore.
+            # Say that, rather than the generic "no backup found" it would otherwise get.
+            if (Path(f"{prefix}-kailash-history.json").exists()
+                    or Path(f"{prefix}-kailash-tracklog.json").exists()):
+                self._send_json(400, {"error": "This is a Kailash archive - travel history "
+                                       "and GPS track, kept so a firmware flash cannot lose "
+                                       "them. There is no write path back to the watch for "
+                                       "either, so it cannot be restored."})
+                return
             self._send_json(400, {"error": f"no backup found at prefix {prefix!r}"})
+            return
+
+        # Never push one watch's regions at a different watch. This project's standing rule
+        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]).
+        #
+        # The authority is the MODEL, not a family (André, 2026-08-27: "I would say the safe
+        # side, back up by model... by family may be risky no?" - and he is right: "Ambit"
+        # covers Ambit1, Ambit2, Ambit3 and Traverse, which do NOT share layouts. Traverse's
+        # waypoint descriptor alone differs from Peak's and decodes to garbage
+        # ([[ambit_app_traverse_waypoint_decode]]), and the region bases differ too
+        # ([[ambit_app_native_region_base_hardcoding]]). A family check would have called that
+        # pairing safe.) The contents hint is kept for LABELLING only and never authorises.
+        #
+        # So: serial must match when the backup records one, model must match always, and a
+        # backup that records neither - i.e. anything saved before this stamp existed
+        # (2026-08-27) - cannot be restored at all. Refusing an old backup is recoverable
+        # (connect the watch, take a fresh one); writing the wrong watch's flash is not.
+        want_model, want_serial = self._backup_device(prefix)
+        if not want_model and not want_serial:
+            self._send_json(400, {"error": (
+                "This backup was saved before backups recorded which watch they came from, "
+                "so there is no way to confirm it belongs to the watch connected now. "
+                "Restoring the wrong watch's data cannot be undone, so it is refused. "
+                "Connect that watch and take a fresh backup to have a restorable one.")})
+            return
+
+        di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
+        di = self._parse_last_json_line(di_out)
+        have_model = str((di or {}).get("model") or "")
+        have_serial = str((di or {}).get("serial") or "")
+        if not have_model and not have_serial:
+            self._send_json(400, {"error": "Couldn't identify the connected watch, so the "
+                                   "backup cannot be matched to it. Refusing to restore."})
+            return
+        if want_model and have_model and want_model != have_model:
+            self._send_json(400, {"error": (
+                f"That backup was taken from a {want_model}; the watch connected now is a "
+                f"{have_model}. Restoring one model's data onto another is refused.")})
+            return
+        if want_serial and have_serial and want_serial != have_serial:
+            self._send_json(400, {"error": (
+                f"That backup was taken from a different {want_model or 'watch'} "
+                f"(serial {want_serial}); the one connected now is serial {have_serial}. "
+                "Two watches of the same model are still different watches - refusing.")})
             return
 
         confirm = bool(body.get("confirm", False))
         # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to
         # restore - skip that call entirely rather than have it fail on files that were never
         # written in the first place.
-        if has_routes_backup:
+        if has_legacy_backup:
+            code, out, err, ok = self._restore_legacy(prefix, confirm)
+        elif has_routes_backup:
             args = ["restore", prefix]
             if confirm:
                 args.append("--write")
@@ -4579,6 +5287,48 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if ok else 502, {
             "ok": ok, "wrote": confirm and ok, "raw_output": out, "stderr": err,
             "ember": ember_result})
+
+    def _restore_legacy(self, prefix, confirm):
+        """Restore an Ambit1/2 nav backup: waypoints (POIs) then the route region. Returns
+        (code, out, err, ok) to match the write_nav.py branch. confirm=False rehearses (reports
+        the plan, writes nothing); confirm=True performs the real writes.
+
+        Order matches the Android port: waypoints FIRST (their write's nav_memory_delete clears
+        the waypoint list but NOT the route flash region), then the route region - so a restore
+        rebuilds exactly what was saved and never leaves routes half-written."""
+        settings_path = Path(f"{prefix}-legacy-settings.json")
+        routes_bin = Path(f"{prefix}-legacy-routes.bin")
+        try:
+            saved = json.loads(settings_path.read_text())
+        except Exception as ex:  # noqa: BLE001
+            return 1, "", f"cannot read {settings_path.name}: {ex}", False
+        wpts = saved.get("waypoints") or []
+        has_routes = routes_bin.exists() and routes_bin.stat().st_size > 0
+
+        if not confirm:
+            # Rehearsal: describe what a real restore would write, touch nothing.
+            plan = f"Would restore {len(wpts)} POI(s)"
+            plan += f" and the route region ({routes_bin.stat().st_size} bytes)" if has_routes \
+                else " (no routes in this backup)"
+            return 0, plan + "\n", "", True
+
+        out_lines = []
+        # 1. Waypoints (POIs) - clears the on-device list and writes the backed-up set.
+        wp_code, wp_out, wp_err = run_tool(
+            "legacy_link.py", ["nav-restore-json", str(settings_path)], timeout=600)
+        wp = self._parse_last_json_line(wp_out)
+        if not (wp and wp.get("ok")):
+            return 1, "\n".join(out_lines), (wp_err or wp_out or "waypoint restore failed"), False
+        out_lines.append(f"POIs restored: {wp.get('wrote', len(wpts))}")
+        # 2. Route region - byte-exact rewrite + commit tail.
+        if has_routes:
+            rr_code, rr_out, rr_err = run_tool(
+                "legacy_link.py", ["route-region-restore", str(routes_bin)], timeout=900)
+            rr = self._parse_last_json_line(rr_out)
+            if not (rr and rr.get("ok")):
+                return 1, "\n".join(out_lines), (rr_err or rr_out or "route restore failed"), False
+            out_lines.append(f"Route region restored: {rr.get('written', 0)} bytes")
+        return 0, "\n".join(out_lines) + "\n", "", True
 
 
 def main():

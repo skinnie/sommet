@@ -340,6 +340,111 @@ def total_seconds(workout: dict) -> int:
     return total
 
 
+# --- intervals.icu direct pull -------------------------------------------------------------
+# The events API returns each workout's `workout_doc` with the SAME nested step structure as the
+# file export, with ONE difference: it carries `hr.value` (a zone INDEX) but not the pre-resolved
+# `_hr` bpm band the file export had. We reconstruct that band from the athlete's own zone
+# boundaries (athlete_info.sportSettings.hr_zones) so the rest of the pipeline - including the
+# optional watch-Karvonen resolution in convert() - runs unchanged.
+
+def resolve_zone_band(zone_index, hr_zones, lthr=None, max_hr=None):
+    """intervals.icu zone INDEX (1-based) -> (low, high) bpm, from the athlete's `hr_zones`
+    (the per-zone UPPER bounds, e.g. [157,166,175,...]). Zones are contiguous: a zone's lower
+    bound is the previous zone's upper + 1. Zone 1 has no predecessor - intervals.icu doesn't
+    publish its floor in `hr_zones`, so we approximate it as ~68% of LTHR (or 60% of max HR),
+    which reproduces the file export's own Z1 floor to within ~1-2 bpm. That floor only governs
+    the "too easy" alert on the lowest zone, so a small approximation there is harmless."""
+    n = len(hr_zones)
+    if not n:
+        return None
+    idx = max(1, min(int(zone_index), n))     # clamp into the real zone range
+    high = int(hr_zones[idx - 1])
+    if idx >= 2:
+        low = int(hr_zones[idx - 2]) + 1
+    elif lthr:
+        low = round(0.68 * float(lthr))
+    elif max_hr:
+        low = round(0.60 * float(max_hr))
+    else:
+        low = max(0, high - 30)               # last-resort width
+    return low, high
+
+
+def resolve_zones_into_hr(steps, hr_zones, lthr=None, max_hr=None):
+    """In-place: give every hr-zone step a synthetic `_hr` band (the same key the file export
+    carries and convert() already reads) reconstructed from its zone index. Recurses into repeat
+    blocks. Leaves steps that already have `_hr`, or a non-zone target, untouched."""
+    for step in steps:
+        if step.get("steps"):
+            resolve_zones_into_hr(step["steps"], hr_zones, lthr, max_hr)
+            continue
+        hr = step.get("hr")
+        if step.get("_hr") or not isinstance(hr, dict) or hr.get("units") != "hr_zone":
+            continue
+        band = resolve_zone_band(hr.get("value"), hr_zones, lthr, max_hr)
+        if band:
+            step["_hr"] = {"start": float(band[0]), "end": float(band[1])}
+    return steps
+
+
+def athlete_hr_zones(athlete_info, activity_types=("Run", "VirtualRun", "TrailRun")):
+    """(hr_zones, lthr, max_hr) for the given activity family from an athlete_info payload, so the
+    zone indices in a workout resolve against the SAME zones intervals.icu drew them from."""
+    best = None
+    for ss in athlete_info.get("sportSettings", []) or []:
+        types = ss.get("types") or []
+        if any(t in types for t in activity_types) and ss.get("hr_zones"):
+            best = ss
+            break
+    if best is None:                          # fall back to any sport that has zones
+        best = next((ss for ss in athlete_info.get("sportSettings", []) or []
+                     if ss.get("hr_zones")), {})
+    return best.get("hr_zones"), best.get("lthr"), best.get("max_hr")
+
+
+def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
+                             activity_types=("Run", "VirtualRun", "TrailRun"),
+                             watch_max_hr=None, watch_rest_hr=None):
+    """Pull planned workouts from intervals.icu in [start, end] (ISO dates) and convert each into a
+    calendar plan entry {date, mode, workout} (workout = this project's schema, ready for
+    training_calendar.py). Only WORKOUT-category events with real steps of a matching activity type
+    are returned. HR zones are reconstructed from the athlete's own zone table; when watch_max_hr/
+    watch_rest_hr are given the bands are then Karvonen-resolved to the watch, exactly like the file
+    path. Returns (entries, skipped) where skipped is a list of {date, name, reason}."""
+    import intervals_stats as IS
+    athlete = IS._get("", athlete_id, api_key)
+    if isinstance(athlete, list):
+        athlete = athlete[0]
+    hr_zones, lthr, max_hr = athlete_hr_zones(athlete, activity_types)
+
+    events = IS._get("/events", athlete_id, api_key,
+                     f"oldest={start}&newest={end}&category=WORKOUT")
+    entries, skipped = [], []
+    for ev in events or []:
+        date = (ev.get("start_date_local") or "")[:10]
+        name = ev.get("name") or "Workout"
+        if activity_types and ev.get("type") not in activity_types:
+            skipped.append({"date": date, "name": name,
+                            "reason": f"activity {ev.get('type')!r} not in {activity_types}"})
+            continue
+        doc = ev.get("workout_doc") or {}
+        steps = doc.get("steps")
+        if not steps:
+            skipped.append({"date": date, "name": name, "reason": "no steps"})
+            continue
+        if hr_zones:
+            resolve_zones_into_hr(steps, hr_zones, lthr, max_hr)
+        icu = {"steps": steps, "duration": doc.get("duration"),
+               "sportSettings": {"max_hr": max_hr}}
+        try:
+            workout = convert(icu, name, watch_max_hr=watch_max_hr, watch_rest_hr=watch_rest_hr)
+        except (ValueError, NotImplementedError) as e:
+            skipped.append({"date": date, "name": name, "reason": str(e)})
+            continue
+        entries.append({"date": date, "mode": mode, "workout": workout})
+    return entries, skipped
+
+
 def open_watch_link():
     """Open a live write_nav.Link to the watch (device-info handshake done). Device I/O is logged
     to stderr, not stdout, so this tool's own stdout stays clean. Caller must close it."""
@@ -403,10 +508,57 @@ def default_name(path: pathlib.Path) -> str:
     return " ".join(stem.replace("_", " ").split()) or path.stem
 
 
+def _run_from_intervals(ap, args) -> int:
+    """--from-intervals: fetch planned workouts from intervals.icu and print dated plan entries as
+    JSON. HR bands are reconstructed from the athlete's own zones, then (when the watch is reachable
+    and --hr-source is watch, the default) Karvonen-resolved to the watch - same as the file path.
+    A missing/unreachable watch is not fatal here: it falls back to the intervals.icu bands."""
+    missing = [f for f in ("athlete_id", "api_key", "start", "end", "mode")
+               if not getattr(args, f)]
+    if missing:
+        ap.error("--from-intervals needs " + ", ".join("--" + m.replace("_", "-") for m in missing))
+
+    watch_max_hr, watch_rest_hr = args.max_hr, args.rest_hr
+    if args.hr_source == "watch" and (watch_max_hr is None or watch_rest_hr is None):
+        try:
+            rmax, rrest = read_watch_hr()
+            watch_max_hr = watch_max_hr if watch_max_hr is not None else rmax
+            watch_rest_hr = watch_rest_hr if watch_rest_hr is not None else rrest
+        except Exception:
+            pass                              # no watch -> reconstructed intervals.icu bands
+    if not (watch_max_hr and watch_rest_hr):
+        watch_max_hr = watch_rest_hr = None
+
+    try:
+        entries, skipped = fetch_intervals_workouts(
+            args.athlete_id, args.api_key, args.start, args.end, args.mode,
+            watch_max_hr=watch_max_hr, watch_rest_hr=watch_rest_hr)
+    except Exception as e:
+        payload = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        print(json.dumps(payload) if args.json else payload["error"], file=sys.stderr
+              if not args.json else sys.stdout)
+        return 1
+
+    result = {"ok": True, "entries": entries, "skipped": skipped,
+              "resolvedToWatch": bool(watch_max_hr)}
+    if args.json:
+        print(json.dumps(result))
+    else:
+        print(f"{len(entries)} workout(s) from intervals.icu "
+              f"({args.start}..{args.end}), HR bands "
+              f"{'resolved to the watch' if watch_max_hr else 'from intervals.icu zones'}:",
+              file=sys.stderr)
+        for e in entries:
+            print(f"  {e['date']}  {e['workout']['name']}  ({len(e['workout']['steps'])} steps)")
+        for sk in skipped:
+            print(f"  skipped {sk['date']} {sk['name']}: {sk['reason']}", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("files", nargs="+", type=pathlib.Path,
+    ap.add_argument("files", nargs="*", type=pathlib.Path,
                     help="intervals.icu workout export .json file(s)")
     ap.add_argument("--name", help="workout name (default: from the filename)")
     ap.add_argument("--cooldown", metavar="SECONDS|auto",
@@ -437,7 +589,22 @@ def main() -> int:
                     help="with --mode: actually write to the watch (else a real dry-run)")
     ap.add_argument("--backup-to", metavar="FILE",
                     help="with --mode --write: where to save the pre-write CustomModes backup")
+    ap.add_argument("--from-intervals", action="store_true",
+                    help="pull planned workouts straight from intervals.icu instead of reading "
+                         "files; needs --athlete-id/--api-key/--start/--end/--mode. Prints the "
+                         "dated plan entries as JSON (for training_calendar.py / the calendar GUI)")
+    ap.add_argument("--athlete-id", help="intervals.icu athlete id (with --from-intervals)")
+    ap.add_argument("--api-key", help="intervals.icu API key (with --from-intervals)")
+    ap.add_argument("--start", help="ISO date, earliest planned workout to pull (--from-intervals)")
+    ap.add_argument("--end", help="ISO date, latest planned workout to pull (--from-intervals)")
+    ap.add_argument("--json", action="store_true", help="machine-readable JSON output")
     args = ap.parse_args()
+
+    if args.from_intervals:
+        return _run_from_intervals(ap, args)
+
+    if not args.files:
+        ap.error("give one or more intervals.icu .json files, or use --from-intervals")
 
     if args.out and len(args.files) > 1:
         ap.error("--out takes a single input file; use --out-dir for several")

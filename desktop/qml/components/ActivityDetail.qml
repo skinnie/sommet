@@ -115,12 +115,12 @@ Item {
             // comment for why Kailash/Garmin "Walk" activities land on the same badge as an
             // Ambit "Walk" sport mode here too.
             ActivityBadge {
-                activityId: activity ? ActivityTypes.forName(activity.name).id : 1
+                activityId: activity ? ActivityTypes.displayId(activity.name, activity.sportTypeRaw) : 1
                 size: 24
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
-                text: activity ? (activity.name || qsTr("Untitled activity")) : ""
+                text: activity ? (ActivityTypes.displayName(activity.name, activity.sportTypeRaw) || qsTr("Untitled activity")) : ""
                 font.pixelSize: Theme.fontSizeTitle
                 font.bold: true
                 color: Theme.text

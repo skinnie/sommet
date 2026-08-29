@@ -210,6 +210,31 @@ PageFlickable {
                                 }
                             }
                         }
+                        // Per-row icon in the dropdown popup too, not just the selected box: the
+                        // shared RoundedComboBox delegate is text-only, so override it here so every
+                        // type in the list carries its own watch glyph (André: "we miss the icons of
+                        // type of poi"). index is the type id (0-17), matching poiTypeNames order.
+                        delegate: ItemDelegate {
+                            width: poiTypeBox.width
+                            height: 34
+                            highlighted: poiTypeBox.highlightedIndex === index
+                            contentItem: Row {
+                                spacing: Theme.spacingSmall
+                                Icon {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    glyph: Icons.poiTypeGlyph(index)
+                                    size: 20
+                                    color: Theme.text
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData
+                                    color: Theme.text
+                                    font.pixelSize: Theme.fontSizeBody
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
                     }
                     // Name - between the type and the search on the same line.
                     RoundedTextField {
@@ -529,6 +554,25 @@ PageFlickable {
             }
             onVisibleChanged: if (visible && waypoints.length === 0 && error === "" && !loading) refresh()
 
+            // Re-read when the connected watch actually changes (see RoutesPage's legacy card):
+            // after a hot-swap the backend heals the stale pin (#16) but this card can be stuck
+            // on its stale-window error, since onVisibleChanged won't re-fetch past a non-empty
+            // error. Keying on serial fires only on a real change, not every poll.
+            property string _lastWatchKey: ""
+            Connections {
+                target: DeviceService
+                function onDeviceInfoChanged() {
+                    const key = DeviceService.deviceInfoOk ? DeviceService.serial : ""
+                    if (key === legacyPoiCard._lastWatchKey)
+                        return
+                    legacyPoiCard._lastWatchKey = key
+                    legacyPoiCard.error = ""
+                    legacyPoiCard.waypoints = []
+                    if (legacyPoiCard.visible && !legacyPoiCard.loading)
+                        legacyPoiCard.refresh()
+                }
+            }
+
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -551,7 +595,20 @@ PageFlickable {
                     delegate: Column {
                         width: parent.width
                         spacing: 2
-                        Text { color: Theme.text; font.bold: true; text: modelData.name }
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            // The POI's own watch icon, per type (André: "we miss the icons of
+                            // type of poi"). type is the Ambit waypoint type byte off the watch.
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: Icons.fontFamily
+                                font.pixelSize: Theme.fontSizeBody + 3
+                                color: Theme.primary
+                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                            }
+                            Text { anchors.verticalCenter: parent.verticalCenter; color: Theme.text; font.bold: true; text: modelData.name }
+                        }
                         Text {
                             color: Theme.mutedText
                             text: qsTr("%1, %2  (%3 m)")
@@ -652,8 +709,18 @@ PageFlickable {
                             width: parent.width
                             spacing: Theme.spacingSmall
 
+                            // The POI's own watch icon, per type (André: "we miss the icons of
+                            // type of poi").
                             Text {
-                                width: parent.width - poiExportButton.width - Theme.spacingSmall
+                                id: onWatchPoiGlyph
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: Icons.fontFamily
+                                font.pixelSize: Theme.fontSizeBody + 3
+                                color: Theme.primary
+                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                            }
+                            Text {
+                                width: parent.width - onWatchPoiGlyph.width - poiExportButton.width - Theme.spacingSmall * 2
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
                                 text: modelData.name

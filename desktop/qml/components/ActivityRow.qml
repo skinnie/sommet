@@ -83,7 +83,7 @@ Rectangle {
         ActivityBadge {
             anchors.verticalCenter: parent.verticalCenter
             activityId: root.activity
-                        ? ActivityTypes.forName(root.activity.name).id : 1
+                        ? ActivityTypes.displayId(root.activity.name, root.activity.sportTypeRaw) : 1
             size: 32
         }
 
@@ -94,7 +94,7 @@ Rectangle {
             Text {
                 width: parent.width
                 elide: Text.ElideRight
-                text: root.activity ? (root.activity.name || qsTr("Untitled activity")) : ""
+                text: root.activity ? (ActivityTypes.displayName(root.activity.name, root.activity.sportTypeRaw) || qsTr("Untitled activity")) : ""
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeBody
                 font.bold: true

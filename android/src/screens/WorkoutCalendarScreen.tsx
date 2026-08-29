@@ -11,6 +11,7 @@ import { pickFile } from '../services/CatalogService';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
+import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
@@ -42,6 +43,12 @@ export default function WorkoutCalendarScreen() {
 
   const [generatedJson, setGeneratedJson] = useState<string | null>(null);
   const [compiledPending, setCompiledPending] = useState<CompiledApp | null>(null);
+
+  // intervals.icu import (a date range -> planned workouts) + which pending plan row a compile is for
+  const [importStart, setImportStart] = useState(todayIso());
+  const [importEnd, setImportEnd] = useState(plusDaysIso(14));
+  const [importing, setImporting] = useState(false);
+  const [compileTarget, setCompileTarget] = useState<number | null>(null);
 
   const [plan, setPlan] = useState<CalendarPlanEntry[]>([]);
 
@@ -84,12 +91,54 @@ export default function WorkoutCalendarScreen() {
     }
   }
 
+  // Pull the athlete's planned workouts from intervals.icu for the date range and drop them into
+  // the plan as pending entries (each carries its structured workout so it can be compiled below).
+  async function handleImportFromIntervals() {
+    if (!mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
+    setImporting(true);
+    try {
+      const { entries, skipped } = await fetchIntervalsWorkouts(importStart, importEnd, mode);
+      if (entries.length === 0) {
+        Alert.alert(t.experimentalWorkoutCalendar,
+          skipped.length ? `${t.workoutCalendarImportNone} (${skipped.length} skipped)` : t.workoutCalendarImportNone);
+      } else {
+        setPlan(p => [...p, ...entries.map(e => ({ date: e.date, mode: e.mode, workoutName: e.name, workout: e.workout }))]);
+        Alert.alert(t.experimentalWorkoutCalendar,
+          `${t.workoutCalendarImportedPrefix} ${entries.length}${skipped.length ? ` (+${skipped.length} skipped)` : ''}. ${t.workoutCalendarImportCompileHint}`);
+      }
+    } catch (e: any) {
+      Alert.alert(t.error, e?.message ?? String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  // Compile one pending imported entry: show its JSON, open the community compiler, and remember
+  // which plan row the next "Import compiled workout" should attach to.
+  function handleCompileEntry(i: number) {
+    const e = plan[i];
+    if (!e.workout) return;
+    setGeneratedJson(JSON.stringify(e.workout, null, 2));
+    setCompileTarget(i);
+    Linking.openURL(COMPILE_SITE_URL);
+    Alert.alert(t.experimentalWorkoutCalendar, t.intervalsSourceCopiedMsg);
+  }
+
   async function handleImportCompiled() {
     try {
       const picked = await pickFile();
-      const compiled = parseCompiledApp(picked.base64, name.trim() || 'Workout');
+      const forName = compileTarget != null ? plan[compileTarget].workoutName : (name.trim() || 'Workout');
+      const compiled = parseCompiledApp(picked.base64, forName);
       if (compiled.binary.length === 0) { Alert.alert(t.error, 'Empty compiled app.'); return; }
-      setCompiledPending(compiled);
+      if (compileTarget != null) {
+        // Attach to the imported plan row being compiled, rather than the manual add flow.
+        setPlan(p => p.map((e, idx) => (idx === compileTarget ? { ...e, compiled } : e)));
+        setCompileTarget(null);
+        setGeneratedJson(null);
+        Alert.alert(t.experimentalWorkoutCalendar, t.workoutCalendarAddedMsg);
+      } else {
+        setCompiledPending(compiled);
+      }
     } catch (e: any) {
       if (e?.message !== 'CANCELLED' && e?.code !== 'CANCELLED') Alert.alert(t.error, e?.message ?? String(e));
     }
@@ -122,6 +171,28 @@ export default function WorkoutCalendarScreen() {
     <ScrollView style={s.root} contentContainerStyle={s.content}>
       <Card style={{ width: '100%' }}>
         <Text style={[s.desc, { color: theme.warning }]}>{t.workoutCalendarWarning}</Text>
+      </Card>
+
+      {/* ── Import from intervals.icu ── */}
+      <Card style={{ width: '100%' }}>
+        <Text style={s.title}>{t.workoutCalendarImportTitle}</Text>
+        <Text style={s.desc}>{t.workoutCalendarImportDesc}</Text>
+        <Row>
+          <Field label={t.workoutCalendarImportFrom} value={importStart} onChangeText={setImportStart} s={s} theme={theme} />
+          <Field label={t.workoutCalendarImportTo} value={importEnd} onChangeText={setImportEnd} s={s} theme={theme} />
+        </Row>
+        <Text style={[s.desc, { marginTop: 8 }]}>
+          {mode ? `${t.workoutCalendarModeLabel}: ${mode}` : t.workoutCalendarPickModeFirst}
+        </Text>
+        <TouchableOpacity
+          style={[s.btn, s.primaryBtn, (importing || !mode) && { opacity: 0.5 }]}
+          disabled={importing || !mode}
+          onPress={handleImportFromIntervals}
+        >
+          {importing
+            ? <ActivityIndicator size="small" color={theme.background} />
+            : <Text style={s.primaryBtnText}>{t.workoutCalendarImportBtn}</Text>}
+        </TouchableOpacity>
       </Card>
 
       {/* ── New calendar entry ── */}
@@ -202,6 +273,14 @@ export default function WorkoutCalendarScreen() {
                   <Text style={s.planName}>{e.workoutName}</Text>
                   <Text style={s.desc}>{e.mode}{!e.compiled ? ` - ${t.workoutCalendarPending}` : ''}</Text>
                 </View>
+                {/* Pending imported entries carry their structured workout, so offer to compile it */}
+                {!e.compiled && e.workout && (
+                  <TouchableOpacity onPress={() => handleCompileEntry(i)}>
+                    <Text style={[s.desc, { color: theme.primary, fontWeight: '700' }]}>
+                      {compileTarget === i ? t.workoutCalendarCompilingRow : t.intervalsGenerateBtn}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity onPress={() => removeFromPlan(i)}>
                   <Text style={[s.desc, { color: theme.error }]}>{t.deleteBtn}</Text>
                 </TouchableOpacity>
@@ -240,6 +319,12 @@ export default function WorkoutCalendarScreen() {
 
 function todayIso(): string {
   const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function plusDaysIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 

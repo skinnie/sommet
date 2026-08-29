@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.3 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.14 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +82,9 @@ set_source_files_properties(qml/TotalsFacts.qml PROPERTIES
 set_source_files_properties(qml/NavBus.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
+set_source_files_properties(qml/DateFormat.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE true
+)
 set_source_files_properties(qml/SunTimes.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
@@ -131,6 +134,7 @@ qt_add_qml_module(ambitapp
         qml/ActivityMetrics.qml
         qml/TotalsFacts.qml
         qml/NavBus.qml
+        qml/DateFormat.qml
         qml/SunTimes.qml
         qml/FunFacts.qml
         qml/components/TotalsCard.qml
@@ -179,7 +183,6 @@ qt_add_qml_module(ambitapp
         qml/pages/SmartSensorPage.qml
         qml/pages/SettingsPage.qml
         qml/pages/SportModesPage.qml
-        qml/pages/IntervalsPage.qml
         qml/pages/WeightPage.qml
         qml/pages/HealthPage.qml
         qml/pages/EmberPage.qml

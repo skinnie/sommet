@@ -106,6 +106,8 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitReadLegacyNav(): String?
     private external fun nativeAmbitReadLegacyRegion(address: Long, length: Long): String?
     private external fun nativeAmbitWritePersonalSetting(offset: Int, width: Int, value: Int): Boolean
+    private external fun nativeAmbitWriteLegacyRegion(address: Long, data: ByteArray, tailExtra: Long): Boolean
+    private external fun nativeAmbitWriteLegacyWaypoints(records: ByteArray): Int
     private external fun nativeAmbitWriteSettingsRaw(data: ByteArray): Boolean
     private external fun nativeAmbitSetDateTime(): Boolean
     private external fun nativeAmbitReadCustomModesRaw(): String?
@@ -904,6 +906,45 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 else promise.reject("LEGACY_REGION_READ_FAILED", "Failed to read legacy region (see logcat AmbitJNI)")
             } catch (e: Exception) {
                 promise.reject("LEGACY_REGION_READ_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    // Ambit 1/2 (Bluebird) raw flash-region WRITE (chunked 0x0b16). `dataB64` is the FULL region
+    // bytes to put on the watch - read the region, patch in JS, write it back. Used for legacy
+    // sport-mode field edits (0x2000) and nav restore. Guarded to the Bluebird family natively.
+    @ReactMethod
+    fun writeLegacyRegion(address: Double, dataB64: String, tailExtra: Double, promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val bytes = Base64.decode(dataB64, Base64.DEFAULT)
+                val ok = nativeAmbitWriteLegacyRegion(address.toLong(), bytes, tailExtra.toLong())
+                if (ok) promise.resolve(true)
+                else promise.reject("LEGACY_REGION_WRITE_FAILED", "Failed to write legacy region (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("LEGACY_REGION_WRITE_ERROR", e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun writeLegacyWaypoints(recordsB64: String, promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            try {
+                val bytes = Base64.decode(recordsB64, Base64.DEFAULT)
+                val n = nativeAmbitWriteLegacyWaypoints(bytes)
+                if (n >= 0) promise.resolve(n)
+                else promise.reject("LEGACY_WAYPOINT_WRITE_FAILED", "Failed to write legacy waypoints (see logcat AmbitJNI)")
+            } catch (e: Exception) {
+                promise.reject("LEGACY_WAYPOINT_WRITE_ERROR", e.message ?: "Unknown error")
             }
         }
     }

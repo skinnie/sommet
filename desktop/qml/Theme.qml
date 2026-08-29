@@ -50,13 +50,14 @@ QtObject {
         // (Persisted here alongside the other app-view prefs, the same mechanism the theme
         // override uses - no new settings singleton needed for two values.)
         //
-        // Ember is a personal side-project, not part of the public Sommet release, so it ships
-        // HIDDEN: `emberEnabled` defaults false, and its Settings card only appears once the
-        // easter egg is found - tapping the version label 10x sets `emberUnlocked` (André,
-        // 2026-08-25: "I don't want this app visible to the public for now"). His own machine
-        // keeps whatever these were already persisted as.
+        // Ember is an experimental personal companion, so it ships OPT-IN: `emberEnabled`
+        // defaults false, which keeps its sidebar entry off until the user turns it on. Its
+        // Settings card (the toggle + phone-install link) is now shown openly and labelled
+        // experimental (2026-08-28); the old 10-tap `emberUnlocked` easter egg was retired, so
+        // that property is no longer read anywhere (kept only so an existing persisted value
+        // loads without warning). An existing install keeps whatever these were persisted as.
         property bool emberEnabled: false
-        property bool emberUnlocked: false
+        property bool emberUnlocked: false   // retired 2026-08-28, no longer read
         // Empty by DEFAULT on purpose (2026-08-26, release prep): this used to ship André's own
         // personal trycloudflare tunnel URL, which is both ephemeral (dead for anyone else) and
         // personal infrastructure that has no business in a public release. Each user pastes

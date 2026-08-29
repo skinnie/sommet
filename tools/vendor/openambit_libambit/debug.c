@@ -46,7 +46,12 @@ void debug_printf(debug_level_t level, const char *file, int line, const char *f
         leveltxt = debug_warn_text;
     }
     else {
-        output = stdout;
+        /* INFO to stderr, not stdout: the ambit_legacy_cli emits its result as JSON on stdout
+         * (after an @@JSON@@ marker), and ~58 lines of INFO spam ("libambit info: ... Vendor:
+         * ... Komposti version: ...") polluting stdout meant a mid-output crash left a truncated
+         * JSON fragment as the "last line" -> the backend's JSON parse 502'd. Keeping stdout pure
+         * JSON makes that degrade gracefully. (err/warn already go to stderr.) */
+        output = stderr;
         leveltxt = debug_info_text;
     }
 

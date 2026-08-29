@@ -79,20 +79,31 @@ void CoachService::openActivitiesDb()
 
 void CoachService::computeReadiness()
 {
+    const QDate today = QDate::currentDate();
+    const QDate doneSince = today.addDays(-7);   // "recently done" window for pickWorkouts()
+    m_recentDone.clear();
+
     QMap<QDate, double> loadByDay;   // day -> minutes trained that day (the load proxy)
     if (m_db.isOpen()) {
         QSqlQuery q(QStringLiteral(
-            "SELECT start_time, duration_s FROM activities "
+            "SELECT start_time, duration_s, name FROM activities "
             "WHERE start_time IS NOT NULL AND start_time != ''"), m_db);
         while (q.next()) {
             const QDateTime dt = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
             if (!dt.isValid()) continue;
             const double minutes = q.value(1).toDouble() / 60.0;
             loadByDay[dt.date()] += minutes;
+            // Anything trained in the last 7 days is a candidate for exclusion from picks.
+            // Name-matching is best-effort: a ride recorded on the watch carries its sport-mode
+            // name, not the SYSTM session name, so this only fires when the two genuinely match
+            // (e.g. a workout named the same way) — but it never wrongly excludes.
+            if (dt.date() >= doneSince) {
+                const QString norm = normalizeName(q.value(2).toString());
+                if (!norm.isEmpty()) m_recentDone.insert(norm);
+            }
         }
     }
 
-    const QDate today = QDate::currentDate();
     QDate start = today.addDays(-119);   // cap history depth - bounded, still plenty for a 42d ramp
     if (!loadByDay.isEmpty()) {
         const QDate earliest = loadByDay.firstKey();
@@ -175,6 +186,11 @@ QString CoachService::intensityForLight(const QString &light)
     return QStringLiteral("endurance");
 }
 
+QString CoachService::normalizeName(const QString &s)
+{
+    return s.trimmed().toLower();
+}
+
 QVariantList CoachService::pickWorkouts(const QString &intensity, int maxMinutes, int limit) const
 {
     const QList<CatalogueRow> &rows =
@@ -190,9 +206,24 @@ QVariantList CoachService::pickWorkouts(const QString &intensity, int maxMinutes
     std::sort(matched.begin(), matched.end(),
               [](const CatalogueRow &a, const CatalogueRow &b) { return a.tss > b.tss; });
 
+    // Drop anything trained in the last 7 days so the coach stops re-serving a session you've
+    // just done (André, 2026-08-28: "recommending the same 2 exercises for 3 days in a row").
+    // If that would empty the pool (small catalogue, everything recently done), fall back to
+    // the full sorted list rather than showing nothing.
+    QList<CatalogueRow> pool;
+    for (const auto &r : matched)
+        if (!m_recentDone.contains(normalizeName(r.name))) pool.append(r);
+    if (pool.isEmpty()) pool = matched;
+
+    // Rotate the starting point by the day, so even when nothing gets excluded the two picks
+    // still change from one day to the next instead of always being the top-TSS pair. Stable
+    // within a single day (same julian-day offset), varied across days, wraps around the pool.
     QVariantList out;
-    for (int i = 0; i < matched.size() && i < limit; ++i) {
-        const auto &r = matched[i];
+    const int n = pool.size();
+    if (n == 0) return out;
+    const int offset = int(QDate::currentDate().toJulianDay() % n);
+    for (int k = 0; k < limit && k < n; ++k) {
+        const auto &r = pool[(offset + k) % n];
         out.append(QVariantMap{
             {QStringLiteral("name"), r.name}, {QStringLiteral("durationSec"), r.durationSec},
             {QStringLiteral("load"), r.tss}, {QStringLiteral("intensityFactor"), r.intensityFactor},

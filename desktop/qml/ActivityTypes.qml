@@ -140,6 +140,28 @@ QtObject {
     function colorForId(id) { return forId(id).color }
     function nameForId(id) { return forId(id).name }
 
+    // The Ambit1/2 (legacy) family carries no sport-mode name string in its activity log, so
+    // ambit_legacy_cli writes the start time into the GPX <name> (e.g. "2026-08-26T15-20").
+    // The rest of the app treats activity.name as a sport name (badge icon, row title), so a
+    // legacy move otherwise reads as a raw timestamp with a blank "Unspecified" badge. When the
+    // name is that bare timestamp (or empty) and the decoded sport id is known, resolve to the
+    // real sport instead - exactly how Ambit3/intervals activities already read. sportTypeRaw is
+    // the Suunto activity id the GPX <sport_type> carries (ActivityService.parseGpx injects it
+    // from the legacy log's activity_type), the same id space as byId.
+    function _isTimestampName(name) {
+        return !name || /^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}/.test(String(name));
+    }
+    function displayName(name, sportTypeRaw) {
+        if (_isTimestampName(name) && sportTypeRaw !== undefined && sportTypeRaw > 0)
+            return forId(sportTypeRaw).name;
+        return name;   // caller keeps its own "Untitled activity" fallback
+    }
+    function displayId(name, sportTypeRaw) {
+        if (_isTimestampName(name) && sportTypeRaw !== undefined && sportTypeRaw > 0)
+            return sportTypeRaw;
+        return forName(name).id;
+    }
+
     // An SVG data: URI for one entry with its symbol painted in `paint`. The stored `svg` is
     // a 24x24 fragment that paints itself with #fff, so a substitution is all that is needed
     // - no per-colour files, and Image caches the result.

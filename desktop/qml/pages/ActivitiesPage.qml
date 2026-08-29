@@ -105,53 +105,16 @@ Item {
     // from ActivityService (Ambit3, real watch log) or GarminService (Garmin, real GPX
     // files already sitting on the device) depending on which one HomeViewModel says is
     // actually connected. Matches the real Android app's own "no sub menu needed, just read
-    // and log" simplicity for Garmin.
-    //
-    // Real, 2026-08-09 ("Activity logs from kailash => treat them as walks => import to
-    // the activities") - Kailash has no ExerciseLog PMEM region at all (KailashService's
-    // own header comment), so ActivityService has nothing to read for it. Its real
-    // per-session data lives in KailashService.sessions instead (the DeviceHistory
-    // "activity mode" logbook - when/durationSeconds/distanceMeters/maxSpeed, already
-    // fetched on Home) - reshaped here into the exact {name, startTime, distanceMeters,
-    // durationSeconds, ascentMeters, track} shape ActivityCard.qml already expects, so no
-    // new QML component is needed. Every session becomes a real "Walk" card - Kailash's own
-    // DeviceHistory doesn't record which activity type each session was (unlike Ambit3's
-    // real ExerciseLog), and "Walk" is the closest honest default for a GPS-adventure watch
-    // with no sport-mode concept at all, per this request.
-    //
-    // Real, 2026-08-09 ("Something is bizarre on the activities, they say no gps, but they
-    // have gps") - ascentMeters/track used to be unconditionally empty here, described above
-    // as "this logbook has summary stats only, no per-session GPS track" - true of
-    // DeviceHistory sessions on their own, but wrong to leave it there: the watch's separate,
-    // continuous TrackLog DOES cover these same real time windows. KailashService.
-    // trackLogActivities now does that correlation server-side (see kailash_tracklog.py's
-    // split_into_activities() docstring) and comes back index-aligned 1:1 with
-    // KailashService.sessions - zipped together here so distance/duration keep coming from
-    // the watch's own real reported stats (more accurate than a GPS-derived approximation)
-    // while track comes from the real correlated GPS points. A session genuinely outside
-    // TrackLog's coverage (predates capture start, etc.) still gets a real empty track, not a
-    // wrong one - ActivityCard.qml already renders that as "No GPS track", which is correct
-    // for that specific case.
-    readonly property var kailashActivities: KailashService.sessions.map(function(s, i) {
-        var t = KailashService.trackLogActivities[i];
-        return {
-            name: qsTr("Walk"),
-            startTime: s.when,
-            distanceMeters: s.distanceMeters,
-            durationSeconds: s.durationSeconds,
-            ascentMeters: 0,
-            track: (t && t.track) ? t.track : [],
-        };
-    })
-
+    // and log" simplicity for Garmin. The activity SOURCE itself now comes from
+    // ActivityViewModel.feed (see there) - only the loading flag stays device-aware here.
     readonly property bool loading:
         HomeViewModel.isGarmin ? GarminService.activitiesLoading
         : HomeViewModel.isKailash ? KailashService.loading
         : ActivityService.loading
-    readonly property var activeActivities:
-        HomeViewModel.isGarmin ? GarminService.activities
-        : HomeViewModel.isKailash ? root.kailashActivities
-        : ActivityService.activities
+    // The full history, with the connected device's on-watch-only sessions merged in -
+    // see ActivityViewModel.feed, which now owns the reshaping and the dedupe that used to
+    // be copied into this page, TotalsPage and CalendarPage separately.
+    readonly property var activeActivities: ActivityViewModel.feed
 
     Component.onCompleted: {
         // Opened straight into an activity (from a Calendar day click) - honour the pending

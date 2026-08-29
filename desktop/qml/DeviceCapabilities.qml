@@ -27,8 +27,75 @@ QtObject {
     readonly property var _legacyModels: (["Bluebird", "Duck", "Colibri", "Greentit"])
     readonly property bool _isLegacy: _legacyModels.indexOf(DeviceService.model) !== -1
 
-    property bool supportsRoutes: !_isLegacy
-    property bool supportsPOIs: !_isLegacy
+    // Kailash (Hoopoe) is a GPS travel/adventure watch with no route-following and no POI
+    // feature at all - see KAILASH-SCOPING-NOTE.md's own "What this project is (and isn't)".
+    // That is not a gap in the Routes/POIs pages, it is the hardware.
+    //
+    // Keyed off DeviceService.model, NOT HomeViewModel.isKailash, which is where NavRail read
+    // it before: isKailash is `connected && model === "Hoopoe"`, so every blip in the 10s
+    // connection heartbeat flashed Routes and POIs back into the rail on a watch that has
+    // never supported either (André, 2026-08-26: "if kailash, routes and pois should not
+    // show, since it is not supported" - seen while the link had dropped). deviceservice.cpp
+    // only ever ASSIGNS m_model on a successful read and never clears it, so the last-known
+    // model rides out a blip and the rail stays still.
+    readonly property bool _isKailash: DeviceService.model === "Hoopoe"
+
+    // Ambit1/2 DO have routes and POIs - André, 2026-08-27: "the ambit 1 has routes... it is
+    // just legacy not sbem.. same for ambit 2". They live in the legacy PMEM waypoint region,
+    // not the SBEM object model, and this file's header above (written before that path
+    // existed) concluded "no routes/POIs" from the SBEM queries coming back empty. That was a
+    // statement about the protocol, not about the watch. /api/nav and /api/pois now dispatch
+    // to tools/legacy_link.py for this family - a route being simply the waypoints that share
+    // a route_name - so both are real here and must be reachable.
+    property bool supportsRoutes: !_isKailash
+    property bool supportsPOIs: !_isKailash
+
+    // Route WRITING is the part that is still SBEM-only: _handle_route_write rebuilds the
+    // whole Routes region through write_nav.py, which this family predates, and no legacy
+    // equivalent is wired. POI writing IS - legacy_link.py poi-add, hardware-validated
+    // 2026-08-22 against openambit's libambit_navigation_write - so only the upload button
+    // is gated, not the page. Reading, exporting and POI add all work.
+    property bool supportsRouteWrite: !_isLegacy && !_isKailash
+
+    // Backup & Restore is write_nav.py's nav --save/restore over the SBEM flash regions.
+    // BackupPage used to read supportsRoutes for this, which was fine while the two were the
+    // same predicate; they are separated because excluding Kailash from Routes would
+    // otherwise have taken Backup away from it as a silent side effect.
+    //
+    // Kailash IS excluded, but on its own evidence - a real `nav --save` run against the
+    // connected watch, 2026-08-27:
+    //   - routes.bin  came back 129,968 of 130,000 bytes 0xFF, header magic 0x3008 vs the
+    //     0x340c expected -> "routes 0  points 0  waypoints 0", and the API's own hasRoutes
+    //     was false. waypoints.bin the same: 16,380 of 16,384 bytes 0xFF. Both regions are
+    //     blank, which is consistent - this watch has no routes/POIs feature to fill them.
+    //   - TrainingProgram "this watch does not declare it"; CustomModes and Apps both
+    //     "read failed (short reply)". The 0x0b21 memory map answered with 4 bytes.
+    //   - The one region with real bytes was GlonassSGEE, which is the GPS ephemeris: it is
+    //     re-downloaded and expires on its own, so capturing it is pointless.
+    // So the card promised a watch backup that captures nothing, and - the part that matters
+    // - `nav --save` never touches TrackLog or DeviceHistory, which IS the irreplaceable data
+    // on this watch and IS what a firmware flash wipes ([[ambit_app_kailash_desktop_home_fix]]).
+    // Backing up a Kailash properly means those two regions and is a real feature, not a flag.
+    // With this false, BackupPage falls through to its dedicated Ember card, so Ember backup
+    // is still offered.
+    property bool supportsWatchBackup: !_isLegacy && !_isKailash
+
+    // What a Kailash CAN have backed up, which is not nothing - it is just not the nav
+    // regions above. Its DeviceHistory (visited cities/countries, travel stats, the
+    // activity-mode logbook) and TrackLog (passive GPS track) are the irreplaceable data on
+    // this watch, and are exactly what a firmware flash wipes. The backend writes them as
+    // JSON plus one .gpx per correlated segment.
+    //
+    // One-way on purpose: there is no proven write path back for either region, so this is
+    // an archive, not a restore point, and the UI must not offer to restore it.
+    property bool supportsTravelArchive: _isKailash
+
+    // The Ambit1/2 equivalent. Their waypoints ARE their navigation database (a route is the
+    // waypoints sharing a route_name), and legacy_link.py reads them plus the watch settings
+    // in one go - real data that `nav --save` could never reach, so Backup used to offer this
+    // family nothing at all. Archive only: POIs can be written back one at a time, but there
+    // is no whole-region legacy restore.
+    property bool supportsLegacyArchive: _isLegacy
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see

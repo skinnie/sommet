@@ -14,6 +14,13 @@
 #include "libambit/libambit.h"
 #include "libambit/libambit_int.h"
 #include "device_driver_ambit3_navigation.h"
+// pmem20.h has no extern "C" guard (like protocol.h) - wrap it so its libambit_pmem20_data_write
+// (the chunked 0x0b16 raw flash write) links against the C libambit.a. Used by
+// nativeAmbitWriteLegacyRegion for the Ambit1/2 sport-mode + nav restore writes.
+extern "C" {
+#include "libambit/pmem20.h"
+#include "libambit/device_support.h"  // libambit_device_support_find_first -> per-model driver_param
+}
 
 // libambit_protocol_command lives in protocol.h, which (unlike libambit.h) has no extern "C"
 // guard - including it from this C++ TU would mangle the name and fail to link against the C
@@ -1030,6 +1037,178 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWritePersonalSetting(
     return JNI_TRUE;
 }
 
+/*
+ * nativeAmbitWriteLegacyRegion
+ *
+ * Ambit 1/2 (Bluebird) raw flash-region WRITE - the chunked 0x0b16 data_write followed by the
+ * 0x0b18 COMMIT tail. Both are required: without the 0x0b18 tail the watch acknowledges the 0x0b16
+ * chunks but DISCARDS them (they read back correct in-session but revert after a reconnect - the
+ * exact bug this fixed, 2026-08-27). Reverse-engineered from the real SuuntoLink<->Ambit2 capture
+ * assets/pcap/ambit2_suuntolink_settings_sportmodes.pcap: 1024-byte 0x0b16 chunks to 0x2000, then
+ * 0x0b18 [u32 addr][u32 tailExtra] (no hash). `tailExtra` is region-specific and constant per
+ * region (0xffffffff for the sport-mode region - proven content-independent across 160 real writes
+ * in the pcap; the region CRC for nav), so the JS caller supplies it. The caller passes the FULL
+ * region bytes (read with nativeAmbitReadLegacyRegion, patch in JS, write back) - a read-modify-
+ * write only changes what JS asked to. Guarded to the Bluebird family. Returns JNI_TRUE on success.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyRegion(
+        JNIEnv *env, jobject /*thiz*/, jlong address, jbyteArray data, jlong tailExtra)
+{
+    if (!g_device) { LOGE("nativeAmbitWriteLegacyRegion: Not connected"); return JNI_FALSE; }
+    uint16_t pid = g_device->device_info.product_id;
+    if (pid != 0x0010 && pid != 0x0019 && pid != 0x001A && pid != 0x001D) {
+        LOGE("nativeAmbitWriteLegacyRegion: not an Ambit1/2 (pid 0x%04x)", pid);
+        return JNI_FALSE;
+    }
+    if (!data) { LOGE("nativeAmbitWriteLegacyRegion: null data"); return JNI_FALSE; }
+    jsize len = env->GetArrayLength(data);
+    if (len <= 0) { LOGE("nativeAmbitWriteLegacyRegion: empty data"); return JNI_FALSE; }
+    jbyte *bytes = env->GetByteArrayElements(data, nullptr);
+
+    // Chunk size is the DEVICE'S OWN driver_param, not a constant: the Ambit2 (Duck) writes 0x400
+    // (1024 B) but the Ambit1 (Bluebird, fw>=1.9) writes 0x200 (512 B) - device_support.c. Sending
+    // 1024-B 0x0b16 chunks to the Ambit1 gets every chunk NAK'd (data_write -1, HW 2026-08-27).
+    // find_first(vid,pid) returns the same supported row libambit's Android init picks, so this
+    // matches the chunk size the running driver was init'd with. Fall back to 0x400 if unknown.
+    const ambit_known_device_t *kd =
+        libambit_device_support_find_first(g_device->device_info.vendor_id, pid);
+    uint16_t chunk = (kd && kd->driver_param) ? (uint16_t)kd->driver_param : 0x400;
+    LOGI("nativeAmbitWriteLegacyRegion: chunk size 0x%x for pid 0x%04x", chunk, pid);
+
+    // A local pmem20 over the connected device. Self-contained so we don't reach into the private
+    // driver_data struct.
+    libambit_pmem20_t pm;
+    memset(&pm, 0, sizeof(pm));
+    int ir = libambit_pmem20_init(&pm, g_device, chunk);
+    int rc = -1;
+    if (ir == 0) {
+        rc = libambit_pmem20_data_write(&pm, (uint32_t)address, (const uint8_t *)bytes, (size_t)len);
+        libambit_pmem20_deinit(&pm);
+    }
+    env->ReleaseByteArrayElements(data, bytes, JNI_ABORT); // read-only, don't copy back
+    if (ir != 0 || rc != 0) {
+        LOGE("nativeAmbitWriteLegacyRegion: init %d / data_write %d at 0x%06llx", ir, rc, (long long)address);
+        return JNI_FALSE;
+    }
+
+    // 0x0b18 COMMIT tail - [u32 addr][u32 tailExtra], no hash (the sport-mode / nav variant).
+    uint32_t addr = (uint32_t)address, ex = (uint32_t)tailExtra;
+    uint8_t tail[8] = {
+        (uint8_t)(addr & 0xff), (uint8_t)((addr >> 8) & 0xff), (uint8_t)((addr >> 16) & 0xff), (uint8_t)((addr >> 24) & 0xff),
+        (uint8_t)(ex & 0xff),   (uint8_t)((ex >> 8) & 0xff),   (uint8_t)((ex >> 16) & 0xff),   (uint8_t)((ex >> 24) & 0xff),
+    };
+    uint8_t *treply = nullptr; size_t tlen = 0;
+    int trc = libambit_protocol_command(g_device, 0x0b18, tail, sizeof(tail), &treply, &tlen, 0);
+    if (treply) free(treply);
+    if (trc != 0) {
+        LOGE("nativeAmbitWriteLegacyRegion: 0x0b18 commit tail rc %d at 0x%06llx", trc, (long long)address);
+        return JNI_FALSE;
+    }
+    LOGI("nativeAmbitWriteLegacyRegion: wrote+committed %d bytes at 0x%06llx (tail 0x%08x)", (int)len, (long long)address, ex);
+    return JNI_TRUE;
+}
+
+/**
+ * nativeAmbitWriteLegacyWaypoints
+ *
+ * Ambit 1/2 (Bluebird) waypoint (POI) WRITE - the command-based path, not a flash-region write.
+ * Legacy waypoints live in the command-accessible nav list (0x0b02/0x0b03 read), NOT the SBEM POI
+ * list (0x0b24, which addPoi/ambit3_add_poi_to_watch use and which is empty on this family). The
+ * write sequence mirrors openambit's ambit_navigation_waypoint_write: 0x0b1b write_start, then
+ * 0x0b04 nav_memory_delete (clears the whole nav list), then one 0x0b05 waypoint_write per point.
+ *
+ * `records` is a flat byte array, 48 bytes per waypoint (little-endian), built by TS:
+ *   [0..15] name  [16..31] route_name  [32] lat i32  [36] lon i32  [40] type(u8, RAW device type)
+ *   [41] year u16 [43] month [44] day [45] hour [46] minute [47] second
+ * We keep `type` RAW (no Movescount table conversion) so a backup round-trips byte-exact - the
+ * conversion openambit does is for Movescount imports, not for our read->write restore.
+ *
+ * IMPORTANT: 0x0b04 may also drop the route region, so the TS caller (restoreLegacyWaypoints)
+ * snapshots + re-writes routes around this call. Returns the count written, or -1 on failure.
+ */
+JNIEXPORT jint JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyWaypoints(
+        JNIEnv *env, jobject /*thiz*/, jbyteArray records)
+{
+    if (!g_device) { LOGE("nativeAmbitWriteLegacyWaypoints: Not connected"); return -1; }
+    uint16_t pid = g_device->device_info.product_id;
+    if (pid != 0x0010 && pid != 0x0019 && pid != 0x001A && pid != 0x001D) {
+        LOGE("nativeAmbitWriteLegacyWaypoints: not an Ambit1/2 (pid 0x%04x)", pid);
+        return -1;
+    }
+    if (!records) { LOGE("nativeAmbitWriteLegacyWaypoints: null records"); return -1; }
+    jsize len = env->GetArrayLength(records);
+    if (len < 0 || (len % 48) != 0) {
+        LOGE("nativeAmbitWriteLegacyWaypoints: bad record length %d (not a multiple of 48)", (int)len);
+        return -1;
+    }
+    int count = (int)(len / 48);
+    if (count > 250) { LOGE("nativeAmbitWriteLegacyWaypoints: too many waypoints (%d)", count); return -1; }
+
+    // 0x0b1b write_start, then 0x0b04 nav_memory_delete (clear the whole nav list first).
+    uint8_t *reply = nullptr; size_t rlen = 0;
+    if (libambit_protocol_command(g_device, 0x0b1b, nullptr, 0, &reply, &rlen, 0) != 0) {
+        LOGE("nativeAmbitWriteLegacyWaypoints: write_start (0x0b1b) denied"); if (reply) free(reply); return -1;
+    }
+    if (reply) { free(reply); reply = nullptr; }
+    if (libambit_protocol_command(g_device, 0x0b04, nullptr, 0, &reply, &rlen, 0) != 0) {
+        LOGE("nativeAmbitWriteLegacyWaypoints: nav_memory_delete (0x0b04) failed"); if (reply) free(reply); return -1;
+    }
+    if (reply) { free(reply); reply = nullptr; }
+
+    jbyte *buf = env->GetByteArrayElements(records, nullptr);
+    auto rd16 = [](const jbyte *p) -> uint16_t {
+        return (uint16_t)((uint8_t)p[0] | ((uint8_t)p[1] << 8));
+    };
+    auto rd32 = [](const jbyte *p) -> uint32_t {
+        return (uint32_t)((uint8_t)p[0] | ((uint8_t)p[1] << 8) | ((uint8_t)p[2] << 16) | ((uint8_t)p[3] << 24));
+    };
+
+    int wrote = 0, failed = 0;
+    for (int i = 0; i < count; i++) {
+        const jbyte *r = buf + (size_t)i * 48;
+        // Build the 55-byte packed ambit_pack_waypoint packet by hand (no struct dependency).
+        uint8_t p[55];
+        memset(p, 0, sizeof(p));
+        // index (u16 @0) = 0, unknown (u16 @2) = 0
+        memcpy(p + 4, r + 0, 16);                 // name[16]
+        p[19] = 0;                                // ensure name NUL-terminated within the field
+        memcpy(p + 20, r + 16, 16);               // route_name[16]
+        p[35] = 0;
+        uint32_t lat = rd32(r + 32), lon = rd32(r + 36);
+        uint8_t  type = (uint8_t)r[40];
+        uint16_t year = rd16(r + 41);
+        uint8_t  month = (uint8_t)r[43], day = (uint8_t)r[44], hour = (uint8_t)r[45],
+                 minute = (uint8_t)r[46], second = (uint8_t)r[47];
+        p[36] = second; p[37] = minute; p[38] = hour; p[39] = day; p[40] = month; // ctime
+        p[41] = (uint8_t)(year & 0xff); p[42] = (uint8_t)((year >> 8) & 0xff);    // ctime_year u16
+        p[43] = (uint8_t)(lat & 0xff);  p[44] = (uint8_t)((lat >> 8) & 0xff);
+        p[45] = (uint8_t)((lat >> 16) & 0xff); p[46] = (uint8_t)((lat >> 24) & 0xff);
+        p[47] = (uint8_t)(lon & 0xff);  p[48] = (uint8_t)((lon >> 8) & 0xff);
+        p[49] = (uint8_t)((lon >> 16) & 0xff); p[50] = (uint8_t)((lon >> 24) & 0xff);
+        p[51] = type;                             // type (raw device type)
+        // p[52] unknown2 = 0
+        p[53] = (uint8_t)strnlen((const char *)(p + 4), 16); // name_count
+        // p[54] status = 0 (synced)
+        uint8_t *wreply = nullptr; size_t wlen = 0;
+        if (libambit_protocol_command(g_device, 0x0b05, p, sizeof(p), &wreply, &wlen, 0) != 0) {
+            failed++;
+        } else {
+            wrote++;
+        }
+        if (wreply) free(wreply);
+    }
+    env->ReleaseByteArrayElements(records, buf, JNI_ABORT);
+
+    if (failed > 0) {
+        LOGE("nativeAmbitWriteLegacyWaypoints: %d of %d waypoint_write commands failed", failed, count);
+        return -1;
+    }
+    LOGI("nativeAmbitWriteLegacyWaypoints: wrote %d waypoints", wrote);
+    return wrote;
+}
+
 // JSON-escape a fixed-length C string field (watch names are latin1; emit >=0x80 as \u00xx so
 // the payload stays valid UTF-8, the same discipline ambit_legacy_cli.c's json_str uses).
 static void jni_json_escape(std::ostringstream &o, const char *s, size_t maxlen) {
@@ -1066,14 +1245,24 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitReadLegacyNav(
     for (uint16_t i = 0; i < ps->waypoints.count; i++) {
         ambit_waypoint_t *w = &ps->waypoints.data[i];
         if (i) json << ",";
+        // Legacy waypoint names are the 16-byte pack field; ambit_navigation_read strncpy's only
+        // 15 bytes into the 50-byte ambit_waypoint_t.name WITHOUT null-terminating, so escaping
+        // sizeof(name)=50 spills uninitialised bytes past a 15-char name (garbage tail). Cap at 15.
         json << "{\"name\":\"";
-        jni_json_escape(json, w->name, sizeof(w->name));
+        jni_json_escape(json, w->name, 15);
         json << "\",\"routeName\":\"";
-        jni_json_escape(json, w->route_name, sizeof(w->route_name));
+        jni_json_escape(json, w->route_name, 15);
         json << "\",\"index\":" << (int)w->index
              << ",\"lat_e7\":" << (long)w->latitude
              << ",\"lon_e7\":" << (long)w->longitude
-             << ",\"type\":" << (int)w->type << "}";
+             << ",\"type\":" << (int)w->type
+             // ctime so a backup can restore the waypoint's original creation timestamp
+             << ",\"ctime_year\":" << (int)w->ctime_year
+             << ",\"ctime_month\":" << (int)w->ctime_month
+             << ",\"ctime_day\":" << (int)w->ctime_day
+             << ",\"ctime_hour\":" << (int)w->ctime_hour
+             << ",\"ctime_minute\":" << (int)w->ctime_minute
+             << ",\"ctime_second\":" << (int)w->ctime_second << "}";
     }
     json << "],\"routes\":[";
     for (uint8_t i = 0; i < ps->routes.count; i++) {

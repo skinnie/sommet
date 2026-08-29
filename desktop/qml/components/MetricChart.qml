@@ -13,12 +13,15 @@ Item {
     // Health page overrides it to give the Ambit3 morning-HRV series its own distinct colour,
     // since it is a different measurement from the overnight HRV line drawn beside it.
     property color lineColor: Theme.accent
+    // Optional dashed target line (e.g. Ember's 2.5 L/day water goal). 0 = none.
+    property real goal: 0
     readonly property bool hasData: series && series.length > 1
     implicitHeight: 200
 
     onSeriesChanged: canvas.requestPaint()
     onWidthChanged: canvas.requestPaint()
     onLineColorChanged: canvas.requestPaint()
+    onGoalChanged: canvas.requestPaint()
 
     Column {
         anchors.fill: parent
@@ -60,6 +63,7 @@ Item {
                     var xMin = xs[0], xMax = xs[xs.length - 1]; if (xMax === xMin) xMax = xMin + 1;
                     var yMin = ys[0], yMax = ys[0];
                     for (var j = 1; j < ys.length; ++j) { if (ys[j] < yMin) yMin = ys[j]; if (ys[j] > yMax) yMax = ys[j]; }
+                    if (root.goal > 0) { if (root.goal > yMax) yMax = root.goal; if (root.goal < yMin) yMin = root.goal; }
                     var pad = Math.max(1, (yMax - yMin) * 0.15); yMin -= pad; yMax += pad;
                     var padL = 46, padR = 12, padT = 12, padB = 22, pW = W - padL - padR, pH = H - padT - padB;
                     function px(t) { return padL + (t - xMin) / (xMax - xMin) * pW; }
@@ -86,6 +90,14 @@ Item {
                         ctx.beginPath(); ctx.arc(pp[m].x, pp[m].y, m === canvas.hoverIndex ? 5 : 2.5, 0, 2 * Math.PI); ctx.fill();
                     }
                     canvas.pts = pp;
+                    if (root.goal > 0) {
+                        var gy = py(root.goal);
+                        ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.6);
+                        ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+                        ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - padR, gy); ctx.stroke(); ctx.setLineDash([]);
+                        ctx.fillStyle = Theme.mutedText; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+                        ctx.fillText(root.goal + root.unit + " goal", padL + 3, gy - 2);
+                    }
                 }
 
                 MouseArea {

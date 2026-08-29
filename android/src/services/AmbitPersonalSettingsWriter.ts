@@ -14,11 +14,34 @@ export interface WritableField {
   scale?: number;
 }
 
+// Field offsets into the 0x0b00/0x0b01 personal-settings blob, transcribed from the desktop CLI's
+// own A1_SETTING_FIELDS (tools/vendor/ambit_legacy_cli/ambit_legacy_cli.c), which is proven
+// byte-exact against real SuuntoLink<->Ambit captures. The desktop makes the WHOLE settings set
+// writable for this family; Android used to write only the 7 profile fields, so the general
+// settings (units, backlight, language, date/time format, ...) showed read-only (André,
+// 2026-08-27: "ambit 1 settings are only read mode, please do like desktop"). Keys match the
+// reader's own field keys (AmbitPersonalSettingsReader.AMBIT12_PERSONAL_FIELDS). Offsets are
+// family-common (Ambit1 132 B / Ambit2 188 B); the writer writes back at the device's own length.
 export const AMBIT12_WRITABLE: Record<string, WritableField> = {
-  gender:        { offset: 55, width: 1 },              // 1 male / 0 female
+  // general settings (desktop A1_SETTING_FIELDS)
+  button_lock_sport_mode: { offset: 1, width: 1 },
+  button_lock_time_mode:  { offset: 2, width: 1 },
+  units_mode:          { offset: 8, width: 1 },
+  gps_position_format: { offset: 19, width: 1 },
+  language:            { offset: 20, width: 1 },
+  gps_time_keeping:    { offset: 24, width: 1 },        // desktop sync_time_w_gps
+  time_format:         { offset: 25, width: 1 },
+  date_format:         { offset: 36, width: 1 },
+  tones:               { offset: 40, width: 1 },        // desktop tones_mode
+  backlight_mode:      { offset: 44, width: 1 },
+  backlight_brightness:{ offset: 45, width: 1 },
+  display_dark:        { offset: 47, width: 1 },        // desktop display_is_negative
+  alti_baro_mode:      { offset: 60, width: 1 },
+  // personal profile
+  gender:        { offset: 55, width: 1 },              // 1 male / 0 female (desktop is_male)
   birth_year:    { offset: 50, width: 2 },
   weight:        { offset: 48, width: 2, scale: 0.01 }, // display kg, stored kg*100
-  height:        { offset: 56, width: 1 },              // cm
+  height:        { offset: 56, width: 1 },              // cm (desktop length)
   max_hr:        { offset: 52, width: 1 },              // bpm
   rest_hr:       { offset: 53, width: 1 },              // bpm
   fitness_level: { offset: 54, width: 1 },
