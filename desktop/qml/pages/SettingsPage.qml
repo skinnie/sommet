@@ -1231,7 +1231,17 @@ PageFlickable {
                 // user, while the old backend status/address it shared was developer-only.
                 Row {
                     spacing: Theme.spacingMedium
-                    SommetMark { size: 46; anchors.verticalCenter: parent.verticalCenter }
+                    // Use the exact raster app icon the Dock/window uses (setWindowIcon,
+                    // packaging/icon.png) so the About mark can't diverge from it - the
+                    // pure-QML SommetMark Canvas rendered its dashed sync ring differently
+                    // at this small size, which read as "wrong icon" next to the Dock.
+                    Image {
+                        source: "qrc:/qt/qml/AmbitApp/packaging/icon.png"
+                        width: 46; height: 46
+                        sourceSize.width: 92; sourceSize.height: 92
+                        smooth: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                     Column {
                         id: aboutBlock
                         anchors.verticalCenter: parent.verticalCenter
