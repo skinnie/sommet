@@ -774,50 +774,51 @@ export default function HomeScreen() {
   // otherwise) - Home/Activities/Settings are always reachable.
   const navItems: NavShellItem[] = [
     { id: 'home', label: t.homeNavHome, icon: 'mountain', onPress: () => {} },
-    { id: 'activities', label: t.viewActivities, icon: 'list', onPress: () => navigation.navigate('LogList') },
+    { id: 'activities', label: t.viewActivities, icon: 'list', onPress: () => navigation.navigate('LogList'), group: 'training' },
     ...(!connected ? [] : deviceType === 'garmin'
       ? [
-          { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }) },
-          { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => garminInfo && navigation.navigate('GarminPoi', { info: garminInfo }) },
+          { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
+          { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => garminInfo && navigation.navigate('GarminPoi', { info: garminInfo }), group: 'watch' as const },
         ]
       : !isKailash(ambitInfo)
         ? [
-            { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => navigation.navigate('Route') },
-            { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi') },
+            { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => navigation.navigate('Route'), group: 'watch' as const },
+            { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const },
           ]
         : []),
-    ...(connected ? [{ id: 'backup', label: t.backupButton, icon: 'backup' as const, onPress: () => navigation.navigate('Backup', { deviceModel: ambitInfo?.model }) }] : []),
+    ...(connected ? [{ id: 'backup', label: t.backupButton, icon: 'backup' as const, onPress: () => navigation.navigate('Backup', { deviceModel: ambitInfo?.model }), group: 'watch' as const }] : []),
     ...(connected && deviceType === 'ambit' && !isKailash(ambitInfo)
-      ? [{ id: 'sportModes', label: t.sportModesButton, icon: 'watch' as const, onPress: () => navigation.navigate('SportModes', { overBle: bleConnectedRef.current, variant: ambitInfo?.model }) }]
+      ? [{ id: 'sportModes', label: t.sportModesButton, icon: 'watch' as const, onPress: () => navigation.navigate('SportModes', { overBle: bleConnectedRef.current, variant: ambitInfo?.model }), group: 'watch' as const }]
       : []),
     // Experimental menu items - appear only when their toggle is on (Settings > Experimental
     // features). Intervals rides the Suunto App-Zone/CustomModes mechanism, so it's Ambit-only
     // and needs a connected watch, same gating as the desktop's NavRail. Smart Sensor is a
     // standalone BLE HR belt, so it shows whenever enabled. André, 2026-08-17.
     ...(expFeatures.intervals && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
-      ? [{ id: 'intervals', label: t.experimentalIntervals, icon: 'chart' as const, onPress: () => navigation.navigate('Intervals') }]
+      ? [{ id: 'intervals', label: t.experimentalIntervals, icon: 'chart' as const, onPress: () => navigation.navigate('Intervals'), group: 'adv' as const }]
       : []),
     ...(expFeatures.smartSensor
-      ? [{ id: 'smartSensor', label: t.experimentalSmartSensor, icon: 'link' as const, onPress: () => navigation.navigate('SmartSensor') }]
+      ? [{ id: 'smartSensor', label: t.experimentalSmartSensor, icon: 'link' as const, onPress: () => navigation.navigate('SmartSensor'), group: 'adv' as const }]
       : []),
     // Workout Calendar - same Apps/CustomModes mechanism as Intervals (guided-workout binaries
     // in the WORKOUT menu), so it's gated identically: Ambit-only, connected, not Kailash/Traverse.
     ...(expFeatures.workoutCalendar && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
-      ? [{ id: 'workoutCalendar', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar') }]
+      ? [{ id: 'workoutCalendar', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar'), group: 'adv' as const }]
       : []),
     // Gear tracker (v3): derived from the local gear DB + intervals.icu, so it's always
     // reachable — no connected watch needed, not gated behind Experimental.
-    { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear') },
+    { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear'), group: 'training' as const },
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
-    { id: 'coach', label: 'Coach', icon: 'coach' as const, onPress: () => navigation.navigate('Coach') },
-    // Ember: only once the Settings easter egg has been found, matching the desktop's own
-    // Theme.emberUnlocked gate - so it stays hidden for everyone who hasn't looked for it.
+    { id: 'coach', label: 'Coach', icon: 'coach' as const, onPress: () => navigation.navigate('Coach'), group: 'training' as const },
+    // Ember: off by default, shown once the user opts in via the open toggle in Settings
+    // (the 10-tap easter egg was retired 2026-08-29, matching the desktop). `emberUnlocked` is
+    // that persisted opt-in flag - the storage key is unchanged, so an already-on install keeps it.
     ...(emberUnlocked
-      ? [{ id: 'ember', label: 'Ember', icon: 'ember' as const, onPress: () => navigation.navigate('Ember') }]
+      ? [{ id: 'ember', label: 'Ember', icon: 'ember' as const, onPress: () => navigation.navigate('Ember'), group: 'training' as const }]
       : []),
-    { id: 'health', label: 'Health', icon: 'health' as const, onPress: () => navigation.navigate('Health') },
-    { id: 'weight', label: 'Weight', icon: 'weight' as const, onPress: () => navigation.navigate('Weight') },
+    { id: 'health', label: 'Health', icon: 'health' as const, onPress: () => navigation.navigate('Health'), group: 'training' as const },
+    { id: 'weight', label: 'Weight', icon: 'weight' as const, onPress: () => navigation.navigate('Weight'), group: 'training' as const },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },
   ];
 

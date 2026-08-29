@@ -124,8 +124,9 @@ export default function SettingsScreen() {
   const [anthropicKey, setAnthropicKeyInput]        = useState('');
   const [anthropicSaved, setAnthropicSaved]         = useState(false);
   const [savingAnthropic, setSavingAnthropic]       = useState(false);
-  // Ember easter egg (2026-08-26, desktop parity): 10 taps on the version label reveal it.
-  const [emberTaps, setEmberTaps]                   = useState(0);
+  // Ember visibility (2026-08-29): an open opt-in toggle now (the 10-tap easter egg was retired).
+  // `emberOn` mirrors the persisted flag via isEmberUnlocked/setEmberUnlocked; the storage key is
+  // unchanged so an already-unlocked install keeps Ember showing.
   const [emberOn, setEmberOn]                       = useState(false);
   // Ember NAS sync config (2026-08-27): the shared store URL + token the iPhone PWA and desktop
   // use (desktop keeps it in ember/sync.json). Lets Android's interactive Ember merge across
@@ -1100,36 +1101,55 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {/* ── Ember sync (only once the egg is unlocked) ── */}
-      {emberOn && (
-        <View style={styles.section}>
-          <Text style={styles.cardTitle}>Ember sync</Text>
-          <Text style={styles.sectionDesc}>
-            Shared store URL + token so Ember logs merge with your other devices (the same
-            ember/sync.json the desktop uses). Leave blank to log on this device only.
-          </Text>
-          <FieldRow
-            icon="link"
-            value={emberSyncUrl}
-            onChangeText={setEmberSyncUrl}
-            placeholder="https://192.168.1.102/ember/sync.php"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <FieldRow
-            icon="key"
-            value={emberSyncToken}
-            onChangeText={setEmberSyncToken}
-            placeholder="token"
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-          />
-          <View style={styles.row}>
-            <Button label={t.saveBtn} variant="filled" loading={savingEmberSync} onPress={handleSaveEmberSync} />
-          </View>
+      {/* ── Ember (2026-08-29, desktop parity): openly opt-in. The 10-tap easter egg was retired
+          (André: Ember stays off by default but the toggle should be discoverable, not hidden);
+          the switch below shows/hides the Ember tile on Home. Labelled experimental - not tested
+          much yet. The sync fields appear once it's on. ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="ember" />
+          <Text style={styles.cardTitle}>Ember</Text>
         </View>
-      )}
+        <Text style={styles.sectionDesc}>
+          Fast & calorie tracking companion. Logs made on your phone show here as charts.
+        </Text>
+        <Text style={[styles.sectionDesc, { color: theme.warning, marginTop: 4 }]}>
+          Experimental — still rough. Turn it on to try it.
+        </Text>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>Show Ember on Home</Text>
+          <Toggle value={emberOn} onValueChange={async v => { await setEmberUnlocked(v); setEmberOn(v); }} />
+        </View>
+        {emberOn && (
+          <View style={{ marginTop: 12 }}>
+            <Text style={styles.cardTitle}>Ember sync</Text>
+            <Text style={styles.sectionDesc}>
+              Shared store URL + token so Ember logs merge with your other devices (the same
+              ember/sync.json the desktop uses). Leave blank to log on this device only.
+            </Text>
+            <FieldRow
+              icon="link"
+              value={emberSyncUrl}
+              onChangeText={setEmberSyncUrl}
+              placeholder="https://192.168.1.102/ember/sync.php"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <FieldRow
+              icon="key"
+              value={emberSyncToken}
+              onChangeText={setEmberSyncToken}
+              placeholder="token"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <View style={styles.row}>
+              <Button label={t.saveBtn} variant="filled" loading={savingEmberSync} onPress={handleSaveEmberSync} />
+            </View>
+          </View>
+        )}
+      </View>
 
       {/* ── About / disclaimer ── */}
       <View style={styles.section}>
@@ -1137,22 +1157,9 @@ export default function SettingsScreen() {
           <IconBadge icon="info" />
           <Text style={styles.cardTitle}>{t.aboutSection}</Text>
         </View>
-        {/* Easter egg, same as the desktop's: ten taps here unlock the Ember recap screen.
-            Silent until it fires - an egg that announces itself isn't one. */}
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={async () => {
-            const n = emberTaps + 1;
-            setEmberTaps(n);
-            if (n >= 10 && !emberOn) {
-              await setEmberUnlocked(true);
-              setEmberOn(true);
-              Alert.alert('Ember', 'Ember unlocked — find it on Home.');
-            }
-          }}
-        >
-          <Text style={styles.sectionDesc}>{t.aboutVersion(APP_VERSION)}</Text>
-        </TouchableOpacity>
+        {/* The Ember easter egg (10 taps here) was retired 2026-08-29 - Ember is now an open
+            opt-in toggle in its own card above, so the version is just plain text again. */}
+        <Text style={styles.sectionDesc}>{t.aboutVersion(APP_VERSION)}</Text>
         <Text style={[styles.sectionDesc, { marginTop: 10 }]}>{t.aboutDisclaimer}</Text>
 
         <Text style={styles.creditsHeading}>{t.aboutCreditsSection}</Text>

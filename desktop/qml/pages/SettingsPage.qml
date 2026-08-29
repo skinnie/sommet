@@ -203,12 +203,12 @@ PageFlickable {
 
         // Ember - fast & calorie tracking companion (André, 2026-08-25). The switch shows/hides
         // the Ember page in the sidebar; the link opens the phone app to Add to Home Screen.
-        // Hidden until the easter egg is found (10 taps on the version label in About below) -
-        // Ember isn't part of the public release. A Column skips invisible children in layout,
-        // so this leaves no gap when hidden.
+        // 2026-08-28 (André): the card is now openly in Settings instead of hidden behind the
+        // 10-tap easter egg - Ember stays OFF in the sidebar by default (the toggle below), but
+        // the toggle and the phone-install link are discoverable for anyone who wants to opt in.
+        // Labelled experimental, since it hasn't been tested much yet.
         Card {
             width: parent.width
-            visible: Theme.emberUnlocked
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -216,9 +216,25 @@ PageFlickable {
                     spacing: Theme.spacingSmall
                     Icon { glyph: Icons.ember; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
                     Text { text: qsTr("Ember"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        radius: Theme.radiusSmall
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Theme.warning
+                        implicitWidth: expLabel.implicitWidth + Theme.spacingSmall
+                        implicitHeight: expLabel.implicitHeight + 4
+                        Text {
+                            id: expLabel
+                            anchors.centerIn: parent
+                            text: qsTr("experimental")
+                            color: Theme.warning
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
                 }
                 Text {
-                    text: qsTr("Fast & calorie tracking app. Logs made on your phone sync here and show as charts.")
+                    text: qsTr("Fast & calorie tracking app. Logs made on your phone sync here and show as charts. Still rough — turn it on to try it.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                     width: parent.width
@@ -1219,52 +1235,20 @@ PageFlickable {
                     Column {
                         id: aboutBlock
                         anchors.verticalCenter: parent.verticalCenter
-                        // Easter egg (André, 2026-08-25): 10 taps on the version reveals the
-                        // hidden Ember card above. Resets if you pause between taps so it isn't
-                        // stumbled into. No visual affordance - it's meant to be a secret.
-                        property int emberTaps: 0
+                        // The Ember easter egg (10 taps here) was retired 2026-08-28: the Ember
+                        // card is now openly in Settings as an experimental toggle, so the
+                        // version label is just a plain label again.
                         Text {
                             id: versionLabel
                             text: qsTr("Sommet v0.2.1")
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeBody
                             font.bold: true
-                            MouseArea {
-                                anchors.fill: parent
-                                enabled: !Theme.emberUnlocked
-                                onClicked: {
-                                    aboutBlock.emberTaps++
-                                    tapResetTimer.restart()
-                                    if (aboutBlock.emberTaps >= 10) {
-                                        Theme.emberUnlocked = true
-                                        Theme.emberEnabled = true
-                                        aboutBlock.emberTaps = 0
-                                    }
-                                }
-                            }
-                            Timer {
-                                id: tapResetTimer
-                                interval: 1500
-                                onTriggered: aboutBlock.emberTaps = 0
-                            }
                         }
                         Text {
                             text: qsTr("Sommet — for Suunto Ambit")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
-                        }
-                        // Quiet confirmation once unlocked (and a way back out).
-                        Text {
-                            visible: Theme.emberUnlocked
-                            text: qsTr("Ember unlocked ✓  ·  hide")
-                            color: Theme.accent
-                            font.pixelSize: Theme.fontSizeCaption
-                            font.bold: true
-                            topPadding: 2
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: { Theme.emberEnabled = false; Theme.emberUnlocked = false }
-                            }
                         }
                     }
                 }

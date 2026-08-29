@@ -372,7 +372,9 @@ PageFlickable {
         // keys, nothing for André (or anyone self-hosting Sommet) to register with a provider.
         Card {
             width: parent.width
-            visible: Theme.emberUnlocked && !root.watchBackupShown
+            // 2026-08-28: was gated on the retired `emberUnlocked` easter egg; now on the
+            // ordinary Ember toggle, so the backup card appears when Ember is enabled.
+            visible: Theme.emberEnabled && !root.watchBackupShown
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
