@@ -45,6 +45,19 @@ Item {
     // may carry an optional `label` (shown nowhere yet - reserved for a future tap/tooltip).
     property var markers: []       // [{lat, lon, label?}, ...] - each drawn as its own pin
 
+    // Climb-coloured route overlay (the offline planner, PlanRoutePage) - each entry is
+    // { color: "#rrggbb", coords: [[lat, lon], ...] }, one contiguous stretch of the route
+    // in its gradient-bucket colour. Drawn with the same white-halo-then-stroke cartography
+    // as trackPoints, but one stroke per segment so a single route changes colour along its
+    // length. Empty by default, so every existing MapView caller renders exactly as before.
+    property var coloredSegments: []
+
+    // Wind arrows overlay (PlanRoutePage weather layer) - one short arrow per sampled point,
+    // pointing the way the wind blows (meteorological "from" direction + 180), sized by speed
+    // and coloured by its relation to your heading (head/cross/tail), each labelled with its
+    // speed. Additive: empty by default, so no other MapView caller is affected.
+    property var windArrows: []   // [{lat, lon, wind_kmh, wind_dir_deg, rel, color}]
+
     clip: true
 
     readonly property int tileSize: 256
@@ -56,6 +69,11 @@ Item {
     // latitude/longitude/zoomLevel as before.
     readonly property var _trackBounds: {
         const points = (trackPoints || []).concat(markers || [])
+        // A coloured route (planner) has no trackPoints - fold its own vertices in so the
+        // view still auto-fits to the whole planned route, not just its waypoint pins.
+        for (const seg of (coloredSegments || []))
+            for (const c of (seg.coords || []))
+                points.push({ lat: c[0], lon: c[1] })
         if (points.length < 2) return null
         let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180
         for (const p of points) {
@@ -127,6 +145,7 @@ Item {
     Component.onCompleted: Qt.callLater(_refitZoom)
     onTrackPointsChanged: Qt.callLater(_refitZoom)
     onMarkersChanged: Qt.callLater(_refitZoom)
+    onColoredSegmentsChanged: Qt.callLater(_refitZoom)
     onWidthChanged: _refitZoom()
     onHeightChanged: _refitZoom()
 
@@ -195,6 +214,25 @@ Item {
         onWheel: (event) => root.zoomBy(event.angleDelta.y > 0 ? 1 : -1)
     }
 
+    // Trackpad pinch to zoom (André, 2026-08-29: "allow zoom by trackpad pinch"). macOS
+    // delivers a native magnify gesture, which a PinchHandler picks up; we translate its
+    // continuous scale into the same discrete zoom steps as the wheel, so pinch and scroll
+    // agree and the pan-anchoring in zoomBy() is reused. Same opt-in as scrollZoom (a picture
+    // thumbnail shouldn't grab the gesture). target:null so it zooms the map, not transforms
+    // the Item.
+    PinchHandler {
+        enabled: root.scrollZoom
+        target: null
+        property int _startZoom: 12
+        onActiveChanged: if (active) _startZoom = root.currentZoom
+        onActiveScaleChanged: {
+            if (!active) return
+            const want = Math.round(_startZoom + Math.log2(activeScale))
+            const steps = want - root.currentZoom
+            if (steps !== 0) root.zoomBy(steps)
+        }
+    }
+
     // Zoom a step, keeping the panned view anchored: pan is measured in pixels at the
     // current zoom, so it has to be rescaled when that zoom changes or the map jumps.
     function zoomBy(steps) {
@@ -213,6 +251,19 @@ Item {
         panY = 0
         userControlled = false
         _refitZoom()
+    }
+
+    // Center the view on a specific coordinate at an optional zoom, regardless of any track
+    // the map is currently auto-fitting to - used by the Plan page's "locate me" button to
+    // jump to the detected location (André, 2026-08-29: "center by localization"). Works by
+    // panning in world pixels relative to the current fit-center, then marking the view
+    // user-controlled so the auto-fit doesn't snap back under it.
+    function centerOn(lat, lon, zoom) {
+        if (zoom !== undefined)
+            currentZoom = Math.max(1, Math.min(19, zoom))
+        userControlled = true
+        panX = lonToWorldX(lon) - lonToWorldX(_centerLon)
+        panY = latToWorldY(lat) - latToWorldY(_centerLat)
     }
 
     Repeater {
@@ -288,6 +339,107 @@ Item {
             function onOriginYChanged() { trackCanvas.requestPaint() }
             function onWidthChanged() { trackCanvas.requestPaint() }
             function onHeightChanged() { trackCanvas.requestPaint() }
+        }
+    }
+
+    // Climb-coloured route (coloredSegments) - same halo-then-stroke technique as
+    // trackCanvas, but the halo is drawn for every segment first so the coloured strokes
+    // then sit on one continuous white outline (no halo seams where two colours meet), and
+    // each segment strokes in its own gradient-bucket colour. Sits above trackCanvas; a
+    // caller uses one or the other, not both.
+    Canvas {
+        id: colorCanvas
+        anchors.fill: parent
+        visible: root.coloredSegments.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const segs = root.coloredSegments
+            if (!segs || segs.length === 0) return
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            const trace = (seg) => {
+                const coords = seg.coords
+                if (!coords || coords.length < 2) return false
+                ctx.beginPath()
+                for (let i = 0; i < coords.length; i++) {
+                    const px = root.lonToWorldX(coords[i][1]) - root.originX
+                    const py = root.latToWorldY(coords[i][0]) - root.originY
+                    if (i === 0) ctx.moveTo(px, py)
+                    else ctx.lineTo(px, py)
+                }
+                return true
+            }
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.85)"
+            ctx.lineWidth = 7
+            for (const seg of segs) { if (trace(seg)) ctx.stroke() }
+            ctx.lineWidth = 4
+            for (const seg of segs) {
+                if (trace(seg)) { ctx.strokeStyle = seg.color || Theme.mapAccent; ctx.stroke() }
+            }
+        }
+        Connections {
+            target: root
+            function onColoredSegmentsChanged() { colorCanvas.requestPaint() }
+            function onOriginXChanged() { colorCanvas.requestPaint() }
+            function onOriginYChanged() { colorCanvas.requestPaint() }
+            function onWidthChanged() { colorCanvas.requestPaint() }
+            function onHeightChanged() { colorCanvas.requestPaint() }
+        }
+    }
+
+    // Wind arrows (weather layer) - drawn above the coloured route with the same
+    // world-pixel projection, so they track pan/zoom. Halo-then-stroke like the route, plus a
+    // small speed label. Empty by default; only PlanRoutePage's weather mode fills it.
+    Canvas {
+        id: windCanvas
+        anchors.fill: parent
+        visible: root.windArrows.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const arrows = root.windArrows
+            if (!arrows || arrows.length === 0) return
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            ctx.font = "600 10px monospace"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            for (const a of arrows) {
+                const px = root.lonToWorldX(a.lon) - root.originX
+                const py = root.latToWorldY(a.lat) - root.originY
+                const beta = (a.wind_dir_deg + 180) * Math.PI / 180   // "blows toward" bearing
+                const dx = Math.sin(beta), dy = -Math.cos(beta)       // screen unit vector (N up)
+                const L = 10 + Math.min(a.wind_kmh, 40) * 0.5
+                const x0 = px - dx * L / 2, y0 = py - dy * L / 2
+                const x1 = px + dx * L / 2, y1 = py + dy * L / 2
+                const ang = Math.atan2(dy, dx), hl = 5
+                const b1 = ang + Math.PI - 0.44, b2 = ang + Math.PI + 0.44
+                const col = a.color || Theme.mapAccent
+                for (let pass = 0; pass < 2; pass++) {           // halo pass, then colour pass
+                    ctx.strokeStyle = pass === 0 ? "rgba(255,255,255,0.9)" : col
+                    ctx.lineWidth = pass === 0 ? 4 : 2.2
+                    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke()
+                    ctx.beginPath()
+                    ctx.moveTo(x1, y1); ctx.lineTo(x1 + Math.cos(b1) * hl, y1 + Math.sin(b1) * hl)
+                    ctx.moveTo(x1, y1); ctx.lineTo(x1 + Math.cos(b2) * hl, y1 + Math.sin(b2) * hl)
+                    ctx.stroke()
+                }
+                const label = Math.round(a.wind_kmh).toString()
+                ctx.lineWidth = 3
+                ctx.strokeStyle = "rgba(255,255,255,0.95)"
+                ctx.strokeText(label, px, py - 11)
+                ctx.fillStyle = col
+                ctx.fillText(label, px, py - 11)
+            }
+        }
+        Connections {
+            target: root
+            function onWindArrowsChanged() { windCanvas.requestPaint() }
+            function onOriginXChanged() { windCanvas.requestPaint() }
+            function onOriginYChanged() { windCanvas.requestPaint() }
+            function onWidthChanged() { windCanvas.requestPaint() }
+            function onHeightChanged() { windCanvas.requestPaint() }
         }
     }
 

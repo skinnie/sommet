@@ -1,0 +1,666 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0C80B921A6F3F58F76C31292 /* libPods-Sommet.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-Sommet.a */; };
+		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		1CDEB9A9675FC7808B8CDA0D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		1F472533478CB04FC4E9212B /* sport_mode_serialize.c in Sources */ = {isa = PBXBuildFile; fileRef = 1A2DE636D0986BDA50EB5B95 /* sport_mode_serialize.c */; };
+		2B3BE12EA0E642E9EFFDA883 /* AmbitBleModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3995221E1CE6CE7A8E06514D /* AmbitBleModule.swift */; };
+		2EC978D5180A38C21BE76D51 /* device_support.c in Sources */ = {isa = PBXBuildFile; fileRef = 4AB1C7F302CF933B9B4CDD88 /* device_support.c */; };
+		3323D554D8CC569BFAA8DEE9 /* device_driver_ambit3_navigation.c in Sources */ = {isa = PBXBuildFile; fileRef = E7ACBAD90BB7426FD6DAEBD7 /* device_driver_ambit3_navigation.c */; };
+		375310F6E252EB244A156D5E /* device_driver_ambit3.c in Sources */ = {isa = PBXBuildFile; fileRef = 2D71A310D35AD53607A8AFE8 /* device_driver_ambit3.c */; };
+		3C6EDEEE78D99469283E759B /* libambit_ios.c in Sources */ = {isa = PBXBuildFile; fileRef = BD2B96F3628252966F831FAC /* libambit_ios.c */; };
+		43D479BCEECF90AAFE05C10C /* debug.c in Sources */ = {isa = PBXBuildFile; fileRef = 96B3179FB92877F1284325A4 /* debug.c */; };
+		543EB018140281ABDDC6106D /* personal.c in Sources */ = {isa = PBXBuildFile; fileRef = 77D6AC0D5DC9F0ADA64FC1E5 /* personal.c */; };
+		66F0F7A496CC5B73ACE897DA /* sha256.c in Sources */ = {isa = PBXBuildFile; fileRef = 8EB19513553F103438850452 /* sha256.c */; };
+		6B24F548122B9D22933D5412 /* GarminModule.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */; };
+		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		76BDE0CC3DE910B1987DD55D /* pmem20.c in Sources */ = {isa = PBXBuildFile; fileRef = 5091B966A4396AFEFFD948CB /* pmem20.c */; };
+		7BE707995ED2457751BF97C7 /* distance.c in Sources */ = {isa = PBXBuildFile; fileRef = E88DEF7DEFCB0A326D79920D /* distance.c */; };
+		7F9D65F253F63E8BD166B9CA /* device_driver_ambit3_sport_modes.c in Sources */ = {isa = PBXBuildFile; fileRef = D14F4F012165DF76561D45D5 /* device_driver_ambit3_sport_modes.c */; };
+		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		8224F9B2753B4E5F5EB8358D /* sbem0102.c in Sources */ = {isa = PBXBuildFile; fileRef = 9625A7B3913FD8813B67990E /* sbem0102.c */; };
+		8F8C957665896FF610220CB9 /* device_driver_ambit.c in Sources */ = {isa = PBXBuildFile; fileRef = 03514CCD40EF6BE35F7A5CEA /* device_driver_ambit.c */; };
+		9DE596AACCE4F0003B7AB563 /* hid_stub.c in Sources */ = {isa = PBXBuildFile; fileRef = EB99C7313E96C975254DDA54 /* hid_stub.c */; };
+		9F1CB8F6C309A1C1B2235EAF /* libambit.c in Sources */ = {isa = PBXBuildFile; fileRef = E989DA16E96ADC02BC0D4D50 /* libambit.c */; };
+		A0D9413D1E457DCC103D6BCD /* utils.c in Sources */ = {isa = PBXBuildFile; fileRef = 93328F0274D775F8FED1DF3D /* utils.c */; };
+		A2F4658993C93A7F8F0B096C /* protocol_ble.c in Sources */ = {isa = PBXBuildFile; fileRef = BC1368BA7355E650F061EC04 /* protocol_ble.c */; };
+		AE2A5283E4934893485AD0CF /* crc16.c in Sources */ = {isa = PBXBuildFile; fileRef = EB533111AF6E69A0C62B18E2 /* crc16.c */; };
+		BAEBD0D2FD776925823BEFAD /* device_driver_common.c in Sources */ = {isa = PBXBuildFile; fileRef = 4B40735B0A569C62B9D863BC /* device_driver_common.c */; };
+		C315F1344940D4DF24335D04 /* protocol.c in Sources */ = {isa = PBXBuildFile; fileRef = 6B41C07B1CE4CD61D442CE1E /* protocol.c */; };
+		D8123C6053A799290E4FC49E /* device_driver_ambit_navigation.c in Sources */ = {isa = PBXBuildFile; fileRef = FABA9D206E1388F47EE70045 /* device_driver_ambit_navigation.c */; };
+		E0696F9801380EE3648B8925 /* AmbitUsbModule.mm in Sources */ = {isa = PBXBuildFile; fileRef = 6D06767D7938BBEC52A52507 /* AmbitUsbModule.mm */; };
+		ECF13A97D3292950B1ECF8D8 /* AmbitBleModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 8A10D67F19070AF057D69FAD /* AmbitBleModule.m */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		03514CCD40EF6BE35F7A5CEA /* device_driver_ambit.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit.c; sourceTree = "<group>"; };
+		13B07F961A680F5B00A75B9A /* Sommet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sommet.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Sommet/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Sommet/Info.plist; sourceTree = "<group>"; };
+		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = Sommet/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1A2DE636D0986BDA50EB5B95 /* sport_mode_serialize.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sport_mode_serialize.c; path = ../android/app/src/main/cpp/libambit/sport_mode_serialize.c; sourceTree = "<group>"; };
+		2D71A310D35AD53607A8AFE8 /* device_driver_ambit3.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit3.c; sourceTree = "<group>"; };
+		3995221E1CE6CE7A8E06514D /* AmbitBleModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AmbitBleModule.swift; sourceTree = "<group>"; };
+		3B4392A12AC88292D35C810B /* Pods-Sommet.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Sommet.debug.xcconfig"; path = "Target Support Files/Pods-Sommet/Pods-Sommet.debug.xcconfig"; sourceTree = "<group>"; };
+		4AB1C7F302CF933B9B4CDD88 /* device_support.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_support.c; path = ../android/app/src/main/cpp/libambit/device_support.c; sourceTree = "<group>"; };
+		4B40735B0A569C62B9D863BC /* device_driver_common.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_common.c; path = ../android/app/src/main/cpp/libambit/device_driver_common.c; sourceTree = "<group>"; };
+		4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = GarminModule.mm; sourceTree = "<group>"; };
+		5091B966A4396AFEFFD948CB /* pmem20.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = pmem20.c; path = ../android/app/src/main/cpp/libambit/pmem20.c; sourceTree = "<group>"; };
+		5709B34CF0A7D63546082F79 /* Pods-Sommet.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Sommet.release.xcconfig"; path = "Target Support Files/Pods-Sommet/Pods-Sommet.release.xcconfig"; sourceTree = "<group>"; };
+		5DCACB8F33CDC322A6C60F78 /* libPods-Sommet.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Sommet.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B41C07B1CE4CD61D442CE1E /* protocol.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = protocol.c; path = ../android/app/src/main/cpp/libambit/protocol.c; sourceTree = "<group>"; };
+		6D06767D7938BBEC52A52507 /* AmbitUsbModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = AmbitUsbModule.mm; sourceTree = "<group>"; };
+		6DB6CA4E5761A5614C17FA35 /* AmbitBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = AmbitBridge.h; sourceTree = "<group>"; };
+		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Sommet/AppDelegate.swift; sourceTree = "<group>"; };
+		77D6AC0D5DC9F0ADA64FC1E5 /* personal.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = personal.c; path = ../android/app/src/main/cpp/libambit/personal.c; sourceTree = "<group>"; };
+		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Sommet/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8A10D67F19070AF057D69FAD /* AmbitBleModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = AmbitBleModule.m; sourceTree = "<group>"; };
+		8EB19513553F103438850452 /* sha256.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sha256.c; path = ../android/app/src/main/cpp/libambit/sha256.c; sourceTree = "<group>"; };
+		93328F0274D775F8FED1DF3D /* utils.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = utils.c; path = ../android/app/src/main/cpp/libambit/utils.c; sourceTree = "<group>"; };
+		9625A7B3913FD8813B67990E /* sbem0102.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sbem0102.c; path = ../android/app/src/main/cpp/libambit/sbem0102.c; sourceTree = "<group>"; };
+		96B3179FB92877F1284325A4 /* debug.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = debug.c; path = ../android/app/src/main/cpp/libambit/debug.c; sourceTree = "<group>"; };
+		BC1368BA7355E650F061EC04 /* protocol_ble.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = protocol_ble.c; path = ../android/app/src/main/cpp/libambit/protocol_ble.c; sourceTree = "<group>"; };
+		BD2B96F3628252966F831FAC /* libambit_ios.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = libambit_ios.c; path = ../android/app/src/main/cpp/libambit/libambit_ios.c; sourceTree = "<group>"; };
+		D14F4F012165DF76561D45D5 /* device_driver_ambit3_sport_modes.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3_sport_modes.c; path = ../../shared/libambit/device_driver_ambit3_sport_modes.c; sourceTree = "<group>"; };
+		E7ACBAD90BB7426FD6DAEBD7 /* device_driver_ambit3_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3_navigation.c; path = ../../shared/libambit/device_driver_ambit3_navigation.c; sourceTree = "<group>"; };
+		E88DEF7DEFCB0A326D79920D /* distance.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = distance.c; path = ../android/app/src/main/cpp/libambit/distance.c; sourceTree = "<group>"; };
+		E989DA16E96ADC02BC0D4D50 /* libambit.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = libambit.c; path = ../android/app/src/main/cpp/libambit/libambit.c; sourceTree = "<group>"; };
+		EB533111AF6E69A0C62B18E2 /* crc16.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = crc16.c; path = ../android/app/src/main/cpp/libambit/crc16.c; sourceTree = "<group>"; };
+		EB99C7313E96C975254DDA54 /* hid_stub.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = hid_stub.c; path = ../android/app/src/main/cpp/libambit/hid_stub.c; sourceTree = "<group>"; };
+		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		FABA9D206E1388F47EE70045 /* device_driver_ambit_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit_navigation.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit_navigation.c; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		13B07F8C1A680F5B00A75B9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C80B921A6F3F58F76C31292 /* libPods-Sommet.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		13B07FAE1A68108700A75B9A /* Sommet */ = {
+			isa = PBXGroup;
+			children = (
+				13B07FB51A68108700A75B9A /* Images.xcassets */,
+				761780EC2CA45674006654EE /* AppDelegate.swift */,
+				13B07FB61A68108700A75B9A /* Info.plist */,
+				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
+				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
+			);
+			name = Sommet;
+			sourceTree = "<group>";
+		};
+		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
+				5DCACB8F33CDC322A6C60F78 /* libPods-Sommet.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Libraries;
+			sourceTree = "<group>";
+		};
+		83CBB9F61A601CBA00E9B192 = {
+			isa = PBXGroup;
+			children = (
+				13B07FAE1A68108700A75B9A /* Sommet */,
+				832341AE1AAA6A7D00B99B32 /* Libraries */,
+				83CBBA001A601CBA00E9B192 /* Products */,
+				2D16E6871FA4F8E400B85C8A /* Frameworks */,
+				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				B9DE45FF6852A91D3D2A4DF4 /* AmbitBle */,
+				C3F28C6A1998FDE4D1AEFDAE /* libambit */,
+			);
+			indentWidth = 2;
+			sourceTree = "<group>";
+			tabWidth = 2;
+			usesTabs = 0;
+		};
+		83CBBA001A601CBA00E9B192 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				13B07F961A680F5B00A75B9A /* Sommet.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B9DE45FF6852A91D3D2A4DF4 /* AmbitBle */ = {
+			isa = PBXGroup;
+			children = (
+				3995221E1CE6CE7A8E06514D /* AmbitBleModule.swift */,
+				8A10D67F19070AF057D69FAD /* AmbitBleModule.m */,
+				6D06767D7938BBEC52A52507 /* AmbitUsbModule.mm */,
+				4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */,
+				6DB6CA4E5761A5614C17FA35 /* AmbitBridge.h */,
+			);
+			path = AmbitBle;
+			sourceTree = "<group>";
+		};
+		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				3B4392A12AC88292D35C810B /* Pods-Sommet.debug.xcconfig */,
+				5709B34CF0A7D63546082F79 /* Pods-Sommet.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		C3F28C6A1998FDE4D1AEFDAE /* libambit */ = {
+			isa = PBXGroup;
+			children = (
+				EB533111AF6E69A0C62B18E2 /* crc16.c */,
+				96B3179FB92877F1284325A4 /* debug.c */,
+				03514CCD40EF6BE35F7A5CEA /* device_driver_ambit.c */,
+				2D71A310D35AD53607A8AFE8 /* device_driver_ambit3.c */,
+				FABA9D206E1388F47EE70045 /* device_driver_ambit_navigation.c */,
+				4B40735B0A569C62B9D863BC /* device_driver_common.c */,
+				4AB1C7F302CF933B9B4CDD88 /* device_support.c */,
+				E88DEF7DEFCB0A326D79920D /* distance.c */,
+				EB99C7313E96C975254DDA54 /* hid_stub.c */,
+				E989DA16E96ADC02BC0D4D50 /* libambit.c */,
+				BD2B96F3628252966F831FAC /* libambit_ios.c */,
+				77D6AC0D5DC9F0ADA64FC1E5 /* personal.c */,
+				5091B966A4396AFEFFD948CB /* pmem20.c */,
+				6B41C07B1CE4CD61D442CE1E /* protocol.c */,
+				BC1368BA7355E650F061EC04 /* protocol_ble.c */,
+				9625A7B3913FD8813B67990E /* sbem0102.c */,
+				8EB19513553F103438850452 /* sha256.c */,
+				1A2DE636D0986BDA50EB5B95 /* sport_mode_serialize.c */,
+				93328F0274D775F8FED1DF3D /* utils.c */,
+				E7ACBAD90BB7426FD6DAEBD7 /* device_driver_ambit3_navigation.c */,
+				D14F4F012165DF76561D45D5 /* device_driver_ambit3_sport_modes.c */,
+			);
+			name = libambit;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		13B07F861A680F5B00A75B9A /* Sommet */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Sommet" */;
+			buildPhases = (
+				C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */,
+				13B07F871A680F5B00A75B9A /* Sources */,
+				13B07F8C1A680F5B00A75B9A /* Frameworks */,
+				13B07F8E1A680F5B00A75B9A /* Resources */,
+				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
+				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
+				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Sommet;
+			productName = Sommet;
+			productReference = 13B07F961A680F5B00A75B9A /* Sommet.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		83CBB9F71A601CBA00E9B192 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1210;
+				TargetAttributes = {
+					13B07F861A680F5B00A75B9A = {
+						LastSwiftMigration = 1120;
+					};
+				};
+			};
+			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "Sommet" */;
+			compatibilityVersion = "Xcode 12.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 83CBB9F61A601CBA00E9B192;
+			productRefGroup = 83CBBA001A601CBA00E9B192 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				13B07F861A680F5B00A75B9A /* Sommet */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		13B07F8E1A680F5B00A75B9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
+				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
+				1CDEB9A9675FC7808B8CDA0D /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/.xcode.env",
+			);
+			name = "Bundle React Native code and images";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"\\\"$WITH_ENVIRONMENT\\\" \\\"$REACT_NATIVE_XCODE\\\"\"\n";
+		};
+		00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Sommet-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		E235C05ADACE081382539298 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		13B07F871A680F5B00A75B9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				2B3BE12EA0E642E9EFFDA883 /* AmbitBleModule.swift in Sources */,
+				ECF13A97D3292950B1ECF8D8 /* AmbitBleModule.m in Sources */,
+				E0696F9801380EE3648B8925 /* AmbitUsbModule.mm in Sources */,
+				6B24F548122B9D22933D5412 /* GarminModule.mm in Sources */,
+				AE2A5283E4934893485AD0CF /* crc16.c in Sources */,
+				43D479BCEECF90AAFE05C10C /* debug.c in Sources */,
+				8F8C957665896FF610220CB9 /* device_driver_ambit.c in Sources */,
+				375310F6E252EB244A156D5E /* device_driver_ambit3.c in Sources */,
+				D8123C6053A799290E4FC49E /* device_driver_ambit_navigation.c in Sources */,
+				BAEBD0D2FD776925823BEFAD /* device_driver_common.c in Sources */,
+				2EC978D5180A38C21BE76D51 /* device_support.c in Sources */,
+				7BE707995ED2457751BF97C7 /* distance.c in Sources */,
+				9DE596AACCE4F0003B7AB563 /* hid_stub.c in Sources */,
+				9F1CB8F6C309A1C1B2235EAF /* libambit.c in Sources */,
+				3C6EDEEE78D99469283E759B /* libambit_ios.c in Sources */,
+				543EB018140281ABDDC6106D /* personal.c in Sources */,
+				76BDE0CC3DE910B1987DD55D /* pmem20.c in Sources */,
+				C315F1344940D4DF24335D04 /* protocol.c in Sources */,
+				A2F4658993C93A7F8F0B096C /* protocol_ble.c in Sources */,
+				8224F9B2753B4E5F5EB8358D /* sbem0102.c in Sources */,
+				66F0F7A496CC5B73ACE897DA /* sha256.c in Sources */,
+				1F472533478CB04FC4E9212B /* sport_mode_serialize.c in Sources */,
+				A0D9413D1E457DCC103D6BCD /* utils.c in Sources */,
+				3323D554D8CC569BFAA8DEE9 /* device_driver_ambit3_navigation.c in Sources */,
+				7F9D65F253F63E8BD166B9CA /* device_driver_ambit3_sport_modes.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		13B07F941A680F5B00A75B9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-Sommet.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8ZZYJR593C;
+				ENABLE_BITCODE = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					DEBUG_PRINT_INFO,
+					DEBUG_PRINT_WARNING,
+					DEBUG_PRINT_ERROR,
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit,
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit/hidapi,
+					/Users/andre/sommet/shared/libambit,
+					/Users/andre/sommet/android/ios/AmbitBle,
+				);
+				INFOPLIST_FILE = Sommet/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-include",
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit/endian_compat.h,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.skinnie.sommet;
+				PRODUCT_NAME = Sommet;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sommet/Sommet-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		13B07F951A680F5B00A75B9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-Sommet.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8ZZYJR593C;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					DEBUG_PRINT_INFO,
+					DEBUG_PRINT_WARNING,
+					DEBUG_PRINT_ERROR,
+				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit,
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit/hidapi,
+					/Users/andre/sommet/shared/libambit,
+					/Users/andre/sommet/android/ios/AmbitBle,
+				);
+				INFOPLIST_FILE = Sommet/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-include",
+					/Users/andre/sommet/android/android/app/src/main/cpp/libambit/endian_compat.h,
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+					"-liconv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.skinnie.sommet;
+				PRODUCT_NAME = Sommet;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sommet/Sommet-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		83CBBA201A601CBA00E9B192 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					/usr/lib/swift,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"\"$(SDKROOT)/usr/lib/swift\"",
+					"\"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)\"",
+					"\"$(inherited)\"",
+				);
+				MTL_ENABLE_DEBUG_INFO = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(OTHER_CFLAGS)",
+					"-DFOLLY_NO_CONFIG",
+					"-DFOLLY_MOBILE=1",
+					"-DFOLLY_USE_LIBCPP=1",
+					"-DFOLLY_CFG_NO_COROUTINES=1",
+					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				USE_HERMES = true;
+			};
+			name = Debug;
+		};
+		83CBBA211A601CBA00E9B192 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					/usr/lib/swift,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"\"$(SDKROOT)/usr/lib/swift\"",
+					"\"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)\"",
+					"\"$(inherited)\"",
+				);
+				MTL_ENABLE_DEBUG_INFO = NO;
+				OTHER_CFLAGS = (
+					"$(inherited)",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(OTHER_CFLAGS)",
+					"-DFOLLY_NO_CONFIG",
+					"-DFOLLY_MOBILE=1",
+					"-DFOLLY_USE_LIBCPP=1",
+					"-DFOLLY_CFG_NO_COROUTINES=1",
+					"-DFOLLY_HAVE_CLOCK_GETTIME=1",
+					"-DRCT_REMOVE_LEGACY_ARCH=1",
+				);
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
+				SDKROOT = iphoneos;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				USE_HERMES = true;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Sommet" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				13B07F941A680F5B00A75B9A /* Debug */,
+				13B07F951A680F5B00A75B9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "Sommet" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				83CBBA201A601CBA00E9B192 /* Debug */,
+				83CBBA211A601CBA00E9B192 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 83CBB9F71A601CBA00E9B192 /* Project object */;
+}

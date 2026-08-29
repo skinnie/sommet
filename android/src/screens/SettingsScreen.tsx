@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, ScrollView, ActivityIndicator, Linking, Modal,
+  StyleSheet, Alert, ScrollView, ActivityIndicator, Linking, Modal, Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -640,7 +640,8 @@ export default function SettingsScreen() {
           that this card doesn't apply to Garmin at all (no AmbitSettings protocol there),
           so it's hidden while one's attached rather than shown with a "Read Settings"
           button that would just fail. ── */}
-      {!isGarminAttached && (
+      {/* Firmware flashing is USB-only (no USB on iOS), so hide it there. */}
+      {!isGarminAttached && Platform.OS !== 'ios' && (
       <View style={styles.section}>
         <View style={styles.cardHead}>
           <IconBadge icon="watch" />

@@ -33,20 +33,35 @@
 #include "libambit_int.h"
 #include "protocol.h"
 
-#include <jni.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <android/log.h>
 
+/* ─── Transport seam (2026-08-28 iOS port) ───────────────────────────────────
+ * The NSP framing/CRC/handshake below is transport-agnostic. Only the outgoing
+ * chunk write differs per platform: Android calls back into Kotlin's
+ * bleWriteChunk() over JNI; iOS (and any non-Android host) supplies a plain C
+ * callback that performs the GATT write (CBPeripheral writeValue on iOS). The
+ * JNI details are confined to the __ANDROID__ branches so the shared file has a
+ * single source of truth for the protocol. */
+#ifdef __ANDROID__
+#include <jni.h>
+#include <android/log.h>
 #define LOG_TAG "AmbitProtocolBle"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-
 /* Defined in jni_bridge.cpp. Replays notification bytes that arrived before
  * g_device was published (see the call site in the handshake below). */
 extern void jni_ble_flush_rx_stash(void);
+#else
+#include <stdio.h>
+#define LOGI(...) fprintf(stderr, "[AmbitProtocolBle] " __VA_ARGS__), fprintf(stderr, "\n")
+#define LOGE(...) fprintf(stderr, "[AmbitProtocolBle:E] " __VA_ARGS__), fprintf(stderr, "\n")
+/* iOS bridge equivalent of jni_ble_flush_rx_stash — replays the pre-init RX
+ * stash. Provided by the iOS transport TU (libambit_ios.c). */
+extern void ambit_ble_flush_rx_stash(void);
+#endif
 
 #define BLE_HEADER_LEN   12
 #define BLE_TRAILER_LEN  4   /* CRC32, little-endian */
@@ -54,9 +69,16 @@ extern void jni_ble_flush_rx_stash(void);
 #define BLE_REPLY_TIMEOUT_SEC 20
 
 typedef struct {
+#ifdef __ANDROID__
     JavaVM *jvm;
     jobject module_ref;       /* global ref to the Kotlin AmbitBleModule instance */
     jmethodID write_chunk_mid; /* void bleWriteChunk(byte[]) */
+#else
+    /* Host-supplied GATT write callback (iOS: CBPeripheral writeValue). Called
+     * with each <=20-byte chunk of a fully-built frame, in order. */
+    ambit_ble_write_fn write_chunk;
+    void *write_ud;
+#endif
 
     pthread_mutex_t lock;
     pthread_cond_t cond;
@@ -131,6 +153,7 @@ static uint32_t crc32_ieee(const uint8_t *data, size_t len)
  * Service Changed indication — see AmbitBleModule.kt), and enabled
  * notifications. Does not touch the wire itself.
  */
+#ifdef __ANDROID__
 int libambit_ble_transport_new(ambit_object_t *object, JavaVM *jvm, jobject module_ref_local, JNIEnv *env)
 {
     ble_ctx_t *ctx = (ble_ctx_t *)calloc(1, sizeof(ble_ctx_t));
@@ -172,16 +195,46 @@ int libambit_ble_transport_new(ambit_object_t *object, JavaVM *jvm, jobject modu
     object->handle = NULL;
     return 0;
 }
+#else /* !__ANDROID__ (iOS / generic host) */
+int libambit_ble_transport_new(ambit_object_t *object, ambit_ble_write_fn write_cb, void *write_ud)
+{
+    if (!write_cb) return -1;
+    ble_ctx_t *ctx = (ble_ctx_t *)calloc(1, sizeof(ble_ctx_t));
+    if (!ctx) return -1;
+
+    ctx->write_chunk = write_cb;
+    ctx->write_ud = write_ud;
+
+    pthread_mutex_init(&ctx->lock, NULL);
+    pthread_cond_init(&ctx->cond, NULL);
+
+    ctx->rx_acc_cap = 512;
+    ctx->rx_acc = (uint8_t *)malloc(ctx->rx_acc_cap);
+    if (!ctx->rx_acc) {
+        pthread_mutex_destroy(&ctx->lock);
+        pthread_cond_destroy(&ctx->cond);
+        free(ctx);
+        return -1;
+    }
+
+    object->transport = AMBIT_TRANSPORT_BLE;
+    object->transport_ctx = ctx;
+    object->handle = NULL;
+    return 0;
+}
+#endif
 
 void libambit_ble_transport_close(ambit_object_t *object)
 {
     if (!object || object->transport != AMBIT_TRANSPORT_BLE || !object->transport_ctx) return;
     ble_ctx_t *ctx = (ble_ctx_t *)object->transport_ctx;
 
+#ifdef __ANDROID__
     JNIEnv *env = NULL;
     if ((*ctx->jvm)->GetEnv(ctx->jvm, (void **)&env, JNI_VERSION_1_6) == JNI_OK && env) {
         (*env)->DeleteGlobalRef(env, ctx->module_ref);
     }
+#endif
     pthread_mutex_destroy(&ctx->lock);
     pthread_cond_destroy(&ctx->cond);
     free(ctx->rx_acc);
@@ -363,6 +416,8 @@ static int ble_build_and_send(ble_ctx_t *ctx, uint16_t command, uint8_t flags,
     size_t frame_len = off;
     free(content);
 
+    int ret = 0;
+#ifdef __ANDROID__
     JNIEnv *env = NULL;
     int attached = 0;
     if ((*ctx->jvm)->GetEnv(ctx->jvm, (void **)&env, JNI_VERSION_1_6) != JNI_OK) {
@@ -374,7 +429,6 @@ static int ble_build_and_send(ble_ctx_t *ctx, uint16_t command, uint8_t flags,
         attached = 1;
     }
 
-    int ret = 0;
     for (size_t pos = 0; pos < frame_len; pos += BLE_CHUNK_SIZE) {
         size_t chunk_len = frame_len - pos;
         if (chunk_len > BLE_CHUNK_SIZE) chunk_len = BLE_CHUNK_SIZE;
@@ -393,6 +447,13 @@ static int ble_build_and_send(ble_ctx_t *ctx, uint16_t command, uint8_t flags,
     }
 
     if (attached) (*ctx->jvm)->DetachCurrentThread(ctx->jvm);
+#else /* iOS / generic host: hand each chunk to the C write callback in order */
+    for (size_t pos = 0; pos < frame_len; pos += BLE_CHUNK_SIZE) {
+        size_t chunk_len = frame_len - pos;
+        if (chunk_len > BLE_CHUNK_SIZE) chunk_len = BLE_CHUNK_SIZE;
+        ctx->write_chunk(ctx->write_ud, frame + pos, chunk_len);
+    }
+#endif
     free(frame);
     return ret;
 }
@@ -454,7 +515,11 @@ int libambit_ble_handshake_device_info(ambit_object_t *object, ambit_device_info
      * (zero "handshake: got frame" logs). Must run here — after handshake_mode=1
      * so replayed frames land in hs_queue, and with ctx->lock released so
      * ambit_ble_on_notify can take it. (2026-08-09.) */
+#ifdef __ANDROID__
     jni_ble_flush_rx_stash();
+#else
+    ambit_ble_flush_rx_stash();
+#endif
 
     struct timespec deadline;
     clock_gettime(CLOCK_REALTIME, &deadline);
