@@ -20,12 +20,6 @@ import { useDemo } from '../config/DemoContext';
 import { DemoDevicePicker } from '../components/ui/DemoDevicePicker';
 import Icon, { IconName } from '../components/ui/Icon';
 import { CREDITS } from '../legal/credits';
-import { DecodedSetting, SettingField, SettingScreen } from '../services/AmbitSettingsReader';
-import { readAmbitSettings, writeAmbitSetting, writeLegacyPersonalSetting } from '../services/AmbitSettingsService';
-import { isWritablePersonalField } from '../services/AmbitPersonalSettingsWriter';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { EPHEMERIS_GPS_ONLY_KEY, GlonassStatus, getGlonassStatus } from '../services/SgeeService';
-import type { WriteDevice } from '../services/AmbitSettingsWriter';
 import {
   getRunalyzeApiKey, saveRunalyzeApiKey, removeRunalyzeApiKey,
 } from '../services/ApiRunalyze';
@@ -35,7 +29,6 @@ import {
 import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
-import { CoordinatePicker } from '../components/CoordinatePicker';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -48,7 +41,7 @@ import {
 import {
   getMapProvider, setMapProvider, MapProvider, MAP_PROVIDER_LABELS,
 } from '../services/MapProviderService';
-import { detectAttachedDeviceType, isBleTransportActive } from '../native/AmbitUsbModule';
+import { detectAttachedDeviceType } from '../native/AmbitUsbModule';
 import { getTileCacheSizeBytes, clearTileCache } from '../services/TileCache';
 import { t } from '../i18n';
 import { APP_VERSION } from '../config/version';
@@ -77,30 +70,6 @@ const THEME_OPTIONS: { mode: ThemeMode; icon: IconName; label: () => string }[] 
   { mode: 'system', icon: 'auto', label: () => t.themeSystem },
 ];
 
-// SuuntoLink groups watch settings into named screens; desktop (SettingsPage.qml) shows the
-// same four section headers in this order. Ported here 2026-08-16 so the two apps group
-// settings identically instead of Android showing one flat list. A row with no `screen`
-// (Kailash, no display metadata) falls into "Other".
-const SETTINGS_SCREEN_ORDER: SettingScreen[] = ['general', 'units', 'personal', 'other'];
-const SETTINGS_SCREEN_TITLE: Record<SettingScreen, string> = {
-  general:  'General settings',
-  units:    'Unit settings',
-  personal: 'Personal settings',
-  other:    'Other',
-};
-const settingScreenOf = (row: DecodedSetting): SettingScreen => row.screen ?? 'other';
-const settingScreenRank = (s: SettingScreen): number => {
-  const i = SETTINGS_SCREEN_ORDER.indexOf(s);
-  return i < 0 ? 99 : i;
-};
-
-// Static, non-editable display of a settings value — used for the read-only Ambit 1/2 rows.
-function readOnlyValue(row: DecodedSetting): string {
-  if (row.kind === 'enum') return row.choices?.find(c => c.value === row.value)?.label ?? String(row.value);
-  if (row.kind === 'bool') return row.value === 1 ? 'On' : 'Off';
-  if (row.kind === 'coord') return row.value.toFixed(6);
-  return String(row.value);
-}
 
 export default function SettingsScreen() {
   const theme = useV3Theme();
@@ -136,7 +105,6 @@ export default function SettingsScreen() {
   const [savingEmberSync, setSavingEmberSync]       = useState(false);
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
-  const [coordPickKey, setCoordPickKey]             = useState<string | null>(null);
   const [savingIntervals, setSavingIntervals]       = useState(false);
   const [gearImporting, setGearImporting]           = useState(false);
   const [gearSyncing, setGearSyncing]               = useState(false);
@@ -186,153 +154,13 @@ export default function SettingsScreen() {
   // in. Re-checked on every focus, same on-demand pattern as the rest of this app (no
   // context/prop-drilling from Home - this screen queries what it needs itself).
   const [isGarminAttached, setIsGarminAttached] = useState(false);
+  // Only detects whether a Garmin is attached, to hide the Firmware card below. Watch settings
+  // moved to their own screen (WatchSettingsScreen, 2026-08-29), so this no longer reads the watch.
   useFocusEffect(useCallback(() => {
-    detectAttachedDeviceType().then(t => {
-      setIsGarminAttached(t === 'garmin');
-      // Auto-read the watch's settings the moment one is connected (USB or BLE) - no manual
-      // "Read settings" tap (André, 2026-08-18: automatic on connect, either transport, any
-      // watch, both platforms - the desktop already auto-reads on page load).
-      if (t === 'ambit' || isBleTransportActive()) handleReadAmbitSettings();
-    }).catch(() => {
-      if (isBleTransportActive()) handleReadAmbitSettings();
-    });
-    AsyncStorage.getItem(EPHEMERIS_GPS_ONLY_KEY).then(v => setEphemerisGpsOnly(v === 'true')).catch(() => {});
+    detectAttachedDeviceType().then(t => setIsGarminAttached(t === 'garmin')).catch(() => {});
   }, []));
 
-  const [ambitSettings, setAmbitSettings] = useState<DecodedSetting[] | null>(null);
-  const [ambitSettingsFields, setAmbitSettingsFields] = useState<SettingField[] | null>(null);
-  // The connected watch's own name (from getDeviceInfo()'s device list), used to label
-  // this section adaptively — "Suunto Kailash Settings" etc. — instead of a hardcoded
-  // "Ambit3". Empty until the settings read connects and identifies the watch.
-  const [ambitDeviceName, setAmbitDeviceName] = useState<string>('');
-  // Ambit 1/2 family: settings are read-only (no write in libambit), so the rows render
-  // their value statically and the write controls are hidden.
-  const [ambitReadOnly, setAmbitReadOnly] = useState(false);
-  const [ambitWriteDevice, setAmbitWriteDevice] = useState<WriteDevice | undefined>();
-  // GLONASS orbital data - desktop parity (WatchSettingsPage's "Orbital data" group). Shown
-  // only when the connected watch declares a GlonassSGEE region (Traverse/Kailash, not the
-  // Ambit3 Peak/Sport), answered by the watch itself via readAmbitSettings' same connection.
-  const [ambitGlonass, setAmbitGlonass] = useState<GlonassStatus | undefined>();
-  const [ephemerisGpsOnly, setEphemerisGpsOnly] = useState(false);
-  const [orbitalInfoOpen, setOrbitalInfoOpen] = useState(false);
-  const [ambitSettingsPhase, setAmbitSettingsPhase] =
-    useState<'idle' | 'connecting' | 'reading' | 'done' | 'error'>('idle');
-  const [ambitSettingsError, setAmbitSettingsError] = useState<string | undefined>();
-  const [writingKey, setWritingKey] = useState<string | null>(null);
-  // Free-text edit state for 'coord' rows (home_latitude/home_longitude) - a plain
-  // TextInput needs its own string buffer, separate from the decoded numeric row.value,
-  // the same pattern SportModesScreen.tsx already uses for its own numeric fields.
-  const [coordEdits, setCoordEdits] = useState<Record<string, string>>({});
-  // Free-text edit buffer for the Personal numeric fields (height/weight/HR) - keyed by key,
-  // the same shape as coordEdits.
-  const [numEdits, setNumEdits] = useState<Record<string, string>>({});
 
-  async function handleReadAmbitSettings() {
-    await readAmbitSettings(s => {
-      setAmbitSettingsPhase(s.phase);
-      if (s.settings) {
-        setAmbitSettings(s.settings);
-        const coords: Record<string, string> = {};
-        for (const row of s.settings) {
-          if (row.kind === 'coord') coords[row.key] = row.value.toFixed(6);
-        }
-        setCoordEdits(coords);
-      }
-      if (s.fields) setAmbitSettingsFields(s.fields);
-      if (s.deviceName) setAmbitDeviceName(s.deviceName);
-      setAmbitWriteDevice(s.writeDevice);
-      setAmbitReadOnly(!!s.readOnly);
-      setAmbitSettingsError(s.error);
-    });
-    // GLONASS support is read in its OWN isolated connection AFTER the settings read has fully
-    // finished (and, over USB, disconnected) - never sharing that link, so the extra 0x0b21 map
-    // read can't desync the settings read on watches where it isn't hardware-confirmed (the
-    // Ambit3 Peak). A watch without a GlonassSGEE region just reports unsupported and no group
-    // shows. Best-effort: its failure never affects the settings already displayed.
-    try { setAmbitGlonass(await getGlonassStatus()); } catch { /* group stays hidden */ }
-  }
-
-  async function handleEphemerisGpsOnly(v: boolean) {
-    setEphemerisGpsOnly(v);
-    await AsyncStorage.setItem(EPHEMERIS_GPS_ONLY_KEY, v ? 'true' : 'false');
-  }
-
-  async function handleWriteAmbitSetting(key: string, value: number) {
-    // Ambit 1/2 (read-only for everything else) but the Personal profile fields ARE writable
-    // via the legacy 0x0b01 path (2026-08-26). Route those there; the state/result contract is
-    // the same so the reflect-confirmed-value logic below is shared.
-    if (ambitReadOnly && isWritablePersonalField(key)) {
-      setWritingKey(key);
-      await writeLegacyPersonalSetting(key, value, s => {
-        if (s.phase === 'done' || s.phase === 'error') {
-          setWritingKey(null);
-          if (s.error) Alert.alert(t.error, s.error);
-        }
-        if (s.result && s.result.confirmedValue !== null) {
-          setAmbitSettings(prev => prev && prev.map(row =>
-            row.key === key ? { ...row, value: s.result!.confirmedValue as number } : row));
-          setNumEdits(prev => ({ ...prev, [key]: String(s.result!.confirmedValue) }));
-        }
-      });
-      return;
-    }
-    if (!ambitSettingsFields || !ambitWriteDevice) return;
-    setWritingKey(key);
-    await writeAmbitSetting(key, value, ambitSettingsFields, ambitWriteDevice, s => {
-      if (s.phase === 'done' || s.phase === 'error') {
-        setWritingKey(null);
-        if (s.error) Alert.alert(t.error, s.error);
-      }
-      if (s.result) {
-        // Reflect the watch's own confirmed value, not blindly what was requested -
-        // matches AmbitSettingsWriter.ts's own "prove it" contract.
-        setAmbitSettings(prev => prev && prev.map(row =>
-          row.key === key && s.result!.confirmedValue !== null
-            ? { ...row, value: s.result!.confirmedValue as number }
-            : row));
-        if (s.result.confirmedValue !== null) {
-          setCoordEdits(prev => ({ ...prev, [key]: (s.result!.confirmedValue as number).toFixed(6) }));
-        }
-      }
-    });
-  }
-
-  // Real, hardware-independent range check, same bounds AmbitSettingsWriter.ts's own
-  // writeSetting() (and settings_write.py's write_one() on the desktop side) enforce
-  // again before ever sending a byte - this is just the earliest, UI-level catch for an
-  // obviously-invalid typed value.
-  function handleSetCoord(key: string) {
-    const parsed = parseFloat(coordEdits[key] ?? '');
-    if (!Number.isFinite(parsed)) {
-      Alert.alert(t.error, `${key}: not a valid number`);
-      return;
-    }
-    if (key === 'home_latitude' && (parsed < -90 || parsed > 90)) {
-      Alert.alert(t.error, `${key}=${parsed} out of range [-90, 90]`);
-      return;
-    }
-    if (key === 'home_longitude' && (parsed < -180 || parsed > 180)) {
-      Alert.alert(t.error, `${key}=${parsed} out of range [-180, 180]`);
-      return;
-    }
-    handleWriteAmbitSetting(key, parsed);
-  }
-
-  // Personal numeric write (Height/Weight/Max HR/Rest HR). Validated against the field's own
-  // display range - the same bounds SuuntoLink's UI enforces (see AmbitSettingsReader ranges)
-  // - so an out-of-range value is refused here rather than sent to the watch.
-  function handleSetNumber(row: DecodedSetting) {
-    const parsed = parseFloat(numEdits[row.key] ?? '');
-    if (!Number.isFinite(parsed)) {
-      Alert.alert(t.error, `${row.label ?? row.key}: not a valid number`);
-      return;
-    }
-    if ((row.min !== undefined && parsed < row.min) || (row.max !== undefined && parsed > row.max)) {
-      Alert.alert(t.error, `${row.label ?? row.key} = ${parsed} out of range [${row.min}, ${row.max}]`);
-      return;
-    }
-    handleWriteAmbitSetting(row.key, parsed);
-  }
 
   useFocusEffect(useCallback(() => {
     getRunalyzeApiKey().then(k => {
@@ -655,235 +483,6 @@ export default function SettingsScreen() {
       </View>
       )}
 
-      {!isGarminAttached && (
-      <View style={styles.section}>
-        <View style={styles.cardHead}>
-          <IconBadge icon="watch" />
-          <Text style={styles.cardTitle}>
-            {ambitDeviceName ? t.ambitSettingsTitle(ambitDeviceName) : t.ambitSettingsSection}
-          </Text>
-        </View>
-        <Text style={styles.sectionDesc}>{t.ambitSettingsDesc}</Text>
-        {ambitReadOnly && <Text style={styles.sectionDesc}>{t.ambitSettingsReadOnly}</Text>}
-
-
-        {(ambitSettingsPhase === 'connecting' || ambitSettingsPhase === 'reading') && (
-          <View style={styles.statusRow}>
-            <ActivityIndicator size="small" color={theme.text} />
-            <Text style={[styles.sectionDesc, { marginLeft: 8, marginBottom: 0 }]}>
-              {ambitSettingsPhase === 'connecting' ? t.connecting : t.ambitSettingsReading}
-            </Text>
-          </View>
-        )}
-
-        {ambitSettingsPhase === 'error' && ambitSettingsError && !ambitSettings && (
-          <Text style={[styles.sectionDesc, { color: theme.error, marginTop: 10 }]}>
-            {ambitSettingsError}
-          </Text>
-        )}
-
-        {/* Orbital data (GLONASS) - shown only when the watch declares a GlonassSGEE region
-            (Traverse/Kailash, not the Ambit3 Peak/Sport), read in the same connection above.
-            Desktop parity: WatchSettingsPage's "Orbital data" group with the "Ephemeris GPS
-            only" switch + a tap-to-expand "i". The write itself rides the Home orbital update. */}
-        {ambitGlonass?.supported && (
-          <>
-            <Text style={styles.settingsGroupTitle}>{t.orbitalDataTitle}</Text>
-            <View style={styles.ambitSettingRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 }}>
-                <Text style={[styles.ambitSettingLabel, { flex: 0, marginRight: 8 }]}>{t.ephemerisGpsOnly}</Text>
-                <TouchableOpacity
-                  onPress={() => setOrbitalInfoOpen(o => !o)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={{
-                    width: 18, height: 18, borderRadius: 9, borderWidth: 1,
-                    alignItems: 'center', justifyContent: 'center',
-                    borderColor: orbitalInfoOpen ? theme.primary : theme.mutedText,
-                  }}
-                >
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: orbitalInfoOpen ? theme.primary : theme.mutedText }}>i</Text>
-                </TouchableOpacity>
-              </View>
-              <Toggle value={ephemerisGpsOnly} onValueChange={handleEphemerisGpsOnly} />
-            </View>
-            {orbitalInfoOpen && (
-              <Text style={[styles.sectionDesc, { marginTop: 4 }]}>{t.ephemerisGpsOnlyInfo}</Text>
-            )}
-          </>
-        )}
-
-        {ambitSettings && ambitSettings
-          // Group by SuuntoLink settings screen (General/Units/Personal/Other), preserving
-          // the table's own order within each group - a stable sort with an index tiebreak.
-          .map((row, i) => ({ row, i }))
-          .sort((a, b) =>
-            settingScreenRank(settingScreenOf(a.row)) - settingScreenRank(settingScreenOf(b.row)) || a.i - b.i)
-          .map(({ row }, idx, arr) => {
-          // SuuntoLink's own field name (desktop renders the same `label`); the title-cased
-          // key is only the fallback for a device with no display metadata (Kailash).
-          const label = row.label ?? row.key.split('_')
-            .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-            .join(' ');
-          const busy = writingKey === row.key;
-          // Ambit 1/2 are read-only EXCEPT the Personal profile fields, now writable via the
-          // legacy 0x0b01 path (2026-08-26). Those render with the same editors as an Ambit3.
-          const roDisplay = ambitReadOnly && !isWritablePersonalField(row.key);
-          const showHeader = idx === 0 || settingScreenOf(arr[idx - 1].row) !== settingScreenOf(row);
-          return (
-            <React.Fragment key={row.key}>
-              {showHeader && (
-                <Text style={styles.settingsGroupTitle}>{SETTINGS_SCREEN_TITLE[settingScreenOf(row)]}</Text>
-              )}
-            <View style={styles.ambitSettingRow}>
-              <Text style={styles.ambitSettingLabel}>{label}</Text>
-
-              {roDisplay && (
-                <Text style={styles.ambitSettingValueRO}>{readOnlyValue(row)}</Text>
-              )}
-
-              {!roDisplay && (<>
-              {row.kind === 'bool' && (
-                <Toggle
-                  value={row.value === 1}
-                  onValueChange={v => handleWriteAmbitSetting(row.key, v ? 1 : 0)}
-                  disabled={busy}
-                />
-              )}
-
-              {/* Every enum setting is a compact dropdown (André, 2026-08-16: the chip rows
-                  "aren't dropdown menus like in the desktop, which puts it cluttered"). A unit
-                  field the watch owns under Metric/Imperial is shown but disabled (row.locked). */}
-              {row.kind === 'enum' && (
-                <Dropdown
-                  value={row.value}
-                  choices={row.choices ?? []}
-                  disabled={busy || row.locked}
-                  onSelect={v => handleWriteAmbitSetting(row.key, v)}
-                />
-              )}
-
-              {/* Activity class: a labelled dropdown of SuuntoLink's own values, matching
-                  desktop (kind 'number' but control 'dropdown'). */}
-              {row.kind === 'number' && row.control === 'dropdown' && (
-                <Dropdown
-                  value={row.value}
-                  choices={row.choices ?? []}
-                  disabled={busy}
-                  onSelect={v => handleWriteAmbitSetting(row.key, v)}
-                />
-              )}
-
-              {/* Personal numerics (Height/Weight/Max HR/Rest HR): a free-text field + Save,
-                  range-checked in handleSetNumber. A +-5 stepper made no sense at these
-                  ranges (30-250 kg, 30-240 bpm) and couldn't do Weight's 0.1 kg step. */}
-              {/* Free-text numeric editors: Personal numerics (Height/Weight/Max HR/Rest HR),
-                  Birth year (kind 'year'), and Compass declination (degrees, can be negative -
-                  so its keyboard isn't digit-only). All range-checked in handleSetNumber. */}
-              {((row.kind === 'number' && (row.control === 'number' || row.control === 'declination'))
-                || row.kind === 'year') && (
-                <View style={styles.coordRow}>
-                  <TextInput
-                    style={styles.coordInput}
-                    value={numEdits[row.key] ?? String(row.value)}
-                    onChangeText={v => setNumEdits(prev => ({ ...prev, [row.key]: v }))}
-                    editable={!busy}
-                    keyboardType={(row.min ?? 0) < 0 ? 'default' : 'numeric'}
-                    placeholderTextColor={theme.mutedText}
-                  />
-                  {!!row.unit && <Text style={styles.ambitSettingValueRO}>{row.unit}</Text>}
-                  <TouchableOpacity style={styles.coordSetBtn} disabled={busy} onPress={() => handleSetNumber(row)}>
-                    <Text style={styles.btnText}>{t.saveBtn}</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Backlight brightness (control 'slider' - no RN slider, kept as a +-step
-                  stepper). Uses the field's own min/max/step when present, else 0..100 by 5. */}
-              {row.kind === 'number' && row.control !== 'dropdown'
-                && row.control !== 'number' && row.control !== 'declination' && (
-                <View style={styles.stepperRow}>
-                  <TouchableOpacity
-                    style={styles.stepperBtn}
-                    disabled={busy}
-                    onPress={() => handleWriteAmbitSetting(row.key, Math.max(row.min ?? 0, row.value - (row.step ?? 5)))}
-                  >
-                    <Text style={styles.stepperBtnText}>-</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.stepperValue}>{row.value}{row.unit ? ` ${row.unit}` : ''}</Text>
-                  <TouchableOpacity
-                    style={styles.stepperBtn}
-                    disabled={busy}
-                    onPress={() => handleWriteAmbitSetting(row.key, Math.min(row.max ?? 100, row.value + (row.step ?? 5)))}
-                  >
-                    <Text style={styles.stepperBtnText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Real, 2026-08-08, Kailash only (home_latitude/home_longitude) - found
-                  from real BLE captures, confirmed byte-exact against the watch's own
-                  real schema descriptor (entry 0x36, GROUP HomeLocation.Latitude/
-                  Longitude - see AmbitSettingsReader.ts's own field comment and the
-                  ambit_app_kailash_home_location_field memory). Free-text degrees input
-                  rather than a stepper (unlike 'number' above) - a +-5 nudge makes no
-                  sense for a GPS coordinate, and it needs to accept a leading "-". */}
-              {row.kind === 'coord' && (
-                <View style={styles.coordRow}>
-                  <TextInput
-                    style={styles.coordInput}
-                    value={coordEdits[row.key] ?? row.value.toFixed(6)}
-                    onChangeText={v => setCoordEdits(prev => ({ ...prev, [row.key]: v }))}
-                    editable={!busy}
-                    placeholderTextColor={theme.mutedText}
-                  />
-                  <TouchableOpacity
-                    style={styles.coordSetBtn}
-                    disabled={busy}
-                    onPress={() => handleSetCoord(row.key)}
-                  >
-                    <Text style={styles.btnText}>{t.saveBtn}</Text>
-                  </TouchableOpacity>
-                  {/* Pick on a map - desktop parity (WatchSettingsPage's own button). Pointing
-                      at a coordinate beats typing six decimal places by hand. */}
-                  <TouchableOpacity
-                    style={styles.coordSetBtn}
-                    disabled={busy}
-                    onPress={() => setCoordPickKey(row.key)}
-                  >
-                    <Text style={styles.btnText}>Map</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              </>)}
-
-              {busy && <ActivityIndicator size="small" color={theme.primary} style={{ marginLeft: 8 }} />}
-            </View>
-            </React.Fragment>
-          );
-        })}
-
-      </View>
-      )}
-
-      {/* Map coordinate picker (desktop parity: WatchSettingsPage's "Pick on a map").
-          home_latitude and home_longitude are two SEPARATE setting rows, but a point on a map
-          is inherently both - so a pick fills BOTH edit buffers. The write itself still needs
-          an explicit Save per row, keeping this app's "explicit tap for any write" rule rather
-          than silently pushing two values to the watch from a map tap. */}
-      <CoordinatePicker
-        visible={coordPickKey !== null}
-        initialLat={parseFloat(coordEdits.home_latitude ?? '') || 0}
-        initialLon={parseFloat(coordEdits.home_longitude ?? '') || 0}
-        onCancel={() => setCoordPickKey(null)}
-        onPick={(la, lo) => {
-          setCoordEdits(prev => ({
-            ...prev,
-            home_latitude: la.toFixed(6),
-            home_longitude: lo.toFixed(6),
-          }));
-          setCoordPickKey(null);
-        }}
-      />
 
       {/* ── Connections - real, 2026-08-09 ("settings was completely reworked in our
           desktop app... proceed"). Ports SettingsPage.qml's real Connections card: one
