@@ -27,6 +27,7 @@ import CalendarScreen from './src/screens/CalendarScreen';
 import SmartSensorScreen from './src/screens/SmartSensorScreen';
 import AppZoneScreen from './src/screens/AppZoneScreen';
 import AppsScreen from './src/screens/AppsScreen';
+import WatchSettingsScreen from './src/screens/WatchSettingsScreen';
 import IntervalsScreen from './src/screens/IntervalsScreen';
 import WorkoutCalendarScreen from './src/screens/WorkoutCalendarScreen';
 import GearScreen from './src/screens/GearScreen';
@@ -84,6 +85,7 @@ export type RootStackParamList = {
   SmartSensor: undefined;
   AppZone: undefined;
   Apps: undefined;
+  WatchSettings: undefined;
   Intervals: undefined;
   // The Calendar feature (2026-08-21) - dated native guided workouts in the WORKOUT menu,
   // named "dd/mm_name". "WorkoutCalendar" (not "Calendar") deliberately - that route name is
@@ -261,6 +263,11 @@ function AppShell() {
             name="Apps"
             component={AppsScreen}
             options={{ title: 'Apps' }}
+          />
+          <Stack.Screen
+            name="WatchSettings"
+            component={WatchSettingsScreen}
+            options={{ title: 'Watch settings' }}
           />
           <Stack.Screen
             name="Intervals"

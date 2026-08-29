@@ -801,6 +801,12 @@ export default function HomeScreen() {
     ...(connected && deviceType === 'ambit' && !isKailash(ambitInfo)
       ? [{ id: 'sportModes', label: t.sportModesButton, icon: 'watch' as const, onPress: () => navigation.navigate('SportModes', { overBle: bleConnectedRef.current, variant: ambitInfo?.model }), group: 'watch' as const }]
       : []),
+    // Watch settings (2026-08-29, desktop parity): on-watch settings read/write, its own screen
+    // now (mirrors the desktop split). Suunto family (Ambit1/2/3, Traverse, Kailash), USB or BLE;
+    // not Garmin. The per-model write rules live in the settings services.
+    ...(connected && deviceType === 'ambit'
+      ? [{ id: 'watchSettings', label: 'Watch settings', icon: 'watch' as const, onPress: () => navigation.navigate('WatchSettings') }]
+      : []),
     // Firmware (2026-08-29, desktop parity): USB-only, HIDDEN over Bluetooth - a bad flash can
     // brick the watch and flashing is cable/USB-OTG only (same brick-safety rule as the desktop's
     // NavRail). Suunto family (incl. Kailash over USB), not Garmin. Also still in Settings.
