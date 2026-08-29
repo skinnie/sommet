@@ -42,12 +42,32 @@ set_target_properties(ambitapp PROPERTIES
     # so align the bundle identity to match (spotted on the first Mac build, 2026-08-27).
     MACOSX_BUNDLE_GUI_IDENTIFIER com.sommet.Sommet
     MACOSX_BUNDLE_BUNDLE_NAME Sommet
+    # Finder/Dock icon for Sommet.app. Names the icon file Qt stamps into Info.plist as
+    # CFBundleIconFile; the matching packaging/icon.icns is copied into Contents/Resources by
+    # the if(APPLE) block below. Without this the .app showed a blank/generic icon even though
+    # the running window icon (setWindowIcon, icon.png) was correct.
+    MACOSX_BUNDLE_ICON_FILE icon.icns
     # Qt defaults CFBundleShortVersionString to major.minor only ("0.2"), so 0.2.0/0.2.1/0.2.2
     # all showed as "0.2" in Finder Get Info and the About box - users couldn't tell builds
     # apart when reporting bugs. Stamp the full project version into both version keys.
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
 )
+
+# OS-level app icon (Finder/Dock on macOS, .exe/Explorer/taskbar on Windows). Both slots are
+# fed by the same artwork as the runtime window icon - regenerate all three files with
+# tools/packaging/make_desktop_app_icon.py. Linux has no per-binary icon slot; it uses the
+# runtime setWindowIcon(icon.png) in main.cpp (and a .desktop file's Icon= at install time).
+if(APPLE)
+    # Copy icon.icns into Sommet.app/Contents/Resources (where CFBundleIconFile points).
+    target_sources(ambitapp PRIVATE packaging/icon.icns)
+    set_source_files_properties(packaging/icon.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
+elseif(WIN32)
+    # Compile the .ico into the executable's resources so Explorer/taskbar show it. CMake
+    # routes .rc files to the platform resource compiler (windres for MinGW, rc for MSVC).
+    target_sources(ambitapp PRIVATE packaging/sommet.rc)
+endif()
 
 # Pure-QML singletons - see qml/Theme.qml's own header comment for why these are QML, not
 # C++ types: no native state or backend calls belong in any of them. MUST be set before

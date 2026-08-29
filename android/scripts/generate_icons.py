@@ -1,64 +1,52 @@
-from PIL import Image, ImageDraw
+#!/usr/bin/env python3
+"""Generates the Android launcher icons for Sommet.
+
+The mark is "Summit sync" (shared 2026-08-29): a rounded-square device tile with a dashed
+teal survey ring around a snow-capped amber summit. Geometry + palette live in
+tools/packaging/sommet_icon.py (the single source of truth every platform renders from), so
+the Android launcher can never drift from the desktop icon.
+
+Per density it writes:
+  ic_launcher.png          - legacy square launcher (pre-Android 8)
+  ic_launcher_round.png    - legacy round launcher
+  ic_launcher_foreground.png - adaptive-icon foreground (ring + summit on transparent; the
+                               solid tile colour is @color/ic_launcher_background = #14181c)
+
+    python3 android/scripts/generate_icons.py
+"""
+
 import os
+import sys
+
+# The artwork lives in tools/packaging/ at the repo root (two levels up from android/scripts).
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(REPO, "tools", "packaging"))
+from sommet_icon import render_tile, render_foreground  # noqa: E402
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SIZES = {
-    'mipmap-mdpi':    48,
-    'mipmap-hdpi':    72,
-    'mipmap-xhdpi':   96,
-    'mipmap-xxhdpi':  144,
-    'mipmap-xxxhdpi': 192,
+RES = os.path.join(BASE, "android", "app", "src", "main", "res")
+
+# density -> (legacy launcher px, adaptive foreground px). Foreground is the 108dp adaptive
+# canvas at each density; legacy is the 48dp launcher. Sizes match what shipped before.
+DENSITIES = {
+    "mipmap-mdpi":    (48, 108),
+    "mipmap-hdpi":    (72, 162),
+    "mipmap-xhdpi":   (96, 216),
+    "mipmap-xxhdpi":  (144, 324),
+    "mipmap-xxxhdpi": (192, 432),
 }
 
-# Tracé GPS stylisé (proportions 0–1)
-TRACK = [
-    (0.15, 0.72),
-    (0.30, 0.52),
-    (0.22, 0.32),
-    (0.50, 0.18),
-    (0.72, 0.30),
-    (0.62, 0.52),
-    (0.82, 0.68),
-]
 
-BG    = (22,  33,  62,  255)   # #16213e
-CYAN  = (0,  229, 255, 255)    # tracé GPS
-GREEN = (46, 204, 113, 255)    # marqueur départ
-RED   = (231, 76,  60, 255)    # marqueur arrivée
+def main():
+    for folder, (launcher, fg) in DENSITIES.items():
+        out = os.path.join(RES, folder)
+        os.makedirs(out, exist_ok=True)
+        render_tile(launcher, shape="rounded").save(os.path.join(out, "ic_launcher.png"))
+        render_tile(launcher, shape="circle").save(os.path.join(out, "ic_launcher_round.png"))
+        render_foreground(fg).save(os.path.join(out, "ic_launcher_foreground.png"))
+        print(f"{folder}: launcher {launcher}px, foreground {fg}px OK")
+    print("Done. (adaptive background colour is @color/ic_launcher_background in colors.xml)")
 
 
-def draw_content(draw, size):
-    pad = size * 0.12
-    w   = size - 2 * pad
-    pts = [(pad + x * w, pad + y * w) for x, y in TRACK]
-    lw  = max(2, size // 20)
-    draw.line(pts, fill=CYAN, width=lw)
-    r = max(3, size // 18)
-    for pt, color in [(pts[0], GREEN), (pts[-1], RED)]:
-        draw.ellipse([pt[0] - r, pt[1] - r, pt[0] + r, pt[1] + r], fill=color)
-
-
-def make_square(size):
-    img  = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    cr   = int(size * 0.22)
-    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=cr, fill=BG)
-    draw_content(draw, size)
-    return img
-
-
-def make_round(size):
-    img  = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([0, 0, size - 1, size - 1], fill=BG)
-    draw_content(draw, size)
-    return img
-
-
-for folder, size in SIZES.items():
-    out = os.path.join(BASE, 'android', 'app', 'src', 'main', 'res', folder)
-    make_square(size).save(os.path.join(out, 'ic_launcher.png'))
-    make_round(size).save(os.path.join(out,  'ic_launcher_round.png'))
-    print(f'{folder}: {size}x{size} OK')
-
-print('Done.')
+if __name__ == "__main__":
+    main()
