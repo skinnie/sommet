@@ -2,36 +2,32 @@ import QtQuick
 import QtQuick.Controls
 import AmbitApp
 
-// AMBITAPP_SPEC.md, "Navigation". Reworked 2026-08-28 (UX audit, items 1+4): the rail had
-// grown to ~21 flat, equal-weight entries with no scrolling - a plain top-anchored Column -
-// so on 720p / tablet-portrait the bottom items (Settings included) fell off-screen with no
-// way to reach them. Two fixes, both here:
-//   1. Home is pinned at the top, above the scroll area, so it never scrolls away. Everything
-//      below it - Settings included (André 2026-08-29: Settings in the scroll "as everything",
-//      no longer a fixed bottom pin) - lives in a Flickable that scrolls when the list is tall.
-//   2. The middle is grouped under three section headers - Training / Your watch / Advanced -
-//      each of which hides itself when every item under it is hidden, so an empty group leaves
-//      no orphan header. Selection is still by string id, not index, so grouping/reordering
-//      (and items appearing/disappearing as flags flip) never shifts any item's own identity.
+// AMBITAPP_SPEC.md, "Navigation": one flat, ordered list of destinations, each item's `visible`
+// gated by device/flags; selection by string id (never index), so items appearing/disappearing
+// never shift another item's identity.
+//
+// History: an audit added scroll + a collapsible ☰ + section grouping (Training/Your watch/
+// Advanced). André kept scroll + collapse but asked to DROP the grouping (2026-08-29: "why you
+// introduced advanced ... don't introduce stuff without me asking"), so this is a FLAT list again
+// in the original order. What survives from the rework:
+//   - Home is pinned at the top (never scrolls away); everything below it scrolls in a Flickable.
+//   - A ☰ at the top collapses the rail (Main.qml animates its width to 0, floats a ☰ to reopen).
+//   - Settings is the last row IN the scroll (no longer a fixed bottom pin), per André 2026-08-29.
 Rectangle {
     id: root
 
     property string currentPage: "home"
     signal pageSelected(string pageId)
-    // 2026-08-29 (André): the rail is collapsible now. This fires when the user taps the ☰ at
-    // the top of the rail; Main.qml handles it by animating the rail's width to 0 and showing a
-    // floating ☰ over the content to bring it back. Same "hide the sidebar to reclaim the width"
-    // idea as the Android drawer, kept as a docked collapse on the desktop's roomy layout.
+    // Fired by the ☰ at the top of the rail; Main.qml collapses the rail and shows a floating ☰.
     signal collapseRequested()
 
     implicitWidth: 220
     color: Theme.card
-    clip: true   // so the label text clips cleanly instead of overflowing while the width animates
+    clip: true   // label text clips cleanly while the width animates on collapse
 
     // --- Rail header: brand + collapse (☰) ----------------------------------------------
-    // The ☰ is drawn as three rounded bars rather than a font glyph: the Material Symbols font
-    // is subset to only the glyphs already in use (see assets/fonts/NOTICE.md), and adding a
-    // "menu" codepoint would need the font re-subsetted. Three Rectangles need no font at all.
+    // ☰ is three rounded bars, not a font glyph: the Material Symbols font is subset to only the
+    // glyphs already in use (assets/fonts/NOTICE.md), so a "menu" codepoint would need re-subsetting.
     Item {
         id: railHeader
         anchors.top: parent.top
@@ -71,50 +67,6 @@ Rectangle {
         }
     }
 
-    // --- Section-header visibility -------------------------------------------------------
-    // Each header shows only when at least one of its items would show. "Training" items are
-    // all always-on (Activities/Totals/Calendar/Gear/Weight/Health), so its header is always
-    // shown. "Your watch" is exactly "a device is connected". "Advanced" is the OR of the
-    // experimental/flagged toggles that surface its items.
-    // Routes/POIs are gated on the CAPABILITY (supportsRoutes/POIs, true for everything but a
-    // Kailash - so true even with no watch, matching the pre-grouping behaviour), while
-    // Sport Modes / Watch settings / Backup / Firmware need a connected device. The header must
-    // show when ANY of them shows, so it's the union: the two capabilities OR anyDevice (the
-    // loosest of the device-gated items - all the others imply it).
-    readonly property bool watchGroupVisible:
-        DeviceCapabilities.supportsRoutes || DeviceCapabilities.supportsPOIs
-        || HomeViewModel.anyDevice
-    readonly property bool advancedGroupVisible:
-        ((DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
-            && HomeViewModel.anyDevice && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
-            && DeviceCapabilities.supportsApps)
-        || (FeatureFlags.trainingProgram && HomeViewModel.anyDevice
-            && !HomeViewModel.isGarmin && !HomeViewModel.isKailash)
-        || DeviceService.smartSensorEnabled
-        || DeviceService.gpsTrackPodExperimentEnabled
-        || DeviceService.suuntoT6ExperimentEnabled
-
-    // A muted, uppercase group label. Collapses to zero height (and a Column skips it) when
-    // `shown` is false, so a hidden group leaves no gap.
-    component SectionHeader: Item {
-        id: sh
-        property string title
-        property bool shown: true
-        width: parent ? parent.width : 0
-        visible: shown
-        height: shown ? 34 : 0
-        Text {
-            anchors.left: parent.left
-            anchors.leftMargin: Theme.spacingMedium
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 6
-            text: sh.title.toUpperCase()
-            color: Theme.mutedText
-            font.pixelSize: Theme.fontSizeCaption
-            font.bold: true
-        }
-    }
-
     // --- Home: pinned at the top ---------------------------------------------------------
     NavItem {
         id: homeItem
@@ -130,10 +82,7 @@ Rectangle {
         onClicked: root.pageSelected("home")
     }
 
-    // --- Everything below Home scrolls, Settings included --------------------------------
-    // Settings used to be pinned at the bottom; André 2026-08-29 wanted it "in the scrolling
-    // menu as everything", so it is now just the last row of the Column below (still always
-    // reachable - the Flickable scrolls to it), not a fixed item.
+    // --- Everything below Home scrolls (Settings is just the last row) --------------------
     Flickable {
         id: scroller
         anchors.top: homeItem.bottom
@@ -154,9 +103,6 @@ Rectangle {
             width: scroller.width
             spacing: 2
 
-            // ===== Training - reads your own history / the cloud, no watch needed ==========
-            SectionHeader { title: qsTr("Training") }
-
             NavItem {
                 width: parent.width
                 glyph: Icons.activities
@@ -164,82 +110,10 @@ Rectangle {
                 selected: root.currentPage === "activities"
                 onClicked: root.pageSelected("activities")
             }
-            // Totals - André, 2026-08-11. Same data as Activities, summed; no device support to
-            // gate on, so it shows for every device including none, where it explains itself.
             NavItem {
                 width: parent.width
-                glyph: Icons.sportModes
-                label: qsTr("Totals")
-                selected: root.currentPage === "totals"
-                onClicked: root.pageSelected("totals")
-            }
-            // Coach (v2, 2026-08-21): readiness beacon + chat over local activity history.
-            // Un-hidden by default 2026-08-28 (UX audit item 3) - it was gated behind an
-            // experimental toggle almost nobody found; it works offline for the basics, so it
-            // now shows for everyone (the Settings toggle still lets you hide it).
-            NavItem {
-                width: parent.width
-                visible: DeviceService.coachEnabled
-                glyph: Icons.coach
-                label: qsTr("Coach")
-                selected: root.currentPage === "coach"
-                onClicked: root.pageSelected("coach")
-            }
-            // Calendar - real request, 2026-08-11. Same device-aware activity list; no device
-            // support to gate on, shows for every device including none.
-            NavItem {
-                width: parent.width
-                glyph: Icons.calendar
-                label: qsTr("Calendar")
-                selected: root.currentPage === "calendar"
-                onClicked: root.pageSelected("calendar")
-            }
-            // Gear tracker (v3, 2026-08-18): bikes/shoes + components + service reminders,
-            // imported from intervals.icu and owned locally. About your gear, not the watch.
-            NavItem {
-                width: parent.width
-                glyph: Icons.gear
-                label: qsTr("Gear")
-                selected: root.currentPage === "gear"
-                onClicked: root.pageSelected("gear")
-            }
-            // Weight (André, 2026-08-24): body-weight history. About your body, not the watch.
-            NavItem {
-                width: parent.width
-                glyph: Icons.weight
-                label: qsTr("Weight")
-                selected: root.currentPage === "weight"
-                onClicked: root.pageSelected("weight")
-            }
-            // Health (André, 2026-08-24): daily resting HR + steps.
-            NavItem {
-                width: parent.width
-                glyph: Icons.health
-                label: qsTr("Health")
-                selected: root.currentPage === "health"
-                onClicked: root.pageSelected("health")
-            }
-            // Ember (André, 2026-08-25): fasting + calorie / coffee / water tracker; logs sync
-            // from the phone app. Off in the sidebar by DEFAULT (Theme.emberEnabled) - it's an
-            // experimental personal companion, so it stays opt-in; the toggle + phone-install
-            // link now live openly in Settings (the 10-tap easter egg was retired 2026-08-28).
-            // Grouped with the other body trackers.
-            NavItem {
-                width: parent.width
-                visible: Theme.emberEnabled
-                glyph: Icons.ember
-                label: qsTr("Ember")
-                selected: root.currentPage === "ember"
-                onClicked: root.pageSelected("ember")
-            }
-
-            // ===== Your watch - needs the connected device ================================
-            SectionHeader { title: qsTr("Your watch"); shown: root.watchGroupVisible }
-
-            NavItem {
-                width: parent.width
-                // Kailash excluded, real 2026-08-09 - a GPS travel/adventure watch with no
-                // route-following feature. Gated on the CAPABILITY, not the model.
+                // Kailash excluded (a travel/adventure watch with no route-following) - gated on
+                // the CAPABILITY, not the model.
                 visible: DeviceCapabilities.supportsRoutes
                 glyph: Icons.routes
                 label: qsTr("Routes")
@@ -248,62 +122,77 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Kailash excluded, real 2026-08-09, same reasoning as Routes above.
                 visible: DeviceCapabilities.supportsPOIs
                 glyph: Icons.pois
                 label: qsTr("POIs")
                 selected: root.currentPage === "pois"
                 onClicked: root.pageSelected("pois")
             }
+            // Totals - same activity data, summed; no device support to gate on, shown always.
             NavItem {
                 width: parent.width
-                // Kailash excluded (no CustomModes region) and Garmin excluded (no on-watch
-                // sport-mode concept) - real, 2026-08-08 / 2026-08-11.
-                visible: FeatureFlags.sportModes && HomeViewModel.anyDevice
-                         && !HomeViewModel.isKailash && !HomeViewModel.isGarmin
                 glyph: Icons.sportModes
-                label: qsTr("Sport Modes")
-                selected: root.currentPage === "sportModes"
-                onClicked: root.pageSelected("sportModes")
+                label: qsTr("Totals")
+                selected: root.currentPage === "totals"
+                onClicked: root.pageSelected("totals")
             }
-            // Watch settings (2026-08-14) - cable-written on-watch settings. Suunto-only and
-            // needs a connected watch to read/write.
+            // Coach - readiness + chat over local history. On by default since 2026-08-28.
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
-                glyph: Icons.watch
-                label: qsTr("Watch settings")
-                selected: root.currentPage === "watchSettings"
-                onClicked: root.pageSelected("watchSettings")
+                visible: DeviceService.coachEnabled
+                glyph: Icons.coach
+                label: qsTr("Coach")
+                selected: root.currentPage === "coach"
+                onClicked: root.pageSelected("coach")
             }
             NavItem {
                 width: parent.width
-                // Nothing to back up, and nothing to restore to, without a device.
+                glyph: Icons.calendar
+                label: qsTr("Calendar")
+                selected: root.currentPage === "calendar"
+                onClicked: root.pageSelected("calendar")
+            }
+            NavItem {
+                width: parent.width
+                glyph: Icons.gear
+                label: qsTr("Gear")
+                selected: root.currentPage === "gear"
+                onClicked: root.pageSelected("gear")
+            }
+            NavItem {
+                width: parent.width
+                glyph: Icons.weight
+                label: qsTr("Weight")
+                selected: root.currentPage === "weight"
+                onClicked: root.pageSelected("weight")
+            }
+            NavItem {
+                width: parent.width
+                glyph: Icons.health
+                label: qsTr("Health")
+                selected: root.currentPage === "health"
+                onClicked: root.pageSelected("health")
+            }
+            // Ember - off in the sidebar by default; the toggle + install link live in Settings.
+            NavItem {
+                width: parent.width
+                visible: Theme.emberEnabled
+                glyph: Icons.ember
+                label: qsTr("Ember")
+                selected: root.currentPage === "ember"
+                onClicked: root.pageSelected("ember")
+            }
+            NavItem {
+                width: parent.width
+                // Nothing to back up, or restore to, without a device.
                 visible: HomeViewModel.anyDevice
                 glyph: Icons.backup
                 label: qsTr("Backup")
                 selected: root.currentPage === "backup"
                 onClicked: root.pageSelected("backup")
             }
-            // Firmware update / recovery (2026-08-12) - Suunto-only, cable-only (hidden over
-            // BLE, see ambit_app_never_touch_firmware): a real flash write is the one mistake
-            // here that can brick the watch, and flashing was never ported to BLE.
-            NavItem {
-                width: parent.width
-                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
-                         && !DeviceService.bleHandshakeDone
-                glyph: Icons.sync
-                label: qsTr("Firmware")
-                selected: root.currentPage === "firmware"
-                onClicked: root.pageSelected("firmware")
-            }
-
-            // ===== Advanced - App Zone builders + experimental / blind-built hardware ======
-            SectionHeader { title: qsTr("Advanced"); shown: root.advancedGroupVisible }
-
-            // Suunto Apps - ONE entry (2026-08-23): the page offers both the Interval Workout
-            // Builder and the free-form App Builder. App-Zone mechanisms - no Garmin equivalent,
-            // no Kailash CustomModes region, and Ambit1/2 predate the SBEM App Zone.
+            // Apps - App-Zone builders (Workout + free-form). Suunto Ambit3/Traverse only: no
+            // Garmin equivalent, no Kailash CustomModes region, and Ambit1/2 predate the App Zone.
             NavItem {
                 width: parent.width
                 visible: (DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
@@ -315,9 +204,7 @@ Rectangle {
                 selected: root.currentPage === "appZone"
                 onClicked: root.pageSelected("appZone")
             }
-            // Training Program (2026-08-12) - scheduled, date-gated workouts. ON HOLD, hidden
-            // behind FeatureFlags.trainingProgram (default false). Same App-Zone/CustomModes
-            // install mechanism, so same Suunto-only gating as Apps.
+            // Training Program - ON HOLD behind FeatureFlags.trainingProgram (default false).
             NavItem {
                 width: parent.width
                 visible: FeatureFlags.trainingProgram && HomeViewModel.anyDevice
@@ -327,8 +214,37 @@ Rectangle {
                 selected: root.currentPage === "trainingProgram"
                 onClicked: root.pageSelected("trainingProgram")
             }
-            // Suunto Smart Sensor (2026-08-14) - standalone BLE HR belt, independent of any
-            // watch, shown whenever its own experimental toggle is on.
+            // Sport Modes - Kailash (no CustomModes region) and Garmin (no sport-mode concept) excluded.
+            NavItem {
+                width: parent.width
+                visible: FeatureFlags.sportModes && HomeViewModel.anyDevice
+                         && !HomeViewModel.isKailash && !HomeViewModel.isGarmin
+                glyph: Icons.sportModes
+                label: qsTr("Sport Modes")
+                selected: root.currentPage === "sportModes"
+                onClicked: root.pageSelected("sportModes")
+            }
+            // Watch settings - cable-written on-watch settings. Suunto-only, needs a connected watch.
+            NavItem {
+                width: parent.width
+                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+                glyph: Icons.watch
+                label: qsTr("Watch settings")
+                selected: root.currentPage === "watchSettings"
+                onClicked: root.pageSelected("watchSettings")
+            }
+            // Firmware - Suunto-only, cable-only (hidden over BLE: a flash write is the one mistake
+            // that can brick the watch, and flashing was never ported to BLE).
+            NavItem {
+                width: parent.width
+                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+                         && !DeviceService.bleHandshakeDone
+                glyph: Icons.sync
+                label: qsTr("Firmware")
+                selected: root.currentPage === "firmware"
+                onClicked: root.pageSelected("firmware")
+            }
+            // Suunto Smart Sensor - standalone BLE HR belt, independent of any watch.
             NavItem {
                 width: parent.width
                 visible: DeviceService.smartSensorEnabled
@@ -337,8 +253,7 @@ Rectangle {
                 selected: root.currentPage === "smartSensor"
                 onClicked: root.pageSelected("smartSensor")
             }
-            // GPS Track Pod (2026-08-12) - a separate standalone Suunto GPS logger, not a
-            // watch, so not gated on anyDevice. Built blind, Settings-gated, off by default.
+            // GPS Track Pod - standalone Suunto GPS logger; built blind, Settings-gated, off by default.
             NavItem {
                 width: parent.width
                 visible: DeviceService.gpsTrackPodExperimentEnabled
@@ -347,8 +262,7 @@ Rectangle {
                 selected: root.currentPage === "gpsTrackPod"
                 onClicked: root.pageSelected("gpsTrackPod")
             }
-            // Suunto T6 (2026-08-14) - older HR training computer (no GPS). Built blind,
-            // Settings-gated, off by default. Same treatment as the GPS Track Pod above.
+            // Suunto T6 - older HR training computer (no GPS); built blind, Settings-gated, off by default.
             NavItem {
                 width: parent.width
                 visible: DeviceService.suuntoT6ExperimentEnabled
@@ -357,9 +271,8 @@ Rectangle {
                 selected: root.currentPage === "suuntoT6"
                 onClicked: root.pageSelected("suuntoT6")
             }
-
-            // Settings - last row in the scroll (2026-08-09 put it last; 2026-08-29 André moved
-            // it OUT of the old fixed bottom pin into the scroll "as everything"). Always shown.
+            // Settings - last row in the scroll (2026-08-29: André moved it out of the fixed pin
+            // into the scroll "as everything"). Always shown.
             NavItem {
                 width: parent.width
                 glyph: Icons.settings
