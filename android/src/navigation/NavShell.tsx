@@ -14,8 +14,9 @@ import { APP_VERSION } from '../config/version';
 //     Hidden by default, so it costs no vertical space until you ask for it; a tap on the dimmed
 //     content, or on a destination, hides it again. Same in portrait and landscape.
 //   - Tablet / desktop (min side >= 700): ☰ toggles a DOCKED rail beside the content; collapsing
-//     it reflows the page to full width. That rail is the grouped, scrollable list with Home
-//     pinned at the top; Settings scrolls with the rest (a port of qml/components/NavRail.qml).
+//     it reflows the page to full width. That rail is the flat, scrollable list (no groups - André
+//     2026-08-29) with Home pinned at the top; Settings scrolls with the rest (a port of
+//     qml/components/NavRail.qml).
 // Presentational only: callers build `items` (each with its own onPress + optional `group`, used
 // only by the tablet rail's grouping) and decide visibility themselves, exactly as before.
 //
@@ -37,11 +38,6 @@ export interface NavShellItem {
   group?: 'training' | 'watch' | 'adv';
 }
 
-const GROUP_ORDER: Array<[NonNullable<NavShellItem['group']>, string]> = [
-  ['training', 'Training'],
-  ['watch', 'Your watch'],
-  ['adv', 'Advanced'],
-];
 
 export function NavShell({
   items,
@@ -75,10 +71,7 @@ export function NavShell({
   function close() { setOpen(false); }
 
   const home = items.find(i => i.id === 'home');
-  const settings = items.find(i => i.id === 'settings');
-  const middle = items.filter(i => i.id !== 'home' && i.id !== 'settings');
-  const inGroup = (g: string) =>
-    middle.filter(i => (i.group || 'training') === g);
+  const rest = items.filter(i => i.id !== 'home');   // flat, in order; Settings is naturally last
 
   function Row({ item }: { item: NavShellItem }) {
     const sel = item.id === selectedId;
@@ -119,20 +112,11 @@ export function NavShell({
         <Text style={[styles.navVer, { color: t.mutedText }]}>v{APP_VERSION}</Text>
       </View>
       {home && <View style={styles.pin}><Row item={home} /></View>}
+      {/* Flat list, no groups (André 2026-08-29: "why you introduced advanced ... don't introduce
+          stuff without me asking"). Home is pinned above; everything else - Settings included, as
+          its natural last position in `items` - scrolls here in order. */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8, paddingBottom: 8 + insets.bottom }} showsVerticalScrollIndicator={false}>
-        {GROUP_ORDER.map(([g, title]) => {
-          const gi = inGroup(g);
-          if (!gi.length) return null;
-          return (
-            <View key={g}>
-              <Text style={[styles.groupHead, { color: t.mutedText }]}>{title.toUpperCase()}</Text>
-              {gi.map(it => <Row key={it.id} item={it} />)}
-            </View>
-          );
-        })}
-        {/* Settings is a normal scrolling row now (André 2026-08-29: "in the scrolling menu as
-            everything"), not a fixed bottom pin. Last row, after the groups. */}
-        {settings && <Row item={settings} />}
+        {rest.map(it => <Row key={it.id} item={it} />)}
       </ScrollView>
     </View>
   );
@@ -218,7 +202,6 @@ const styles = StyleSheet.create({
   pin: { padding: 8 },
   pinBottom: { borderTopWidth: StyleSheet.hairlineWidth },
 
-  groupHead: { fontSize: 10.5, letterSpacing: 0.6, fontWeight: '700', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 5 },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 10, marginBottom: 2 },
   rowLabel: { fontSize: 14.5 },

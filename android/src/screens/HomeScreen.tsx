@@ -775,6 +775,10 @@ export default function HomeScreen() {
   const navItems: NavShellItem[] = [
     { id: 'home', label: t.homeNavHome, icon: 'mountain', onPress: () => {} },
     { id: 'activities', label: t.viewActivities, icon: 'list', onPress: () => navigation.navigate('LogList'), group: 'training' },
+    // Totals + Calendar (2026-08-29, desktop parity): activity-analytics views, always reachable
+    // (read the local activity DB, no watch needed) - like the desktop nav.
+    { id: 'totals', label: 'Totals', icon: 'chart', onPress: () => navigation.navigate('Totals') },
+    { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
     ...(!connected ? [] : deviceType === 'garmin'
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
@@ -790,12 +794,21 @@ export default function HomeScreen() {
     ...(connected && deviceType === 'ambit' && !isKailash(ambitInfo)
       ? [{ id: 'sportModes', label: t.sportModesButton, icon: 'watch' as const, onPress: () => navigation.navigate('SportModes', { overBle: bleConnectedRef.current, variant: ambitInfo?.model }), group: 'watch' as const }]
       : []),
+    // Firmware (2026-08-29, desktop parity): USB-only, HIDDEN over Bluetooth - a bad flash can
+    // brick the watch and flashing is cable/USB-OTG only (same brick-safety rule as the desktop's
+    // NavRail). Suunto family (incl. Kailash over USB), not Garmin. Also still in Settings.
+    ...(connected && deviceType === 'ambit' && !bleConnected
+      ? [{ id: 'firmware', label: 'Firmware', icon: 'sync' as const, onPress: () => navigation.navigate('Firmware') }]
+      : []),
     // Experimental menu items - appear only when their toggle is on (Settings > Experimental
     // features). Intervals rides the Suunto App-Zone/CustomModes mechanism, so it's Ambit-only
     // and needs a connected watch, same gating as the desktop's NavRail. Smart Sensor is a
     // standalone BLE HR belt, so it shows whenever enabled. André, 2026-08-17.
+    // Apps (2026-08-29, desktop parity): one entry -> a launcher with the Workout Builder +
+    // the Suunto app catalog (AppsScreen), replacing the old separate 'Intervals' item. Same
+    // App-Zone gating as before: Ambit3-family only, connected, not Kailash/Traverse/Ambit1-2.
     ...(expFeatures.intervals && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
-      ? [{ id: 'intervals', label: t.experimentalIntervals, icon: 'chart' as const, onPress: () => navigation.navigate('Intervals'), group: 'adv' as const }]
+      ? [{ id: 'apps', label: 'Apps', icon: 'apps' as const, onPress: () => navigation.navigate('Apps') }]
       : []),
     ...(expFeatures.smartSensor
       ? [{ id: 'smartSensor', label: t.experimentalSmartSensor, icon: 'link' as const, onPress: () => navigation.navigate('SmartSensor'), group: 'adv' as const }]
