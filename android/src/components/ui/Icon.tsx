@@ -6,7 +6,7 @@ import Svg, { Path, Circle, Line, Rect } from 'react-native-svg';
 
 export type IconName =
   | 'sync' | 'satellite' | 'route' | 'poi' | 'backup' | 'settings'
-  | 'list' | 'link' | 'map' | 'chart' | 'activity' | 'key' | 'person'
+  | 'list' | 'link' | 'map' | 'chart' | 'apps' | 'activity' | 'key' | 'person'
   | 'delete' | 'check' | 'info' | 'battery' | 'warning' | 'mountain'
   | 'watch' | 'etrex' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
   | 'cycling' | 'running' | 'walking'
@@ -161,6 +161,16 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
           <Line x1={12} y1={20} x2={12} y2={7} {...s} />
           <Line x1={19} y1={20} x2={19} y2={15} {...s} />
           <Line x1={3} y1={20} x2={21} y2={20} {...s} />
+        </Svg>
+      );
+    case 'apps':
+      // 2x2 grid of rounded squares - the Apps launcher (mirrors the desktop's Icons.apps).
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={4} y={4} width={7} height={7} rx={1.5} {...s} />
+          <Rect x={13} y={4} width={7} height={7} rx={1.5} {...s} />
+          <Rect x={4} y={13} width={7} height={7} rx={1.5} {...s} />
+          <Rect x={13} y={13} width={7} height={7} rx={1.5} {...s} />
         </Svg>
       );
     case 'activity':

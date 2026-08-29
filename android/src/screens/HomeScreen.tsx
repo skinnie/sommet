@@ -804,8 +804,11 @@ export default function HomeScreen() {
     // features). Intervals rides the Suunto App-Zone/CustomModes mechanism, so it's Ambit-only
     // and needs a connected watch, same gating as the desktop's NavRail. Smart Sensor is a
     // standalone BLE HR belt, so it shows whenever enabled. André, 2026-08-17.
+    // Apps (2026-08-29, desktop parity): one entry -> a launcher with the Workout Builder +
+    // the Suunto app catalog (AppsScreen), replacing the old separate 'Intervals' item. Same
+    // App-Zone gating as before: Ambit3-family only, connected, not Kailash/Traverse/Ambit1-2.
     ...(expFeatures.intervals && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
-      ? [{ id: 'intervals', label: t.experimentalIntervals, icon: 'chart' as const, onPress: () => navigation.navigate('Intervals'), group: 'adv' as const }]
+      ? [{ id: 'apps', label: 'Apps', icon: 'apps' as const, onPress: () => navigation.navigate('Apps') }]
       : []),
     ...(expFeatures.smartSensor
       ? [{ id: 'smartSensor', label: t.experimentalSmartSensor, icon: 'link' as const, onPress: () => navigation.navigate('SmartSensor'), group: 'adv' as const }]
