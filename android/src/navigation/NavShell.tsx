@@ -15,7 +15,7 @@ import { APP_VERSION } from '../config/version';
 //     content, or on a destination, hides it again. Same in portrait and landscape.
 //   - Tablet / desktop (min side >= 700): ☰ toggles a DOCKED rail beside the content; collapsing
 //     it reflows the page to full width. That rail is the grouped, scrollable list with Home
-//     pinned top and Settings pinned bottom (a port of desktop/qml/components/NavRail.qml).
+//     pinned at the top; Settings scrolls with the rest (a port of qml/components/NavRail.qml).
 // Presentational only: callers build `items` (each with its own onPress + optional `group`, used
 // only by the tablet rail's grouping) and decide visibility themselves, exactly as before.
 //
@@ -119,7 +119,7 @@ export function NavShell({
         <Text style={[styles.navVer, { color: t.mutedText }]}>v{APP_VERSION}</Text>
       </View>
       {home && <View style={styles.pin}><Row item={home} /></View>}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8, paddingBottom: 8 + insets.bottom }} showsVerticalScrollIndicator={false}>
         {GROUP_ORDER.map(([g, title]) => {
           const gi = inGroup(g);
           if (!gi.length) return null;
@@ -130,12 +130,10 @@ export function NavShell({
             </View>
           );
         })}
+        {/* Settings is a normal scrolling row now (André 2026-08-29: "in the scrolling menu as
+            everything"), not a fixed bottom pin. Last row, after the groups. */}
+        {settings && <Row item={settings} />}
       </ScrollView>
-      {settings && (
-        <View style={[styles.pin, styles.pinBottom, { borderTopColor: t.border, paddingBottom: 8 + insets.bottom }]}>
-          <Row item={settings} />
-        </View>
-      )}
     </View>
   );
 

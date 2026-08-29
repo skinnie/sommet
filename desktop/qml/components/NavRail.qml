@@ -6,9 +6,9 @@ import AmbitApp
 // grown to ~21 flat, equal-weight entries with no scrolling - a plain top-anchored Column -
 // so on 720p / tablet-portrait the bottom items (Settings included) fell off-screen with no
 // way to reach them. Two fixes, both here:
-//   1. Home is pinned at the top and Settings at the bottom, OUTSIDE the scroll area, so the
-//      two anchors of the app can never scroll away. Everything between them lives in a
-//      Flickable that scrolls when the list is taller than the rail.
+//   1. Home is pinned at the top, above the scroll area, so it never scrolls away. Everything
+//      below it - Settings included (André 2026-08-29: Settings in the scroll "as everything",
+//      no longer a fixed bottom pin) - lives in a Flickable that scrolls when the list is tall.
 //   2. The middle is grouped under three section headers - Training / Your watch / Advanced -
 //      each of which hides itself when every item under it is hidden, so an empty group leaves
 //      no orphan header. Selection is still by string id, not index, so grouping/reordering
@@ -130,27 +130,15 @@ Rectangle {
         onClicked: root.pageSelected("home")
     }
 
-    // --- Settings: pinned at the bottom --------------------------------------------------
-    // Real, 2026-08-09 ("settings at the bottom") - kept, but now literally pinned so it is
-    // always reachable no matter how many items or how short the window.
-    NavItem {
-        id: settingsItem
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: Theme.spacingSmall
-        anchors.topMargin: 0
-        glyph: Icons.settings
-        label: qsTr("Settings")
-        selected: root.currentPage === "settings"
-        onClicked: root.pageSelected("settings")
-    }
-
-    // --- Everything else: scrolls between Home and Settings ------------------------------
+    // --- Everything below Home scrolls, Settings included --------------------------------
+    // Settings used to be pinned at the bottom; André 2026-08-29 wanted it "in the scrolling
+    // menu as everything", so it is now just the last row of the Column below (still always
+    // reachable - the Flickable scrolls to it), not a fixed item.
     Flickable {
         id: scroller
         anchors.top: homeItem.bottom
-        anchors.bottom: settingsItem.top
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.spacingSmall
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.leftMargin: Theme.spacingSmall
@@ -368,6 +356,16 @@ Rectangle {
                 label: qsTr("T6/X6")
                 selected: root.currentPage === "suuntoT6"
                 onClicked: root.pageSelected("suuntoT6")
+            }
+
+            // Settings - last row in the scroll (2026-08-09 put it last; 2026-08-29 André moved
+            // it OUT of the old fixed bottom pin into the scroll "as everything"). Always shown.
+            NavItem {
+                width: parent.width
+                glyph: Icons.settings
+                label: qsTr("Settings")
+                selected: root.currentPage === "settings"
+                onClicked: root.pageSelected("settings")
             }
         }
     }
