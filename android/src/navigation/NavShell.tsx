@@ -8,18 +8,19 @@ import Icon, { IconName } from '../components/ui/Icon';
 import { useV3Theme } from '../theme/v3';
 import { APP_VERSION } from '../config/version';
 
-// Nav shell. Reworked 2026-08-29 (André) into ONE hamburger everywhere, matching the desktop:
-//   - Phone (min side < 700): the nav is a MODAL DRAWER — ☰ slides it over the content, a scrim
-//     dims the page, tapping away closes it. Hidden by default so the whole screen is content.
-//   - Tablet / desktop (min side >= 700): the nav is a DOCKED rail beside the content; ☰ collapses
-//     it to zero width and the content reflows to fill. Shown by default (there's room).
-// Either way it's the same list: Home pinned at the top, Settings pinned at the bottom, the
-// middle grouped (Training / Your watch / Advanced) and scrollable — a 1:1 port of
-// desktop/qml/components/NavRail.qml. Presentational only: callers build `items` (each with its
-// own onPress + optional `group`) and decide visibility themselves, exactly as before.
+// Nav shell. Reworked 2026-08-29 (André). One ☰ everywhere, but two shapes for two form factors:
+//   - Phone (min side < 700): ☰ (top-left, in the app bar) reveals a BOTTOM menu that slides up —
+//     a horizontal, scrollable strip of every destination (Settings included, nothing pinned).
+//     Hidden by default, so it costs no vertical space until you ask for it; a tap on the dimmed
+//     content, or on a destination, hides it again. Same in portrait and landscape.
+//   - Tablet / desktop (min side >= 700): ☰ toggles a DOCKED rail beside the content; collapsing
+//     it reflows the page to full width. That rail is the grouped, scrollable list with Home
+//     pinned top and Settings pinned bottom (a port of desktop/qml/components/NavRail.qml).
+// Presentational only: callers build `items` (each with its own onPress + optional `group`, used
+// only by the tablet rail's grouping) and decide visibility themselves, exactly as before.
 //
-// This replaces the previous split (bottom tab row on phone, always-on icon rail on tablet): a
-// bottom bar squeezed ~11-15 destinations into unreadable slivers, and neither could be hidden.
+// This replaces the previous split (an always-on bottom tab row on phone that squeezed ~11-15
+// destinations into unreadable slivers, and an always-on icon rail on tablet - neither hideable).
 const TABLET_MIN_SIDE = 700;
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -95,6 +96,22 @@ export function NavShell({
     );
   }
 
+  // Phone bottom-menu cell: a small icon-over-label card, kept a readable width so the strip
+  // scrolls sideways rather than squeezing. Selecting it navigates and hides the menu.
+  function BottomItem({ item }: { item: NavShellItem }) {
+    const sel = item.id === selectedId;
+    return (
+      <TouchableOpacity
+        style={[styles.bItem, sel && { backgroundColor: t.primary }]}
+        activeOpacity={0.7}
+        onPress={() => { item.onPress(); close(); }}
+      >
+        <Icon name={item.icon} size={22} color={sel ? t.card : t.text} />
+        <Text style={[styles.bLabel, { color: sel ? t.card : t.text }]} numberOfLines={1}>{item.label}</Text>
+      </TouchableOpacity>
+    );
+  }
+
   const navList = (
     <View style={{ flex: 1 }}>
       <View style={[styles.navHead, { borderBottomColor: t.border }]}>
@@ -152,19 +169,22 @@ export function NavShell({
         <>
           <Animated.View
             pointerEvents={open ? 'auto' : 'none'}
-            style={[styles.scrim, { opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] }) }]}
+            style={[styles.scrim, { opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] }) }]}
           >
             <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={close} />
           </Animated.View>
           <Animated.View
-            style={[styles.drawer, {
+            pointerEvents={open ? 'auto' : 'none'}
+            style={[styles.bottomBar, {
               backgroundColor: t.card,
-              borderRightColor: t.border,
-              paddingTop: insets.top,
-              transform: [{ translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [-320, 0] }) }],
+              borderTopColor: t.border,
+              paddingBottom: insets.bottom,
+              transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [180, 0] }) }],
             }]}
           >
-            {navList}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bottomScroll}>
+              {items.map(it => <BottomItem key={it.id} item={it} />)}
+            </ScrollView>
           </Animated.View>
         </>
       )}
@@ -186,7 +206,12 @@ const styles = StyleSheet.create({
   dockRail: { overflow: 'hidden', borderRightWidth: StyleSheet.hairlineWidth },
 
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000', zIndex: 40 },
-  drawer: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 288, borderRightWidth: StyleSheet.hairlineWidth, zIndex: 50 },
+
+  // Phone: the bottom slide-up menu (a horizontal scrollable strip of every destination).
+  bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth, zIndex: 50 },
+  bottomScroll: { flexGrow: 1, justifyContent: 'space-around', alignItems: 'center', paddingHorizontal: 8 },
+  bItem: { minWidth: 74, alignItems: 'center', paddingVertical: 6, paddingHorizontal: 6, borderRadius: 12, marginHorizontal: 2 },
+  bLabel: { fontSize: 10, marginTop: 2, maxWidth: 82 },
 
   navHead: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, flexDirection: 'row', alignItems: 'baseline', borderBottomWidth: StyleSheet.hairlineWidth },
   navBrand: { fontSize: 17, fontWeight: '700' },
