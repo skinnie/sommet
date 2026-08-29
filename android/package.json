@@ -1,6 +1,6 @@
 {
   "name": "AmbitApp",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "scripts": {
     "postinstall": "patch-package",
