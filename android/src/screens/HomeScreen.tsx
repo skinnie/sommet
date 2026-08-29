@@ -584,7 +584,14 @@ export default function HomeScreen() {
         }
       } catch { /* corrupt/empty selection - fall back to first-found */ }
       restoredRef.current = true;
-      startSearchingRef.current(); // now connect, honoring any restored selection
+      // On iOS there is no USB, and the phone hosts + advertises the NSP server
+      // continuously (the watch connects in), so there is no short watch-advertising
+      // window to drain — auto-connect over BLE on launch instead of the USB search.
+      if (Platform.OS === 'ios') {
+        handleBleConnectRef.current();
+      } else {
+        startSearchingRef.current(); // now connect, honoring any restored selection
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
