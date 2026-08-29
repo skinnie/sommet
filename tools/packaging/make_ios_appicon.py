@@ -21,7 +21,8 @@ from pathlib import Path
 
 from sommet_icon import render_tile
 
-OUT = Path(__file__).resolve().parent.parent.parent / "android" / "ios" / "AppIcon.appiconset"
+OUT = (Path(__file__).resolve().parent.parent.parent
+       / "android" / "ios" / "Sommet" / "Images.xcassets" / "AppIcon.appiconset")
 
 # (idiom, point-size string, scale) -> px is size*scale. The classic full ladder: valid on
 # every Xcode version and complete for App Store submission.
