@@ -872,6 +872,15 @@ class Handler(BaseHTTPRequestHandler):
         # the pre-write mode). Coarse by design: an extra re-read after a write is cheap safety.
         if self._post_mutates_watch(self.path):
             read_cache_clear()
+        # A route write also invalidates the PERSISTENT on-disk route-track cache (the in-memory
+        # clear above doesn't reach it) so the next /api/nav re-reads the watch, not stale tracks.
+        _p = self.path.split("?", 1)[0]
+        if _p in ("/api/routes", "/api/routes/export") or _p.startswith("/api/nav"):
+            try:
+                for _f in ROUTE_CACHE_DIR.glob("*.json"):
+                    _f.unlink(missing_ok=True)
+            except OSError:
+                pass
 
         if self.path == "/api/ble/connect":
             self._handle_ble_connect(body)
@@ -1045,22 +1054,26 @@ class Handler(BaseHTTPRequestHandler):
         # route-tagged waypoints instead, which only ever recovers the A/B markers, never the
         # track. Hardware-confirmed on André's Ambit1 the same day: 3 routes, 1695 points,
         # region CRC matching, "Gare du Nord" decoding to 48.88097,2.35613.
-        # On-disk route-track cache: probe the 32-byte head (~1s) for its checksum and reuse a
-        # previously-decoded track set from disk instead of the ~79s full read. Only a miss (or a
-        # changed route region -> new checksum) pays the full read, which we then persist. Unlike
-        # the in-memory cache this survives app restart AND replug, and it keeps full-track previews.
-        cache_file = None
-        head = self._parse_last_json_line(run_tool("legacy_link.py", ["route-head"])[1])
-        if head and head.get("ok") and not head.get("empty") and head.get("point_count"):
-            key = "%s_%d_%d_%04x" % (device_key(), head.get("route_count", 0),
-                                     head["point_count"], head.get("checksum", 0))
-            cache_file = ROUTE_CACHE_DIR / (key + ".json")
-            if cache_file.is_file():
-                try:
-                    self._send_json(200, json.loads(cache_file.read_text()))
-                    return
-                except (OSError, ValueError):
-                    pass  # unreadable cache -> fall through to a fresh read
+        # Persistent on-disk route cache (option C, André 2026-08-29). The full route read is
+        # ~79-93s on macOS: the route region sits at a HIGH flash offset (0x41EB0 ≈ 270KB) and a
+        # 0x0b17 read there costs ~45s to REACH regardless of length (measured: even a 32-byte
+        # head read = 45s), so there is no cheap head-probe to key on. Instead cache the decoded
+        # tracks on disk per WATCH IDENTITY and reuse WITHOUT re-reading: the first read pays ~79s
+        # once, every read after is ~instant and survives app restart AND replug (unlike the
+        # in-memory cache). Invalidated when routes are written through the app (do_POST clears
+        # ROUTE_CACHE_DIR on /api/routes) and by ?force=1 (manual Refresh). A route edited ON THE
+        # WATCH itself needs a manual Refresh - rare, and the auto-detect (a head checksum probe)
+        # would cost 45s, defeating the whole point. Keeps full-track map previews.
+        force = "force=1" in (urllib.parse.urlparse(self.path).query or "")
+        _ident = str(_READ_CACHE_DEVICE or device_key())
+        _safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in _ident) or "watch"
+        cache_file = ROUTE_CACHE_DIR / (_safe + ".json")
+        if not force and cache_file.is_file():
+            try:
+                self._send_json(200, json.loads(cache_file.read_text()))
+                return
+            except (OSError, ValueError):
+                pass  # unreadable -> fall through to a fresh read
 
         code, out, err = run_tool("legacy_link.py", ["routes"], timeout=900)
         info = self._parse_last_json_line(out)
@@ -1076,12 +1089,11 @@ class Handler(BaseHTTPRequestHandler):
             resp = {"ok": True, "routes": routes,
                     "raw_output": "legacy Ambit1/2 - %d route(s) read from the route region\n"
                     % len(routes)}
-            if cache_file is not None:  # persist for instant reads after restart/replug
-                try:
-                    ROUTE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                    cache_file.write_text(json.dumps(resp))
-                except OSError:
-                    pass
+            try:  # persist for instant reads after restart/replug
+                ROUTE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(resp))
+            except OSError:
+                pass
             self._send_json(200, resp)
             return
 
