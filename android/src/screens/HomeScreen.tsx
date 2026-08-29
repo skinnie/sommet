@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, useWindowDimensions, ScrollView, Linking,
+  Alert, ActivityIndicator, useWindowDimensions, ScrollView, Linking, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -896,13 +896,18 @@ export default function HomeScreen() {
                 Multi-watch switcher: one direct-connect button per already-paired watch. */}
             {!busy && (
               <View style={styles.heroButtons}>
+                {/* On iOS there is no USB, so "Retry" must run the BLE connect (not the
+                    USB search), otherwise it's a dead button — only "Pair via Bluetooth"
+                    would work, which is confusing. */}
                 {phase === 'timeout' && (
-                  <Button label={t.homeConnectRetryBtn} onPress={startSearching} variant="text" grow={false} />
+                  <Button label={t.homeConnectRetryBtn}
+                    onPress={Platform.OS === 'ios' ? () => handleBleConnectRef.current() : startSearching}
+                    variant="text" grow={false} />
                 )}
                 {phase === 'connect-error' && (
                   <Button
                     label={t.homeConnectRetryBtn}
-                    onPress={() => bleAttempt ? handleBleConnectRef.current() : connectFlowRef.current(deviceType === 'garmin' ? 'garmin' : 'ambit')}
+                    onPress={() => (Platform.OS === 'ios' || bleAttempt) ? handleBleConnectRef.current() : connectFlowRef.current(deviceType === 'garmin' ? 'garmin' : 'ambit')}
                     variant="text"
                     grow={false}
                   />

@@ -40,42 +40,42 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		03514CCD40EF6BE35F7A5CEA /* device_driver_ambit.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_ambit.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit.c; sourceTree = "<group>"; };
+		03514CCD40EF6BE35F7A5CEA /* device_driver_ambit.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit.c; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Sommet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sommet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Sommet/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Sommet/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = Sommet/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		1A2DE636D0986BDA50EB5B95 /* sport_mode_serialize.c */ = {isa = PBXFileReference; includeInIndex = 1; name = sport_mode_serialize.c; path = ../android/app/src/main/cpp/libambit/sport_mode_serialize.c; sourceTree = "<group>"; };
-		2D71A310D35AD53607A8AFE8 /* device_driver_ambit3.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_ambit3.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit3.c; sourceTree = "<group>"; };
+		1A2DE636D0986BDA50EB5B95 /* sport_mode_serialize.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sport_mode_serialize.c; path = ../android/app/src/main/cpp/libambit/sport_mode_serialize.c; sourceTree = "<group>"; };
+		2D71A310D35AD53607A8AFE8 /* device_driver_ambit3.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit3.c; sourceTree = "<group>"; };
 		3995221E1CE6CE7A8E06514D /* AmbitBleModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AmbitBleModule.swift; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-Sommet.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Sommet.debug.xcconfig"; path = "Target Support Files/Pods-Sommet/Pods-Sommet.debug.xcconfig"; sourceTree = "<group>"; };
-		4AB1C7F302CF933B9B4CDD88 /* device_support.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_support.c; path = ../android/app/src/main/cpp/libambit/device_support.c; sourceTree = "<group>"; };
-		4B40735B0A569C62B9D863BC /* device_driver_common.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_common.c; path = ../android/app/src/main/cpp/libambit/device_driver_common.c; sourceTree = "<group>"; };
-		4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = GarminModule.mm; sourceTree = "<group>"; };
-		5091B966A4396AFEFFD948CB /* pmem20.c */ = {isa = PBXFileReference; includeInIndex = 1; name = pmem20.c; path = ../android/app/src/main/cpp/libambit/pmem20.c; sourceTree = "<group>"; };
+		4AB1C7F302CF933B9B4CDD88 /* device_support.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_support.c; path = ../android/app/src/main/cpp/libambit/device_support.c; sourceTree = "<group>"; };
+		4B40735B0A569C62B9D863BC /* device_driver_common.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_common.c; path = ../android/app/src/main/cpp/libambit/device_driver_common.c; sourceTree = "<group>"; };
+		4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = GarminModule.mm; sourceTree = "<group>"; };
+		5091B966A4396AFEFFD948CB /* pmem20.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = pmem20.c; path = ../android/app/src/main/cpp/libambit/pmem20.c; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-Sommet.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Sommet.release.xcconfig"; path = "Target Support Files/Pods-Sommet/Pods-Sommet.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-Sommet.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Sommet.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		6B41C07B1CE4CD61D442CE1E /* protocol.c */ = {isa = PBXFileReference; includeInIndex = 1; name = protocol.c; path = ../android/app/src/main/cpp/libambit/protocol.c; sourceTree = "<group>"; };
-		6D06767D7938BBEC52A52507 /* AmbitUsbModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = AmbitUsbModule.mm; sourceTree = "<group>"; };
+		6B41C07B1CE4CD61D442CE1E /* protocol.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = protocol.c; path = ../android/app/src/main/cpp/libambit/protocol.c; sourceTree = "<group>"; };
+		6D06767D7938BBEC52A52507 /* AmbitUsbModule.mm */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.objcpp; path = AmbitUsbModule.mm; sourceTree = "<group>"; };
 		6DB6CA4E5761A5614C17FA35 /* AmbitBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = AmbitBridge.h; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Sommet/AppDelegate.swift; sourceTree = "<group>"; };
-		77D6AC0D5DC9F0ADA64FC1E5 /* personal.c */ = {isa = PBXFileReference; includeInIndex = 1; name = personal.c; path = ../android/app/src/main/cpp/libambit/personal.c; sourceTree = "<group>"; };
+		77D6AC0D5DC9F0ADA64FC1E5 /* personal.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = personal.c; path = ../android/app/src/main/cpp/libambit/personal.c; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Sommet/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8A10D67F19070AF057D69FAD /* AmbitBleModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = AmbitBleModule.m; sourceTree = "<group>"; };
-		8EB19513553F103438850452 /* sha256.c */ = {isa = PBXFileReference; includeInIndex = 1; name = sha256.c; path = ../android/app/src/main/cpp/libambit/sha256.c; sourceTree = "<group>"; };
-		93328F0274D775F8FED1DF3D /* utils.c */ = {isa = PBXFileReference; includeInIndex = 1; name = utils.c; path = ../android/app/src/main/cpp/libambit/utils.c; sourceTree = "<group>"; };
-		9625A7B3913FD8813B67990E /* sbem0102.c */ = {isa = PBXFileReference; includeInIndex = 1; name = sbem0102.c; path = ../android/app/src/main/cpp/libambit/sbem0102.c; sourceTree = "<group>"; };
-		96B3179FB92877F1284325A4 /* debug.c */ = {isa = PBXFileReference; includeInIndex = 1; name = debug.c; path = ../android/app/src/main/cpp/libambit/debug.c; sourceTree = "<group>"; };
-		BC1368BA7355E650F061EC04 /* protocol_ble.c */ = {isa = PBXFileReference; includeInIndex = 1; name = protocol_ble.c; path = ../android/app/src/main/cpp/libambit/protocol_ble.c; sourceTree = "<group>"; };
-		BD2B96F3628252966F831FAC /* libambit_ios.c */ = {isa = PBXFileReference; includeInIndex = 1; name = libambit_ios.c; path = ../android/app/src/main/cpp/libambit/libambit_ios.c; sourceTree = "<group>"; };
-		D14F4F012165DF76561D45D5 /* device_driver_ambit3_sport_modes.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_ambit3_sport_modes.c; path = ../../shared/libambit/device_driver_ambit3_sport_modes.c; sourceTree = "<group>"; };
-		E7ACBAD90BB7426FD6DAEBD7 /* device_driver_ambit3_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_ambit3_navigation.c; path = ../../shared/libambit/device_driver_ambit3_navigation.c; sourceTree = "<group>"; };
-		E88DEF7DEFCB0A326D79920D /* distance.c */ = {isa = PBXFileReference; includeInIndex = 1; name = distance.c; path = ../android/app/src/main/cpp/libambit/distance.c; sourceTree = "<group>"; };
-		E989DA16E96ADC02BC0D4D50 /* libambit.c */ = {isa = PBXFileReference; includeInIndex = 1; name = libambit.c; path = ../android/app/src/main/cpp/libambit/libambit.c; sourceTree = "<group>"; };
-		EB533111AF6E69A0C62B18E2 /* crc16.c */ = {isa = PBXFileReference; includeInIndex = 1; name = crc16.c; path = ../android/app/src/main/cpp/libambit/crc16.c; sourceTree = "<group>"; };
-		EB99C7313E96C975254DDA54 /* hid_stub.c */ = {isa = PBXFileReference; includeInIndex = 1; name = hid_stub.c; path = ../android/app/src/main/cpp/libambit/hid_stub.c; sourceTree = "<group>"; };
+		8EB19513553F103438850452 /* sha256.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sha256.c; path = ../android/app/src/main/cpp/libambit/sha256.c; sourceTree = "<group>"; };
+		93328F0274D775F8FED1DF3D /* utils.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = utils.c; path = ../android/app/src/main/cpp/libambit/utils.c; sourceTree = "<group>"; };
+		9625A7B3913FD8813B67990E /* sbem0102.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = sbem0102.c; path = ../android/app/src/main/cpp/libambit/sbem0102.c; sourceTree = "<group>"; };
+		96B3179FB92877F1284325A4 /* debug.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = debug.c; path = ../android/app/src/main/cpp/libambit/debug.c; sourceTree = "<group>"; };
+		BC1368BA7355E650F061EC04 /* protocol_ble.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = protocol_ble.c; path = ../android/app/src/main/cpp/libambit/protocol_ble.c; sourceTree = "<group>"; };
+		BD2B96F3628252966F831FAC /* libambit_ios.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = libambit_ios.c; path = ../android/app/src/main/cpp/libambit/libambit_ios.c; sourceTree = "<group>"; };
+		D14F4F012165DF76561D45D5 /* device_driver_ambit3_sport_modes.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3_sport_modes.c; path = ../../shared/libambit/device_driver_ambit3_sport_modes.c; sourceTree = "<group>"; };
+		E7ACBAD90BB7426FD6DAEBD7 /* device_driver_ambit3_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit3_navigation.c; path = ../../shared/libambit/device_driver_ambit3_navigation.c; sourceTree = "<group>"; };
+		E88DEF7DEFCB0A326D79920D /* distance.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = distance.c; path = ../android/app/src/main/cpp/libambit/distance.c; sourceTree = "<group>"; };
+		E989DA16E96ADC02BC0D4D50 /* libambit.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = libambit.c; path = ../android/app/src/main/cpp/libambit/libambit.c; sourceTree = "<group>"; };
+		EB533111AF6E69A0C62B18E2 /* crc16.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = crc16.c; path = ../android/app/src/main/cpp/libambit/crc16.c; sourceTree = "<group>"; };
+		EB99C7313E96C975254DDA54 /* hid_stub.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = hid_stub.c; path = ../android/app/src/main/cpp/libambit/hid_stub.c; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		FABA9D206E1388F47EE70045 /* device_driver_ambit_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; name = device_driver_ambit_navigation.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit_navigation.c; sourceTree = "<group>"; };
+		FABA9D206E1388F47EE70045 /* device_driver_ambit_navigation.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; name = device_driver_ambit_navigation.c; path = ../android/app/src/main/cpp/libambit/device_driver_ambit_navigation.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -151,7 +151,6 @@
 				4C1D2FABD86AA9CBCFA9859D /* GarminModule.mm */,
 				6DB6CA4E5761A5614C17FA35 /* AmbitBridge.h */,
 			);
-			name = AmbitBle;
 			path = AmbitBle;
 			sourceTree = "<group>";
 		};
@@ -285,9 +284,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -324,9 +327,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-Sommet/Pods-Sommet-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -378,7 +385,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8ZZYJR593C;
 				ENABLE_BITCODE = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -412,7 +421,7 @@
 					"-lc++",
 					"-liconv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.skinnie.sommet;
 				PRODUCT_NAME = Sommet;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_OBJC_BRIDGING_HEADER = "Sommet/Sommet-Bridging-Header.h";
@@ -429,7 +438,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8ZZYJR593C;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -462,7 +473,7 @@
 					"-lc++",
 					"-liconv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.skinnie.sommet;
 				PRODUCT_NAME = Sommet;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_OBJC_BRIDGING_HEADER = "Sommet/Sommet-Bridging-Header.h";

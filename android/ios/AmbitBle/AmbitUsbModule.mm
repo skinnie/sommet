@@ -27,6 +27,13 @@
 #include <set>
 #include <cmath>
 #include <ctime>
+#import <os/log.h>
+
+// Trace JS->native calls to stderr (visible via devicectl --console) + unified log.
+#define CORE_LOG(fmt, ...) do { \
+  fprintf(stderr, "[sommet.core] " fmt "\n", ##__VA_ARGS__); \
+  os_log(OS_LOG_DEFAULT, "[sommet.core] " fmt, ##__VA_ARGS__); \
+} while (0)
 
 extern "C" {
 #include "libambit.h"
@@ -56,6 +63,27 @@ int ambit3_write_region_raw(ambit_object_t *object, uint32_t base, const uint8_t
 static NSString *b64(const uint8_t *data, size_t len) {
     if (!data || len == 0) return @"";
     return [[NSData dataWithBytes:data length:len] base64EncodedStringWithOptions:0];
+}
+
+// Over BLE the watch reports its internal CODENAME as the device_info model
+// (e.g. "Emu" for an Ambit3 Peak, "Hoopoe" for a Kailash). Map it to the
+// marketing name — same table as Android's SUUNTO_PID_NAMES, keyed by codename.
+static NSString *friendlyName(NSString *model) {
+    static NSDictionary *map = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            @"Bluebird": @"Suunto Ambit",       @"Duck":     @"Suunto Ambit2",
+            @"Colibri":  @"Suunto Ambit2 S",    @"Greentit": @"Suunto Ambit2 R",
+            @"Emu":      @"Suunto Ambit3 Peak", @"Finch":    @"Suunto Ambit3 Sport",
+            @"Ibisbill": @"Suunto Ambit3 Run",  @"Kaka":     @"Suunto Ambit3 Vertical",
+            @"Hoopoe":   @"Suunto Kailash",     @"Jabiru":   @"Suunto Traverse",
+            @"Loon":     @"Suunto Traverse Alpha",
+        };
+    });
+    NSString *friendly = map[model];
+    if (friendly) return friendly;
+    return model.length ? model : @"Suunto Ambit";
 }
 
 // Read-log cache: filled by a getLogs() download, indexed the same as the
@@ -186,6 +214,7 @@ RCT_EXPORT_MODULE(AmbitUsbModule);
 // ── Device info ────────────────────────────────────────────────────────────
 RCT_EXPORT_METHOD(getDeviceInfo:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     ambit_object_t *dev = ambit_ios_active_device();
+    CORE_LOG("getDeviceInfo called (dev=%p)", (void*)dev);
     if (!dev) { reject(@"NOT_CONNECTED", @"Watch not connected", nil); return; }
 
     const uint8_t *fw = dev->device_info.fw_version;
@@ -199,7 +228,7 @@ RCT_EXPORT_METHOD(getDeviceInfo:(RCTPromiseResolveBlock)resolve rejecter:(RCTPro
     ambit_device_status_t status;
     if (libambit_device_status_get(dev, &status) == 0) battery = status.charge;
 
-    resolve(@{ @"name": model.length ? model : @"Suunto Ambit",
+    resolve(@{ @"name": friendlyName(model),
                @"model": model, @"serial": serial,
                @"fwVersion": fwStr, @"hwVersion": hwStr, @"battery": @(battery) });
 }
@@ -207,6 +236,7 @@ RCT_EXPORT_METHOD(getDeviceInfo:(RCTPromiseResolveBlock)resolve rejecter:(RCTPro
 // ── Activity log sync ──────────────────────────────────────────────────────
 RCT_EXPORT_METHOD(getLogs:(NSArray *)knownIds resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     ambit_object_t *dev = ambit_ios_active_device();
+    CORE_LOG("getLogs called (knownIds=%lu dev=%p)", (unsigned long)knownIds.count, (void*)dev);
     if (!dev) { reject(@"NOT_CONNECTED", @"Watch not connected", nil); return; }
 
     g_known_dates.clear();
@@ -214,7 +244,9 @@ RCT_EXPORT_METHOD(getLogs:(NSArray *)knownIds resolver:(RCTPromiseResolveBlock)r
     g_log_cache.clear();
     g_log_dates.clear();
 
+    CORE_LOG("getLogs: calling libambit_log_read ...");
     int ret = libambit_log_read(dev, log_skip_callback, log_push_callback, NULL, NULL);
+    CORE_LOG("getLogs: libambit_log_read returned %d, cache=%zu", ret, g_log_cache.size());
     if (ret < 0) { reject(@"LOG_READ_FAILED", @"Failed to read activity logs", nil); return; }
 
     NSMutableArray<NSString *> *results = [NSMutableArray arrayWithCapacity:g_log_cache.size()];
@@ -329,9 +361,12 @@ RCT_EXPORT_METHOD(readRegion:(double)address length:(double)length
 - (void)rawRead:(int(^)(ambit_object_t *dev, uint8_t **out, size_t *len))fn
         resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject code:(NSString *)code {
     ambit_object_t *dev = ambit_ios_active_device();
+    CORE_LOG("rawRead[%s] called (dev=%p)", code.UTF8String, (void*)dev);
     if (!dev) { reject(@"NOT_CONNECTED", @"Watch not connected", nil); return; }
     uint8_t *raw = NULL; size_t rawlen = 0;
-    if (fn(dev, &raw, &rawlen) != 0) { reject(code, @"raw read failed", nil); return; }
+    int rc = fn(dev, &raw, &rawlen);
+    CORE_LOG("rawRead[%s] rc=%d len=%zu", code.UTF8String, rc, rawlen);
+    if (rc != 0) { reject(code, @"raw read failed", nil); return; }
     NSString *out = (raw && rawlen > 0) ? b64(raw, rawlen) : @"";
     free(raw);
     resolve(out);
@@ -407,7 +442,7 @@ RCT_EXPORT_METHOD(connect:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRe
     ambit_object_t *dev = ambit_ios_active_device();
     if (!dev) { reject(@"USB_UNSUPPORTED_IOS", @"No BLE watch connected; USB is not available on iOS", nil); return; }
     NSString *model = [NSString stringWithUTF8String:dev->device_info.model ?: ""];
-    resolve(@{ @"name": model.length ? model : @"Suunto Ambit", @"vendorId": @(0x1493), @"productId": @(0) });
+    resolve(@{ @"name": friendlyName(model), @"vendorId": @(0x1493), @"productId": @(0) });
 }
 RCT_EXPORT_METHOD(disconnect:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve([NSNull null]); }
 
