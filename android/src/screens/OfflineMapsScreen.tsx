@@ -1,16 +1,17 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, Platform, ActivityIndicator,
 } from 'react-native';
+import RNFS from 'react-native-fs';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { useFocusEffect } from '@react-navigation/native';
 import { useV3Theme, v3Spacing, v3Radius, v3Type, V3Colors } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Button, Chip } from '../components/ui/primitives';
+import { Button } from '../components/ui/primitives';
 import Icon from '../components/ui/Icon';
 import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
 import { MapProvider, MAP_PROVIDER_LABELS } from '../services/MapProviderService';
-import { downloadRegion, countRegionTiles, DownloadRegionProgress } from '../services/TileCache';
+import { downloadRegion, countRegionTiles, DownloadRegionProgress, TILE_CACHE_DIR_URI } from '../services/TileCache';
 import {
   OfflineRegion, listRegions, addRegion, deleteRegion, bboxCorners, RegionBBox,
 } from '../services/OfflineRegionsService';
@@ -35,21 +36,37 @@ const DETAIL: Record<string, { label: string; zooms: number[]; hint: string }> =
 const AVG_TILE_BYTES = 15000;       // OSM PNGs average ~10–20 KB; used for the size estimate
 const MAX_TILES = 20000;            // refuse absurd bulk downloads (OSM tile-policy friendliness)
 
-function buildOfflineMapHtml(provider: MapProvider): string {
+// The map page is loaded from a file:// URL (not inline HTML) so the WebView is allowed to read
+// cached tiles off disk — the ONLY setup that works on WKWebView too. Tiles are cache-first:
+// each tile's src points at the on-disk cache (${cacheDirUri}/<provider>/{z}/{x}/{y}.png); a
+// cache miss fires 'tileerror' and the handler swaps that one <img> to the remote provider URL.
+// So online browsing looks normal while a downloaded area still renders with no signal.
+function buildOfflineMapHtml(provider: MapProvider, cacheDirUri: string): string {
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 ${LEAFLET_STYLE_TAG}
 <style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}
 .selbox{position:absolute;top:8%;left:8%;right:8%;bottom:8%;border:2px solid #0a79d0;border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.14);pointer-events:none;z-index:600}</style>
 </head><body><div id="map"></div><div class="selbox"></div><script>
+var CACHE = '${cacheDirUri}';
 var TPL = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   cyclosm: 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
   ign: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}'
 };
+function remoteUrl(key, c) { return TPL[key].split('{z}').join(c.z).split('{x}').join(c.x).split('{y}').join(c.y); }
+function makeLayer(key) {
+  var lyr = L.tileLayer(CACHE + '/' + key + '/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+  lyr.on('tileerror', function (e) {
+    if (!e.tile || e.tile.dataset.fb) return; // already tried remote — don't loop
+    e.tile.dataset.fb = '1';
+    e.tile.src = remoteUrl(key, e.coords);
+  });
+  return lyr;
+}
 var PAD = 0.08; // matches .selbox inset — the download box is the inset 84% of the viewport
 var map = L.map('map', { zoomControl: true, attributionControl: true }).setView([40, -3], 4);
-var layer = L.tileLayer(TPL['${provider}'], { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+var layer = makeLayer('${provider}').addTo(map);
 function report() {
   var s = map.getSize();
   var tl = map.containerPointToLatLng(L.point(s.x * PAD, s.y * PAD));
@@ -60,7 +77,7 @@ function report() {
     minLon: Math.min(tl.lng, br.lng), maxLon: Math.max(tl.lng, br.lng), zoom: map.getZoom() }));
 }
 map.on('moveend', report); map.on('zoomend', report); map.whenReady(report);
-window.setProvider = function (key) { map.removeLayer(layer); layer = L.tileLayer(TPL[key], { maxZoom: 19 }).addTo(map); };
+window.setProvider = function (key) { map.removeLayer(layer); layer = makeLayer(key).addTo(map); };
 window.flyToBox = function (a, b, c, d) { map.fitBounds([[a, b], [c, d]], { padding: [30, 30] }); };
 </script></body></html>`;
 }
@@ -77,7 +94,18 @@ export default function OfflineMapsScreen() {
   const [progress, setProgress] = useState<DownloadRegionProgress | null>(null);
   const [regions, setRegions] = useState<OfflineRegion[]>([]);
 
-  const html = useMemo(() => buildOfflineMapHtml('osm'), []); // provider swapped live via injectJS
+  // Write the map page to a file under the caches dir and load it by file:// URL — the only
+  // setup that lets the WebView (WKWebView included) read cached tiles off disk. Provider is
+  // swapped live via injectJS, so this is written once. cachesRoot grants the WebView read
+  // access to both this html and the sibling maptiles/ cache.
+  const cachesRoot = `file://${RNFS.CachesDirectoryPath}`;
+  const [mapUri, setMapUri] = useState<string | null>(null);
+  useEffect(() => {
+    const path = `${RNFS.CachesDirectoryPath}/sommet_offline_map.html`;
+    RNFS.writeFile(path, buildOfflineMapHtml('osm', TILE_CACHE_DIR_URI), 'utf8')
+      .then(() => setMapUri(`file://${path}`))
+      .catch(() => setMapUri(null));
+  }, []);
 
   const refresh = useCallback(() => { listRegions().then(setRegions); }, []);
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
@@ -143,18 +171,30 @@ export default function OfflineMapsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
       <View style={s.mapWrap}>
-        <WebView
-          ref={webRef}
-          style={{ flex: 1, backgroundColor: theme.cardNested }}
-          originWhitelist={['*']}
-          source={{ html }}
-          injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
-          javaScriptEnabled
-          domStorageEnabled={false}
-          onMessage={onMessage}
-          userAgent="Sommet/2.0"
-          androidLayerType="hardware"
-        />
+        {mapUri ? (
+          <WebView
+            ref={webRef}
+            style={{ flex: 1, backgroundColor: theme.cardNested }}
+            originWhitelist={['*']}
+            source={{ uri: mapUri }}
+            injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
+            javaScriptEnabled
+            domStorageEnabled={false}
+            onMessage={onMessage}
+            userAgent="Sommet/2.0"
+            androidLayerType="hardware"
+            // Read cached tiles off disk (iOS grants read to cachesRoot; Android needs the file
+            // flags). allowUniversalAccess… lets the file:// page fetch remote tiles on a miss.
+            allowFileAccess
+            allowFileAccessFromFileURLs
+            allowUniversalAccessFromFileURLs
+            {...(Platform.OS === 'ios' ? { allowingReadAccessToURL: cachesRoot } : {})}
+          />
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator color={theme.primary} />
+          </View>
+        )}
         <View style={s.hintPill} pointerEvents="none">
           <Text style={s.hintText}>Frame the area inside the box</Text>
         </View>
