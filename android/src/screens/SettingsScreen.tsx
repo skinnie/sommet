@@ -827,19 +827,6 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   themeOptionLabel: { fontSize: 13, fontWeight: '600', color: t.text },
   themeOptionLabelSelected: { color: t.card },
   btnText: { color: t.card, fontWeight: '600', fontSize: 14 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  // Section header for a settings group (General/Units/Personal/Other) - matches desktop's
-  // group title (mutedText, bold, fontSizeLabel, a little top space above the first row).
-  settingsGroupTitle: {
-    color: t.mutedText, fontWeight: '700', fontSize: 12, marginTop: 18, marginBottom: 2,
-  },
-  ambitSettingRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 14,
-  },
-  ambitSettingLabel: { color: t.text, fontSize: 14, flex: 1, marginRight: 10 },
-  // Read-only (Ambit 1/2) value display, right-aligned where the control would be.
-  ambitSettingValueRO: { color: t.mutedText, fontSize: 14, fontWeight: '600', textAlign: 'right' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, flexShrink: 1, justifyContent: 'flex-end' },
   // Same tinted-primary pill treatment as primitives.tsx's own Chip - a real selected
   // state, not a neutral bordered box.
@@ -850,34 +837,6 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   chipActive: { borderColor: t.primary, backgroundColor: t.primary + '1F' },
   chipText: { color: t.mutedText, fontSize: 12 },
   chipTextActive: { color: t.primary, fontWeight: '600' },
-  stepperRow: { flexDirection: 'row', alignItems: 'center' },
-  stepperBtn: {
-    width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: t.mutedText + '33',
-    alignItems: 'center', justifyContent: 'center', backgroundColor: t.card,
-  },
-  stepperBtnText: { color: t.primary, fontSize: 18, fontWeight: '700' },
-  stepperValue: { color: t.text, fontSize: 14, marginHorizontal: 10, minWidth: 30, textAlign: 'center' },
-  coordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  coordInput: {
-    backgroundColor: t.card,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: t.mutedText + '33',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    color: t.text,
-    fontSize: 13,
-    width: 110,
-    textAlign: 'right',
-  },
-  coordSetBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: t.primary + '1F',
-    borderWidth: 1,
-    borderColor: t.primary,
-  },
   // ── Connections card - compact tap-to-open rows + modal (v3.0 UI port) ──
   connRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   connDot: { width: 8, height: 8, borderRadius: 4 },
