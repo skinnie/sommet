@@ -3,11 +3,13 @@
   "version": "0.2.25",
   "private": true,
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package && node scripts/sync-version.js",
     "android": "react-native run-android",
     "start": "react-native start",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "sync-version": "node scripts/sync-version.js",
+    "version": "node scripts/sync-version.js && git add android/app/build.gradle ios/Sommet.xcodeproj/project.pbxproj ../desktop/CMakeLists.txt"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.23.1",
