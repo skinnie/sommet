@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Alert,
 } from 'react-native';
@@ -13,6 +13,8 @@ import { pickGpxFile } from '../native/AmbitUsbModule';
 import { readGpxFile } from '../services/GpxService';
 import { parseRouteGpx } from '../services/RouteGpxParser';
 import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
+import { TILE_CACHE_DIR_URI } from '../services/TileCache';
+import { writeMapPage, mapWebViewFileProps } from '../services/mapWebView';
 
 // Weather + sun/moon along a route — the "what am I walking into?" layer, ported from the
 // desktop Plan page's Weather panel (weather_route.py + astro.py, both verified equal in TS).
@@ -47,6 +49,9 @@ export default function RouteWeatherScreen() {
   // forecast for the previous route.
   const [imported, setImported] = useState<{ route: RoutePoint[]; name: string } | undefined>();
   const [importing, setImporting] = useState(false);
+  // The coloured map is loaded from a caches-dir file:// page so it can read cached tiles off
+  // disk (offline-capable + renders on iOS). Rewritten each forecast.
+  const [mapUri, setMapUri] = useState<string | null>(null);
 
   const route: RoutePoint[] = imported?.route
     ?? ((params.route && params.route.length >= 2) ? params.route : DEMO_ROUTE);
@@ -73,6 +78,16 @@ export default function RouteWeatherScreen() {
   }
 
   const tzOffsetH = -new Date().getTimezoneOffset() / 60;
+
+  // Write the coloured-track map page whenever a new forecast lands.
+  useEffect(() => {
+    if (!result?.ok || !result.segments?.length) { setMapUri(null); return; }
+    let alive = true;
+    writeMapPage(buildRouteMapHtml(result.segments, result.wind_arrows), 'sommet_weather_map.html')
+      .then(uri => { if (alive) setMapUri(uri); })
+      .catch(() => { if (alive) setMapUri(null); });
+    return () => { alive = false; };
+  }, [result]);
 
   async function handleForecast() {
     setLoading(true); setError(undefined); setResult(undefined);
@@ -162,17 +177,19 @@ export default function RouteWeatherScreen() {
               <Text style={s.cardTitle}>Map</Text>
               <Text style={s.muted}>Track coloured by temperature · wind arrows · ● start / ● finish.</Text>
               <View style={s.mapWrap}>
+                {mapUri && (
                 <WebView
                   style={{ flex: 1, backgroundColor: theme.cardNested }}
                   originWhitelist={['*']}
-                  source={{ html: buildRouteMapHtml(result.segments!, result.wind_arrows) }}
+                  source={{ uri: mapUri }}
                   injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
                   javaScriptEnabled
                   domStorageEnabled={false}
+                  {...mapWebViewFileProps()}
                   // OSM's tile policy wants an identifying UA on every request (same as MapScreen).
                   userAgent="Sommet/2.0"
                   androidLayerType="hardware"
-                />
+                />)}
               </View>
             </Card>
           )}
@@ -236,8 +253,12 @@ ${LEAFLET_STYLE_TAG}
 </head><body><div id="map"></div><script>
 var segs = ${segJson}, winds = ${windJson};
 var map = L.map('map', { zoomControl: true, attributionControl: true });
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+// cache-first OSM: use a downloaded tile off disk when present, else fetch it remotely — so the
+// basemap under the forecast draws even offline if you saved the area (see Offline maps).
+var tiles = L.tileLayer('${TILE_CACHE_DIR_URI}/osm/{z}/{x}/{y}.png',
   { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+tiles.on('tileerror', function(e){ if(!e.tile||e.tile.dataset.fb)return; e.tile.dataset.fb='1';
+  e.tile.src='https://tile.openstreetmap.org/'+e.coords.z+'/'+e.coords.x+'/'+e.coords.y+'.png'; });
 var all = [];
 segs.forEach(function(s){ if(!s.p.length) return; L.polyline(s.p, { color: s.c, weight: 5, opacity: 0.95 }).addTo(map); s.p.forEach(function(pt){ all.push(pt); }); });
 // stitch the gap between adjacent colour runs so the line reads as continuous

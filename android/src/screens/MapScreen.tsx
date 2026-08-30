@@ -20,6 +20,9 @@ import { getMapProvider, setMapProvider, MapProvider } from '../services/MapProv
 import { mapTileLayersJs } from '../services/MapHtml';
 import { TRACK_COLOR } from '../services/MapTile';
 import { TILE_CACHE_DIR_URI, downloadRegion, DownloadRegionProgress } from '../services/TileCache';
+import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
+import { writeMapPage, mapWebViewFileProps } from '../services/mapWebView';
+import { getCachedPois } from '../services/PoiService';
 import Icon from '../components/ui/Icon';
 
 type Route = RouteProp<RootStackParamList, 'Map'>;
@@ -77,8 +80,7 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
 <html><head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <link rel="stylesheet" href="leaflet/leaflet.css"/>
-  <script src="leaflet/leaflet.js"></script>
+  ${LEAFLET_STYLE_TAG}
   <style>* { margin:0; padding:0; } html,body,#map { width:100%; height:100%; }</style>
 </head><body>
 <div id="map"></div>
@@ -86,6 +88,19 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
   var map = L.map('map', { zoomControl: false });
 
   ${mapTileLayersJs(provider, TILE_CACHE_DIR_URI)}
+
+  // POI overlay — pins for the watch's cached waypoints (RN injects them after load via
+  // window.showPois). Works offline: the POI list is already stored on-device.
+  var poiLayer = L.layerGroup().addTo(map);
+  window.showPois = function(list) {
+    poiLayer.clearLayers();
+    (list || []).forEach(function(p) {
+      var icon = L.divIcon({ className: '',
+        html: '<div style="width:16px;height:16px;background:#f39c12;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
+        iconAnchor: [8, 16] });
+      L.marker([p.lat, p.lon], { icon: icon }).bindPopup(p.name || 'POI').addTo(poiLayer);
+    });
+  };
 
   var line = null;
   var startMarker = null;
@@ -274,6 +289,18 @@ export default function MapScreen() {
   // map overlay that needs to read against arbitrary tile colors).
   const leafletHtml = useMemo(() => buildLeafletHtml(mapProvider, TRACK_COLOR), [mapProvider]);
 
+  // Write the map page to the caches dir and load it by file:// URL (mapWebView.ts) so the
+  // WebView can read cached tiles off disk on both platforms. Rewritten when the provider changes.
+  const [mapUri, setMapUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setIsReady(false);
+    writeMapPage(leafletHtml, 'sommet_activity_map.html')
+      .then(uri => { if (alive) setMapUri(uri); })
+      .catch(() => { if (alive) setMapUri(null); });
+    return () => { alive = false; };
+  }, [leafletHtml]);
+
   useEffect(() => {
     readGpxFile(activity.gpx_path)
       .then(xml => setPoints(parseTrackPoints(xml)))
@@ -344,6 +371,12 @@ export default function MapScreen() {
 
   const onWebViewLoad = () => {
     setIsReady(true);
+    // Overlay the watch's cached POIs (available offline). Best-effort — no POIs is fine.
+    getCachedPois().then(pois => {
+      if (!pois || pois.length === 0) return;
+      const list = pois.map(p => ({ lat: p.latitude, lon: p.longitude, name: p.name }));
+      webViewRef.current?.injectJavaScript(`window.showPois && window.showPois(${JSON.stringify(list)}); true;`);
+    }).catch(() => {});
   };
 
   const onMessage = (event: WebViewMessageEvent) => {
@@ -602,30 +635,25 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       {/* ── Carte Leaflet ── */}
+      {/* Loaded from a caches-dir file:// page (mapWebView.ts) with Leaflet bundled inline — no
+          more android_asset dependency, so this renders on iOS too, and cached tiles read off
+          disk for offline use (mapWebViewFileProps grants the read access per platform). */}
+      {mapUri && (
       <WebView
         ref={webViewRef}
         style={styles.map}
-        // baseUrl: android_asset - real, 2026-08-10 (offline maps) - resolves the vendored
-        // leaflet/leaflet.js|css <script>/<link> tags above, and is what makes file://
-        // access to TileCache.ts's own cache directory (an unrelated app-private path, not
-        // under android_asset) actually permitted - Android WebView only allows file://
-        // sub-resource loads when the page's own origin is file:// too.
-        source={{ html: leafletHtml, baseUrl: 'file:///android_asset/' }}
-        originWhitelist={['about:', 'data:', 'file:*']}
+        source={{ uri: mapUri }}
+        injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
+        originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled={false}
-        mixedContentMode="never"
-        allowFileAccess
-        allowFileAccessFromFileURLs
-        // Real, 2026-08-09 - same real requirement desktop's own main.cpp comment documents:
-        // tile.openstreetmap.org's usage policy (operations.osmfoundation.org/policies/tiles/)
-        // requires a real, identifying User-Agent on every tile request, or it gets treated as
-        // bulk/anonymous traffic. WebView's default sends a generic Android/Chrome UA with no
-        // way to single out just the tile requests, so this sets it for the whole page load.
+        {...mapWebViewFileProps()}
+        // tile.openstreetmap.org's usage policy requires an identifying User-Agent on every tile
+        // request, or it's treated as bulk/anonymous traffic (same as desktop's main.cpp).
         userAgent="Sommet/2.0"
         onLoad={onWebViewLoad}
         onMessage={onMessage}
-      />
+      />)}
 
       {/* ── Infos overlay ── */}
       <View style={styles.overlay}>
