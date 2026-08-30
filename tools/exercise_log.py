@@ -646,7 +646,12 @@ def extract_track_points(header, samples):
             cur_lon = s["longitude"] / 1e7
             has_pos = True
             emit = True
-        elif s["type"] == "periodic" and has_pos:
+        elif s["type"] == "periodic":
+            # A periodic sample carrying lat+lon IS a position — do NOT require a prior gps_base
+            # (was `and has_pos`). Trekking (low-rate / FusedTrack GPS) often has no gps_base and
+            # stores positions only in periodic samples; that guard dropped every one, so the
+            # move had distance but an empty track ("no GPS data"). 2026-08-30. Mirrors the same
+            # fix in jni_bridge.cpp / AmbitUsbModule.mm (Android/iOS parity).
             lat_ok = lon_ok = False
             lat, lon = cur_lat, cur_lon
             for v in s["values"]:
@@ -656,6 +661,7 @@ def extract_track_points(header, samples):
                     lon = v["value"] / 1e7; lon_ok = True
             if lat_ok and lon_ok:
                 cur_lat, cur_lon = lat, lon
+                has_pos = True
                 emit = True
 
         if emit and has_pos and (cur_lat != 0.0 or cur_lon != 0.0):

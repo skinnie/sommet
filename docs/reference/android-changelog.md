@@ -3,6 +3,20 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.20 (2026-08-30)
+
+### Fix: activities showing "no GPS data" despite having a track (all platforms)
+
+Trekking (and any low-rate / FusedTrack GPS) activities recorded their positions only in
+**periodic** samples, with no early `gps_base` fix. The GPX/track builder required a prior
+`gps_base` before it would trust a periodic sample's lat/lon (`&& has_pos`), so it dropped every
+position — the move kept its distance (from periodic speed) but had an empty track, and the map
+said "no GPS data". A periodic sample carrying lat+lon **is** a position; the guard is gone and
+such a sample now also establishes the fix. Fixed in all three log→GPX paths:
+`jni_bridge.cpp` (Android), `AmbitUsbModule.mm` (iOS), and `tools/exercise_log.py` (desktop, used
+by both the USB and BLE activity reads). Applies to newly-synced activities; re-sync an affected
+move to regenerate its track.
+
 ## 0.2.19 (2026-08-30)
 
 ### iOS: fix BLE sync with real Ambit3 hardware

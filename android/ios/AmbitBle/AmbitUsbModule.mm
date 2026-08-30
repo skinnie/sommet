@@ -157,7 +157,11 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry) {
             cur_lat = s.u.gps_tiny.latitude / 1e7;
             cur_lon = s.u.gps_tiny.longitude / 1e7;
             has_pos = true; emit = true;
-        } else if (s.type == ambit_log_sample_type_periodic && has_pos) {
+        } else if (s.type == ambit_log_sample_type_periodic) {
+            // A periodic sample carrying lat+lon IS a position — do NOT require a prior gps_base
+            // (the old `&& has_pos` guard). Trekking (low-rate / FusedTrack GPS) often has no
+            // gps_base and records positions only in periodic samples, so that guard dropped
+            // every one → distance survived but the track was empty ("no GPS data"). 2026-08-30.
             double lat = cur_lat, lon = cur_lon;
             bool lat_ok = false, lon_ok = false;
             for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
@@ -165,7 +169,7 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry) {
                 if (pv.type == ambit_log_sample_periodic_type_latitude)  { lat = pv.u.latitude / 1e7; lat_ok = true; }
                 if (pv.type == ambit_log_sample_periodic_type_longitude) { lon = pv.u.longitude / 1e7; lon_ok = true; }
             }
-            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; emit = true; }
+            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; has_pos = true; emit = true; }
         }
         if (emit && has_pos && (cur_lat != 0.0 || cur_lon != 0.0)) {
             time_t point_epoch = start_epoch + (time_t)(cur_time_ms / 1000);
@@ -235,6 +239,38 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     RCTPromiseRejectBlock rej = self.reject;
     gActiveGpxPicker = nil;
     if (rej) rej(@"GPX_PICK_CANCELLED", @"File selection cancelled", nil);
+}
+@end
+
+// ─── Export ("Save as") document picker (iOS) ───────────────────────────────
+// Android's saveFileAs() is SAF's ACTION_CREATE_DOCUMENT; the iOS equivalent is a
+// UIDocumentPickerViewController in EXPORT mode. Same contract as Android: resolve
+// with the chosen destination path, reject SAVE_AS_CANCELLED when the user backs
+// out (JS callers - firmware download, nav backup, the app-data backup - all treat
+// that code as a silent no-op). asCopy:YES so the picker copies our temp file to the
+// chosen location and hands us back a URL we own.
+API_AVAILABLE(ios(14.0))
+@interface SommetExportPicker : NSObject <UIDocumentPickerDelegate>
+@property (nonatomic, copy) RCTPromiseResolveBlock resolve;
+@property (nonatomic, copy) RCTPromiseRejectBlock reject;
+@end
+
+static id gActiveExportPicker;
+
+@implementation SommetExportPicker
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *dst = urls.firstObject;
+    RCTPromiseResolveBlock res = self.resolve;
+    RCTPromiseRejectBlock rej = self.reject;
+    gActiveExportPicker = nil;
+    if (!dst) { if (rej) rej(@"SAVE_AS_FAILED", @"The picker returned no destination", nil); return; }
+    if (res) res(dst.path ?: dst.absoluteString);
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    RCTPromiseRejectBlock rej = self.reject;
+    gActiveExportPicker = nil;
+    if (rej) rej(@"SAVE_AS_CANCELLED", @"No destination chosen", nil);
 }
 @end
 
@@ -546,6 +582,46 @@ RCT_EXPORT_METHOD(pickGpxFile:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromi
 }
 RCT_EXPORT_METHOD(shareFile:(NSString *)filePath mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"shareFile needs an iOS share-sheet implementation", nil); }
 RCT_EXPORT_METHOD(saveToDownloads:(NSString *)filePath fileName:(NSString *)fileName mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"saveToDownloads needs an iOS implementation", nil); }
-RCT_EXPORT_METHOD(saveFileAs:(NSString *)sourcePath suggestedName:(NSString *)suggestedName mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"saveFileAs needs an iOS document-picker implementation", nil); }
+RCT_EXPORT_METHOD(saveFileAs:(NSString *)sourcePath suggestedName:(NSString *)suggestedName mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    if (@available(iOS 14.0, *)) {
+        // The export picker keeps the source file's own name, so stage a copy under the
+        // suggested name in the temp dir and export THAT - otherwise every backup would be
+        // offered as whatever internal temp name the caller happened to use.
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:sourcePath]) { reject(@"SAVE_AS_FAILED", @"Source file not found", nil); return; }
+        NSString *name = suggestedName.length ? suggestedName : sourcePath.lastPathComponent;
+        NSURL *staged = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name]];
+        [fm removeItemAtURL:staged error:NULL];
+        NSError *copyErr = nil;
+        if (![fm copyItemAtURL:[NSURL fileURLWithPath:sourcePath] toURL:staged error:&copyErr]) {
+            reject(@"SAVE_AS_FAILED", copyErr.localizedDescription ?: @"Could not stage the file for export", copyErr);
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIDocumentPickerViewController *picker =
+                [[UIDocumentPickerViewController alloc] initForExportingURLs:@[staged] asCopy:YES];
+            SommetExportPicker *delegate = [SommetExportPicker new];
+            delegate.resolve = resolve;
+            delegate.reject = reject;
+            picker.delegate = delegate;
+            gActiveExportPicker = delegate;
+
+            UIViewController *root = nil;
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                if (scene.activationState != UISceneActivationStateForegroundActive) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (w.isKeyWindow) { root = w.rootViewController; break; }
+                }
+                if (root) break;
+            }
+            while (root.presentedViewController) root = root.presentedViewController;
+            if (!root) { gActiveExportPicker = nil; reject(@"SAVE_AS_FAILED", @"No view controller to present the picker", nil); return; }
+            [root presentViewController:picker animated:YES completion:nil];
+        });
+    } else {
+        reject(@"SAVE_AS_UNSUPPORTED", @"Saving to a folder needs iOS 14 or newer", nil);
+    }
+}
 
 @end

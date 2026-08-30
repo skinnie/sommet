@@ -292,8 +292,12 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
             has_pos = true;
             emit    = true;
         }
-        else if (s.type == ambit_log_sample_type_periodic && has_pos) {
-            // Les samples périodiques peuvent contenir lat/lon séparément
+        else if (s.type == ambit_log_sample_type_periodic) {
+            // Un sample périodique porteur de lat+lon EST une position — ne pas exiger un
+            // gps_base préalable (l'ancien `&& has_pos`). Le trekking (GPS basse fréquence /
+            // FusedTrack) n'a souvent aucun gps_base et n'enregistre les positions que dans les
+            // samples périodiques : ce garde-fou les jetait toutes → distance mais trace vide
+            // ("no GPS data"). 2026-08-30.
             double lat = cur_lat, lon = cur_lon;
             bool lat_ok = false, lon_ok = false;
             for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
@@ -303,7 +307,7 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
                 // Ne pas écraser cur_ele avec l'altitude barométrique periodique :
                 // elle diverge souvent de l'altitude GPS (gps_base) et cause des D+ délirants.
             }
-            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; emit = true; }
+            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; has_pos = true; emit = true; }
         }
 
         if (emit && has_pos && (cur_lat != 0.0 || cur_lon != 0.0)) {
