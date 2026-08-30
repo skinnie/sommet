@@ -631,6 +631,22 @@ const fr = {
   backupFolderInfo: 'Vous pouvez l\'enregistrer dans votre dossier cloud préféré, pour qu\'elle soit synchronisée si vous le souhaitez.',
   backupFolderBtn: 'Enregistrer une sauvegarde dans un dossier…',
   backupNavDone: 'Sauvegarde créée.',
+  // App-data backup (André, 2026-08-30) - the app's OWN database (activities + gear), separate
+  // from the watch backups. Always shown; works with or without a watch.
+  appDataSection: 'Vos activités et équipement',
+  appDataDesc: 'Sauvegarde la base de données de cette app - toutes vos activités synchronisées ' +
+    '(GPX et FIT inclus) et votre équipement. C\'est distinct des sauvegardes de la montre ci-dessous.',
+  appDataInfo: 'Choisissez où l\'enregistrer - pointez vers un dossier synchronisé ' +
+    'Dropbox/OneDrive/Drive et c\'est sauvegardé dans le cloud aussi, sans connexion.',
+  appDataSaveBtn: 'Enregistrer une sauvegarde…',
+  appDataRestoreBtn: 'Restaurer depuis une sauvegarde…',
+  appDataSavedMsg: (a: number, g: number, f: number) =>
+    `Sauvegardé : ${a} activité${a === 1 ? '' : 's'}, ${g} équipement${g === 1 ? '' : 's'}, ${f} fichier${f === 1 ? '' : 's'}.`,
+  appDataRestoreConfirmTitle: 'Restaurer les données de l\'app ?',
+  appDataRestoreConfirmMsg: 'Ceci ajoute les activités et l\'équipement de la sauvegarde à cette ' +
+    'app (une entrée existante du même identifiant est remplacée). Continuer ?',
+  appDataRestoredMsg: (a: number, g: number, f: number) =>
+    `Restauré : ${a} activité${a === 1 ? '' : 's'}, ${g} équipement${g === 1 ? '' : 's'}, ${f} fichier${f === 1 ? '' : 's'}.`,
   backupExistingSection: 'Sauvegardes existantes',
   backupExistingEmpty: 'Aucune pour le moment.',
   backupShareBtn: 'Partager',
@@ -1434,6 +1450,22 @@ const en: typeof fr = {
   backupFolderInfo: 'You can save it to your favourite cloud folder, so it can be synced if you wish.',
   backupFolderBtn: 'Save a backup to a folder…',
   backupNavDone: 'Backup created.',
+  // App-data backup (André, 2026-08-30) - the app's OWN database (activities + gear), separate
+  // from the watch backups. Always shown; works with or without a watch.
+  appDataSection: 'Your activities & gear',
+  appDataDesc: 'Backs up this app\'s own database - every activity you\'ve synced (their GPX and ' +
+    'FIT included) and your gear. This is separate from the watch backups below.',
+  appDataInfo: 'Choose where to save it - point it at a Dropbox/OneDrive/Drive-synced folder and ' +
+    'it backs up to the cloud too, no sign-in needed.',
+  appDataSaveBtn: 'Save a backup…',
+  appDataRestoreBtn: 'Restore from a backup…',
+  appDataSavedMsg: (a: number, g: number, f: number) =>
+    `Saved ${a} activit${a === 1 ? 'y' : 'ies'}, ${g} gear item${g === 1 ? '' : 's'}, ${f} file${f === 1 ? '' : 's'}.`,
+  appDataRestoreConfirmTitle: 'Restore app data?',
+  appDataRestoreConfirmMsg: 'This adds the activities and gear from the backup into this app ' +
+    '(an existing entry with the same id is replaced). Continue?',
+  appDataRestoredMsg: (a: number, g: number, f: number) =>
+    `Restored ${a} activit${a === 1 ? 'y' : 'ies'}, ${g} gear item${g === 1 ? '' : 's'}, ${f} file${f === 1 ? '' : 's'}.`,
   backupExistingSection: 'Existing backups',
   backupExistingEmpty: 'None yet.',
   backupShareBtn: 'Share',

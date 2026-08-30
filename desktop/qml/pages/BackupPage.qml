@@ -35,6 +35,26 @@ PageFlickable {
         onAccepted: BackupService.createBackup(selectedFolder)
     }
 
+    // App-data backup (André, 2026-08-30: "can't choose where to save the database"). Separate
+    // from every backup above - those save the WATCH's nav regions; this saves the app's own
+    // activities.db (which holds every activity's GPX/FIT) and gear.db. Synchronous local copy,
+    // no watch, no backend, so the result is known the instant the dialog closes.
+    property string dbBackupResult: ""
+    property bool dbBackupOk: false
+    function runDbBackup(folderUrl) {
+        var err = LocalFileService.backupDatabase(folderUrl);
+        root.dbBackupOk = err.length === 0;
+        root.dbBackupResult = err.length === 0
+            ? qsTr("Saved your activities and gear.")
+            : err;
+    }
+    FolderDialog {
+        id: dbBackupFolderDialog
+        title: qsTr("Choose a folder to save your data in")
+        currentFolder: LocalFileService.downloadsLocation
+        onAccepted: root.runDbBackup(selectedFolder)
+    }
+
     // Whether the watch-backup card below is showing - if it is, it already backs up Ember
     // too (the backend writes an -ember.json alongside every watch backup, silently), so the
     // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
@@ -47,6 +67,96 @@ PageFlickable {
         anchors.topMargin: Theme.spacingLarge
         width: 480
         spacing: Theme.spacingMedium
+
+        // App data (André, 2026-08-30) - always shown, because this backs up THIS app's own
+        // database (your activities, with their GPX/FIT, plus gear), which exists whether or
+        // not a watch is plugged in. Every other card on this page saves the connected watch's
+        // regions instead; before this there was no way to back up the app's own data at all.
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Your activities & gear")
+                        font.bold: true
+                        color: Theme.text
+                    }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 15; height: 15; radius: 7.5
+                        color: "transparent"
+                        border.width: 1
+                        border.color: dbInfo.open ? Theme.primary : Theme.mutedText
+                        Text {
+                            anchors.centerIn: parent
+                            text: "i"
+                            font.pixelSize: Theme.fontSizeLabel
+                            font.bold: true
+                            color: dbInfo.open ? Theme.primary : Theme.mutedText
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: dbInfo.open = !dbInfo.open
+                        }
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Saves this app's own database - every activity you've imported " +
+                                "(their GPX and FIT included) and your gear. This is separate " +
+                                "from the watch backups below.")
+                }
+                Text {
+                    id: dbInfo
+                    property bool open: false
+                    visible: open
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("\"Create backup now\" saves to your backups folder. " +
+                                "\"Save to a folder…\" lets you pick anywhere - point it at a " +
+                                "Dropbox/OneDrive/Drive-synced folder and it backs up to the " +
+                                "cloud too, no sign-in needed.")
+                }
+
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: qsTr("Create backup now")
+                        onClicked: root.runDbBackup(LocalFileService.backupsLocation)
+                    }
+                    RoundedButton {
+                        text: qsTr("Save to a folder…")
+                        onClicked: dbBackupFolderDialog.open()
+                    }
+                    RoundedButton {
+                        text: qsTr("Open backup folder")
+                        onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
+                    }
+                }
+
+                Text {
+                    visible: root.dbBackupResult.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: root.dbBackupOk ? Theme.success : Theme.error
+                    text: root.dbBackupResult
+                }
+            }
+        }
 
         // Real, 2026-08-08 ("when a garmin device is detected, hide backup&restore and
         // existing backups, since those are suunto specific") - this mechanism only ever

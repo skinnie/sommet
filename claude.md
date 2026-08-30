@@ -19,6 +19,13 @@ Spacing should also be respect and uniform across pages
 - If we change some design on desktop replicate it for android. they should have parity
 
 Reverse Engineering:
+- ALWAYS STICK TO THE SNIFFINGS. The packet captures (.pklg / decoded sessions) are the source of
+  truth for any protocol question — byte order, who speaks first, chunk sizes, MTU, encryption.
+  Decode and read the real capture before changing protocol code; never infer the wire behaviour
+  from comments or guesses. (Proven 2026-08-30: the iOS BLE handshake was fixed in minutes once
+  the sniff showed the phone must send the 0x0000 opener first.) Tools: tools/ble_pklg.py +
+  tshark (Wireshark). To inspect live device state, pull the app's DB/files off the phone with
+  `xcrun devicectl device copy from` and read them directly rather than guessing.
 - Unless I tell you so, don't search online. Everything needed is on our assets folder
 - If I tell you to challenge, find another angle, don't take conclusions from written .md files, get back to assets folder and go deeper on materials.
 - If I ask to revive a certain feature, don't give me workarounds, unless I tell you so

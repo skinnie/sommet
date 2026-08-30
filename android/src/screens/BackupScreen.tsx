@@ -11,6 +11,7 @@ import {
 import {
   createKailashArchive, listKailashArchives, KailashArchiveEntry,
 } from '../services/KailashBackupService';
+import { backupAppDataToFile, restoreAppDataFromFile } from '../services/AppDataBackupService';
 import { shareFile } from '../native/AmbitUsbModule';
 import { t, fmtDateTime } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
@@ -153,6 +154,54 @@ export default function BackupScreen() {
             Alert.alert(t.error, e?.message ?? t.unknownError);
           } finally {
             setRestoreBusy(false);
+          }
+        },
+      },
+    ]);
+  }
+
+  // ── App data (activities + gear) - the app's OWN database, backed up/restored to a file the
+  // user picks (André, 2026-08-30). Separate from every watch backup on this screen; always
+  // shown because this data exists with or without a connected watch. ──
+  const [appDataBusy, setAppDataBusy] = useState(false);
+  const [appDataMsg, setAppDataMsg] = useState<string | undefined>();
+  const [appDataOk, setAppDataOk] = useState(true);
+
+  async function handleAppDataBackup() {
+    if (appDataBusy) return;
+    setAppDataBusy(true); setAppDataMsg(undefined);
+    try {
+      const r = await backupAppDataToFile();
+      setAppDataOk(true);
+      setAppDataMsg(t.appDataSavedMsg(r.activities, r.gear, r.files));
+    } catch (e: any) {
+      if (e?.code === 'SAVE_AS_CANCELLED') return;  // user backed out of the picker - no-op
+      setAppDataOk(false);
+      setAppDataMsg(e?.message ?? t.unknownError);
+    } finally {
+      setAppDataBusy(false);
+    }
+  }
+
+  function handleAppDataRestore() {
+    if (appDataBusy) return;
+    Alert.alert(t.appDataRestoreConfirmTitle, t.appDataRestoreConfirmMsg, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.backupRestoreBtn,
+        onPress: async () => {
+          setAppDataBusy(true); setAppDataMsg(undefined);
+          try {
+            const r = await restoreAppDataFromFile();
+            refreshBackups();
+            setAppDataOk(true);
+            setAppDataMsg(t.appDataRestoredMsg(r.activities, r.gear, r.files));
+          } catch (e: any) {
+            if (e?.code === 'GPX_PICK_CANCELLED') return;  // user backed out of the picker - no-op
+            setAppDataOk(false);
+            setAppDataMsg(e?.message ?? t.unknownError);
+          } finally {
+            setAppDataBusy(false);
           }
         },
       },

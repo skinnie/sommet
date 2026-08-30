@@ -45,4 +45,19 @@ public:
     // QDesktopServices). Returns false if the OS couldn't find a handler for it; there's
     // nothing more specific to report beyond that.
     Q_INVOKABLE bool openFolder(const QUrl &folderUrl);
+
+    // Back up the app's OWN databases - activities.db (which is also where every activity's
+    // GPX/FIT text lives, so this IS the activity backup) and gear.db - into a timestamped
+    // "sommet-data-YYYYMMDD-HHmmss" subfolder of destFolder (André, 2026-08-30: "can't choose
+    // where to save the database"). An empty destFolder falls back to ~/AmbitAppBackups, the
+    // same default the watch backup uses; a chosen folder can be a Dropbox/OneDrive/Drive sync
+    // folder for keyless cloud backup, matching the watch-backup card's own model.
+    //
+    // Nothing to do with a watch or the Python backend - a pure, always-available local copy,
+    // so it works with no watch plugged in and no server running. Uses SQLite's own
+    // `VACUUM INTO` from a short-lived second connection rather than a raw file copy, so the
+    // snapshot is transactionally consistent even if a sync is writing the live DB at the time
+    // (a plain copy could tear mid-write). Returns "" on success, a friendly message otherwise,
+    // the same convention as saveText().
+    Q_INVOKABLE QString backupDatabase(const QUrl &destFolder);
 };
