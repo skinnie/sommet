@@ -75,39 +75,67 @@ export interface DownloadRegionProgress {
   failed: number;
 }
 
+export interface TileXYZ { z: number; x: number; y: number; }
+export type LatLonPt = { lat: number; lon: number };
+
 /**
- * Downloads every tile covering `points`' bounding box (plus a small margin) across
- * `zooms`, for real offline use of one route/activity's own area - not a "cache the whole
- * world" scheme. One failed tile doesn't abort the rest (a flaky single request shouldn't
- * lose an otherwise-complete download); `failed` in the final progress report tells the
- * caller if the result is incomplete.
+ * Every {z,x,y} tile covering `points`' bounding box (plus `marginDeg` on each side) across
+ * `zooms`. Two corner points = an explicit rectangle (use marginDeg 0 for a hand-drawn box);
+ * a full track = its area (default ~2km margin so panning slightly off-track still hits cache).
+ * Shared by downloadRegion (fetch), countRegionTiles (size estimate) and deletion.
  */
-export async function downloadRegion(
-  provider: MapProvider,
-  points: { lat: number; lon: number }[],
-  zooms: number[],
-  onProgress?: (p: DownloadRegionProgress) => void,
-): Promise<DownloadRegionProgress> {
-  if (points.length === 0) return { done: 0, total: 0, failed: 0 };
-
-  const margin = 0.02; // degrees, ~2km - enough that panning slightly off-track still hits cache
-  const minLat = Math.min(...points.map(p => p.lat)) - margin;
-  const maxLat = Math.max(...points.map(p => p.lat)) + margin;
-  const minLon = Math.min(...points.map(p => p.lon)) - margin;
-  const maxLon = Math.max(...points.map(p => p.lon)) + margin;
-
-  const tiles: { z: number; x: number; y: number }[] = [];
+export function regionTiles(points: LatLonPt[], zooms: number[], marginDeg = 0.02): TileXYZ[] {
+  if (points.length === 0) return [];
+  const minLat = Math.min(...points.map(p => p.lat)) - marginDeg;
+  const maxLat = Math.max(...points.map(p => p.lat)) + marginDeg;
+  const minLon = Math.min(...points.map(p => p.lon)) - marginDeg;
+  const maxLon = Math.max(...points.map(p => p.lon)) + marginDeg;
+  const tiles: TileXYZ[] = [];
   for (const z of zooms) {
     // Latitude and longitude invert oppositely in tile-Y (north = smaller Y).
     const tl = latLonToTile(maxLat, minLon, z);
     const br = latLonToTile(minLat, maxLon, z);
     for (let x = tl.x; x <= br.x; x++) {
-      for (let y = tl.y; y <= br.y; y++) {
-        tiles.push({ z, x, y });
-      }
+      for (let y = tl.y; y <= br.y; y++) tiles.push({ z, x, y });
     }
   }
+  return tiles;
+}
 
+/** Tile count for a region — for the "≈ N tiles / ~X MB" estimate shown before downloading. */
+export function countRegionTiles(points: LatLonPt[], zooms: number[], marginDeg = 0.02): number {
+  return regionTiles(points, zooms, marginDeg).length;
+}
+
+/** Deletes the given tiles for a provider from disk (skips any in `keep`, keyed "z/x/y").
+ * Returns how many files were actually removed. Used when deleting a saved offline area, so
+ * tiles still covered by another saved area survive. */
+export async function deleteTiles(provider: MapProvider, tiles: TileXYZ[], keep?: Set<string>): Promise<number> {
+  let removed = 0;
+  for (const t of tiles) {
+    if (keep && keep.has(`${t.z}/${t.x}/${t.y}`)) continue;
+    const path = localTilePath(provider, t.z, t.x, t.y);
+    if (await RNFS.exists(path)) { await RNFS.unlink(path).catch(() => {}); removed++; }
+  }
+  return removed;
+}
+
+/**
+ * Downloads every tile covering `points`' bounding box (+ `marginDeg`) across `zooms`, for
+ * real offline use of an area - not a "cache the whole world" scheme. One failed tile doesn't
+ * abort the rest (a flaky single request shouldn't lose an otherwise-complete download);
+ * `failed` in the final progress report tells the caller if the result is incomplete.
+ */
+export async function downloadRegion(
+  provider: MapProvider,
+  points: LatLonPt[],
+  zooms: number[],
+  onProgress?: (p: DownloadRegionProgress) => void,
+  marginDeg = 0.02,
+): Promise<DownloadRegionProgress> {
+  if (points.length === 0) return { done: 0, total: 0, failed: 0 };
+
+  const tiles = regionTiles(points, zooms, marginDeg);
   const total = tiles.length;
   let done = 0, failed = 0;
   onProgress?.({ done, total, failed });

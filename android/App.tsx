@@ -38,6 +38,7 @@ import HealthScreen from './src/screens/HealthScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import EmberScreen from './src/screens/EmberScreen';
 import RouteWeatherScreen from './src/screens/RouteWeatherScreen';
+import OfflineMapsScreen from './src/screens/OfflineMapsScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
@@ -100,6 +101,9 @@ export type RootStackParamList = {
   // each point's ETA, temp-coloured profile + verdict. `route` optional (a demo route is used
   // when none is passed); no watch needed.
   RouteWeather: { route?: Array<{ lat: number; lon: number; ele?: number | null }>; name?: string } | undefined;
+  // Offline maps (2026-08-30): download any map area of the world (OruxMaps-style) for use with
+  // no signal, plus a saved-areas manager. Reachable any time, no device needed.
+  OfflineMaps: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -254,6 +258,11 @@ function AppShell() {
             name="RouteWeather"
             component={RouteWeatherScreen}
             options={{ title: 'Weather along route' }}
+          />
+          <Stack.Screen
+            name="OfflineMaps"
+            component={OfflineMapsScreen}
+            options={{ title: 'Offline maps' }}
           />
           <Stack.Screen
             name="Calendar"

@@ -12,6 +12,7 @@ import { planWeatherRoute, WeatherRoutePlan, RoutePoint } from '../services/Weat
 import { pickGpxFile } from '../native/AmbitUsbModule';
 import { readGpxFile } from '../services/GpxService';
 import { parseRouteGpx } from '../services/RouteGpxParser';
+import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
 
 // Weather + sun/moon along a route — the "what am I walking into?" layer, ported from the
 // desktop Plan page's Weather panel (weather_route.py + astro.py, both verified equal in TS).
@@ -165,6 +166,7 @@ export default function RouteWeatherScreen() {
                   style={{ flex: 1, backgroundColor: theme.cardNested }}
                   originWhitelist={['*']}
                   source={{ html: buildRouteMapHtml(result.segments!, result.wind_arrows) }}
+                  injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
                   javaScriptEnabled
                   domStorageEnabled={false}
                   // OSM's tile policy wants an identifying UA on every request (same as MapScreen).
@@ -229,8 +231,7 @@ function buildRouteMapHtml(
   );
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+${LEAFLET_STYLE_TAG}
 <style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}.wind{color:#333;font-size:15px;line-height:15px;text-align:center}</style>
 </head><body><div id="map"></div><script>
 var segs = ${segJson}, winds = ${windJson};
