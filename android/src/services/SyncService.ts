@@ -2,7 +2,7 @@ import { DeviceProvider } from './devices/DeviceProvider';
 import { ambitDeviceProvider } from './devices/AmbitDeviceProvider';
 import { writeGpxFile } from './GpxService';
 import { extractGpxMetadata } from './GpxParser';
-import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, getDeletedIds } from '../database/db';
+import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, clearDeletedActivities } from '../database/db';
 import { isMarkSyncedEnabled } from './MarkSynced';
 import { attributeMoveToGear } from './GearAutoAssign';
 
@@ -59,9 +59,11 @@ export async function runSync(
 
   // Charger les IDs déjà connus → passés au skip_callback natif pour éviter
   // de relire le payload complet des logs déjà synchronisés
-  // On a forced refresh, tell the watch to re-send the kept activities (only the deleted
-  // blacklist is "known"); otherwise skip everything already synced.
-  const knownIds = opts.forceRefresh ? await getDeletedIds() : await getAllSyncedIds();
+  // On a forced refresh, empty the deleted blacklist first (so a move removed by mistake comes
+  // back) and treat NOTHING as known, so the watch re-sends every activity; otherwise skip
+  // everything already synced.
+  if (opts.forceRefresh) await clearDeletedActivities();
+  const knownIds = opts.forceRefresh ? [] : await getAllSyncedIds();
 
   let current = 0;
   let total = 0;

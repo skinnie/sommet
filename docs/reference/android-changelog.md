@@ -3,6 +3,20 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.22 (2026-08-30)
+
+### Fix: "can't read gpx" + recover deleted activities (iOS)
+
+Two issues found by pulling the real DB + GPX off the device:
+- **"Can't read gpx" (iOS).** Activity `gpx_path`s were stored as ABSOLUTE paths including the
+  app's data-container UUID, which iOS changes between some installs — so files saved under an
+  old container no longer resolved. `getAllActivities` now rebases every `gpx_path` onto the
+  CURRENT `Documents` dir, so activities load wherever this install put them.
+- **Re-download now restores deleted activities.** The long-press "Re-download" empties the
+  deleted-activities blacklist first, so a move removed by mistake (e.g. while trying to force a
+  re-sync) comes back from the watch with its full GPS track — the tracks were never actually
+  missing, the activity had just been deleted.
+
 ## 0.2.21 (2026-08-30)
 
 ### Re-download activities (long-press Sync)

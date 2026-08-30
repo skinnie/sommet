@@ -1305,7 +1305,7 @@ export default function HomeScreen() {
               if (isBusy) return;
               Alert.alert(
                 'Re-download activities',
-                'Re-read every activity still on the phone from the watch and rebuild its track/GPX (fixes older moves after a decode update). Deleted activities are not restored. This can take a while.',
+                'Re-read every activity from the watch and rebuild its track/GPX — this also RESTORES any activities you previously deleted (they come back from the watch). Use it to recover a move or apply a decode fix. This can take a while.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Re-download', onPress: () => handleSync(true) },

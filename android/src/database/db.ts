@@ -1,6 +1,19 @@
 import SQLite, { SQLiteDatabase } from 'react-native-sqlite-storage';
+import RNFS from 'react-native-fs';
 
 SQLite.enablePromise(true);
+
+// iOS moves the app's data container (its UUID changes between some installs), so a gpx_path
+// stored as an ABSOLUTE path under an old container stops resolving → "can't read gpx". Rebase
+// any stored `.../Documents/<rel>` onto the CURRENT DocumentDirectoryPath so the file is found
+// wherever this install put it. (André, 2026-08-30.)
+function rebaseToDocuments(p: string | null | undefined): string {
+  if (!p) return p ?? '';
+  const marker = '/Documents/';
+  const i = p.indexOf(marker);
+  if (i === -1) return p;
+  return `${RNFS.DocumentDirectoryPath}/${p.slice(i + marker.length)}`;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,7 +206,9 @@ export async function getAllActivities(): Promise<ActivityRecord[]> {
   );
   const activities: ActivityRecord[] = [];
   for (let i = 0; i < result.rows.length; i++) {
-    activities.push(result.rows.item(i));
+    const a = result.rows.item(i);
+    a.gpx_path = rebaseToDocuments(a.gpx_path);   // survive an iOS container-UUID change
+    activities.push(a);
   }
   return activities;
 }
@@ -219,6 +234,13 @@ export async function getDeletedIds(): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < result.rows.length; i++) ids.push(result.rows.item(i).id);
   return ids;
+}
+
+/** Empties the deleted-activities blacklist — used by a "re-download incl. deleted" so a move
+ * removed by mistake can come back from the watch on the next sync. */
+export async function clearDeletedActivities(): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('DELETE FROM deleted_activities');
 }
 
 /** Met à jour uniquement le type d'activité d'un enregistrement existant. */
