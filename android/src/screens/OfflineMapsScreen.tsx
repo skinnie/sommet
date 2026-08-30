@@ -12,6 +12,7 @@ import Icon from '../components/ui/Icon';
 import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
 import { MapProvider, MAP_PROVIDER_LABELS } from '../services/MapProviderService';
 import { downloadRegion, countRegionTiles, DownloadRegionProgress, TILE_CACHE_DIR_URI } from '../services/TileCache';
+import { getCachedPois } from '../services/PoiService';
 import {
   OfflineRegion, listRegions, addRegion, deleteRegion, bboxCorners, RegionBBox,
 } from '../services/OfflineRegionsService';
@@ -67,6 +68,16 @@ function makeLayer(key) {
 var PAD = 0.08; // matches .selbox inset — the download box is the inset 84% of the viewport
 var map = L.map('map', { zoomControl: true, attributionControl: true }).setView([40, -3], 4);
 var layer = makeLayer('${provider}').addTo(map);
+// POI pins (the watch's cached waypoints; RN injects them via window.showPois). Offline-safe.
+var poiLayer = L.layerGroup().addTo(map);
+window.showPois = function(list) {
+  poiLayer.clearLayers();
+  (list || []).forEach(function(p) {
+    var pin = L.divIcon({ className: '', iconAnchor: [8,16],
+      html: '<div style="width:16px;height:16px;background:#f39c12;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>' });
+    L.marker([p.lat, p.lon], { icon: pin }).bindPopup(p.name || 'POI').addTo(poiLayer);
+  });
+};
 function report() {
   var s = map.getSize();
   var tl = map.containerPointToLatLng(L.point(s.x * PAD, s.y * PAD));
@@ -181,6 +192,13 @@ export default function OfflineMapsScreen() {
             javaScriptEnabled
             domStorageEnabled={false}
             onMessage={onMessage}
+            onLoad={() => {
+              getCachedPois().then(list => {
+                if (!list || list.length === 0) return;
+                const pts = list.map(p => ({ lat: p.latitude, lon: p.longitude, name: p.name }));
+                webRef.current?.injectJavaScript(`window.showPois && window.showPois(${JSON.stringify(pts)}); true;`);
+              }).catch(() => {});
+            }}
             userAgent="Sommet/2.0"
             androidLayerType="hardware"
             // Read cached tiles off disk (iOS grants read to cachesRoot; Android needs the file

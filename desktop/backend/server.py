@@ -319,6 +319,98 @@ _READ_CACHE_DEVICE = None              # identity of the watch _READ_CACHE curre
 _READ_CACHE_LOCK = threading.Lock()
 
 
+# ---- Two-watch sync ("freefly") ---------------------------------------------------------
+# Snapshot a watch's syncable state into a slot (A/B), diff two slots, and apply the diff to
+# whichever watch is plugged in. Deliberately reuses the SAME per-category read/write the
+# individual pages already use (settings_write.py today; add_poi/customodes as they are wired
+# in) - no new watch-write mechanism is invented here, so a category is offered only once its
+# own write path is hardware-proven. Only one watch connects at a time over the cable, so the
+# flow is inherently sequential: snapshot A, swap the cable, snapshot B, preview, swap to the
+# target, apply. The connected watch's real serial is re-checked before every write, so a plan
+# built against watch B can never be applied to watch A by accident (SYNC_TARGET_MISMATCH).
+# Kailash "countries visited" is NOT a category here: it is a firmware-computed 0x1200 query
+# object with no writable region - see docs/explanation/kailash-history-write-probe.md.
+_SYNC_SNAPSHOTS = {}                    # "A"/"B" -> snapshot dict (see _handle_sync_snapshot)
+_SYNC_LOCK = threading.Lock()
+
+
+def _sync_display_name(model):
+    """Friendly product name for a device codename ("Emu" -> "Suunto Ambit 3 Peak",
+    "Hoopoe" -> "Kailash"), reusing the same row_bridge table the Firmware card uses so the
+    Sync page names a watch identically to Home. Falls back to the codename."""
+    if not model:
+        return "Watch"
+    try:
+        sys.path.insert(0, str(TOOLS_DIR))
+        import row_bridge                                    # noqa: PLC0415
+        row = row_bridge.load_rows().get("variants", {}).get(model, {})
+        return row.get("productName") or model
+    except Exception:                                        # noqa: BLE001 - name is cosmetic
+        return model
+
+
+def _sync_summary(snap):
+    """A slot summary without the heavy per-item dicts - identity plus per-category counts,
+    for /api/sync/state and a plan's source/target headers."""
+    cats = {}
+    for name, cat in (snap.get("categories") or {}).items():
+        cats[name] = {k: v for k, v in cat.items() if k != "items"}
+    return {
+        "slot": snap.get("slot"),
+        "serial": snap.get("serial"),
+        "model": snap.get("model"),
+        "displayName": snap.get("displayName"),
+        "fw_version": snap.get("fw_version"),
+        "capturedAt": snap.get("capturedAt"),
+        "categories": cats,
+    }
+
+
+def _sync_choice_text(meta, value):
+    """Human label for a setting value - the enum's own choice text when the field is an enum,
+    else the raw value as-is. `meta` is one snapshot settings item (with its `choices`)."""
+    for pair in (meta or {}).get("choices") or []:
+        if pair and pair[0] == value:
+            return pair[1]
+    if (meta or {}).get("kind") == "bool":
+        return "On" if value else "Off"
+    return str(value)
+
+
+def _sync_setting_label(key):
+    """A readable label for a setting key ("backlight_mode" -> "Backlight mode")."""
+    return key.replace("_", " ").capitalize()
+
+
+def _sync_diff_settings(src, tgt):
+    """Changes that would make TARGET's settings match SOURCE. Only a writable key present on
+    both watches whose value differs becomes a change; a key the target cannot write (or does
+    not have) is reported in `skipped` with the reason. Settings is a scalar set, so "mirror"
+    and "merge" collapse to the same operation - there is no union of a single-valued field."""
+    s_items = ((src.get("categories") or {}).get("settings") or {}).get("items") or {}
+    t_items = ((tgt.get("categories") or {}).get("settings") or {}).get("items") or {}
+    changes, skipped = [], []
+    for key, s in s_items.items():
+        t = t_items.get(key)
+        if t is None:
+            skipped.append({"key": key, "reason": "target watch has no such setting"})
+            continue
+        if s.get("value") == t.get("value"):
+            continue
+        if not t.get("writable"):
+            skipped.append({"key": key, "reason": "read-only on target"})
+            continue
+        changes.append({
+            "key": key,
+            "label": _sync_setting_label(key),
+            "from": t.get("value"),
+            "to": s.get("value"),
+            "fromText": _sync_choice_text(s, t.get("value")),
+            "toText": _sync_choice_text(s, s.get("value")),
+        })
+    return changes, skipped
+
+
 def _read_cache_device_identity(info):
     """A stable identity for the connected watch from a device_info dict: its serial if it
     reports one, else model/product id. When this changes, the cache is dropped."""
@@ -804,6 +896,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_kailash_tracklog()
         elif self.path == "/api/settings" or self.path.startswith("/api/settings?"):
             self._handle_settings_read()
+        elif self.path == "/api/sync/state":
+            self._handle_sync_state()
         elif self.path == "/api/legacy/settings" or self.path.startswith("/api/legacy/settings?"):
             self._cached_get("legacy_settings", self._handle_legacy_settings)
         elif self.path == "/api/customodes" or self.path.startswith("/api/customodes?"):
@@ -918,6 +1012,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_restore(body)
         elif self.path == "/api/settings":
             self._handle_settings_write(body)
+        elif self.path == "/api/sync/snapshot":
+            self._handle_sync_snapshot(body)
+        elif self.path == "/api/sync/plan":
+            self._handle_sync_plan(body)
+        elif self.path == "/api/sync/apply":
+            self._handle_sync_apply(body)
+        elif self.path == "/api/sync/clear":
+            self._handle_sync_clear(body)
         elif self.path == "/api/intervals/activity-level":
             self._handle_intervals_activity_level(body)
         elif self.path == "/api/intervals/stats-to-watch":
@@ -3252,6 +3354,212 @@ class Handler(BaseHTTPRequestHandler):
         on why this is genuinely offline already, not a scoped-down version of an online
         list)."""
         self._send_json(200, {"ok": True, "zones": sorted(available_timezones())})
+
+    # ---- Two-watch sync ("freefly") -----------------------------------------------------
+    # See the _SYNC_SNAPSHOTS block near the top for the design. Snapshot A, swap the cable,
+    # snapshot B, /plan (dry diff), swap to the target, /apply (serial-guarded write).
+    def _sync_connected_device(self):
+        """The connected watch's real {model, serial, displayName, fw_version} or None. One
+        cheap device_info.py query - the same read /api/device uses."""
+        code, out, err = run_tool("device_info.py", ["--json"])
+        info = self._parse_last_json_line(out)
+        if not info or not info.get("serial"):
+            return None
+        model = info.get("model") or info.get("usb_model")
+        return {
+            "model": model,
+            "serial": info.get("serial"),
+            "displayName": _sync_display_name(model),
+            "fw_version": info.get("fw_version"),
+        }
+
+    def _sync_read_settings(self, model):
+        """The connected watch's DeviceSettings as {key: item}, reusing the exact
+        settings_write.py --json the Watch Settings page reads (Kailash via its own curated
+        --device kailash table). Fields this watch's schema does not have are dropped, not
+        errors. Returns (items_dict, error_or_None)."""
+        args = ["--json"]
+        if model == "Hoopoe":
+            args += ["--device", "kailash"]
+        code, out, err = run_tool("settings_write.py", args)
+        info = self._parse_last_json_line(out)
+        if not info or not info.get("ok"):
+            return None, (info or {}).get("error") or err or "settings read failed"
+        items = {}
+        for key, meta in (info.get("settings") or {}).items():
+            if not meta.get("ok"):
+                continue  # a field this watch's schema doesn't declare - skip, not an error
+            items[key] = {
+                "value": meta.get("value"),
+                "writable": bool(meta.get("writable")),
+                "kind": meta.get("kind"),
+                "choices": meta.get("choices"),
+                "path": meta.get("path"),
+            }
+        return items, None
+
+    def _sync_write_setting(self, model, key, value):
+        """One real settings write via settings_write.py --set key=value --write (the exact
+        0x1101 the Watch Settings page uses; Kailash through its own table). Returns the tool's
+        own JSON, whose `ok` is only true when its re-read confirms the new value took."""
+        args = ["--set", f"{key}={value}", "--json", "--write"]
+        if model == "Hoopoe":
+            args += ["--device", "kailash"]
+        code, out, err = run_tool("settings_write.py", args)
+        info = self._parse_last_json_line(out)
+        if not info:
+            return {"ok": False, "error": err or "no JSON from settings_write.py"}
+        return info
+
+    def _handle_sync_snapshot(self, body):
+        """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
+        CONNECTED watch's syncable state into that slot and returns its summary. Only
+        "settings" is wired today; any other category is recorded as unsupported rather than
+        failing the whole snapshot, so the UI can already show it greyed."""
+        slot = (body.get("slot") or "").upper()
+        if slot not in ("A", "B"):
+            self._send_json(400, {"ok": False, "error": "slot must be \"A\" or \"B\""})
+            return
+        categories = body.get("categories") or ["settings"]
+        dev = self._sync_connected_device()
+        if not dev:
+            self._send_json(502, {"ok": False, "error": "no watch detected - plug in the "
+                                  "watch to snapshot and try again"})
+            return
+        snap = {
+            "slot": slot, "serial": dev["serial"], "model": dev["model"],
+            "displayName": dev["displayName"], "fw_version": dev.get("fw_version"),
+            "capturedAt": int(time.time()), "categories": {},
+        }
+        for cat in categories:
+            if cat == "settings":
+                items, err = self._sync_read_settings(dev["model"])
+                if err:
+                    snap["categories"][cat] = {"supported": False, "error": err}
+                else:
+                    snap["categories"][cat] = {
+                        "supported": True, "count": len(items),
+                        "writableCount": sum(1 for v in items.values() if v["writable"]),
+                        "items": items,
+                    }
+            else:
+                snap["categories"][cat] = {"supported": False,
+                                           "error": f"category \"{cat}\" not wired yet"}
+        with _SYNC_LOCK:
+            _SYNC_SNAPSHOTS[slot] = snap
+        self._send_json(200, {"ok": True, "snapshot": _sync_summary(snap)})
+
+    def _handle_sync_state(self):
+        """GET /api/sync/state - the two stored slot summaries plus the currently connected
+        watch, so the page can label which slot the plugged watch matches (or that it is a
+        third, not-yet-snapshotted watch)."""
+        dev = self._sync_connected_device()
+        with _SYNC_LOCK:
+            slots = {s: _sync_summary(_SYNC_SNAPSHOTS[s]) for s in ("A", "B")
+                     if s in _SYNC_SNAPSHOTS}
+        self._send_json(200, {"ok": True, "slots": slots, "connected": dev})
+
+    def _handle_sync_clear(self, body):
+        """POST /api/sync/clear. Body {"slot":"A"|"B"} clears one slot, {} clears both."""
+        slot = (body.get("slot") or "").upper()
+        with _SYNC_LOCK:
+            if slot in ("A", "B"):
+                _SYNC_SNAPSHOTS.pop(slot, None)
+            else:
+                _SYNC_SNAPSHOTS.clear()
+        self._send_json(200, {"ok": True})
+
+    def _sync_build_plan(self, body):
+        """Shared by /plan and /apply: build the per-category change list for the chosen mode/
+        direction from the two stored slots. Returns (plan_dict, error_or_None). Pure - reads
+        no watch, writes nothing."""
+        mode = body.get("mode") or "mirror"
+        direction = body.get("direction") or "AtoB"
+        categories = body.get("categories") or ["settings"]
+        if direction not in ("AtoB", "BtoA"):
+            return None, "direction must be \"AtoB\" or \"BtoA\""
+        src_slot, tgt_slot = ("A", "B") if direction == "AtoB" else ("B", "A")
+        with _SYNC_LOCK:
+            src = _SYNC_SNAPSHOTS.get(src_slot)
+            tgt = _SYNC_SNAPSHOTS.get(tgt_slot)
+        if not src or not tgt:
+            missing = src_slot if not src else tgt_slot
+            return None, f"snapshot both watches first - slot {missing} is empty"
+        cats_out, total = [], 0
+        for cat in categories:
+            if cat == "settings":
+                changes, skipped = _sync_diff_settings(src, tgt)
+                cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
+                total += len(changes)
+            else:
+                cats_out.append({"category": cat, "changes": [], "skipped": [],
+                                 "error": f"category \"{cat}\" not wired yet"})
+        return {
+            "mode": mode, "direction": direction,
+            "source": _sync_summary(src), "target": _sync_summary(tgt),
+            "categories": cats_out, "changeCount": total,
+        }, None
+
+    def _handle_sync_plan(self, body):
+        """POST /api/sync/plan. Body {"mode","direction","categories"}. Pure dry-run: the
+        per-category changes /apply would make to the target slot. Nothing is written."""
+        plan, err = self._sync_build_plan(body)
+        if err:
+            self._send_json(400, {"ok": False, "error": err})
+            return
+        self._send_json(200, {"ok": True, **plan})
+
+    def _handle_sync_apply(self, body):
+        """POST /api/sync/apply. Body: /plan's fields plus {"confirm": bool, "keys":[...]?}.
+        Applies the plan to the CONNECTED watch, which must be the target slot's own serial -
+        a plan built for one watch is refused (409 SYNC_TARGET_MISMATCH) against any other, so
+        the wrong watch can never be written. Without confirm:true it re-previews (writes
+        nothing). "keys" optionally restricts to a chosen subset of the planned changes."""
+        plan, err = self._sync_build_plan(body)
+        if err:
+            self._send_json(400, {"ok": False, "error": err})
+            return
+        confirm = bool(body.get("confirm", False))
+        selection = body.get("keys")  # optional list of setting keys to include
+        dev = self._sync_connected_device()
+        if not dev:
+            self._send_json(502, {"ok": False, "error": "no watch detected - plug in the "
+                                  "target watch and try again"})
+            return
+        target_serial = plan["target"]["serial"]
+        if dev["serial"] != target_serial:
+            self._send_json(409, {"ok": False, "error": "SYNC_TARGET_MISMATCH",
+                "detail": f"this plan targets {plan['target']['displayName']} "
+                          f"({target_serial}) but {dev['displayName']} ({dev['serial']}) is "
+                          f"plugged in - connect the target watch to apply",
+                "connected": dev, "target": plan["target"]})
+            return
+        results, applied = [], 0
+        for cat in plan["categories"]:
+            if cat["category"] != "settings":
+                continue
+            for ch in cat["changes"]:
+                if selection is not None and ch["key"] not in selection:
+                    continue
+                base = {"category": "settings", "key": ch["key"], "label": ch["label"],
+                        "from": ch["from"], "to": ch["to"], "toText": ch.get("toText")}
+                if not confirm:
+                    results.append({**base, "dryRun": True, "ok": True})
+                    continue
+                r = self._sync_write_setting(dev["model"], ch["key"], ch["to"])
+                results.append({**base, "ok": bool(r.get("ok")),
+                                "error": None if r.get("ok") else r.get("error")})
+                if r.get("ok"):
+                    applied += 1
+        if confirm and applied:
+            # The target watch changed - drop any now-stale snapshot of it plus the read cache.
+            with _SYNC_LOCK:
+                for s in ("A", "B"):
+                    if _SYNC_SNAPSHOTS.get(s, {}).get("serial") == dev["serial"]:
+                        _SYNC_SNAPSHOTS.pop(s, None)
+            read_cache_clear()
+        self._send_json(200, {"ok": True, "confirmed": confirm, "applied": applied,
+                              "results": results, "target": plan["target"]})
 
     def _handle_customodes_read(self):
         """GET /api/customodes - Ambit3's real sport modes (CustomModes flash region),

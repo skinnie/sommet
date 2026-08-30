@@ -55,11 +55,23 @@ public:
     Q_INVOKABLE void refreshCacheSize();
     Q_INVOKABLE void clearCache();
 
+    // ── Saved offline areas (the OruxMaps-style named-region manager) ──
+    // Persisted in QSettings; the tiles live in the shared disk cache. savedRegions() returns a
+    // list of maps {id,name,provider,minLat,minLon,maxLat,maxLon,zooms,tileCount,bytes,savedAt}
+    // for the offline-maps page. The page calls saveRegion() after a download finishes.
+    Q_INVOKABLE QVariantList savedRegions() const;
+    Q_INVOKABLE void saveRegion(const QString &name, const QString &provider,
+                                const QVariantList &corners, const QVariantList &zooms, int tileCount);
+    // Removes a saved area and the tiles unique to it (tiles still covered by another saved area
+    // of the same provider are kept).
+    Q_INVOKABLE void deleteSavedRegion(const QString &id);
+
 signals:
     void downloadingChanged();
     void progressChanged();
     void cacheSizeChanged();
     void downloadFinished(int done, int total, int failed);
+    void savedRegionsChanged();
 
 private:
     void setDownloading(bool value);

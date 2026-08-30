@@ -211,6 +211,17 @@ Rectangle {
                 selected: root.currentPage === "backup"
                 onClicked: root.pageSelected("backup")
             }
+            // Sync two watches ("freefly"): copy settings (and, as their write paths land,
+            // POIs/routes/sport-mode layouts) between two watches of a compatible model. Needs
+            // a device; the page itself explains the one-cable-at-a-time A/B flow.
+            NavItem {
+                width: parent.width
+                visible: HomeViewModel.anyDevice
+                glyph: Icons.sync
+                label: qsTr("Sync watches")
+                selected: root.currentPage === "sync"
+                onClicked: root.pageSelected("sync")
+            }
             // Apps - App-Zone builders (Workout + free-form). Suunto Ambit3/Traverse only: no
             // Garmin equivalent, no Kailash CustomModes region, and Ambit1/2 predate the App Zone.
             NavItem {

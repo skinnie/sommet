@@ -1,10 +1,17 @@
 #include "tilecacheservice.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkDiskCache>
 #include <QNetworkRequest>
+#include <QSet>
+#include <QSettings>
 #include <QtMath>
+#include <QUuid>
 #include <algorithm>
 
 #include "tilecachepaths.h"
@@ -246,4 +253,176 @@ void TileCacheService::clearCache()
     if (auto *cache = m_network.cache())
         static_cast<QNetworkDiskCache *>(cache)->clear();
     refreshCacheSize();
+}
+
+// ── Saved offline areas ─────────────────────────────────────────────────────
+
+namespace {
+
+const QString kRegionsKey = QStringLiteral("map/offlineRegions");
+constexpr qint64 kAvgTileBytes = 15360;  // ~15 KB, same estimate the mobile manager uses
+
+QJsonArray loadRegionsArray()
+{
+    const QString raw = QSettings().value(kRegionsKey).toString();
+    if (raw.isEmpty())
+        return {};
+    return QJsonDocument::fromJson(raw.toUtf8()).array();
+}
+
+void storeRegionsArray(const QJsonArray &arr)
+{
+    QSettings().setValue(kRegionsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+QList<int> zoomsFromJson(const QJsonArray &z)
+{
+    QList<int> out;
+    for (const QJsonValue &v : z) {
+        const int zi = v.toInt();
+        if (zi >= 0 && zi <= 19)
+            out.append(zi);
+    }
+    return out;
+}
+
+// "z/x/y" keys covering a bbox across the given zoom levels.
+QSet<QString> regionTileKeys(double minLat, double minLon, double maxLat, double maxLon, const QList<int> &levels)
+{
+    QSet<QString> keys;
+    for (int z : levels) {
+        const int minTx = lonToTileX(minLon, z);
+        const int maxTx = lonToTileX(maxLon, z);
+        const int minTy = latToTileY(maxLat, z);
+        const int maxTy = latToTileY(minLat, z);
+        for (int tx = minTx; tx <= maxTx; tx++)
+            for (int ty = minTy; ty <= maxTy; ty++)
+                keys.insert(QStringLiteral("%1/%2/%3").arg(z).arg(tx).arg(ty));
+    }
+    return keys;
+}
+
+}  // namespace
+
+QVariantList TileCacheService::savedRegions() const
+{
+    QVariantList out;
+    const QJsonArray arr = loadRegionsArray();
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        QVariantList zooms;
+        for (const QJsonValue &z : o.value(QStringLiteral("zooms")).toArray())
+            zooms.append(z.toInt());
+        out.append(QVariantMap{
+            { QStringLiteral("id"), o.value(QStringLiteral("id")).toString() },
+            { QStringLiteral("name"), o.value(QStringLiteral("name")).toString() },
+            { QStringLiteral("provider"), o.value(QStringLiteral("provider")).toString() },
+            { QStringLiteral("minLat"), o.value(QStringLiteral("minLat")).toDouble() },
+            { QStringLiteral("minLon"), o.value(QStringLiteral("minLon")).toDouble() },
+            { QStringLiteral("maxLat"), o.value(QStringLiteral("maxLat")).toDouble() },
+            { QStringLiteral("maxLon"), o.value(QStringLiteral("maxLon")).toDouble() },
+            { QStringLiteral("zooms"), zooms },
+            { QStringLiteral("tileCount"), o.value(QStringLiteral("tileCount")).toInt() },
+            { QStringLiteral("bytes"), o.value(QStringLiteral("bytes")).toDouble() },
+            { QStringLiteral("savedAt"), o.value(QStringLiteral("savedAt")).toDouble() },
+        });
+    }
+    return out;
+}
+
+void TileCacheService::saveRegion(const QString &name, const QString &provider,
+                                  const QVariantList &corners, const QVariantList &zooms, int tileCount)
+{
+    if (corners.isEmpty())
+        return;
+    double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    for (const QVariant &c : corners) {
+        const QVariantMap m = c.toMap();
+        const double lat = m.value(QStringLiteral("lat")).toDouble();
+        const double lon = m.value(QStringLiteral("lon")).toDouble();
+        minLat = std::min(minLat, lat);
+        maxLat = std::max(maxLat, lat);
+        minLon = std::min(minLon, lon);
+        maxLon = std::max(maxLon, lon);
+    }
+    QJsonArray zoomsJson;
+    for (const QVariant &z : zooms)
+        zoomsJson.append(z.toInt());
+
+    QJsonObject o;
+    o[QStringLiteral("id")] = QUuid::createUuid().toString(QUuid::Id128);
+    o[QStringLiteral("name")] = name.trimmed().isEmpty()
+        ? QStringLiteral("Area %1, %2").arg((minLat + maxLat) / 2, 0, 'f', 2).arg((minLon + maxLon) / 2, 0, 'f', 2)
+        : name.trimmed();
+    o[QStringLiteral("provider")] = provider;
+    o[QStringLiteral("minLat")] = minLat;
+    o[QStringLiteral("minLon")] = minLon;
+    o[QStringLiteral("maxLat")] = maxLat;
+    o[QStringLiteral("maxLon")] = maxLon;
+    o[QStringLiteral("zooms")] = zoomsJson;
+    o[QStringLiteral("tileCount")] = tileCount;
+    o[QStringLiteral("bytes")] = double(qint64(tileCount) * kAvgTileBytes);
+    o[QStringLiteral("savedAt")] = double(QDateTime::currentMSecsSinceEpoch());
+
+    QJsonArray arr = loadRegionsArray();
+    arr.prepend(o);
+    storeRegionsArray(arr);
+    emit savedRegionsChanged();
+}
+
+void TileCacheService::deleteSavedRegion(const QString &id)
+{
+    QJsonArray arr = loadRegionsArray();
+    QJsonObject target;
+    QJsonArray rest;
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QStringLiteral("id")).toString() == id)
+            target = o;
+        else
+            rest.append(o);
+    }
+    if (target.isEmpty())
+        return;
+
+    const QString provider = target.value(QStringLiteral("provider")).toString();
+    const QList<int> levels = zoomsFromJson(target.value(QStringLiteral("zooms")).toArray());
+
+    // Tiles still needed by another saved area of the SAME provider — keep those.
+    QSet<QString> keep;
+    for (const QJsonValue &v : rest) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QStringLiteral("provider")).toString() != provider)
+            continue;
+        keep.unite(regionTileKeys(o.value(QStringLiteral("minLat")).toDouble(),
+                                  o.value(QStringLiteral("minLon")).toDouble(),
+                                  o.value(QStringLiteral("maxLat")).toDouble(),
+                                  o.value(QStringLiteral("maxLon")).toDouble(),
+                                  zoomsFromJson(o.value(QStringLiteral("zooms")).toArray())));
+    }
+
+    // Remove this area's tiles (except the shared ones) from the disk cache.
+    if (auto *cache = m_network.cache()) {
+        const double minLat = target.value(QStringLiteral("minLat")).toDouble();
+        const double minLon = target.value(QStringLiteral("minLon")).toDouble();
+        const double maxLat = target.value(QStringLiteral("maxLat")).toDouble();
+        const double maxLon = target.value(QStringLiteral("maxLon")).toDouble();
+        for (int z : levels) {
+            const int minTx = lonToTileX(minLon, z);
+            const int maxTx = lonToTileX(maxLon, z);
+            const int minTy = latToTileY(maxLat, z);
+            const int maxTy = latToTileY(minLat, z);
+            for (int tx = minTx; tx <= maxTx; tx++) {
+                for (int ty = minTy; ty <= maxTy; ty++) {
+                    if (keep.contains(QStringLiteral("%1/%2/%3").arg(z).arg(tx).arg(ty)))
+                        continue;
+                    cache->remove(QUrl(tileUrlFor(provider, z, tx, ty)));
+                }
+            }
+        }
+    }
+
+    storeRegionsArray(rest);
+    refreshCacheSize();
+    emit savedRegionsChanged();
 }

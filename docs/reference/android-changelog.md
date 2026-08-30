@@ -3,6 +3,19 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.18 (2026-08-30)
+
+### Offline maps polish + POIs on more maps
+
+- **Desktop: saved-areas manager.** The desktop Offline maps page now names, lists and deletes
+  downloaded areas just like mobile — a name field, a **Saved areas** list (size + Delete, tap a
+  row to fly to it), backed by `TileCacheService` (QSettings metadata; deleting an area removes
+  only the tiles no other saved area still needs).
+- **Desktop: the map provider is remembered** across restarts (was in-memory only).
+- **POI pins on more maps.** The watch's cached waypoints are now shown as pins on the mobile
+  **weather-along-route** map and the **Offline maps** browsing map (they were already on the
+  activity map) — all offline.
+
 ## 0.2.17 (2026-08-30)
 
 ### Offline maps — download any area of the world (iOS + Android + desktop)

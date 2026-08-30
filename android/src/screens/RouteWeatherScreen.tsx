@@ -15,6 +15,7 @@ import { parseRouteGpx } from '../services/RouteGpxParser';
 import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline';
 import { TILE_CACHE_DIR_URI } from '../services/TileCache';
 import { writeMapPage, mapWebViewFileProps } from '../services/mapWebView';
+import { getCachedPois } from '../services/PoiService';
 
 // Weather + sun/moon along a route — the "what am I walking into?" layer, ported from the
 // desktop Plan page's Weather panel (weather_route.py + astro.py, both verified equal in TS).
@@ -52,6 +53,11 @@ export default function RouteWeatherScreen() {
   // The coloured map is loaded from a caches-dir file:// page so it can read cached tiles off
   // disk (offline-capable + renders on iOS). Rewritten each forecast.
   const [mapUri, setMapUri] = useState<string | null>(null);
+  // The watch's cached POIs, overlaid on the map as pins (offline).
+  const [pois, setPois] = useState<Array<{ lat: number; lon: number; name: string }>>([]);
+  useEffect(() => {
+    getCachedPois().then(list => setPois((list ?? []).map(p => ({ lat: p.latitude, lon: p.longitude, name: p.name })))).catch(() => {});
+  }, []);
 
   const route: RoutePoint[] = imported?.route
     ?? ((params.route && params.route.length >= 2) ? params.route : DEMO_ROUTE);
@@ -83,11 +89,11 @@ export default function RouteWeatherScreen() {
   useEffect(() => {
     if (!result?.ok || !result.segments?.length) { setMapUri(null); return; }
     let alive = true;
-    writeMapPage(buildRouteMapHtml(result.segments, result.wind_arrows), 'sommet_weather_map.html')
+    writeMapPage(buildRouteMapHtml(result.segments, result.wind_arrows, pois), 'sommet_weather_map.html')
       .then(uri => { if (alive) setMapUri(uri); })
       .catch(() => { if (alive) setMapUri(null); });
     return () => { alive = false; };
-  }, [result]);
+  }, [result, pois]);
 
   async function handleForecast() {
     setLoading(true); setError(undefined); setResult(undefined);
@@ -241,17 +247,19 @@ export default function RouteWeatherScreen() {
 function buildRouteMapHtml(
   segments: NonNullable<WeatherRoutePlan['segments']>,
   windArrows: WeatherRoutePlan['wind_arrows'],
+  pois: Array<{ lat: number; lon: number; name: string }> = [],
 ): string {
   const segJson = JSON.stringify(segments.map(s => ({ c: s.color, p: s.coords })));
   const windJson = JSON.stringify(
     (windArrows ?? []).map((w: any) => ({ lat: w.lat, lon: w.lon, dir: w.wind_dir_deg, col: w.color })),
   );
+  const poiJson = JSON.stringify(pois);
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 ${LEAFLET_STYLE_TAG}
 <style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}.wind{color:#333;font-size:15px;line-height:15px;text-align:center}</style>
 </head><body><div id="map"></div><script>
-var segs = ${segJson}, winds = ${windJson};
+var segs = ${segJson}, winds = ${windJson}, pois = ${poiJson};
 var map = L.map('map', { zoomControl: true, attributionControl: true });
 // cache-first OSM: use a downloaded tile off disk when present, else fetch it remotely — so the
 // basemap under the forecast draws even offline if you saved the area (see Offline maps).
@@ -267,6 +275,11 @@ winds.forEach(function(w){
   // rotate a ↓ glyph to point where the wind blows TO (from-direction + 180°); tinted head/cross/tail
   var html = '<div class="wind" style="transform:rotate(' + w.dir + 'deg);color:' + w.col + '">&#8595;</div>';
   L.marker([w.lat, w.lon], { icon: L.divIcon({ html: html, className: '', iconSize: [15,15] }) }).addTo(map);
+});
+pois.forEach(function(p){
+  var pin = L.divIcon({ className: '', iconAnchor: [8,16],
+    html: '<div style="width:16px;height:16px;background:#f39c12;border:2px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>' });
+  L.marker([p.lat, p.lon], { icon: pin }).bindPopup(p.name || 'POI').addTo(map);
 });
 if (all.length) {
   map.fitBounds(L.latLngBounds(all), { padding: [22,22] });

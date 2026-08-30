@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Qt.labs.settings
 
 // AMBITAPP_SPEC.md, "Maps": "Create a MapService abstraction... The UI must never care
 // where tiles come from." MapView.qml (components/) is the only thing that reads this - a
@@ -33,11 +34,17 @@ import QtQuick
 QtObject {
     readonly property bool offlineAvailable: false  // pre-fetch-a-region MBTiles - future, per the spec
 
-    // In-memory only for now - resets on restart. Real persistence (matching
-    // ConnectionsService's QSettings pattern) is a small, real follow-up, not done here
-    // since this is pure QML by design (see Theme.qml's own header comment on why - no
-    // native state in these singletons).
-    property string provider: "cyclosm"  // "osm", "cyclosm" or "ign"
+    // Persisted across launches (André, 2026-08-30) via Qt.labs.settings, the same way
+    // Theme.qml persists the theme choice - a plain alias onto a nested Settings property, so
+    // every reader of MapService.provider picks up the saved choice on next launch with no other
+    // file needing to know persistence is involved. (QtObject has no default property, so the
+    // Settings child is an explicit named property with its own id - see Theme.qml's note.)
+    property alias provider: mapSettings.provider  // "osm", "cyclosm" or "ign"
+    property Settings mapSettingsObj: Settings {
+        id: mapSettings
+        category: "map"
+        property string provider: "cyclosm"
+    }
 
     // IGN added on desktop 2026-08-11 (André: "ok add IGN to desktop"), which also corrects
     // a claim this project had been carrying: MapProviderService.ts said IGN was

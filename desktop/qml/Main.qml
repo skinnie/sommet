@@ -38,6 +38,7 @@ ApplicationWindow {
         pois: "pages/PoisPage.qml",
         offlineMaps: "pages/OfflineMapsPage.qml",
         backup: "pages/BackupPage.qml",
+        sync: "pages/SyncPage.qml",
         firmware: "pages/FirmwarePage.qml",
         watchSettings: "pages/WatchSettingsPage.qml",
         smartSensor: "pages/SmartSensorPage.qml",

@@ -200,6 +200,7 @@ qt_add_qml_module(ambitapp
         qml/pages/PoisPage.qml
         qml/pages/OfflineMapsPage.qml
         qml/pages/BackupPage.qml
+        qml/pages/SyncPage.qml
         qml/pages/FirmwarePage.qml
         qml/pages/WatchSettingsPage.qml
         qml/pages/SmartSensorPage.qml
@@ -237,6 +238,8 @@ qt_add_qml_module(ambitapp
         src/services/poiservice.cpp
         src/services/backupservice.h
         src/services/backupservice.cpp
+        src/services/syncservice.h
+        src/services/syncservice.cpp
         src/services/connectionsservice.h
         src/services/connectionsservice.cpp
         src/services/localfileservice.h
