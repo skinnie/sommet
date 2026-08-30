@@ -35,6 +35,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import struct
@@ -409,6 +410,62 @@ def _sync_diff_settings(src, tgt):
             "toText": _sync_choice_text(s, s.get("value")),
         })
     return changes, skipped
+
+
+# --- POIs: an item-list category ----------------------------------------------------------
+# The Ambit3/Traverse POI read comes back as write_nav.py's own printed text (server.py's
+# _handle_pois_read keeps it raw on purpose - the field names come from the real SuuntoLink
+# descriptor, decoded live), so the WayPoint records are parsed out of it here. \bName avoids
+# matching the "Name" inside "RouteName"; a record with a non-empty RouteName is a route
+# turn-point, not a standalone POI, so it is skipped - the same split /api/nav and the app use.
+# Fields are emitted in a fixed order (Name, RouteName, ..., Type, ..., Location.Latitude,
+# .Longitude), so the non-greedy spans stay within one record.
+_POI_RE = re.compile(
+    r"\bName='([^']*)'\s+RouteName='([^']*)'.*?\bType=(\d+).*?"
+    r"Location\.Latitude=(-?\d+)\s+Location\.Longitude=(-?\d+)", re.S)
+
+
+def _sync_parse_pois(raw):
+    """Standalone POIs as [{name, type, lat, lon}] from write_nav.py's `pois` text output."""
+    pois = []
+    for m in _POI_RE.finditer(raw or ""):
+        name, route_name, typ, lat, lon = m.groups()
+        if route_name:            # a route turn-point, not a standalone POI
+            continue
+        pois.append({"name": name, "type": int(typ),
+                     "lat": int(lat) / 1e7, "lon": int(lon) / 1e7})
+    return pois
+
+
+def _sync_poi_key(poi):
+    """A POI's identity for diffing: name plus coordinates rounded to ~1 m. Two POIs match only
+    when both name and position line up, so a renamed or moved POI reads as a new one rather
+    than being silently merged onto a different place."""
+    return (str(poi.get("name", "")).strip().lower(),
+            round(float(poi.get("lat", 0.0)), 5), round(float(poi.get("lon", 0.0)), 5))
+
+
+def _sync_diff_pois(src, tgt):
+    """POIs on the source the target lacks (by identity) - the add-missing set. POIs are an item
+    list, so this is a union: two-way merge and mirror both add what's missing, and neither
+    deletes (the watch's POI writer only ever appends). Returns (changes, skipped)."""
+    s_items = ((src.get("categories") or {}).get("pois") or {}).get("items") or []
+    t_items = ((tgt.get("categories") or {}).get("pois") or {}).get("items") or []
+    have = {_sync_poi_key(p) for p in t_items}
+    changes = []
+    for p in s_items:
+        if _sync_poi_key(p) in have:
+            continue
+        changes.append({
+            "key": "poi:" + "|".join(str(x) for x in _sync_poi_key(p)),
+            "label": p.get("name") or "(unnamed POI)",
+            "poi": {"name": p.get("name"), "lat": p.get("lat"), "lon": p.get("lon"),
+                    "type": p.get("type", 0)},
+            "from": None, "to": p.get("name"),
+            "fromText": "—",  # em dash: not present on the target
+            "toText": "%.5f, %.5f" % (float(p.get("lat", 0.0)), float(p.get("lon", 0.0))),
+        })
+    return changes, []
 
 
 def _read_cache_device_identity(info):
@@ -3411,6 +3468,30 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": err or "no JSON from settings_write.py"}
         return info
 
+    def _sync_read_pois(self, model):
+        """The connected watch's standalone POIs as [{name, type, lat, lon}], parsed from the
+        same write_nav.py `pois` text /api/pois returns. Kailash has no POI region, so it is an
+        empty list rather than an error. Returns (items_list, error_or_None)."""
+        if model == "Hoopoe":
+            return [], None
+        code, out, err = run_tool("write_nav.py", ["pois"])
+        if code != 0:
+            return None, (err or out or "POI read failed").strip()
+        return _sync_parse_pois(out), None
+
+    def _sync_write_poi(self, poi):
+        """Add one POI via write_nav.py addpoi --write - the same read-append-write the POIs
+        page uses (hardware-proven, never touches the Routes/Waypoints regions). Returns {ok}."""
+        args = ["addpoi", "--name", str(poi.get("name") or ""),
+                "--lat", "%.7f" % float(poi.get("lat")),
+                "--lon", "%.7f" % float(poi.get("lon")), "--write"]
+        if poi.get("type") not in (None, "", 0):
+            args += ["--type", str(poi.get("type"))]
+        code, out, err = run_tool("write_nav.py", args)
+        if code != 0:
+            return {"ok": False, "error": (err or out or "POI write failed").strip()}
+        return {"ok": True}
+
     def _handle_sync_snapshot(self, body):
         """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
         CONNECTED watch's syncable state into that slot and returns its summary. Only
@@ -3442,6 +3523,13 @@ class Handler(BaseHTTPRequestHandler):
                         "writableCount": sum(1 for v in items.values() if v["writable"]),
                         "items": items,
                     }
+            elif cat == "pois":
+                items, err = self._sync_read_pois(dev["model"])
+                if err:
+                    snap["categories"][cat] = {"supported": False, "error": err}
+                else:
+                    snap["categories"][cat] = {"supported": True, "count": len(items),
+                                               "items": items}
             else:
                 snap["categories"][cat] = {"supported": False,
                                            "error": f"category \"{cat}\" not wired yet"}
@@ -3491,6 +3579,10 @@ class Handler(BaseHTTPRequestHandler):
                 changes, skipped = _sync_diff_settings(src, tgt)
                 cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
                 total += len(changes)
+            elif cat == "pois":
+                changes, skipped = _sync_diff_pois(src, tgt)
+                cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
+                total += len(changes)
             else:
                 cats_out.append({"category": cat, "changes": [], "skipped": [],
                                  "error": f"category \"{cat}\" not wired yet"})
@@ -3536,17 +3628,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         results, applied = [], 0
         for cat in plan["categories"]:
-            if cat["category"] != "settings":
+            category = cat["category"]
+            if category not in ("settings", "pois"):
                 continue
             for ch in cat["changes"]:
                 if selection is not None and ch["key"] not in selection:
                     continue
-                base = {"category": "settings", "key": ch["key"], "label": ch["label"],
-                        "from": ch["from"], "to": ch["to"], "toText": ch.get("toText")}
+                base = {"category": category, "key": ch["key"], "label": ch["label"],
+                        "from": ch.get("from"), "to": ch.get("to"), "toText": ch.get("toText")}
                 if not confirm:
                     results.append({**base, "dryRun": True, "ok": True})
                     continue
-                r = self._sync_write_setting(dev["model"], ch["key"], ch["to"])
+                if category == "settings":
+                    r = self._sync_write_setting(dev["model"], ch["key"], ch["to"])
+                else:  # pois - add the missing POI
+                    r = self._sync_write_poi(ch["poi"])
                 results.append({**base, "ok": bool(r.get("ok")),
                                 "error": None if r.get("ok") else r.get("error")})
                 if r.get("ok"):
