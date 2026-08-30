@@ -298,9 +298,9 @@ export function FieldRow({ icon, style, ...inputProps }: { icon: IconName } & Te
 
 // ── ActionTile — Card-surfaced square used on Home's action grid ───────────
 export function ActionTile({
-  icon, label, progress, onPress, disabled, busy, basis, grow,
+  icon, label, progress, onPress, onLongPress, disabled, busy, basis, grow,
 }: {
-  icon: IconName; label: string; progress?: string; onPress: () => void; disabled?: boolean; busy?: boolean;
+  icon: IconName; label: string; progress?: string; onPress: () => void; onLongPress?: () => void; disabled?: boolean; busy?: boolean;
   // Column width as a flex-basis. When omitted it adapts to the screen: two columns on
   // phones, three on roomy/landscape/tablet widths. flexGrow 0 keeps a lone trailing tile
   // at its column width (centered by the row) rather than stretching full-width. The row
@@ -325,6 +325,7 @@ export function ActionTile({
   return (
     <TouchableOpacity
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={disabled}
       activeOpacity={0.75}
       style={{

@@ -2,7 +2,7 @@ import { DeviceProvider } from './devices/DeviceProvider';
 import { ambitDeviceProvider } from './devices/AmbitDeviceProvider';
 import { writeGpxFile } from './GpxService';
 import { extractGpxMetadata } from './GpxParser';
-import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds } from '../database/db';
+import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, getDeletedIds } from '../database/db';
 import { isMarkSyncedEnabled } from './MarkSynced';
 import { attributeMoveToGear } from './GearAutoAssign';
 
@@ -32,7 +32,14 @@ type SyncListener = (state: SyncState) => void;
 export async function runSync(
   onState: SyncListener,
   provider: DeviceProvider = ambitDeviceProvider,
+  opts: { forceRefresh?: boolean } = {},
 ): Promise<number> {
+  // forceRefresh (André, 2026-08-30): re-read and OVERWRITE the GPX of activities already on the
+  // phone — so a decode fix (e.g. the trekking "no GPS data" periodic-sample fix) reaches moves
+  // that were synced before it. The watch is an immutable logbook that re-sends everything, so we
+  // just skip the deleted blacklist instead of every already-synced id, and overwrite on write.
+  // Deleted activities are still never resurrected (isActivityDeleted guard below).
+  const refresh = !!opts.forceRefresh || !!provider.refreshExisting;
   const emit = (partial: Partial<SyncState> & { phase: SyncState['phase'] }) =>
     onState({ current: 0, total: 0, newCount: 0, ...partial });
 
@@ -52,7 +59,9 @@ export async function runSync(
 
   // Charger les IDs déjà connus → passés au skip_callback natif pour éviter
   // de relire le payload complet des logs déjà synchronisés
-  const knownIds = await getAllSyncedIds();
+  // On a forced refresh, tell the watch to re-send the kept activities (only the deleted
+  // blacklist is "known"); otherwise skip everything already synced.
+  const knownIds = opts.forceRefresh ? await getDeletedIds() : await getAllSyncedIds();
 
   let current = 0;
   let total = 0;
@@ -105,9 +114,9 @@ export async function runSync(
     // better decode; an immutable logbook (Ambit3) skips ones already synced. Either way a
     // user-DELETED activity is never resurrected.
     if (await isActivityDeleted(id)) continue;
-    if (!provider.refreshExisting && await isActivitySynced(id)) continue;
+    if (!refresh && await isActivitySynced(id)) continue;
 
-    const gpxPath = await writeGpxFile(id, gpxXml, !!provider.refreshExisting);
+    const gpxPath = await writeGpxFile(id, gpxXml, refresh);
     if (!gpxPath) continue;
 
     await markActivitySynced({

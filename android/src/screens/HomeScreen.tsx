@@ -651,7 +651,7 @@ export default function HomeScreen() {
     return () => clearInterval(iv);
   }, [phase]);
 
-  async function handleSync() {
+  async function handleSync(forceRefresh = false) {
     if (isBusy) return;
     setLastActive('sync');
     try {
@@ -667,7 +667,7 @@ export default function HomeScreen() {
       const provider = bleConnectedRef.current
         ? ambitBleDeviceProvider
         : (isKailash(ambitInfo) ? kailashDeviceProvider : undefined);
-      await runSync(setSync, provider);
+      await runSync(setSync, provider, { forceRefresh });
       // Recalculate the watch's activity class from the athlete's latest intervals.icu
       // training on every sync (André, 2026-08-18: "recalculate activity level on each sync
       // usb and bluetooth"). No-op if intervals.icu isn't connected, or on Ambit1/2/Kailash;
@@ -1297,7 +1297,21 @@ export default function HomeScreen() {
             label={syncLabel}
             progress={sync.phase !== 'idle' && sync.total > 0 ? `${sync.current}/${sync.total}` : undefined}
             busy={syncBusy}
-            onPress={handleSync}
+            onPress={() => handleSync(false)}
+            // Long-press = re-download: re-read every kept activity from the watch and overwrite
+            // its GPX, so a decode fix (e.g. the trekking "no GPS data" fix) reaches moves synced
+            // before it. Deleted activities are never resurrected.
+            onLongPress={() => {
+              if (isBusy) return;
+              Alert.alert(
+                'Re-download activities',
+                'Re-read every activity still on the phone from the watch and rebuild its track/GPX (fixes older moves after a decode update). Deleted activities are not restored. This can take a while.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Re-download', onPress: () => handleSync(true) },
+                ],
+              );
+            }}
             disabled={isBusy}
             grow
           />

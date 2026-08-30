@@ -3,6 +3,17 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.21 (2026-08-30)
+
+### Re-download activities (long-press Sync)
+
+Older activities keep the GPX they were synced with, so a decode fix (like the GPS one above)
+doesn't reach moves synced before it. **Long-press the Sync tile** on Home to re-read every
+activity still on the phone from the watch and overwrite its track/GPX. Deleted activities are
+never resurrected (the delete blacklist is honoured). `runSync` gains a `forceRefresh` mode that
+uses the deleted-only known set + overwrites on write; new `getDeletedIds()` DB helper; `ActionTile`
+gains `onLongPress`.
+
 ## 0.2.20 (2026-08-30)
 
 ### Fix: activities showing "no GPS data" despite having a track (all platforms)

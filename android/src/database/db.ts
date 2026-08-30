@@ -211,6 +211,16 @@ export async function getAllSyncedIds(): Promise<string[]> {
   return ids;
 }
 
+/** Just the user-deleted blacklist IDs — used by a forced re-download (runSync forceRefresh) so
+ * kept activities are re-read from the watch while deleted ones are still never resurrected. */
+export async function getDeletedIds(): Promise<string[]> {
+  const db = await getDb();
+  const [result] = await db.executeSql('SELECT id FROM deleted_activities');
+  const ids: string[] = [];
+  for (let i = 0; i < result.rows.length; i++) ids.push(result.rows.item(i).id);
+  return ids;
+}
+
 /** Met à jour uniquement le type d'activité d'un enregistrement existant. */
 export async function updateActivityType(id: string, activityType: string): Promise<void> {
   const db = await getDb();
