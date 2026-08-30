@@ -3,6 +3,14 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.23 (2026-08-30)
+
+### Fix: activity order after a bulk re-import
+
+The activity list's default "uploaded" sort ties every move on `synced_at`, and a re-download
+stamps them all at the same instant — so after one, the list looked unsorted. The uploaded sort
+now tie-breaks by each activity's own date, so it stays newest-activity-first.
+
 ## 0.2.22 (2026-08-30)
 
 ### Fix: "can't read gpx" + recover deleted activities (iOS)

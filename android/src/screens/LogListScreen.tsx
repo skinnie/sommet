@@ -232,8 +232,14 @@ export default function LogListScreen() {
     // Sort by the chosen column (any metric), or newest-first by upload date (default).
     base.sort((a, b) => {
       let c: number;
-      if (sortKey === 'uploaded') c = (a.synced_at || 0) - (b.synced_at || 0);
-      else c = metricRaw(a.metrics, sortKey) - metricRaw(b.metrics, sortKey);
+      if (sortKey === 'uploaded') {
+        c = (a.synced_at || 0) - (b.synced_at || 0);
+        // Tie-break by the activity's own date, so a bulk re-import (every move stamped with the
+        // same synced_at) still lists newest-activity-first instead of arbitrary order.
+        if (c === 0) c = String(a.date || '').localeCompare(String(b.date || ''));
+      } else {
+        c = metricRaw(a.metrics, sortKey) - metricRaw(b.metrics, sortKey);
+      }
       return sortDesc ? -c : c;
     });
     return base;
