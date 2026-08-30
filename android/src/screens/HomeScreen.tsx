@@ -788,6 +788,8 @@ export default function HomeScreen() {
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
     // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
     { id: 'routeweather', label: 'Weather', icon: 'sun', onPress: () => navigation.navigate('RouteWeather') },
+    // Offline maps — download any area of the world for use with no signal (no watch needed).
+    { id: 'offlinemaps', label: 'Offline maps', icon: 'backup', onPress: () => navigation.navigate('OfflineMaps') },
     ...(!connected ? [] : deviceType === 'garmin'
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
@@ -918,7 +920,12 @@ export default function HomeScreen() {
           : t.homeNoDeviceTitle;
         const sub = phase === 'searching' ? t.homeTagline
           : phase === 'connecting' ? (bleAttempt ? t.homeBleReadyMsg : '')
-          : phase === 'connect-error' ? '' : t.homeNoDeviceSub;
+          // connect-error: the title already carries the cause. On iOS add an actionable sub
+          // (turn BT on / re-trigger Sync + Retry) since that's the common BLE dead-end there.
+          : phase === 'connect-error' ? (Platform.OS === 'ios' ? t.homeBleErrorSubIos : '')
+          // iOS: no USB, so the default "Plug it in via USB…" sub is wrong. Use the BLE-only
+          // wording, which also tells USB-only Ambit1/2 owners why their watch won't appear.
+          : Platform.OS === 'ios' ? t.homeNoDeviceSubIos : t.homeNoDeviceSub;
         return (
           <Card style={[roomy ? styles.deviceCardRoomyFull : styles.deviceCardCol, styles.deviceCardInner]}>
             <Text style={[styles.deviceName, v3TextStyle]}>{title}</Text>

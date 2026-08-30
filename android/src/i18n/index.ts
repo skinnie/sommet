@@ -96,7 +96,14 @@ const fr = {
   homeNoDeviceTitle:
     "Aucun appareil détecté. Vérifiez le câble et l'appareil, ou utilisez l'app sans appareil.",
   homeNoDeviceSub: 'Branchez-la en USB, ou recherchez-la en Bluetooth ci-dessous.',
+  // iOS n'a pas d'USB : on ne propose que le Bluetooth, et on explique que les Ambit1/Ambit2
+  // (USB uniquement) ne peuvent pas se connecter ici, sinon leur échec de scan BLE est muet.
+  homeNoDeviceSubIos:
+    'Associez votre Ambit3, Traverse ou Kailash en Bluetooth ci-dessous. Les Ambit1 et Ambit2 ne se synchronisent qu’en USB — utilisez l’app de bureau ou Android pour ces montres.',
   homeConnectingAmbit: 'Connexion à la montre…',
+  // iOS : sous le message d'erreur de connexion BLE (le titre porte déjà la cause, ex.
+  // « Bluetooth désactivé »), une consigne d'action valable pour toutes les causes.
+  homeBleErrorSubIos: 'Vérifiez que le Bluetooth est activé, lancez la synchro sur votre montre, puis appuyez sur Réessayer.',
   homeConnectRetryBtn: 'Réessayer',
   homeBleConnectBtn: 'Associer en Bluetooth',
   homeBleConnectWatchBtn: (name: string) => `Connecter ${name} en Bluetooth`,
@@ -915,7 +922,14 @@ const en: typeof fr = {
   homeNoDeviceTitle:
     'No device detected, please check your cable and device or use app without it.',
   homeNoDeviceSub: 'Plug it in via USB, or search for it over Bluetooth below.',
+  // iOS has no USB, so offer only Bluetooth and spell out that the USB-only Ambit1/Ambit2
+  // can't connect here — otherwise their BLE scan just times out with no explanation.
+  homeNoDeviceSubIos:
+    'Pair your Ambit3, Traverse or Kailash over Bluetooth below. Ambit1 and Ambit2 sync only by USB cable — use the desktop or Android app for those watches.',
   homeConnectingAmbit: 'Connecting to watch…',
+  // iOS: shown under a BLE connect error (the title already carries the cause, e.g.
+  // "Bluetooth is off or unavailable") — an action that's right for every cause.
+  homeBleErrorSubIos: 'Check that Bluetooth is on, trigger Sync on your watch, then tap Retry.',
   homeConnectRetryBtn: 'Retry',
   homeBleConnectBtn: 'Pair via Bluetooth',
   homeBleConnectWatchBtn: (name: string) => `Connect ${name} via Bluetooth`,
