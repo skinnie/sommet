@@ -6,7 +6,8 @@ import { isAmbit12 } from './AmbitSettingsService';
 import { parseRouteGpx, nearestPointIndex, RoutePoint } from './RouteGpxParser';
 import { simplifyRoute } from './RouteSimplify';
 import {
-  decodeNavigation, navigationToGpx, WatchNavigation, WatchRoute, WatchWaypoint,
+  decodeNavigation, navigationToGpx, navHeaderReadLen, navUsedSizes,
+  WatchNavigation, WatchRoute, WatchWaypoint,
 } from './RouteReader';
 import { readNavBases } from './MemoryMap';
 
@@ -300,9 +301,19 @@ export async function readOnWatchNavigation(): Promise<WatchNavigation> {
     } catch { /* not legacy, or detection failed - fall through to the SBEM path */ }
 
     const bases = await readNavBases();
+    // Size the reads down first (André, 2026-08-30 "routes take ~1min"): the routes region is
+    // ~130 KB allocated but only a few KB used, and over BLE every extra KB is many round trips.
+    // Read each region's small header, compute the USED length, then read only that. navUsedSizes
+    // falls back to the full size on any parse hiccup, so this never truncates real data.
+    const { waypointHeaderLen, routeHeaderLen } = navHeaderReadLen();
+    const [wHead, rHead] = await Promise.all([
+      readRegion(bases.waypointBase, Math.min(bases.waypointSize, waypointHeaderLen)),
+      readRegion(bases.routeBase, Math.min(bases.routeSize, routeHeaderLen)),
+    ]);
+    const { waypointUsed, routeUsed } = navUsedSizes(wHead, rHead, bases.waypointSize, bases.routeSize);
     const [waypointsB64, routesB64] = await Promise.all([
-      readRegion(bases.waypointBase, bases.waypointSize),
-      readRegion(bases.routeBase, bases.routeSize),
+      readRegion(bases.waypointBase, waypointUsed),
+      readRegion(bases.routeBase, routeUsed),
     ]);
     const data = decodeNavigation(waypointsB64, routesB64);
     await AsyncStorage.setItem(NAV_CACHE_KEY, JSON.stringify(data)).catch(() => {});

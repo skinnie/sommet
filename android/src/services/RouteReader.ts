@@ -88,6 +88,49 @@ export interface WatchNavigation {
 
 export { AMBIT3_WAYPOINT_BASE, AMBIT3_WAYPOINT_REGION_SIZE, AMBIT3_ROUTE_BASE, AMBIT3_ROUTE_REGION_SIZE };
 
+// How many header bytes to read from each region to size the real read down. For routes this is
+// the whole header+descriptor block (up to the points), so route/point counts are all known.
+export function navHeaderReadLen(): { waypointHeaderLen: number; routeHeaderLen: number } {
+  return { waypointHeaderLen: 4, routeHeaderLen: ROUTE_POINTS_OFFSET };
+}
+
+// Given each region's header bytes (base64), work out how many bytes are actually USED, so the
+// caller reads only that instead of the full allocated region. The routes region is ~130 KB
+// allocated but a handful of routes use a few KB — reading it all over BLE is the ~1-min stall.
+// Falls back to the full size if the magic/header doesn't parse, so a bad guess never truncates
+// real data. (2026-08-30.)
+export function navUsedSizes(
+  waypointHeaderB64: string, routeHeaderB64: string,
+  waypointFull: number, routeFull: number,
+): { waypointUsed: number; routeUsed: number } {
+  let waypointUsed = waypointFull;
+  let routeUsed = routeFull;
+  try {
+    const w = base64ToBytes(waypointHeaderB64);
+    if (w.length >= 4 && readU16(w, 0) === WAYPOINT_HEADER_MAGIC) {
+      const n = readU16(w, 2);
+      waypointUsed = Math.min(waypointFull, WAYPOINT_DESC_OFFSET + 52 * n + 4);
+    }
+  } catch { /* keep full */ }
+  try {
+    const r = base64ToBytes(routeHeaderB64);
+    if (r.length >= 6 && readU16(r, 0) === ROUTE_HEADER_MAGIC) {
+      const count = readU16(r, 4);
+      let maxIdx = 0;
+      let ok = true;
+      for (let i = 0; i < count; i++) {
+        const doff = ROUTE_DESC_OFFSET + 52 * i;
+        if (doff + 22 > r.length) { ok = false; break; }   // header shorter than expected → full
+        const startIndex = readU32(r, doff + 16);
+        const pointCount = readU16(r, doff + 20);
+        maxIdx = Math.max(maxIdx, startIndex + pointCount);
+      }
+      if (ok) routeUsed = Math.min(routeFull, ROUTE_POINTS_OFFSET + 12 * maxIdx + 12);
+    }
+  } catch { /* keep full */ }
+  return { waypointUsed, routeUsed };
+}
+
 export function decodeNavigation(waypointsB64: string, routesB64: string): WatchNavigation {
   const wRegion = base64ToBytes(waypointsB64);
   const rRegion = base64ToBytes(routesB64);

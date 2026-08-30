@@ -3,6 +3,17 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.24 (2026-08-30)
+
+### Faster route read over BLE
+
+Reading routes off the watch took ~1 min because it pulled the whole ~130 KB allocated routes
+region even when only a few routes/points were stored — and over BLE every KB is many round
+trips. Now it reads each region's small header first, computes the actually-USED length from the
+route/point counts (points are 12 bytes, indexed by startIndex), and reads only that. Falls back
+to the full region if the header doesn't parse, so it never truncates real data. `RouteReader`
+gains `navHeaderReadLen()` + `navUsedSizes()`.
+
 ## 0.2.23 (2026-08-30)
 
 ### Fix: activity order after a bulk re-import
