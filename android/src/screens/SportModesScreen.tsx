@@ -7,6 +7,7 @@ import {
   StyleSheet, Alert, ScrollView, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
 import { ExerciseMode, FIELD_TYPES, fieldTypeLabel, builtInScreenName } from '../services/CustomModesReader';
+import { clearCustomModesCache } from '../services/CustomModesCache';
 import { writeLegacySportMode, LegacyModePatch } from '../services/AmbitLegacySportModes';
 import {
   readCustomModes, renameCustomMode, writeCustomModeField, writeCustomModeDisplayField,
@@ -155,7 +156,12 @@ export default function SportModesScreen() {
   // Auto-read on open - this screen is only reachable from Home while a watch is connected
   // (USB or BLE, `overBle` says which), so read the modes automatically instead of making the
   // user tap a button (André, 2026-08-18: automatic on connect, either transport, both apps).
-  useEffect(() => { handleRead(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Read on open, and drop the in-session CustomModes cache on leave so the next visit reads
+  // fresh (the cache only exists to spare edits a redundant 12KB re-read while this screen is up).
+  useEffect(() => {
+    handleRead();
+    return () => { clearCustomModesCache(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run one structural edit (create/delete/multisport), then refresh both views. The error, if
   // any, is captured from the state callback (async state can't be read back after the await).

@@ -1,5 +1,6 @@
 import { connect, disconnect, getDeviceInfo, readCustomModesRaw } from '../native/AmbitUsbModule';
 import { base64ToBytes } from './Base64';
+import { setCustomModesCache } from './CustomModesCache';
 import { decode, ExerciseMode } from './CustomModesReader';
 import { isAmbit12 } from './AmbitSettingsService';
 import { readLegacySportModes, LegacyMode } from './AmbitLegacySportModes';
@@ -86,6 +87,7 @@ export async function readCustomModes(
       }
     }
     const bytes = base64ToBytes(await readCustomModesRaw());
+    setCustomModesCache(bytes);   // seed the cache so edits don't re-read the 12KB region
     const decoded = decode(bytes, maxUserDisplays);
     onState({ phase: 'done', modes: decoded.exerciseModes });
   } catch (e: any) {

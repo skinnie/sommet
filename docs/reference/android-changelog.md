@@ -3,6 +3,17 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.25 (2026-08-30)
+
+### Snappier sport-mode edits
+
+Each sport-mode edit (rename, autolap, HR, pods…) re-read the whole 12 KB CustomModes region
+before its write, even though the screen had just read it. Added an in-session region cache
+(`CustomModesCache.ts`) that the Sport Modes read seeds and every edit reuses as its "before",
+updating it after each write — so an edit is now ~one write instead of read-then-write over BLE.
+The cache is dropped when you leave the screen, so the next visit reads fresh. (The post-write
+verify re-read is kept for safety.)
+
 ## 0.2.24 (2026-08-30)
 
 ### Faster route read over BLE

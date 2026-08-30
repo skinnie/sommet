@@ -1,4 +1,16 @@
 import { readCustomModesRaw, writeCustomModesRaw } from '../native/AmbitUsbModule';
+import { getCustomModesCache, setCustomModesCache } from './CustomModesCache';
+
+// The current CustomModes region — from the in-session cache the Sport Modes screen seeded on
+// read, or a fresh read if the cache is cold. Lets an edit skip re-reading the 12KB region it
+// already has, cutting each edit from ~2 reads + a write to ~1 read + a write over BLE.
+async function currentRegion(): Promise<Uint8Array> {
+  const cached = getCustomModesCache();
+  if (cached) return new Uint8Array(cached);
+  const bytes = base64ToBytes(await readCustomModesRaw());
+  setCustomModesCache(bytes);
+  return bytes;
+}
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import {
   readTag, fieldTypeName, FIELD_TYPE_VALUES, NAME_FIELD_WIDTH, SETTING_FIELD_OFFSETS,
@@ -280,7 +292,7 @@ export async function renameMode(fromName: string, toName: string): Promise<Rena
       error: `"${toName}" is ${nameBytes.length + 1} bytes encoded, doesn't fit in the ${NAME_FIELD_WIDTH}-byte field.` };
   }
 
-  const before = base64ToBytes(await readCustomModesRaw());
+  const before = await currentRegion();
   const offsets = findNameOffsets(before, fromName);
   if (offsets.length === 0) {
     return { ok: false, from: fromName, to: toName, offsets: [], bytesChanged: 0,
@@ -294,6 +306,7 @@ export async function renameMode(fromName: string, toName: string): Promise<Rena
   const bytesChanged = countDiff(before, modified);
 
   await writeCustomModesRaw(bytesToBase64(modified));
+  setCustomModesCache(modified);   // keep the cache current so the next edit doesn't re-read
   const matches = await reReadMatches(modified);
 
   return { ok: matches, from: fromName, to: toName, offsets, bytesChanged,
@@ -322,7 +335,7 @@ export async function writeField(modeName: string, fields: Record<string, number
     return { ok: false, mode: modeName, fields: {}, bytesChanged: 0, error: 'no fields given' };
   }
 
-  const before = base64ToBytes(await readCustomModesRaw());
+  const before = await currentRegion();
   const base = findSettingsBase(before, modeName);
   if (base === null) {
     return { ok: false, mode: modeName, fields: {}, bytesChanged: 0,
@@ -341,6 +354,7 @@ export async function writeField(modeName: string, fields: Record<string, number
   const bytesChanged = countDiff(before, modified);
 
   await writeCustomModesRaw(bytesToBase64(modified));
+  setCustomModesCache(modified);   // keep the cache current so the next edit doesn't re-read
   const matches = await reReadMatches(modified);
 
   return { ok: matches, mode: modeName, fields: changed, bytesChanged,
@@ -387,7 +401,7 @@ export async function writeDisplayField(
       error: 'not a known field type name and not a valid integer.' };
   }
 
-  const before = base64ToBytes(await readCustomModesRaw());
+  const before = await currentRegion();
   const located = findFieldSettingOffset(before, modeName, displayIndex, fieldIndex);
   if (!located) {
     return { ok: false, mode: modeName, display: displayIndex, field: fieldIndex, ...blank,
@@ -404,6 +418,7 @@ export async function writeDisplayField(
   modified[offset + 3] = (finalType >> 8) & 0xFF;
 
   await writeCustomModesRaw(bytesToBase64(modified));
+  setCustomModesCache(modified);   // keep the cache current so the next edit doesn't re-read
   const matches = await reReadMatches(modified);
 
   return {
