@@ -519,6 +519,19 @@ int libambit_ble_handshake_device_info(ambit_object_t *object, ambit_device_info
     jni_ble_flush_rx_stash();
 #else
     ambit_ble_flush_rx_stash();
+
+    /* iOS: THE PHONE SPEAKS FIRST. Byte-exact from the working Suunto-app capture
+     * (Downloads/*.pklg, decoded 2026-08-30 with tools/ble_pklg.py): right after the watch
+     * subscribes, the app sends 0x0000 device_info (flags 0x01, connId 0, pktNum 0, payload
+     * {82 06 08 00}) and ONLY THEN does the watch reply 0x0002 hello. The old "watch drives /
+     * pushes 0x1201 first" model (below) is what the handshake waited for — but a bonded Ambit3
+     * subscribes then sits silent waiting for THIS opener, so both sides hung until the 20 s
+     * timeout (the whole iOS "subscribes then nothing" failure). Sending it kicks the exchange.
+     * Guarded to non-Android so Android's separately-proven path is unchanged. */
+    {
+        static const uint8_t hello_req[4] = { 0x82, 0x06, 0x08, 0x00 };
+        ble_send_frame(ctx, 0x0000, 0x01, 0x0000, 0x0000, hello_req, sizeof(hello_req));
+    }
 #endif
 
     struct timespec deadline;

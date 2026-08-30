@@ -223,14 +223,23 @@ final class AmbitBleModule: RCTEventEmitter {
     let service = CBMutableService(type: kNspServiceUUID, primary: true)
     // notify char: iOS manages the CCCD automatically for a .notify characteristic;
     // value must be nil for a dynamic (notify/write) characteristic.
+    // ENCRYPTION REQUIRED (2026-08-30, from the working Suunto-app sniff, Downloads/*.pklg
+    // decoded via tools/ble_pklg.py + tshark): in the real capture the watch's first
+    // write/subscribe to these characteristics is rejected "insufficient encryption", which
+    // triggers a full SMP LE-Secure-Connections pairing/bond — and ONLY AFTER the bond does the
+    // watch run NSP (its 0x1201 opener, hello, …). With plain .readable/.writeable the watch
+    // subscribes with no reject, no pairing is triggered, no bond forms, and the Ambit3 firmware
+    // refuses to run NSP over the unsecured link — it subscribes then goes silent (0 frames),
+    // exactly the failure we traced. Requiring encryption forces the same bond the Suunto app
+    // gets. (MTU is 20 in that working capture too, so it was never the MTU.)
     notifyChar = CBMutableCharacteristic(type: kNspNotifyCharUUID,
-                                         properties: [.notify],
+                                         properties: [.notifyEncryptionRequired],
                                          value: nil,
-                                         permissions: [.readable])
+                                         permissions: [.readEncryptionRequired])
     let writeChar = CBMutableCharacteristic(type: kNspWriteCharUUID,
                                             properties: [.writeWithoutResponse, .write],
                                             value: nil,
-                                            permissions: [.writeable])
+                                            permissions: [.writeEncryptionRequired])
     service.characteristics = [notifyChar, writeChar]
     peripheralMgr.add(service)
     serviceAdded = true
@@ -391,9 +400,16 @@ extension AmbitBleModule: CBPeripheralManagerDelegate {
   // native device-info handshake here, exactly once.
   func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
                          didSubscribeTo characteristic: CBCharacteristic) {
+    BLE_LOG("didSubscribeTo char=\(characteristic.uuid) central=\(central.identifier.uuidString) mtu=\(central.maximumUpdateValueLength)")
     guard characteristic.uuid == kNspNotifyCharUUID else { return }
     BLE_LOG("watch SUBSCRIBED to NSP notify (mtu=\(central.maximumUpdateValueLength)) — starting handshake")
     startHandshake(for: central)
+  }
+
+  // Log any read the watch makes against our server (service/characteristic discovery reads).
+  func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+    BLE_LOG("didReceiveRead char=\(request.characteristic.uuid) offset=\(request.offset)")
+    peripheral.respond(to: request, withResult: .success)
   }
 
   func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
@@ -404,6 +420,8 @@ extension AmbitBleModule: CBPeripheralManagerDelegate {
   // Watch -> phone NSP data: writes to c6339440. Feed each into the framing layer.
   func peripheralManager(_ peripheral: CBPeripheralManager,
                          didReceiveWrite requests: [CBATTRequest]) {
+    // Unconditional: catch a write to ANY characteristic (incl. one we didn't expect).
+    BLE_LOG("didReceiveWrite: \(requests.count) req(s) — uuids=\(requests.map { $0.characteristic.uuid.uuidString }.joined(separator: ","))")
     for req in requests where req.characteristic.uuid == kNspWriteCharUUID {
       if let value = req.value, !value.isEmpty {
         BLE_LOG("watch->phone write: \(value.count) bytes")

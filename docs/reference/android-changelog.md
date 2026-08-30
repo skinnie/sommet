@@ -3,6 +3,25 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.19 (2026-08-30)
+
+### iOS: fix BLE sync with real Ambit3 hardware
+
+The iOS watch connection would pair and subscribe but then hang and fail the device-info
+handshake ("NSP device handshake failed"). Root-caused from the Suunto-app packet capture
+(`tools/ble_pklg.py` + tshark): the NSP bootstrap is **phone-first**, not watch-driven — right
+after the watch subscribes, the app must send `0x0000` device_info (payload `82 06 08 00`), and
+only then does the watch reply its `0x0002` hello. Our handshake was waiting for the watch to
+speak first, so both sides sat silent until timeout.
+
+- `protocol_ble.c`: send the `0x0000` opener proactively at handshake start (iOS only; Android's
+  separately-proven path is unchanged).
+- `AmbitBleModule.swift`: the NSP notify/write characteristics now **require encryption**, so the
+  watch pairs/bonds (LE Secure Connections) exactly as it does with the Suunto app — the capture
+  shows the watch won't run NSP over an unsecured link. Added GATT read/write tracing.
+
+Confirmed connecting on a real Ambit3 over BLE on iPhone.
+
 ## 0.2.18 (2026-08-30)
 
 ### Offline maps polish + POIs on more maps
