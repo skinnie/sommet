@@ -80,7 +80,8 @@ void TileCacheService::setDownloading(bool value)
     emit downloadingChanged();
 }
 
-void TileCacheService::downloadRegion(const QVariantList &points, const QString &provider)
+void TileCacheService::downloadRegion(const QVariantList &points, const QString &provider,
+                                      const QVariantList &zooms, double marginDeg)
 {
     if (m_downloading || points.isEmpty())
         return;
@@ -95,13 +96,23 @@ void TileCacheService::downloadRegion(const QVariantList &points, const QString 
         minLon = std::min(minLon, lon);
         maxLon = std::max(maxLon, lon);
     }
-    minLat -= kMarginDegrees;
-    maxLat += kMarginDegrees;
-    minLon -= kMarginDegrees;
-    maxLon += kMarginDegrees;
+    minLat -= marginDeg;
+    maxLat += marginDeg;
+    minLon -= marginDeg;
+    maxLon += marginDeg;
+
+    // Caller-supplied zoom levels (the offline-maps page's detail presets), or the shared default.
+    QList<int> levels;
+    for (const QVariant &z : zooms) {
+        const int zi = z.toInt();
+        if (zi >= 0 && zi <= 19)
+            levels.append(zi);
+    }
+    if (levels.isEmpty())
+        levels = kOfflineZooms;
 
     QVector<QUrl> urls;
-    for (int z : kOfflineZooms) {
+    for (int z : levels) {
         const int minTx = lonToTileX(minLon, z);
         const int maxTx = lonToTileX(maxLon, z);
         // Latitude inverts in tile-Y (north = smaller Y) - maxLat is the smaller tileY.
@@ -159,6 +170,45 @@ void TileCacheService::downloadRegion(const QVariantList &points, const QString 
             }
         });
     }
+}
+
+int TileCacheService::countRegionTiles(const QVariantList &points, const QVariantList &zooms,
+                                       double marginDeg) const
+{
+    if (points.isEmpty())
+        return 0;
+
+    double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    for (const QVariant &pointVar : points) {
+        const QVariantMap point = pointVar.toMap();
+        const double lat = point.value(QStringLiteral("lat")).toDouble();
+        const double lon = point.value(QStringLiteral("lon")).toDouble();
+        minLat = std::min(minLat, lat);
+        maxLat = std::max(maxLat, lat);
+        minLon = std::min(minLon, lon);
+        maxLon = std::max(maxLon, lon);
+    }
+    minLat -= marginDeg; maxLat += marginDeg;
+    minLon -= marginDeg; maxLon += marginDeg;
+
+    QList<int> levels;
+    for (const QVariant &z : zooms) {
+        const int zi = z.toInt();
+        if (zi >= 0 && zi <= 19)
+            levels.append(zi);
+    }
+    if (levels.isEmpty())
+        levels = kOfflineZooms;
+
+    int total = 0;
+    for (int z : levels) {
+        const int minTx = lonToTileX(minLon, z);
+        const int maxTx = lonToTileX(maxLon, z);
+        const int minTy = latToTileY(maxLat, z);
+        const int maxTy = latToTileY(minLat, z);
+        total += (maxTx - minTx + 1) * (maxTy - minTy + 1);
+    }
+    return total;
 }
 
 void TileCacheService::cancelDownload()

@@ -198,6 +198,7 @@ qt_add_qml_module(ambitapp
         qml/pages/RoutesPage.qml
         qml/pages/PlanRoutePage.qml
         qml/pages/PoisPage.qml
+        qml/pages/OfflineMapsPage.qml
         qml/pages/BackupPage.qml
         qml/pages/FirmwarePage.qml
         qml/pages/WatchSettingsPage.qml

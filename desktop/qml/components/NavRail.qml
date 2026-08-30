@@ -139,6 +139,15 @@ Rectangle {
                 selected: root.currentPage === "pois"
                 onClicked: root.pageSelected("pois")
             }
+            // Offline maps (André, 2026-08-30): download any area of the world for use with no
+            // signal. Not device-gated — reachable any time, like Totals.
+            NavItem {
+                width: parent.width
+                glyph: Icons.cloudDownload
+                label: qsTr("Offline maps")
+                selected: root.currentPage === "offlineMaps"
+                onClicked: root.pageSelected("offlineMaps")
+            }
             // Totals - same activity data, summed; no device support to gate on, shown always.
             NavItem {
                 width: parent.width

@@ -36,6 +36,7 @@ ApplicationWindow {
         routes: "pages/RoutesPage.qml",
         planRoute: "pages/PlanRoutePage.qml",
         pois: "pages/PoisPage.qml",
+        offlineMaps: "pages/OfflineMapsPage.qml",
         backup: "pages/BackupPage.qml",
         firmware: "pages/FirmwarePage.qml",
         watchSettings: "pages/WatchSettingsPage.qml",

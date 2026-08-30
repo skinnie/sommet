@@ -3,6 +3,29 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.17 (2026-08-30)
+
+### Offline maps — download any area of the world (iOS + Android + desktop)
+
+OruxMaps-style offline maps: pick **any** area anywhere (be in France, download Utah), see the
+size, download it, and use the map with no signal — plus a saved-areas manager. Same feature on
+iPhone, iPad, Android and the desktop app.
+
+- **Bundled the map engine (Leaflet 1.9.4) into the app.** Previously the mobile maps loaded
+  Leaflet from an Android-only `file:///android_asset/leaflet` path whose files weren't even in
+  the repo — so the activity map / POI picker were broken as vendored and **iOS had no map at
+  all**. Leaflet is now inlined (`leafletInline.ts`) and every map WebView loads from a
+  caches-dir `file://` page with per-platform read access — so **maps now render on iOS/iPadOS**
+  and read cached tiles off disk for offline use. (Leaflet credited; BSD-2-Clause.)
+- **Offline maps screen** (Home → Offline maps): pan/zoom anywhere, a box marks exactly what
+  saves, pick a **Detail** level (zoom presets), see a live **"N tiles · ~X MB"** estimate,
+  download with progress, and manage **saved areas** (size + delete; delete frees only tiles no
+  other saved area still needs). Downloaded areas render with **no signal**.
+- **POI pins on the activity map** (the watch's cached waypoints, shown offline).
+- **Desktop**: a new **Offline maps** page in the nav rail — search or pan to any area, frame it,
+  pick detail, see the size, download. The C++ tile downloader gained optional zoom levels + a
+  tile-count estimate; the existing route-area "Download for offline" button is unchanged.
+
 ## 0.2.16 (2026-08-30)
 
 ### Weather along a route — map + GPX import (iOS + Android)
