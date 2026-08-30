@@ -25,12 +25,14 @@ WT_ROOT="$(dirname "$PRIMARY")/ambit-wt"
 
 # Gitignored dirs a fresh checkout lacks but needs to actually build/run. Symlinked, not
 # copied, from the main checkout. Add to this list if a new runtime dir appears.
+# (Note: assets/ itself is partly tracked so git recreates it; its heavy gitignored subdirs -
+# APK/Firmware/manuals/... - are reference-only, not needed to run. Symlink one by hand if a
+# task needs it, e.g.  ln -s "$PRIMARY/assets/Firmware" assets/Firmware  .)
 LINK_PATHS=(
   ".venv"
   "android/node_modules"
   "android/android/app/src/main/assets/leaflet"
   "desktop/assets/map"
-  "assets"
 )
 
 link_runtime_dirs() {

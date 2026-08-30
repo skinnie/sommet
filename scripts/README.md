@@ -12,9 +12,10 @@ scripts/worktree.sh new my-task        # folder ../ambit-wt/my-task, branch my-t
 cd ../ambit-wt/my-task                  # work here
 ```
 
-The heavy gitignored folders (`node_modules` ~1.5G, `.venv`, map tiles, `assets/`) are
+The heavy gitignored runtime folders (`node_modules` ~1.5G, `.venv`, map tiles) are
 **symlinked** from the main checkout, so the new worktree runs immediately — no reinstall, no
-duplication.
+duplication. (Big reference data under `assets/` — Firmware/APK/manuals — isn't linked by
+default since the app doesn't need it to run; symlink one by hand if a task does.)
 
 ## Everyday flow
 
