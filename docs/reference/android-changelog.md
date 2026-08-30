@@ -3,6 +3,62 @@
 All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
+## 0.2.17 (2026-08-30)
+
+### Offline maps — download any area of the world (iOS + Android + desktop)
+
+OruxMaps-style offline maps: pick **any** area anywhere (be in France, download Utah), see the
+size, download it, and use the map with no signal — plus a saved-areas manager. Same feature on
+iPhone, iPad, Android and the desktop app.
+
+- **Bundled the map engine (Leaflet 1.9.4) into the app.** Previously the mobile maps loaded
+  Leaflet from an Android-only `file:///android_asset/leaflet` path whose files weren't even in
+  the repo — so the activity map / POI picker were broken as vendored and **iOS had no map at
+  all**. Leaflet is now inlined (`leafletInline.ts`) and every map WebView loads from a
+  caches-dir `file://` page with per-platform read access — so **maps now render on iOS/iPadOS**
+  and read cached tiles off disk for offline use. (Leaflet credited; BSD-2-Clause.)
+- **Offline maps screen** (Home → Offline maps): pan/zoom anywhere, a box marks exactly what
+  saves, pick a **Detail** level (zoom presets), see a live **"N tiles · ~X MB"** estimate,
+  download with progress, and manage **saved areas** (size + delete; delete frees only tiles no
+  other saved area still needs). Downloaded areas render with **no signal**.
+- **POI pins on the activity map** (the watch's cached waypoints, shown offline).
+- **Desktop**: a new **Offline maps** page in the nav rail — search or pan to any area, frame it,
+  pick detail, see the size, download. The C++ tile downloader gained optional zoom levels + a
+  tile-count estimate; the existing route-area "Download for offline" button is unchanged.
+
+## 0.2.16 (2026-08-30)
+
+### Weather along a route — map + GPX import (iOS + Android)
+
+- **Map of the coloured track.** The route now renders on a real Leaflet map (OSM tiles),
+  drawn as one polyline per temperature run — the same temperature palette as the elevation
+  profile — with per-point **wind arrows** (tinted head/cross/tailwind, pointing where the wind
+  blows) and ● start / ● finish markers, auto-fit to the route. Leaflet and tiles load over the
+  network, which this screen already needs for the forecast (no offline dependency added).
+- **Load a GPX.** A **Load GPX** button imports a route/track file to plan against, replacing
+  the demo route. On iOS this is a new native `UIDocumentPicker` implementation of
+  `pickGpxFile` (`asCopy`, returns a real on-disk path the JS layer reads with RNFS) — the same
+  entry point route upload already uses; cancel is a silent no-op. `<rte>` and `<trk>` GPX are
+  both accepted (via the existing route parser).
+
+## 0.2.15 (2026-08-29)
+
+### New, stable (iOS + Android)
+
+- **Weather along a route.** The weather/weather-analysis half of the desktop Plan page, ported
+  to mobile. Give a start time and pace; the app resamples the route by ETA, fetches the live
+  Open-Meteo hourly forecast at each point, and shows: a plain-language **verdict** (e.g. "bring
+  a headlamp — you finish after sunset"), summary chips (finish time, temp range, rain, wind),
+  a **temperature-coloured elevation profile** with rain bars and a sunset marker, and a full
+  **sun/moon panel** (sunrise/sunset, the three twilights, solar noon, moonrise/set/transit,
+  phase + illumination). Wind is classified head/cross/tailwind relative to travel bearing.
+  Reached from Home → **Weather**; ships with a demo route so it works with no watch and no GPX.
+  - The two computation cores are **faithful ports verified against their Python references**:
+    `src/services/Astro.ts` (byte-identical to `tools/astro.py`, Schlyter sun/moon formulae) and
+    `src/services/WeatherRoute.ts` (matches `tools/weather_route.py`'s self-test).
+  - Offline routing is intentionally **not** on mobile (no on-device engine on iOS); only the
+    weather/analysis portion of the Plan page is delivered here.
+
 ## 0.1.1 (2026-08-14)
 
 Desktop→Android feature parity, plus an opt-in **Experimental** batch (App Zone, Intervals,

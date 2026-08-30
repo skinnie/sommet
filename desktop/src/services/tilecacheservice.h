@@ -43,7 +43,14 @@ public:
     // points: [{lat, lon}, ...] - the same trackPoints/markers a MapView is already showing
     // (MapWindow.qml passes its own union of both, see MapView.qml's _trackBounds). Ignored
     // while a download is already running - matches Android's own re-entrancy guard.
-    Q_INVOKABLE void downloadRegion(const QVariantList &points, const QString &provider);
+    // zooms: optional list of zoom levels (defaults to the shared z13-16 set); marginDeg:
+    // padding added around the points' bbox (0 for a hand-picked rectangle, ~0.02 for a route).
+    // Both defaulted so the existing 2-arg route-download call is unchanged.
+    Q_INVOKABLE void downloadRegion(const QVariantList &points, const QString &provider,
+                                    const QVariantList &zooms = {}, double marginDeg = 0.02);
+    // Tile count for a region — for the offline-maps page's "N tiles / ~X MB" estimate.
+    Q_INVOKABLE int countRegionTiles(const QVariantList &points, const QVariantList &zooms = {},
+                                     double marginDeg = 0.02) const;
     Q_INVOKABLE void cancelDownload();
     Q_INVOKABLE void refreshCacheSize();
     Q_INVOKABLE void clearCache();

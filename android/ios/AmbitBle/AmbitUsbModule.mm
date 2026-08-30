@@ -19,6 +19,8 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include <string>
 #include <sstream>
@@ -191,6 +193,50 @@ static int log_skip_callback(void *ud, ambit_log_header_t *header) {
     if (g_known_dates.empty()) return 1;
     return g_known_dates.count(formatLogId(header)) ? 0 : 1;
 }
+
+// ─── GPX document picker (iOS) ──────────────────────────────────────────────
+// iOS has no SAF; bring a route/track GPX in through UIDocumentPicker instead.
+// asCopy:YES hands us a readable temporary copy — we move it to a stable temp
+// path and resolve that path, so the JS layer reads it with RNFS exactly like
+// Android's pickGpxFile() (route upload + the weather-along-route planner).
+// Cancellation rejects with GPX_PICK_CANCELLED, which NavigationService maps to
+// a silent no-op (matching Android).
+API_AVAILABLE(ios(14.0))
+@interface SommetGpxPicker : NSObject <UIDocumentPickerDelegate>
+@property (nonatomic, copy) RCTPromiseResolveBlock resolve;
+@property (nonatomic, copy) RCTPromiseRejectBlock reject;
+@end
+
+// Keep the delegate alive while the (non-retaining picker.delegate) sheet is up.
+static id gActiveGpxPicker;
+
+@implementation SommetGpxPicker
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *src = urls.firstObject;
+    RCTPromiseResolveBlock res = self.resolve;
+    RCTPromiseRejectBlock rej = self.reject;
+    gActiveGpxPicker = nil;
+    if (!src) { if (rej) rej(@"GPX_PICK_FAILED", @"The picker returned no file", nil); return; }
+
+    BOOL scoped = [src startAccessingSecurityScopedResource];
+    NSString *name = src.lastPathComponent.length ? src.lastPathComponent : @"route.gpx";
+    NSURL *dest = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name]];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm removeItemAtURL:dest error:NULL];
+    NSError *err = nil;
+    BOOL ok = [fm copyItemAtURL:src toURL:dest error:&err];
+    if (scoped) [src stopAccessingSecurityScopedResource];
+
+    if (!ok) { if (rej) rej(@"GPX_PICK_FAILED", err.localizedDescription ?: @"Could not read the picked file", err); return; }
+    if (res) res(dest.path);
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    RCTPromiseRejectBlock rej = self.reject;
+    gActiveGpxPicker = nil;
+    if (rej) rej(@"GPX_PICK_CANCELLED", @"File selection cancelled", nil);
+}
+@end
 
 // ─── Module ───────────────────────────────────────────────────────────────────
 
@@ -463,7 +509,41 @@ RCT_EXPORT_METHOD(firmwarePreflight:(NSString *)path resolver:(RCTPromiseResolve
 RCT_EXPORT_METHOD(firmwareFlash:(NSString *)path commit:(BOOL)commit confirm:(BOOL)confirm resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"FIRMWARE_IOS_UNSUPPORTED", @"Firmware flashing is not available on iOS yet", nil); }
 
 // ── Stubs: Android file/SAF ops (need iOS UIDocument equivalents — TODO) ────
-RCT_EXPORT_METHOD(pickGpxFile:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"pickGpxFile needs an iOS document-picker implementation", nil); }
+RCT_EXPORT_METHOD(pickGpxFile:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    if (@available(iOS 14.0, *)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSMutableArray<UTType *> *types = [NSMutableArray array];
+            UTType *gpx = [UTType typeWithFilenameExtension:@"gpx"]; // GPX often isn't a known system UTI
+            if (gpx) [types addObject:gpx];
+            [types addObject:UTTypeXML];
+            [types addObject:UTTypeData];           // last-resort so any .gpx is still selectable
+            UIDocumentPickerViewController *picker =
+                [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
+            picker.allowsMultipleSelection = NO;
+            SommetGpxPicker *delegate = [SommetGpxPicker new];
+            delegate.resolve = resolve;
+            delegate.reject = reject;
+            picker.delegate = delegate;
+            gActiveGpxPicker = delegate;
+
+            // Present from the foreground scene's top-most view controller.
+            UIViewController *root = nil;
+            for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+                if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+                if (scene.activationState != UISceneActivationStateForegroundActive) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    if (w.isKeyWindow) { root = w.rootViewController; break; }
+                }
+                if (root) break;
+            }
+            while (root.presentedViewController) root = root.presentedViewController;
+            if (!root) { gActiveGpxPicker = nil; reject(@"GPX_PICK_FAILED", @"No view controller to present the picker", nil); return; }
+            [root presentViewController:picker animated:YES completion:nil];
+        });
+    } else {
+        reject(@"GPX_PICK_UNSUPPORTED", @"GPX import needs iOS 14 or newer", nil);
+    }
+}
 RCT_EXPORT_METHOD(shareFile:(NSString *)filePath mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"shareFile needs an iOS share-sheet implementation", nil); }
 RCT_EXPORT_METHOD(saveToDownloads:(NSString *)filePath fileName:(NSString *)fileName mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"saveToDownloads needs an iOS implementation", nil); }
 RCT_EXPORT_METHOD(saveFileAs:(NSString *)sourcePath suggestedName:(NSString *)suggestedName mimeType:(NSString *)mimeType resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { reject(@"NOT_IMPLEMENTED_IOS", @"saveFileAs needs an iOS document-picker implementation", nil); }

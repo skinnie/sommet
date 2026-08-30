@@ -37,6 +37,8 @@ import WeightScreen from './src/screens/WeightScreen';
 import HealthScreen from './src/screens/HealthScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import EmberScreen from './src/screens/EmberScreen';
+import RouteWeatherScreen from './src/screens/RouteWeatherScreen';
+import OfflineMapsScreen from './src/screens/OfflineMapsScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
@@ -94,6 +96,14 @@ export type RootStackParamList = {
   // Gear tracker (v3): bikes/shoes + components (parts) + service reminders, local-first and
   // mirrored two-way to intervals.icu. Derived from the local gear DB, no device needed.
   Gear: undefined;
+  // Weather along a route (2026-08-29, port of the desktop Plan page's Weather panel —
+  // weather_route.py + astro.py, both verified equal in TS). Sun/moon + Open-Meteo forecast at
+  // each point's ETA, temp-coloured profile + verdict. `route` optional (a demo route is used
+  // when none is passed); no watch needed.
+  RouteWeather: { route?: Array<{ lat: number; lon: number; ele?: number | null }>; name?: string } | undefined;
+  // Offline maps (2026-08-30): download any map area of the world (OruxMaps-style) for use with
+  // no signal, plus a saved-areas manager. Reachable any time, no device needed.
+  OfflineMaps: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -243,6 +253,16 @@ function AppShell() {
             name="Ember"
             component={EmberScreen}
             options={{ title: 'Ember' }}
+          />
+          <Stack.Screen
+            name="RouteWeather"
+            component={RouteWeatherScreen}
+            options={{ title: 'Weather along route' }}
+          />
+          <Stack.Screen
+            name="OfflineMaps"
+            component={OfflineMapsScreen}
+            options={{ title: 'Offline maps' }}
           />
           <Stack.Screen
             name="Calendar"

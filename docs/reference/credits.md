@@ -61,6 +61,11 @@ reverse-engineering here would have been possible, or would have taken far longe
 - **[OpenStreetMap](https://www.openstreetmap.org/copyright)** - © OpenStreetMap contributors
   (ODbL). The map views render OSM tiles.
 
+- **[Leaflet](https://leafletjs.com/)** - © Vladimir Agafonkin / CloudMade (BSD-2-Clause). The
+  interactive map engine behind the mobile map views; bundled inline (`android/src/services/
+  leafletInline.ts`, auto-generated from the pinned `leaflet` npm package) so maps render with
+  no network on iOS/iPadOS/Android.
+
 - **[Open-Meteo](https://open-meteo.com/)** - weather data (CC BY 4.0), for the weather card.
 
 - **[Google Material Symbols](https://github.com/google/material-design-icons)** - the icon
