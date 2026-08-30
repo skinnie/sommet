@@ -22,6 +22,28 @@ PageFlickable {
     // the shape of the feature is visible before their write paths land.
     property string mode: "mirror"          // "mirror" | "merge"
     property string direction: "AtoB"       // "AtoB" | "BtoA"
+    // Which categories to sync. Only ones both snapshotted watches actually support end up in
+    // effectiveCategories (below), which is what the plan/apply calls use.
+    property var selectedCategories: ["settings", "pois", "routes", "sportModes"]
+
+    function catSupported(slot, cat) {
+        return !!(slot && slot.categories && slot.categories[cat]
+                  && slot.categories[cat].supported === true);
+    }
+    function bothSupport(cat) {
+        return catSupported(root.slotA, cat) && catSupported(root.slotB, cat);
+    }
+    function toggleCategory(cat) {
+        var list = root.selectedCategories.slice();
+        var i = list.indexOf(cat);
+        if (i === -1)
+            list.push(cat);
+        else
+            list.splice(i, 1);
+        root.selectedCategories = list;
+    }
+    readonly property var effectiveCategories:
+        root.selectedCategories.filter(function (c) { return root.bothSupport(c); })
 
     readonly property var slotA: SyncService.slotA
     readonly property var slotB: SyncService.slotB
@@ -169,19 +191,25 @@ PageFlickable {
                         onClicked: root.direction = "BtoA"
                     }
                 }
-                // Categories. Settings is live; the rest are placeholders for now.
+                // Categories to sync. Settings + POIs are live (tap to toggle); Routes and
+                // Sport modes are placeholders until their write paths are wired in.
+                Text {
+                    text: qsTr("What to sync")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                }
                 Flow {
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    CategoryChip { label: qsTr("Settings"); on: true }
-                    CategoryChip { label: qsTr("POIs"); on: false }
-                    CategoryChip { label: qsTr("Routes"); on: false }
-                    CategoryChip { label: qsTr("Sport modes"); on: false }
+                    CategoryChip { cat: "settings"; label: qsTr("Settings") }
+                    CategoryChip { cat: "pois"; label: qsTr("POIs") }
+                    CategoryChip { cat: "routes"; label: qsTr("Routes") }
+                    CategoryChip { cat: "sportModes"; label: qsTr("Sport modes") }
                 }
                 RoundedButton {
                     text: SyncService.busy ? qsTr("Working…") : qsTr("Preview changes")
-                    enabled: !SyncService.busy
-                    onClicked: SyncService.buildPlan(root.mode, root.direction)
+                    enabled: !SyncService.busy && root.effectiveCategories.length > 0
+                    onClicked: SyncService.buildPlan(root.mode, root.direction, root.effectiveCategories)
                 }
             }
         }
@@ -196,70 +224,114 @@ PageFlickable {
                 spacing: Theme.spacingSmall
 
                 readonly property var plan: SyncService.plan
-                readonly property var settingsCat: plan && plan.categories && plan.categories.length > 0
-                                                    ? plan.categories[0] : null
-                readonly property var changes: settingsCat && settingsCat.changes ? settingsCat.changes : []
-                readonly property var skipped: settingsCat && settingsCat.skipped ? settingsCat.skipped : []
+                readonly property var cats: plan && plan.categories ? plan.categories : []
+                readonly property int changeCount: plan && plan.changeCount !== undefined ? plan.changeCount : 0
                 readonly property string targetName: plan && plan.target ? plan.target.displayName : ""
+                readonly property bool modelMismatch: plan && plan.modelMismatch === true
+
+                function catTitle(name) {
+                    if (name === "settings") return qsTr("Settings");
+                    if (name === "pois") return qsTr("POIs");
+                    if (name === "routes") return qsTr("Routes");
+                    if (name === "sportModes") return qsTr("Sport modes");
+                    return name;
+                }
+
+                // Different models: syncing is refused outright (sensors/hardware differ).
+                Text {
+                    visible: planCol.modelMismatch
+                    width: planCol.width
+                    wrapMode: Text.WordWrap
+                    font.bold: true
+                    color: Theme.error
+                    font.pixelSize: Theme.fontSizeHeading
+                    text: qsTr("Can't sync different models")
+                }
+                Text {
+                    visible: planCol.modelMismatch
+                    width: planCol.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: (planCol.plan && planCol.plan.modelMismatchText)
+                          ? planCol.plan.modelMismatchText : ""
+                }
 
                 Text {
+                    visible: !planCol.modelMismatch
                     width: planCol.width
                     wrapMode: Text.WordWrap
                     font.bold: true
                     color: Theme.text
                     font.pixelSize: Theme.fontSizeHeading
-                    text: planCol.changes.length === 0
+                    text: planCol.changeCount === 0
                         ? qsTr("Both watches already match")
                         : qsTr("%1 change%2 to write to %3")
-                            .arg(planCol.changes.length)
-                            .arg(planCol.changes.length === 1 ? "" : "s")
+                            .arg(planCol.changeCount)
+                            .arg(planCol.changeCount === 1 ? "" : "s")
                             .arg(planCol.targetName)
                 }
 
-                // One row per changed setting: label, from → to (human text).
+                // One section per category, each with its own changed rows.
                 Repeater {
-                    model: planCol.changes
-                    delegate: Rectangle {
+                    model: planCol.cats
+                    delegate: Column {
                         required property var modelData
                         width: planCol.width
-                        height: rowCol.height + Theme.spacingSmall
-                        radius: Theme.radiusSmall
-                        color: Theme.cardNested
-                        Column {
-                            id: rowCol
-                            x: Theme.spacingSmall
-                            y: Theme.spacingSmall / 2
-                            width: parent.width - Theme.spacingSmall * 2
-                            Text {
-                                text: modelData.label
-                                color: Theme.text
-                                font.pixelSize: Theme.fontSizeLabel
-                                font.bold: true
+                        spacing: Theme.spacingSmall / 2
+                        visible: (modelData.changes && modelData.changes.length > 0)
+                                 || (modelData.skipped && modelData.skipped.length > 0)
+
+                        Text {
+                            text: planCol.catTitle(modelData.category)
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.bold: true
+                        }
+                        Repeater {
+                            model: modelData.changes ? modelData.changes : []
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: planCol.width
+                                height: rowCol.height + Theme.spacingSmall
+                                radius: Theme.radiusSmall
+                                color: Theme.cardNested
+                                Column {
+                                    id: rowCol
+                                    x: Theme.spacingSmall
+                                    y: Theme.spacingSmall / 2
+                                    width: parent.width - Theme.spacingSmall * 2
+                                    Text {
+                                        text: modelData.label
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontSizeLabel
+                                        font.bold: true
+                                    }
+                                    Text {
+                                        text: qsTr("%1  →  %2")
+                                            .arg(modelData.fromText !== undefined ? modelData.fromText : modelData.from)
+                                            .arg(modelData.toText !== undefined ? modelData.toText : modelData.to)
+                                        color: Theme.mutedText
+                                        font.pixelSize: Theme.fontSizeCaption
+                                    }
+                                }
                             }
-                            Text {
-                                text: qsTr("%1  →  %2")
-                                    .arg(modelData.fromText !== undefined ? modelData.fromText : modelData.from)
-                                    .arg(modelData.toText !== undefined ? modelData.toText : modelData.to)
-                                color: Theme.mutedText
-                                font.pixelSize: Theme.fontSizeCaption
-                            }
+                        }
+                        Text {
+                            visible: modelData.skipped && modelData.skipped.length > 0
+                            width: planCol.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            text: qsTr("%1 skipped (read-only on the target or not present).")
+                                .arg(modelData.skipped ? modelData.skipped.length : 0)
                         }
                     }
                 }
 
-                Text {
-                    visible: planCol.skipped.length > 0
-                    width: planCol.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("%1 setting(s) skipped (read-only on the target or not present).")
-                        .arg(planCol.skipped.length)
-                }
-
                 // Target-watch prompt / apply.
                 Text {
-                    visible: planCol.changes.length > 0 && !root.targetPlugged
+                    visible: planCol.changeCount > 0 && !root.targetPlugged
                     width: planCol.width
                     wrapMode: Text.WordWrap
                     color: Theme.warning
@@ -269,12 +341,12 @@ PageFlickable {
                         : qsTr("Plug in the target watch to apply.")
                 }
                 RoundedButton {
-                    visible: planCol.changes.length > 0
+                    visible: planCol.changeCount > 0
                     enabled: root.targetPlugged && !SyncService.busy
                     text: SyncService.busy ? qsTr("Writing…")
                         : qsTr("Apply to %1").arg(root.targetSummary && root.targetSummary.displayName !== undefined
                                                   ? root.targetSummary.displayName : qsTr("target"))
-                    onClicked: SyncService.apply(root.mode, root.direction, true)
+                    onClicked: SyncService.apply(root.mode, root.direction, true, root.effectiveCategories)
                 }
                 Text {
                     visible: SyncService.mismatchText.length > 0
@@ -369,32 +441,51 @@ PageFlickable {
         }
     }
 
-    // ---- Inline component: a category chip --------------------------------------------
+    // ---- Inline component: a selectable category chip ---------------------------------
     component CategoryChip: Rectangle {
+        property string cat: ""
         property string label: ""
-        property bool on: false
+        property bool comingSoon: false
+        // Available to sync only when both snapshotted watches support it.
+        readonly property bool available: !comingSoon && root.bothSupport(cat)
+        readonly property bool selected: available && root.selectedCategories.indexOf(cat) !== -1
+
         implicitWidth: chipRow.width + Theme.spacingMedium
         implicitHeight: 26
         radius: 13
-        color: on ? Theme.primary : Theme.cardNested
+        opacity: (comingSoon || !available) ? 0.55 : 1.0
+        color: selected ? Theme.primary : Theme.cardNested
         border.width: 1
-        border.color: on ? Theme.primary : Theme.border
+        border.color: selected ? Theme.primary : Theme.border
         Row {
             id: chipRow
             anchors.centerIn: parent
             spacing: 4
             Text {
                 text: label
-                color: on ? Theme.card : Theme.mutedText
+                color: selected ? Theme.card : Theme.mutedText
                 font.pixelSize: Theme.fontSizeCaption
-                font.bold: on
+                font.bold: selected
             }
             Text {
-                visible: !on
+                visible: comingSoon
                 text: qsTr("(soon)")
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeTiny
             }
+            Text {
+                // A live category that one of the two watches can't do (e.g. POIs on a Kailash).
+                visible: !comingSoon && !available
+                text: qsTr("(n/a)")
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeTiny
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: parent.available
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: root.toggleCategory(parent.cat)
         }
     }
 }

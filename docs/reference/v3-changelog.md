@@ -7,6 +7,56 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-08-30: two-watch "freefly" sync (0.2.16)
+
+André: "we have the option to backup our watch... would be nice both [watches] had the same
+sports modes, settings etc." A new **Sync watches** page copies data between two watches of a
+compatible model. One watch connects at a time, so the flow is sequential: snapshot watch A,
+swap the cable, snapshot B, preview the diff, plug the target and apply. Every write reuses an
+already-proven per-category path - no new watch-write mechanism was invented - and the backend
+re-checks the connected serial before every write (409 SYNC_TARGET_MISMATCH), so a plan built
+for one watch can never be applied to another.
+
+- **Backend `/api/sync/{snapshot,state,plan,apply,clear}`** (`desktop/backend/server.py`),
+  category-generic. Four categories, all hardware-verified on a real Ambit3 Peak pair + Kailash:
+  - **Settings** (0x1101) and **Sport modes** (whole CustomModes+Apps region mirror,
+    byte-exact readback via new `tools/sync_write_sportmodes.py` + `dump_sportmode_regions.py`):
+    **same model only** - sensors/hardware differ (Ambit3 Peak → Peak, Sport → Sport, ...).
+  - **POIs** and **Routes** (item-list union / add-missing): allowed **across** models too, as
+    plain geographic data, when both watches support them.
+- **Mirror / two-way-merge** modes, A→B / B→A direction, per-category selection, a grouped
+  dry-run **preview** before any write, and the serial guard. Desktop `SyncPage.qml` +
+  `SyncService`.
+- **POI write bug found & fixed (the hard one).** The Ambit3's `0x0b25` POI write only ever
+  **appends** on its own - it never replaces or shrinks the list. The clear is the nav-region
+  commit that must run *first*: `0x0b16` writes + `0x0b18` tail + **`0x0b04` commit** (which
+  clears the POI SBEM region), *then* `0x0b25` sets the whole list - the SuuntoLink `poiimport`
+  sequence. New `write_nav.py --set-pois-json` does exactly this (empty list = clear all), and
+  packs POIs into ≤254-byte single-byte-length entries, never the extended `0xFF+u32` header
+  (which the watch only emits on read and corrupts on write). Verified live: a watch left with
+  34 duplicate POIs was cleared and set to a clean 9, routes untouched.
+
+## 2026-08-30: back up the app's own database (activities + gear) to any folder (0.2.15)
+
+André: "I believe we have backup of database, but I believe we don't know, can't choose where
+to save the database". Investigation confirmed the gap: every existing "Backup" card saves the
+connected **watch's** nav regions - the app's own SQLite databases (`activities.db`, which is
+also where each activity's GPX/FIT text lives, and `gear.db`) had **no** backup path at all. On
+desktop that made `activities.db` a silent single point of failure.
+
+- **New "Your activities & gear" card on the Backup page**, always visible (app data exists
+  with or without a watch). Two actions: *Create backup now* (writes to `~/AmbitAppBackups`) and
+  *Save to a folder…* (a `FolderDialog` - point it at a Dropbox/OneDrive/Drive-synced folder for
+  keyless cloud backup, the same model as the watch-backup cards), plus *Open backup folder*.
+- **`LocalFileService::backupDatabase()`** - pure local copy, no watch and no Python backend, so
+  it works offline and with nothing plugged in. Writes a timestamped `sommet-data-YYYYMMDD-HHmmss/`
+  folder containing `activities.db` (+ `gear.db` when present).
+- **Consistent snapshot via SQLite `VACUUM INTO`** from a private second connection, not a raw
+  file copy - can't tear even if a sync is writing the live DB. Verified: snapshot passes
+  `PRAGMA integrity_check`, all 41 activities carried across with their `gpx_text` intact.
+- Still **open** (tracked): a setting to relocate the *live* DB/tile cache, and a maps
+  backup/destination option - see the storage-location roadmap issues.
+
 ## 2026-08-13: native Training program (planned moves) breakthrough + Suunto nomenclature
 
 Two related pieces of work; see `training_program_andre.md` Finding 59 and its Nomenclature

@@ -589,6 +589,19 @@ def run_nav(args):
         else:
             print(gpx)
 
+    if args.routes_gpx_json:
+        # All routes' proven GPX from the ONE flash read above - the sync snapshot's fast path,
+        # replacing N separate `nav --route-gpx INDEX` subprocesses that each re-read the region.
+        header = F.RouteHeader.parse(flash.read(F.ROUTE_BASE, 32))
+        routes_out = []
+        if header.magic == F.ROUTE_HEADER_MAGIC:
+            for i in range(header.route_count):
+                d = F.RouteDescriptor.parse(flash.read(F.ROUTE_DESC + 52 * i, 52))
+                routes_out.append({"name": d.name, "pointCount": d.point_count,
+                                   "gpx": route_to_gpx(flash, i)})
+        print(json.dumps({"ok": True, "routes": routes_out}))
+        return 0
+
     route_ok, wpt_ok = show_navigation(flash)
     if route_ok and not wpt_ok:
         # A waypoint-CRC mismatch on a watch whose routes are valid (the Traverse) is a
@@ -804,6 +817,35 @@ def build_poi_record(name, lat, lon, stamp=None, type_=F.WAYPOINT_TYPE_DEFAULT):
     record += int(round(lat * 1e7)).to_bytes(4, "little", signed=True)
     record += int(round(lon * 1e7)).to_bytes(4, "little", signed=True)
     return record
+
+
+def build_set_pois_payload(pois):
+    """The 0x0b25 payload that SETS the watch's POI list to exactly `pois` (each
+    {name,lat,lon,type?}), for the clear-then-set flow (a preceding nav 0x0b04 commit clears the
+    region). Returns None for an empty list, so the caller sends no 0x0b25 and the commit's
+    clear stands (all POIs removed).
+
+    POIs are packed into combined 0x55 entries of <= 254 bytes each - the SuuntoLink poiimport
+    shape (one 0x55 entry, single-byte length) - split across several entries when the list is
+    bigger, so the extended-length header (0x55 0xFF + u32) is never used: that form is only ever
+    emitted BY the watch on read, never written to it, and writing it corrupted the region
+    (2026-08-30)."""
+    records = []
+    for p in pois:
+        t = p.get("type")
+        t = F.WAYPOINT_TYPE_DEFAULT if t in (None, "") else int(t)
+        records.append(build_poi_record(p["name"], float(p["lat"]), float(p["lon"]), type_=t))
+    if not records:
+        return None
+    payload = SBEM_WRITE_PREFIX + F.SBEM_MAGIC
+    chunk = b""
+    for rec in records:
+        if chunk and len(chunk) + len(rec) > 0xFE:
+            payload += bytes([POI_ENTRY, len(chunk)]) + chunk
+            chunk = b""
+        chunk += rec
+    payload += bytes([POI_ENTRY, len(chunk)]) + chunk
+    return payload
 
 
 def run_addpoi(args):
@@ -1181,6 +1223,18 @@ def main():
                         help="nav: also prints every on-watch route's real points as JSON "
                              "(on the last stdout line) - no extra USB read, reuses the "
                              "same flash data already read for the summary above it")
+    parser.add_argument("--routes-gpx-json", action="store_true",
+                        help="nav: print {ok, routes:[{name, pointCount, gpx}]} on the last "
+                             "stdout line - every on-watch route's proven route_to_gpx() text "
+                             "from the SINGLE flash read already done, so a caller (the two-"
+                             "watch sync snapshot) gets all routes' GPX without one slow USB "
+                             "read per route")
+    parser.add_argument("--set-pois-json", metavar="PATH",
+                        help="route/reset/restore: instead of restoring the POIs read off the "
+                             "watch, SET the watch's whole POI list to the JSON list in PATH "
+                             "([{name,lat,lon,type?}, ...]). The nav write + 0x0b04 commit above "
+                             "clears the POI region, so this 0x0b25 sets rather than appends - "
+                             "the SuuntoLink poiimport sequence. An empty list clears all POIs.")
     parser.add_argument("--verbose", action="store_true",
                         help="logs every 64-byte report")
     parser.add_argument("--device", metavar="NAME",
@@ -1229,19 +1283,31 @@ def main():
         flash, layout = build_routes([pathlib.Path(p) for p in args.gpx], args.meta)
     send_plan(link, flash, layout)
 
-    restored = poi_write_payload(pois)
-    if restored:
-        link.command(CMD_POI_WRITE, restored)
-    elif link.dry_run and not (args.compare or args.meta):
-        # A dry-run has no watch to ask, so it cannot show the 0x0b25 a live run will send.
-        # Saying "no POI" here once made a rehearsal announce one message fewer than the
-        # real write, on a watch that did have a POI. A rehearsal must not undercount.
-        print("  a live run would read the watch's POI list here and write it back "
-              "afterwards,\n  which this rehearsal cannot show: expect one more 0x0b25 "
-              "than the count below.\n  Give --compare or --meta to rehearse that message "
-              "against a capture.")
+    # The 0x0b04 commit in send_plan() just cleared the POI SBEM region, so the 0x0b25 below
+    # SETS the whole list (the SuuntoLink poiimport sequence) rather than appending. With
+    # --set-pois-json we set a caller-supplied list instead of restoring what was read.
+    if args.set_pois_json is not None:
+        set_list = json.loads(pathlib.Path(args.set_pois_json).read_text())
+        payload = build_set_pois_payload(set_list)   # None for an empty list -> POIs cleared
+        if payload:
+            link.command(CMD_POI_WRITE, payload)
+            print(f"  set POIs: {len(set_list)} written into the cleared region")
+        else:
+            print(f"  set POIs: empty list -> all POIs cleared")
     else:
-        print("  no POI to put back")
+        restored = poi_write_payload(pois)
+        if restored:
+            link.command(CMD_POI_WRITE, restored)
+        elif link.dry_run and not (args.compare or args.meta):
+            # A dry-run has no watch to ask, so it cannot show the 0x0b25 a live run will
+            # send. Saying "no POI" here once made a rehearsal announce one message fewer than
+            # the real write, on a watch that did have a POI. A rehearsal must not undercount.
+            print("  a live run would read the watch's POI list here and write it back "
+                  "afterwards,\n  which this rehearsal cannot show: expect one more 0x0b25 "
+                  "than the count below.\n  Give --compare or --meta to rehearse that message "
+                  "against a capture.")
+        else:
+            print("  no POI to put back")
 
     total = sum(len(payload) for _, payload, _ in link.sent)
     reports = sum(len(r) for _, _, r in link.sent)

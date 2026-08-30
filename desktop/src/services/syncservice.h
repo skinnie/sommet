@@ -51,12 +51,15 @@ public:
 
     // Re-read the connected watch and both stored slots.
     Q_INVOKABLE void refreshState();
-    // Snapshot the CONNECTED watch into slot "A" or "B".
+    // Snapshot the CONNECTED watch into slot "A" or "B" - captures every category it supports.
     Q_INVOKABLE void snapshot(const QString &slot);
-    // Compute (dry-run) the diff for the given mode/direction. direction is "AtoB" or "BtoA".
-    Q_INVOKABLE void buildPlan(const QString &mode, const QString &direction);
+    // Compute (dry-run) the diff for the given mode/direction over the chosen categories.
+    // direction is "AtoB" or "BtoA"; categories e.g. ["settings","pois"].
+    Q_INVOKABLE void buildPlan(const QString &mode, const QString &direction,
+                               const QStringList &categories);
     // Apply the plan to the connected watch. confirm=false re-previews; true writes for real.
-    Q_INVOKABLE void apply(const QString &mode, const QString &direction, bool confirm);
+    Q_INVOKABLE void apply(const QString &mode, const QString &direction, bool confirm,
+                           const QStringList &categories);
     // Forget a stored slot ("A"/"B"), or both when slot is empty.
     Q_INVOKABLE void clearSlot(const QString &slot);
 

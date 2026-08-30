@@ -62,11 +62,18 @@ void SyncService::refreshState()
     });
 }
 
+// Every category the sync engine knows how to read. A snapshot always captures all of them;
+// the watch that can't do one records it as unsupported, and the page only offers to sync the
+// categories both slots actually captured.
+static const QVariantList kAllCategories = {QStringLiteral("settings"), QStringLiteral("pois"),
+                                            QStringLiteral("routes"),
+                                            QStringLiteral("sportModes")};
+
 void SyncService::snapshot(const QString &slot)
 {
     QVariantMap body;
     body[QStringLiteral("slot")] = slot;
-    body[QStringLiteral("categories")] = QVariantList{QStringLiteral("settings")};
+    body[QStringLiteral("categories")] = kAllCategories;
     postJson(QStringLiteral("/api/sync/snapshot"), body,
              [this, slot](const QVariantMap &obj, bool) {
                  m_lastActionOk = obj.value(QStringLiteral("ok")).toBool();
@@ -78,12 +85,13 @@ void SyncService::snapshot(const QString &slot)
              });
 }
 
-void SyncService::buildPlan(const QString &mode, const QString &direction)
+void SyncService::buildPlan(const QString &mode, const QString &direction,
+                            const QStringList &categories)
 {
     QVariantMap body;
     body[QStringLiteral("mode")] = mode;
     body[QStringLiteral("direction")] = direction;
-    body[QStringLiteral("categories")] = QVariantList{QStringLiteral("settings")};
+    body[QStringLiteral("categories")] = QVariant(categories).toList();
     postJson(QStringLiteral("/api/sync/plan"), body, [this](const QVariantMap &obj, bool) {
         if (obj.value(QStringLiteral("ok")).toBool()) {
             m_plan = obj;
@@ -96,18 +104,20 @@ void SyncService::buildPlan(const QString &mode, const QString &direction)
     });
 }
 
-void SyncService::apply(const QString &mode, const QString &direction, bool confirm)
+void SyncService::apply(const QString &mode, const QString &direction, bool confirm,
+                        const QStringList &categories)
 {
     QVariantMap body;
     body[QStringLiteral("mode")] = mode;
     body[QStringLiteral("direction")] = direction;
-    body[QStringLiteral("categories")] = QVariantList{QStringLiteral("settings")};
+    body[QStringLiteral("categories")] = QVariant(categories).toList();
     body[QStringLiteral("confirm")] = confirm;
     postJson(QStringLiteral("/api/sync/apply"), body,
              [this, confirm](const QVariantMap &obj, bool) {
-                 // The serial guard: the plugged watch was not the plan's target.
-                 if (obj.value(QStringLiteral("error")).toString()
-                         == QStringLiteral("SYNC_TARGET_MISMATCH")) {
+                 // The guards: wrong watch plugged (serial), or two different models.
+                 const auto errCode = obj.value(QStringLiteral("error")).toString();
+                 if (errCode == QStringLiteral("SYNC_TARGET_MISMATCH")
+                         || errCode == QStringLiteral("SYNC_MODEL_MISMATCH")) {
                      m_mismatchText = obj.value(QStringLiteral("detail")).toString();
                      emit mismatchChanged();
                      return;

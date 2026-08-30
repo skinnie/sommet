@@ -468,6 +468,62 @@ def _sync_diff_pois(src, tgt):
     return changes, []
 
 
+# --- Routes: an item-list category (add-missing; the route writer preserves existing) -----
+def _sync_diff_routes(src, tgt):
+    """Routes on the source the target lacks, by name (case-insensitive). An item list, so this
+    is a union: two-way merge and mirror both add what's missing, and neither deletes (the route
+    writer reads the existing routes and keeps them - the 2026-08-11 fix). Returns (changes,[])."""
+    s_items = ((src.get("categories") or {}).get("routes") or {}).get("items") or []
+    t_items = ((tgt.get("categories") or {}).get("routes") or {}).get("items") or []
+    have = {str(r.get("name", "")).strip().lower() for r in t_items}
+    changes = []
+    for r in s_items:
+        if str(r.get("name", "")).strip().lower() in have:
+            continue
+        changes.append({
+            "key": "route:" + str(r.get("name", "")).strip().lower(),
+            "label": r.get("name") or "(unnamed route)",
+            "route": {"name": r.get("name"), "gpx": r.get("gpx")},
+            "from": None, "to": r.get("name"),
+            "fromText": "—",
+            "toText": "%d points" % (r.get("pointCount") or 0),
+        })
+    return changes, []
+
+
+# --- Sport modes: a whole-region MIRROR (not an item list) --------------------------------
+# Ambit3/Traverse sport modes live in the CustomModes flash region (cross-linked to Apps). A
+# merged region can't be re-encoded safely, so sport modes are mirrored whole: the target's
+# region becomes byte-identical to the source's (proven, reversible - sync_write_sportmodes.py
+# backs the target up and verifies the readback). Only meaningful between the SAME model - the
+# byte layout is model-specific - and only in mirror mode; "two-way merge" has no meaning for a
+# whole region and is skipped with a note. The heavy region bytes live under "items" so
+# _sync_summary strips them from every /state and /plan response.
+def _sync_diff_sportmodes(src, tgt, mode):
+    s = (src.get("categories") or {}).get("sportModes") or {}
+    t = (tgt.get("categories") or {}).get("sportModes") or {}
+    if not s.get("supported") or not t.get("supported"):
+        return [], []
+    if src.get("model") != tgt.get("model"):
+        return [], [{"key": "sportModes",
+                     "reason": "different watch models - sport modes can't be mirrored"}]
+    if mode == "merge":
+        return [], [{"key": "sportModes",
+                     "reason": "sport modes can only be mirrored, not merged"}]
+    # Compare the content signature (a hash over each region's USED extent), NOT the full
+    # padded region base64 - the bytes past the used data are undefined and differ between
+    # watches even when the sport modes are identical, which produced a false "differs".
+    if s.get("signature") and s.get("signature") == t.get("signature"):
+        return [], []
+    return [{
+        "key": "sportModes:mirror",
+        "label": "All sport modes",
+        "from": t.get("count"), "to": s.get("count"),
+        "fromText": "%d modes" % (t.get("count") or 0),
+        "toText": "replace with %d modes" % (s.get("count") or 0),
+    }], []
+
+
 def _read_cache_device_identity(info):
     """A stable identity for the connected watch from a device_info dict: its serial if it
     reports one, else model/product id. When this changes, the cache is dropped."""
@@ -571,11 +627,12 @@ def autopin_if_needed():
         pass
 
 
-def run_tool(script, args, timeout=180):
+def run_tool(script, args, timeout=180, stdin=None):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
     that means for the specific tool. Serialized across all callers via WATCH_LOCK - see its
-    own comment for why."""
+    own comment for why. `stdin`, when given, is a string fed to the tool's stdin (set_pois.py
+    reads its POI list that way)."""
     if script != "list_watches.py":
         autopin_if_needed()
     env = os.environ.copy()
@@ -591,7 +648,8 @@ def run_tool(script, args, timeout=180):
         cmd = ([PYTHON, "--tool", str(TOOLS_DIR / script), *args] if FROZEN
                else [PYTHON, str(TOOLS_DIR / script), *args])
         proc = subprocess.run(
-            cmd, cwd=TOOLS_DIR, capture_output=True, text=True, timeout=timeout, env=env)
+            cmd, cwd=TOOLS_DIR, capture_output=True, text=True, timeout=timeout, env=env,
+            input=stdin)
         return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -3479,18 +3537,124 @@ class Handler(BaseHTTPRequestHandler):
             return None, (err or out or "POI read failed").strip()
         return _sync_parse_pois(out), None
 
-    def _sync_write_poi(self, poi):
-        """Add one POI via write_nav.py addpoi --write - the same read-append-write the POIs
-        page uses (hardware-proven, never touches the Routes/Waypoints regions). Returns {ok}."""
-        args = ["addpoi", "--name", str(poi.get("name") or ""),
-                "--lat", "%.7f" % float(poi.get("lat")),
-                "--lon", "%.7f" % float(poi.get("lon")), "--write"]
-        if poi.get("type") not in (None, "", 0):
-            args += ["--type", str(poi.get("type"))]
-        code, out, err = run_tool("write_nav.py", args)
+    def _sync_write_pois(self, pois):
+        """SET the target's whole POI list to `pois` via the clear-then-set sequence, the
+        SuuntoLink poiimport flow (reverse-engineered 2026-08-30, hardware-verified): a bare
+        0x0b25 only APPENDS, but a nav-region rewrite + 0x0b04 commit FIRST clears the POI
+        region, so the following 0x0b25 SETS the whole list. That is write_nav.py's route/reset
+        path with --set-pois-json. The current routes are rewritten so they are preserved (a
+        watch with no routes uses reset - same commit, nothing to lose). `pois` is the full
+        desired list (target's existing POIs + additions, de-duplicated). Returns {ok}."""
+        # Capture the target's current routes so the nav rewrite preserves them.
+        rcode, rout, rerr = run_tool("write_nav.py", ["nav", "--routes-gpx-json"])
+        rinfo = self._parse_last_json_line(rout)
+        routes = (rinfo.get("routes", []) if rinfo and rinfo.get("ok") else [])
+        gpx_paths = []
+        for r in routes:
+            if not r.get("gpx"):
+                continue
+            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+                f.write(r["gpx"])
+                gpx_paths.append(f.name)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as pf:
+            pf.write(json.dumps(pois))
+            pois_path = pf.name
+        try:
+            if gpx_paths:
+                args = ["route", *gpx_paths, "--set-pois-json", pois_path, "--write"]
+            else:
+                args = ["reset", "--set-pois-json", pois_path, "--write"]
+            code, out, err = run_tool("write_nav.py", args, timeout=300)
+        finally:
+            for p in gpx_paths:
+                Path(p).unlink(missing_ok=True)
+            Path(pois_path).unlink(missing_ok=True)
         if code != 0:
-            return {"ok": False, "error": (err or out or "POI write failed").strip()}
+            return {"ok": False, "error": (err or out or "POI set failed").strip()}
         return {"ok": True}
+
+    def _sync_read_routes(self, model):
+        """The connected watch's routes as [{name, pointCount, gpx}], captured now so the
+        snapshot can be written to the OTHER watch later without the source replugged. ONE flash
+        read for all of them via write_nav.py nav --routes-gpx-json (not one slow USB read per
+        route - the Mac-speed fix, André 2026-08-30). Kailash has no routes -> []."""
+        if model == "Hoopoe":
+            return [], None
+        code, out, err = run_tool("write_nav.py", ["nav", "--routes-gpx-json"])
+        info = self._parse_last_json_line(out)
+        if info is None or not info.get("ok"):
+            return None, (info or {}).get("error") or err or "route read failed"
+        items = []
+        for r in info.get("routes", []) or []:
+            if not r.get("gpx"):
+                continue
+            items.append({"name": r.get("name"), "pointCount": r.get("pointCount") or 0,
+                          "gpx": r.get("gpx")})
+        return items, None
+
+    def _sync_write_route(self, gpx_text):
+        """Add one route via the same writer the Routes page uses - it reads the watch's
+        existing routes first and includes them, so an add never deletes the others (the
+        2026-08-11 fix). Returns {ok}."""
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+            f.write(gpx_text)
+            gpx_path = f.name
+        existing = self._existing_route_gpx_paths()
+        try:
+            code, out, err = run_tool("write_nav.py", ["route", *existing, gpx_path, "--write"])
+        finally:
+            Path(gpx_path).unlink(missing_ok=True)
+            for p in existing:
+                Path(p).unlink(missing_ok=True)
+        if code != 0:
+            return {"ok": False, "error": (err or out or "route write failed").strip()}
+        return {"ok": True}
+
+    def _sync_read_sportmodes(self, model):
+        """The connected watch's sport modes as the raw CustomModes + Apps region bytes
+        (base64), captured now via dump_sportmode_regions.py so the whole region can be mirrored
+        onto the other watch later. Kailash/legacy have no CustomModes region -> unsupported.
+        Returns ({count, items:{appsB64, customModesB64}}, error_or_None)."""
+        if model == "Hoopoe":
+            return None, "Kailash has no custom sport modes"
+        with tempfile.NamedTemporaryFile(suffix="-apps.bin", delete=False) as fa, \
+                tempfile.NamedTemporaryFile(suffix="-cm.bin", delete=False) as fc:
+            apath, cpath = fa.name, fc.name
+        try:
+            code, out, err = run_tool("dump_sportmode_regions.py",
+                ["--apps-out", apath, "--custom-modes-out", cpath, "--json"])
+            info = self._parse_last_json_line(out)
+            if not info or not info.get("ok"):
+                return None, (info or {}).get("error") or err or "sport-mode region dump failed"
+            apps_b64 = base64.b64encode(Path(apath).read_bytes()).decode()
+            cm_b64 = base64.b64encode(Path(cpath).read_bytes()).decode()
+        finally:
+            Path(apath).unlink(missing_ok=True)
+            Path(cpath).unlink(missing_ok=True)
+        return {"count": info.get("modeCount", 0), "signature": info.get("signature"),
+                "items": {"appsB64": apps_b64, "customModesB64": cm_b64}}, None
+
+    def _sync_write_sportmodes(self, apps_b64, cm_b64):
+        """Mirror the source's CustomModes + Apps regions onto the connected watch via
+        sync_write_sportmodes.py --write (backs the target up first, verifies byte-exact
+        readback). Returns the tool's own {ok, ..., backup} JSON."""
+        if not apps_b64 or not cm_b64:
+            return {"ok": False, "error": "source sport-mode snapshot is missing"}
+        with tempfile.NamedTemporaryFile(suffix="-apps.bin", delete=False) as fa, \
+                tempfile.NamedTemporaryFile(suffix="-cm.bin", delete=False) as fc:
+            fa.write(base64.b64decode(apps_b64))
+            fc.write(base64.b64decode(cm_b64))
+            apath, cpath = fa.name, fc.name
+        try:
+            code, out, err = run_tool("sync_write_sportmodes.py",
+                ["--apps", apath, "--custom-modes", cpath, "--write", "--json"], timeout=300)
+            info = self._parse_last_json_line(out)
+        finally:
+            Path(apath).unlink(missing_ok=True)
+            Path(cpath).unlink(missing_ok=True)
+        if not info:
+            return {"ok": False, "error": err or "sync_write_sportmodes.py produced no JSON"}
+        return info
 
     def _handle_sync_snapshot(self, body):
         """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
@@ -3530,6 +3694,21 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     snap["categories"][cat] = {"supported": True, "count": len(items),
                                                "items": items}
+            elif cat == "routes":
+                items, err = self._sync_read_routes(dev["model"])
+                if err:
+                    snap["categories"][cat] = {"supported": False, "error": err}
+                else:
+                    snap["categories"][cat] = {"supported": True, "count": len(items),
+                                               "items": items}
+            elif cat == "sportModes":
+                data, err = self._sync_read_sportmodes(dev["model"])
+                if err:
+                    snap["categories"][cat] = {"supported": False, "error": err}
+                else:
+                    snap["categories"][cat] = {"supported": True, "count": data["count"],
+                                               "signature": data.get("signature"),
+                                               "items": data["items"]}
             else:
                 snap["categories"][cat] = {"supported": False,
                                            "error": f"category \"{cat}\" not wired yet"}
@@ -3573,19 +3752,48 @@ class Handler(BaseHTTPRequestHandler):
         if not src or not tgt:
             missing = src_slot if not src else tgt_slot
             return None, f"snapshot both watches first - slot {missing} is empty"
+        # Model policy (André 2026-08-30). SETTINGS and SPORT MODES are sensor/hardware-specific
+        # and must NEVER cross models - only an identical model pair (Ambit3 Peak -> Ambit3 Peak,
+        # Ambit3 Sport -> Ambit3 Sport, ...). POIS and ROUTES are plain geographic data, so they
+        # sync across models too, as long as both watches support them. Model identity is the
+        # codename (Emu/Finch/Ibisbill/Kaka/Hoopoe/...); a case material like "Sapphire" is the
+        # same codename.
+        same_model = src.get("model") == tgt.get("model")
+        SAME_MODEL_ONLY = {"settings", "sportModes"}
+
+        def supports(slot, cat):
+            return bool((slot.get("categories") or {}).get(cat, {}).get("supported"))
+
         cats_out, total = [], 0
         for cat in categories:
+            # Both watches must actually have the category.
+            if not supports(src, cat) or not supports(tgt, cat):
+                cats_out.append({"category": cat, "changes": [],
+                                 "skipped": [{"key": cat,
+                                              "reason": "not supported on both watches"}]})
+                continue
+            # Settings / sport modes are refused across different models.
+            if cat in SAME_MODEL_ONLY and not same_model:
+                cats_out.append({"category": cat, "changes": [],
+                    "skipped": [{"key": cat, "reason": "different models (%s vs %s) - %s "
+                        "can't be synced, sensors/hardware differ"
+                        % (src.get("displayName"), tgt.get("displayName"),
+                           "settings" if cat == "settings" else "sport modes")}]})
+                continue
             if cat == "settings":
                 changes, skipped = _sync_diff_settings(src, tgt)
-                cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
-                total += len(changes)
             elif cat == "pois":
                 changes, skipped = _sync_diff_pois(src, tgt)
-                cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
-                total += len(changes)
+            elif cat == "routes":
+                changes, skipped = _sync_diff_routes(src, tgt)
+            elif cat == "sportModes":
+                changes, skipped = _sync_diff_sportmodes(src, tgt, mode)
             else:
                 cats_out.append({"category": cat, "changes": [], "skipped": [],
                                  "error": f"category \"{cat}\" not wired yet"})
+                continue
+            cats_out.append({"category": cat, "changes": changes, "skipped": skipped})
+            total += len(changes)
         return {
             "mode": mode, "direction": direction,
             "source": _sync_summary(src), "target": _sync_summary(tgt),
@@ -3627,12 +3835,47 @@ class Handler(BaseHTTPRequestHandler):
                 "connected": dev, "target": plan["target"]})
             return
         results, applied = [], 0
+
+        def selected(ch):
+            return selection is None or ch["key"] in selection
+
+        # POIs are written as ONE bulk set (never per-POI - see _sync_write_pois): the final
+        # list is the target's existing POIs plus the ones being added, de-duplicated. Handled
+        # before the per-change loop so it is a single write regardless of how many POIs.
+        poi_changes = [ch for cat in plan["categories"] if cat["category"] == "pois"
+                       for ch in cat["changes"] if selected(ch)]
+        if poi_changes:
+            def pbase(ch):
+                return {"category": "pois", "key": ch["key"], "label": ch["label"],
+                        "from": ch.get("from"), "to": ch.get("to"), "toText": ch.get("toText")}
+            if not confirm:
+                results += [{**pbase(ch), "dryRun": True, "ok": True} for ch in poi_changes]
+            else:
+                existing, rerr = self._sync_read_pois(dev["model"])
+                if rerr:
+                    results += [{**pbase(ch), "ok": False, "error": rerr} for ch in poi_changes]
+                else:
+                    final, seen = [], set()
+                    for p in (existing or []) + [ch["poi"] for ch in poi_changes]:
+                        k = (str(p.get("name", "")).strip().lower(),
+                             round(float(p.get("lat", 0.0)), 5), round(float(p.get("lon", 0.0)), 5))
+                        if k in seen:
+                            continue
+                        seen.add(k)
+                        final.append(p)
+                    r = self._sync_write_pois(final)
+                    ok = bool(r.get("ok"))
+                    results += [{**pbase(ch), "ok": ok,
+                                 "error": None if ok else r.get("error")} for ch in poi_changes]
+                    if ok:
+                        applied += len(poi_changes)
+
         for cat in plan["categories"]:
             category = cat["category"]
-            if category not in ("settings", "pois"):
+            if category not in ("settings", "routes", "sportModes"):
                 continue
             for ch in cat["changes"]:
-                if selection is not None and ch["key"] not in selection:
+                if not selected(ch):
                     continue
                 base = {"category": category, "key": ch["key"], "label": ch["label"],
                         "from": ch.get("from"), "to": ch.get("to"), "toText": ch.get("toText")}
@@ -3641,8 +3884,17 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 if category == "settings":
                     r = self._sync_write_setting(dev["model"], ch["key"], ch["to"])
-                else:  # pois - add the missing POI
-                    r = self._sync_write_poi(ch["poi"])
+                elif category == "routes":  # add the missing route (existing routes preserved)
+                    r = self._sync_write_route(ch["route"]["gpx"])
+                else:  # sportModes - whole-region mirror; bytes come from the source slot,
+                       # kept server-side and never round-tripped through the client
+                    src_slot = "A" if plan["direction"] == "AtoB" else "B"
+                    with _SYNC_LOCK:
+                        src_snap = _SYNC_SNAPSHOTS.get(src_slot) or {}
+                    sm_items = ((src_snap.get("categories") or {}).get("sportModes")
+                                or {}).get("items") or {}
+                    r = self._sync_write_sportmodes(sm_items.get("appsB64"),
+                                                    sm_items.get("customModesB64"))
                 results.append({**base, "ok": bool(r.get("ok")),
                                 "error": None if r.get("ok") else r.get("error")})
                 if r.get("ok"):
