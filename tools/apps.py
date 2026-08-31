@@ -114,11 +114,23 @@ def decode(data):
         name = name_field.split(b"\0", 1)[0].decode("utf-8", "replace")
         bin_start = magic_off + len(MAGIC)
         bin_end = table[i + 1] if i + 1 < num_entries else total_length
-        entries.append({
+        entry = {
             "entry_offset": off, "reserved": reserved, "activityId": activity_id,
             "marker": marker, "name": name, "magic_offset": magic_off, "unknown2": unknown2,
             "binary": data[bin_start:bin_end],
-        })
+        }
+        # Bytecode header fields, decoded 2026-08-31 against a genuine Movescount-compiled
+        # app recovered from André's Ambit3 Sport (backups/finch-sport-2026-08-31) plus a
+        # catalog-wide correlation (13k SuuntoLink binaries x the corpus metadata, joined on
+        # RuleID, zero exceptions): u32 @4 of the binary is the display divisor mapped 1:1
+        # from Movescount's OutputFormatID (1=integer, 10=one decimal, 100=two decimals,
+        # 255=time format), and u32 @12 is the Movescount RuleID (0 on compiler-built apps).
+        if len(entry["binary"]) >= 16:
+            fmt_div, rule_id = struct.unpack_from("<I", entry["binary"], 4)[0], \
+                struct.unpack_from("<I", entry["binary"], 12)[0]
+            entry["outputFormatDivisor"] = fmt_div
+            entry["ruleId"] = rule_id
+        entries.append(entry)
     return entries
 
 
@@ -272,7 +284,10 @@ def show(entries, catalog=None):
         print(f"  offset 0x{e['entry_offset']:x}: name={e.get('name', '?')!r}"
               f"  activityId={e.get('activityId', '?')}"
               f"  marker={marker}"
-              f"  binary_length={binary_length}")
+              f"  binary_length={binary_length}"
+              + (f"  ruleId={e['ruleId']}" if e.get("ruleId") else "")
+              + (f"  outputFormatDivisor={e['outputFormatDivisor']}"
+                 if "outputFormatDivisor" in e else ""))
         if "_warning" in e:
             print(f"    WARNING: {e['_warning']}")
         if catalog is not None and "binary" in e:
