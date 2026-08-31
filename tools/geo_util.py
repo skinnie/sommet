@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Small, dependency-free geo helpers shared by the offline-routing tools
-(`route_plan.py`, `track_color.py`, `poi_search.py`).
+"""Small, dependency-free geo helpers shared by the route-weather tools
+(`track_color.py`, `weather_route.py`).
 
 Stdlib only, on purpose - same rule as the rest of `tools/`: the backend ships frozen with
 PyInstaller and must never need a pip install. Everything here is plain math or `struct`.

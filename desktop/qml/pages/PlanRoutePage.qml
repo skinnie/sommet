@@ -1,44 +1,42 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import AmbitApp
 
-// Offline route planner (André, 2026-08-28: "fully offline router... nice for biking and
-// trekking", then "do it all"). Tap points on the map, pick a sport profile, and the local
-// BRouter server plans the route with no internet; it comes back painted by climb gradient
-// (the OruxMaps feature he called out) with an elevation profile and legend, and can be sent
-// straight to the watch through the same GPX route-write /api/routes already does.
+// Plan a ride/hike with weather. You bring a GPX (drawn in any online planner, Basecamp,
+// Komoot, RideWithGPS...), and Sommet paints it by climb steepness and, once you set a start
+// time + pace, shows the weather you'll actually meet along it - temperature, rain, head/tail
+// wind and sun/moon at each point's ETA - then can send the route straight to the watch.
 //
-// All the work is in the Python backend (backend/server.py's /api/router/* and /api/poi/*,
-// see docs/offline-routing.md) - this page is the map canvas and the controls over it, the
-// same split as every other page. The map itself is the shared MapView (its coloredSegments
-// overlay was added for exactly this), reusing the tap-to-pick + drag-to-pan idiom PoisPage
-// and the Kailash home picker already use.
+// History: this began as a fully-offline route *planner* on a bundled BRouter engine (tap
+// points, auto-route). Removed 2026-08-31 (André: "most of the time we have good online
+// planners... weather is something I really need") - route-*drawing* is better done in the
+// dedicated tools he already uses, so Plan now takes a finished GPX and adds the one thing
+// those tools don't: weather along it. This matches the Android/iOS RouteWeather screen, which
+// already worked from an imported GPX. Climb colouring (track_color.py) and weather
+// (weather_route.py) both run on any coordinate list, so nothing here needs a router.
+//
+// Backend: /api/router/color {gpx} (climb, offline) and /api/weather/route {gpx} (Open-Meteo,
+// online). The map is the shared MapView; sending uses the same /api/routes as RoutesPage.
 Item {
     id: root
 
-    // --- planning state ---------------------------------------------------------------
-    property var waypoints: []          // [{lat, lon}] in tap order: first = start, last = end
-    property var coloredSegments: []    // [{color, coords:[[lat,lon],...]}] from the backend
+    // --- loaded route + climb colouring -----------------------------------------------
+    property string plannedGpx: ""      // the uploaded GPX text; "" = nothing loaded
+    property string routeName: ""       // the file's name, for the header + send dialog
+    property var coloredSegments: []    // [{color, coords:[[lat,lon],...]}] climb-coloured
     property var legendRows: []         // [{key,label,color,distance_m,ascent_m}]
     property var profileRows: []        // [{dist_m,ele_m,grad_pct,color}]
     property var summary: ({})          // {distance_m,ascent_m,descent_m,max_gradient_pct,...}
-    property string plannedGpx: ""
-    property string profileName: "trekking"
     property string statusMsg: ""
     property bool busy: false
-    property string routerState: "unknown"   // "up" | "down" | "unknown"
 
-    // POI search (optional - needs a prebuilt DB, see docs/offline-routing.md)
-    property string poiDb: ""
-    property string poiQuery: ""
-    property var poiResults: []
-
-    // Weather + sun/moon along the planned route (online: Open-Meteo via the backend). Same
-    // shape family as the climb colouring - temp-coloured `weatherSegments` feed the map's
-    // coloredSegments, `weatherProfile` feeds a profile canvas - plus wind, a sun/moon summary
-    // and a plain-language verdict. `weatherMode` toggles whether the map paints weather or climb.
-    property var weatherSegments: []    // [{color, coords:[[lat,lon],...]}] coloured by temp
-    property var weatherProfile: []     // [{dist_m,eta,ele_m,temp_c,feels_c,rain_mm,wind_kmh,wind_rel,color}]
+    // Weather + sun/moon along the route (online: Open-Meteo via the backend). Temp-coloured
+    // `weatherSegments` feed the map's coloredSegments; `weatherProfile` feeds a profile canvas;
+    // plus wind, a sun/moon summary and a plain-language verdict. `weatherMode` toggles whether
+    // the map paints weather or climb.
+    property var weatherSegments: []
+    property var weatherProfile: []
     property var windArrows: []
     property var weatherAstro: ({})
     property var weatherVerdict: ({})
@@ -49,10 +47,17 @@ Item {
     property string paceText: "4.5"
     property string planDate: ""        // "" = today (YYYY-MM-DD)
 
-    readonly property var profiles: ["trekking", "fastbike", "gravel", "mtb", "hiking-mountain"]
     readonly property string backend: "http://127.0.0.1:8766"
 
-    Component.onCompleted: checkRouter()
+    // Start/finish dots, derived from the coloured track's first/last coordinate.
+    readonly property var startEndMarkers: {
+        if (coloredSegments.length === 0) return []
+        var first = coloredSegments[0].coords
+        var lastSeg = coloredSegments[coloredSegments.length - 1].coords
+        if (!first || !lastSeg || first.length === 0 || lastSeg.length === 0) return []
+        var s = first[0], e = lastSeg[lastSeg.length - 1]
+        return [{ lat: s[0], lon: s[1] }, { lat: e[0], lon: e[1] }]
+    }
 
     // --- backend calls (same XMLHttpRequest idiom as Main.qml / RoutesPage) ------------
     function api(method, path, body, cb) {
@@ -68,56 +73,46 @@ Item {
         xhr.send(body ? JSON.stringify(body) : undefined)
     }
 
-    function checkRouter() {
-        api("GET", "/api/router/health", null, function(status, res) {
-            root.routerState = (res && res.reachable) ? "up" : "down"
+    // Read the picked GPX, colour it by climb, and forecast the weather along it.
+    function loadGpx(fileUrl) {
+        var gpx = LocalFileService.readText(fileUrl)
+        if (!gpx || gpx.length === 0) {
+            statusMsg = qsTr("Couldn't read that file")
+            return
+        }
+        var s = fileUrl.toString()
+        routeName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
+        plannedGpx = gpx
+        clearResults()
+        colorTrack()
+        forecastWeather()
+    }
+
+    function colorTrack() {
+        if (!plannedGpx) return
+        busy = true
+        statusMsg = qsTr("Reading route…")
+        api("POST", "/api/router/color", { gpx: plannedGpx }, function(status, res) {
+            busy = false
+            if (!res || res.ok === false) {
+                coloredSegments = []; legendRows = []; profileRows = []; summary = ({})
+                statusMsg = (res && res.error) ? res.error : qsTr("Couldn't read the route")
+                return
+            }
+            coloredSegments = res.segments || []
+            legendRows = res.legend || []
+            profileRows = res.profile || []
+            summary = res.summary || ({})
+            statusMsg = ""
         })
     }
 
-    function planRoute() {
-        if (waypoints.length < 2) {
-            statusMsg = qsTr("Tap at least two points on the map first")
-            return
-        }
-        busy = true
-        statusMsg = qsTr("Planning…")
-        var via = waypoints.map(function(w) { return [w.lon, w.lat] })
-        api("POST", "/api/router/route",
-            { via: via, profile: profileName, color: true, gpx: true },
-            function(status, res) {
-                busy = false
-                if (!res || !res.ok) {
-                    coloredSegments = []; legendRows = []; profileRows = []; summary = ({})
-                    plannedGpx = ""
-                    statusMsg = (res && (res.error || res.hint))
-                                ? ((res.error || "") + (res.hint ? " — " + res.hint : ""))
-                                : qsTr("Routing failed")
-                    return
-                }
-                var col = res.colored || ({})
-                coloredSegments = col.segments || []
-                legendRows = col.legend || []
-                profileRows = col.profile || []
-                summary = col.summary || res.summary || ({})
-                plannedGpx = res.gpx || ""
-                statusMsg = ""
-            })
-    }
-
     function forecastWeather() {
+        if (!plannedGpx) { statusMsg = qsTr("Upload a GPX first"); return }
         var pace = parseFloat(paceText)
         if (!(pace > 0)) { statusMsg = qsTr("Enter a pace in km/h"); return }
-        // Prefer the routed track (it carries elevation); fall back to the tapped waypoints so
-        // weather works even without a BRouter route (straight legs between the points).
-        var body = { start: startTime, pace: pace, tz: -(new Date().getTimezoneOffset()) / 60 }
-        if (plannedGpx) {
-            body.gpx = plannedGpx
-        } else if (waypoints.length >= 2) {
-            body.points = waypoints.map(function(w) { return { lat: w.lat, lon: w.lon } })
-        } else {
-            statusMsg = qsTr("Tap at least two points (or plan a route) first")
-            return
-        }
+        var body = { gpx: plannedGpx, start: startTime, pace: pace,
+                     tz: -(new Date().getTimezoneOffset()) / 60 }
         if (planDate.length) body.date = planDate
         weatherBusy = true
         statusMsg = qsTr("Fetching forecast…")
@@ -138,16 +133,16 @@ Item {
         })
     }
 
-    function clearAll() {
-        waypoints = []; coloredSegments = []; legendRows = []; profileRows = []
-        summary = ({}); plannedGpx = ""; statusMsg = ""
+    // Clear just the computed results (kept separate so loadGpx can reset before recomputing).
+    function clearResults() {
+        coloredSegments = []; legendRows = []; profileRows = []; summary = ({})
         weatherSegments = []; weatherProfile = []; windArrows = []
         weatherAstro = ({}); weatherVerdict = ({}); weatherSummary = ({}); weatherMode = false
     }
 
-    function undoWaypoint() {
-        if (waypoints.length > 0)
-            waypoints = waypoints.slice(0, waypoints.length - 1)
+    function clearAll() {
+        plannedGpx = ""; routeName = ""; statusMsg = ""
+        clearResults()
     }
 
     function doSend() {
@@ -155,7 +150,7 @@ Item {
         busy = true
         statusMsg = qsTr("Sending to watch…")
         api("POST", "/api/routes",
-            { name: "Sommet plan (" + profileName + ")", gpx: plannedGpx, confirm: true },
+            { name: (routeName || "Sommet plan").replace(/\.gpx$/i, ""), gpx: plannedGpx, confirm: true },
             function(status, res) {
                 busy = false
                 statusMsg = (res && res.ok)
@@ -165,24 +160,21 @@ Item {
             })
     }
 
-    function searchPoi() {
-        if (!poiDb || !poiQuery) return
-        api("POST", "/api/poi/search", { db: poiDb, name: poiQuery, limit: 15 },
-            function(status, res) {
-                poiResults = (res && res.results) ? res.results : []
-                if (res && res.ok === false)
-                    statusMsg = res.error || qsTr("POI search failed")
-            })
-    }
-
     function fmtKm(m) { return m === undefined || m === null ? "–" : (m / 1000).toFixed(1) + " km" }
     function fmtM(m)  { return m === undefined || m === null ? "–" : Math.round(m) + " m" }
+
+    // File picker for the GPX (same idiom as RoutesPage's import dialog).
+    FileDialog {
+        id: gpxDialog
+        title: qsTr("Choose a GPX route")
+        nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
+        onAccepted: root.loadGpx(selectedFile)
+    }
 
     // --- layout: map on the left, controls + results on the right ----------------------
     Row {
         anchors.fill: parent
 
-        // The interactive planning canvas
         Item {
             id: mapHolder
             width: parent.width - panel.width
@@ -195,29 +187,16 @@ Item {
                 scrollZoom: true
                 showZoomControls: true
                 zoomLevel: 12
-                // Open centered on the detected location (André, 2026-08-29: "center by
-                // localization") - WeatherService is the app's own IP-detected position, the
-                // same one the weather card uses. Only used while the map has no route/markers;
-                // once a route exists MapView auto-fits to it (and the locate button below
-                // returns here on demand).
+                // Centre on the detected location until a route is loaded; MapView auto-fits to
+                // the coloured route once one exists. WeatherService is the app's own IP position.
                 latitude: WeatherService.latitude
                 longitude: WeatherService.longitude
-                markers: root.waypoints
+                markers: root.startEndMarkers
                 coloredSegments: (root.weatherMode && root.weatherSegments.length > 0)
                                  ? root.weatherSegments : root.coloredSegments
                 windArrows: (root.weatherMode && root.windArrows.length > 0) ? root.windArrows : []
 
-                // Tap = drop the next waypoint (start, then vias, then end). Same inverse
-                // projection the tiles are drawn with.
-                TapHandler {
-                    onTapped: (event) => {
-                        root.waypoints = root.waypoints.concat(
-                            [{ lat: map.latAtY(event.position.y),
-                               lon: map.lonAtX(event.position.x) }])
-                    }
-                }
-                // Drag = pan (pan-only, unlike PoisPage's drag-to-pick: here a tap already
-                // places the point, so a drag must never move it).
+                // Drag = pan (no tap-to-place any more; the route comes from the GPX).
                 DragHandler {
                     id: panner
                     target: null
@@ -236,14 +215,11 @@ Item {
                     }
                 }
                 HoverHandler {
-                    cursorShape: panner.active ? Qt.ClosedHandCursor : Qt.CrossCursor
+                    cursorShape: panner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                 }
             }
 
-            // "Locate me" - centre the map on the detected location (André, 2026-08-29:
-            // "center by localization"). WeatherService.latitude/longitude is the app's own
-            // IP-detected position (the same one the weather card uses), so this needs no new
-            // GPS/Positioning dependency. Sits just below MapView's own +/- zoom controls.
+            // "Locate me" - centre the map on the detected location.
             Rectangle {
                 anchors.right: parent.right
                 anchors.top: parent.top
@@ -294,9 +270,9 @@ Item {
                     anchors.centerIn: parent
                     color: "white"
                     font.pixelSize: Theme.fontSizeCaption
-                    text: root.busy ? root.statusMsg
-                          : root.waypoints.length === 0
-                            ? qsTr("Tap the map to set a start, then more points. Drag to pan, scroll to zoom.")
+                    text: root.busy || root.weatherBusy ? root.statusMsg
+                          : root.plannedGpx.length === 0
+                            ? qsTr("Upload a GPX to see its climbs and the weather along it. Drag to pan, scroll to zoom.")
                             : root.statusMsg
                 }
             }
@@ -321,7 +297,7 @@ Item {
                     width: panel.width - Theme.spacingMedium * 2
                     spacing: Theme.spacingMedium
 
-                    // Title + offline-router status
+                    // Title + loaded-route name
                     Column {
                         width: parent.width
                         spacing: 2
@@ -331,89 +307,51 @@ Item {
                             font.pixelSize: Theme.fontSizeTitle
                             font.bold: true
                         }
-                        Row {
-                            spacing: Theme.spacingSmall / 2
-                            Rectangle {
-                                width: 8; height: 8; radius: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: root.routerState === "up" ? Theme.success
-                                     : root.routerState === "down" ? Theme.error : Theme.mutedText
-                            }
-                            Text {
-                                text: root.routerState === "up" ? qsTr("Offline router ready")
-                                    : root.routerState === "down" ? qsTr("Offline router not running")
-                                    : qsTr("Checking offline router…")
-                                color: Theme.mutedText
-                                font.pixelSize: Theme.fontSizeCaption
-                            }
-                            Text {
-                                text: qsTr("· retry")
-                                color: Theme.primary
-                                font.pixelSize: Theme.fontSizeCaption
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.checkRouter()
-                                }
-                            }
-                        }
-                    }
-
-                    // Sport profile
-                    Column {
-                        width: parent.width
-                        spacing: Theme.spacingSmall / 2
                         Text {
-                            text: qsTr("Sport profile")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeLabel
-                        }
-                        RoundedComboBox {
-                            id: profileCombo
                             width: parent.width
-                            model: root.profiles
-                            currentIndex: root.profiles.indexOf(root.profileName)
-                            onActivated: root.profileName = root.profiles[currentIndex]
+                            text: root.routeName.length > 0 ? root.routeName
+                                                            : qsTr("Weather + climbs for a GPX you bring")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            elide: Text.ElideRight
                         }
                     }
 
                     // Actions
-                    Grid {
+                    Column {
                         width: parent.width
-                        columns: 2
-                        columnSpacing: Theme.spacingSmall
-                        rowSpacing: Theme.spacingSmall
-                        readonly property real cellW: (width - Theme.spacingSmall) / 2
+                        spacing: Theme.spacingSmall
 
                         RoundedButton {
-                            width: parent.cellW
-                            text: qsTr("Route")
-                            enabled: !root.busy && root.waypoints.length >= 2
-                            onClicked: root.planRoute()
+                            width: parent.width
+                            text: root.plannedGpx.length > 0 ? qsTr("Upload a different GPX")
+                                                             : qsTr("Upload GPX")
+                            enabled: !root.busy
+                            onClicked: gpxDialog.open()
                         }
-                        RoundedButton {
-                            width: parent.cellW
-                            text: qsTr("Undo point")
-                            enabled: root.waypoints.length > 0
-                            onClicked: root.undoWaypoint()
-                        }
-                        RoundedButton {
-                            width: parent.cellW
-                            text: qsTr("Clear")
-                            enabled: root.waypoints.length > 0 || root.coloredSegments.length > 0
-                            onClicked: root.clearAll()
-                        }
-                        RoundedButton {
-                            width: parent.cellW
-                            text: qsTr("Send to watch")
-                            enabled: !root.busy && root.plannedGpx.length > 0
-                            onClicked: sendDialog.open()
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            visible: root.plannedGpx.length > 0
+                            readonly property real cellW: (width - Theme.spacingSmall) / 2
+                            RoundedButton {
+                                width: parent.cellW
+                                text: qsTr("Clear")
+                                enabled: root.plannedGpx.length > 0
+                                onClicked: root.clearAll()
+                            }
+                            RoundedButton {
+                                width: parent.cellW
+                                text: qsTr("Send to watch")
+                                enabled: !root.busy && root.plannedGpx.length > 0
+                                onClicked: sendDialog.open()
+                            }
                         }
                     }
 
                     Text {
                         width: parent.width
-                        visible: root.statusMsg.length > 0 && !root.busy
+                        visible: root.statusMsg.length > 0 && !root.busy && !root.weatherBusy
                         text: root.statusMsg
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
@@ -467,7 +405,7 @@ Item {
                     // Weather + sun/moon along the route (online forecast at each point's ETA)
                     Column {
                         width: parent.width
-                        visible: root.waypoints.length > 0 || root.plannedGpx.length > 0
+                        visible: root.plannedGpx.length > 0
                         spacing: Theme.spacingSmall
                         Rectangle { width: parent.width; height: 1; color: Theme.border }
                         Text {
@@ -508,25 +446,8 @@ Item {
                         RoundedButton {
                             width: parent.width
                             text: root.weatherBusy ? qsTr("Fetching…") : qsTr("Forecast weather")
-                            enabled: !root.weatherBusy
-                                     && (root.plannedGpx.length > 0 || root.waypoints.length >= 2)
+                            enabled: !root.weatherBusy && root.plannedGpx.length > 0
                             onClicked: root.forecastWeather()
-                        }
-                        Text {
-                            width: parent.width
-                            visible: root.plannedGpx.length === 0 && root.waypoints.length < 2
-                            text: qsTr("Tap at least two points on the map (or plan a route), then forecast.")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeTiny
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            width: parent.width
-                            visible: root.plannedGpx.length === 0 && root.waypoints.length >= 2
-                            text: qsTr("No routed track yet — forecasting along your tapped points.")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeTiny
-                            wrapMode: Text.WordWrap
                         }
 
                         // verdict strip
@@ -756,96 +677,6 @@ Item {
                             }
                         }
                     }
-
-                    // POI search (optional - needs a prebuilt region DB, see the docs)
-                    Column {
-                        width: parent.width
-                        spacing: Theme.spacingSmall / 2
-                        Rectangle { width: parent.width; height: 1; color: Theme.border }
-                        Text {
-                            text: qsTr("Find a place (offline)")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeLabel
-                        }
-                        RoundedTextField {
-                            id: poiDbField
-                            width: parent.width
-                            placeholderText: qsTr("POI database path (region.poi.sqlite)")
-                            text: root.poiDb
-                            onTextChanged: root.poiDb = text
-                        }
-                        Row {
-                            width: parent.width
-                            spacing: Theme.spacingSmall
-                            RoundedTextField {
-                                id: poiQueryField
-                                width: parent.width - searchBtn.width - Theme.spacingSmall
-                                placeholderText: qsTr("name, e.g. refuge")
-                                text: root.poiQuery
-                                onTextChanged: root.poiQuery = text
-                                onAccepted: root.searchPoi()
-                            }
-                            RoundedButton {
-                                id: searchBtn
-                                text: qsTr("Search")
-                                enabled: root.poiDb.length > 0 && root.poiQuery.length > 0
-                                onClicked: root.searchPoi()
-                            }
-                        }
-                        Text {
-                            width: parent.width
-                            visible: root.poiDb.length === 0
-                            text: qsTr("Build a region DB with tools/poi_search.py — see docs/offline-routing.md.")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeTiny
-                            wrapMode: Text.WordWrap
-                        }
-                        Repeater {
-                            model: root.poiResults
-                            delegate: Rectangle {
-                                required property var modelData
-                                width: parent.width
-                                height: poiRow.implicitHeight + Theme.spacingSmall
-                                radius: Theme.radiusSmall
-                                color: Theme.cardNested
-                                border.color: Theme.border
-                                border.width: 1
-                                Row {
-                                    id: poiRow
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.margins: Theme.spacingSmall
-                                    spacing: Theme.spacingSmall
-                                    Column {
-                                        width: parent.width - addBtn.width - Theme.spacingSmall
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        Text {
-                                            width: parent.width
-                                            text: modelData.name || qsTr("(unnamed)")
-                                            color: Theme.text
-                                            font.pixelSize: Theme.fontSizeCaption
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            text: modelData.category || ""
-                                            color: Theme.mutedText
-                                            font.pixelSize: Theme.fontSizeTiny
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                    RoundedButton {
-                                        id: addBtn
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: qsTr("Add")
-                                        onClicked: root.waypoints = root.waypoints.concat(
-                                            [{ lat: modelData.lat, lon: modelData.lon }])
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -861,8 +692,6 @@ Item {
         title: qsTr("Add route to watch")
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: root.doSend()
-        // Column width is fixed (not derived from the dialog) so the dialog's implicitWidth
-        // doesn't feed back into its own content width - that feedback is a binding loop.
         contentItem: Column {
             width: 360
             spacing: Theme.spacingSmall
@@ -871,14 +700,14 @@ Item {
                 wrapMode: Text.WordWrap
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeBody
-                text: qsTr("Send this planned route to the connected watch? Your existing routes are kept.")
+                text: qsTr("Send this route to the connected watch? Your existing routes are kept.")
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeCaption
-                text: root.profileName + " · " + root.fmtKm(root.summary.distance_m)
+                text: (root.routeName || qsTr("route")) + " · " + root.fmtKm(root.summary.distance_m)
                       + " · ↑ " + root.fmtM(root.summary.ascent_m)
             }
         }

@@ -122,3 +122,14 @@ QString LocalFileService::saveBase64(const QUrl &fileUrl, const QString &base64)
 {
     return writeFile(fileUrl, QByteArray::fromBase64(base64.toUtf8()));
 }
+
+QString LocalFileService::readText(const QUrl &fileUrl)
+{
+    const QString path = fileUrl.toLocalFile();
+    if (path.isEmpty())
+        return QString();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(file.readAll());
+}

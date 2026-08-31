@@ -975,10 +975,6 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ember_get()
         elif self.path == "/api/nav" or self.path.startswith("/api/nav?"):
             self._cached_get("nav", self._handle_nav)   # keep the read cache (v0.2.x)
-        elif self.path == "/api/router/health":         # + offline-router health (offline-routing)
-            code, out, err = run_tool("route_plan.py", ["--health"])
-            self._send_json(200, self._parse_last_json_line(out)
-                            or {"ok": False, "error": err.strip() or "probe failed"})
         elif self.path == "/api/activities" or self.path.startswith("/api/activities?"):
             self._handle_activities()
         elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
@@ -1107,12 +1103,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_route_write(body)
         elif self.path == "/api/routes/export":
             self._handle_route_export(body)
-        elif self.path == "/api/router/route":
-            self._handle_router_route(body)
         elif self.path == "/api/router/color":
             self._handle_router_color(body)
-        elif self.path == "/api/poi/search":
-            self._handle_poi_search(body)
         elif self.path == "/api/weather/route":
             self._handle_weather_route(body)
         elif self.path == "/api/agps/update":
@@ -1904,59 +1896,44 @@ class Handler(BaseHTTPRequestHandler):
             "ok": code == 0 and bool(gpx_text), "gpx": gpx_text,
             "raw_output": out, "stderr": err})
 
-    # --- offline route planning + climb colouring + POI search -------------------------
-    # All read-only: they plan/colour/search locally and never touch the watch. See
-    # docs/offline-routing.md for the BRouter + mapsforge (OruxMaps-style) setup. The three
-    # tools are pure computation, but are still called via run_tool (not imported) to keep the
-    # one dispatch convention and the frozen (--tool) path working like every other endpoint.
-
-    def _handle_router_route(self, body):
-        """Body: {"via": [[lon,lat], ...] (>=2), "profile"?: str, "color"?: bool,
-        "gpx"?: bool, "step"?, "window"?, "hgt"?}. Plans a bike/trek route offline via the
-        local BRouter server (route_plan.py); optionally colours it by climb and/or returns a
-        GPX string ready to hand straight to /api/routes. Never writes to the watch."""
-        via = body.get("via") or []
-        if not isinstance(via, list) or len(via) < 2:
-            self._send_json(400, {"error": '"via" needs >=2 [lon,lat] points'})
-            return
-        args = []
-        for pair in via:
-            try:
-                lon, lat = float(pair[0]), float(pair[1])
-            except (TypeError, ValueError, IndexError):
-                self._send_json(400, {"error": "bad via point: %r" % (pair,)})
-                return
-            args += ["--via", "%s,%s" % (lon, lat)]
-        args += ["--profile", str(body.get("profile") or "trekking")]
-        gpx_path = None
-        if body.get("gpx"):
-            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
-                gpx_path = f.name
-            args += ["--gpx-out", gpx_path]
-        try:
-            code, out, err = run_tool("route_plan.py", args)
-            result = self._parse_last_json_line(out) or {
-                "ok": False, "error": err.strip() or "router failed"}
-            if result.get("ok") and gpx_path:
-                result["gpx"] = Path(gpx_path).read_text(encoding="utf-8")
-        finally:
-            if gpx_path:
-                Path(gpx_path).unlink(missing_ok=True)
-        if not result.get("ok"):
-            self._send_json(502, {**result, "raw_output": out, "stderr": err})
-            return
-        if body.get("color"):
-            result["colored"] = self._color_points(result.get("points", []), body)
-        self._send_json(200, result)
+    # --- route weather + climb colouring (from an uploaded GPX) -------------------------
+    # Read-only: they colour/forecast a GPX the user drew in any planner and never touch the
+    # watch. The offline BRouter route-planner + POI-DB search were removed 2026-08-31 (André:
+    # online planners/Basecamp already draw routes; the real need was weather along a route -
+    # see docs/offline-routing.md). track_color.py is pure computation; weather_route.py needs
+    # network. Both are called via run_tool (not imported) to keep the one dispatch convention
+    # and the frozen (--tool) path working like every other endpoint.
 
     def _handle_router_color(self, body):
-        """Body: {"points": [{lat,lon,ele?}] (>=2), "step"?, "window"?, "hgt"?}. Colours an
-        arbitrary track (e.g. an imported GPX the user is inspecting) by climb gradient."""
+        """Body: {"gpx": str  OR  "points": [{lat,lon,ele?}] (>=2), "step"?, "window"?, "hgt"?}.
+        Colours a track by climb gradient - the Plan page hands it an uploaded GPX (drawn in any
+        planner), so it accepts either the raw GPX text or an explicit point list. track_color.py
+        parses GPX itself, so a GPX just goes to it via a temp file. Never touches the watch."""
+        gpx = body.get("gpx")
+        if gpx:
+            self._send_json(200, self._color_gpx(gpx, body))
+            return
         pts = body.get("points") or []
         if not isinstance(pts, list) or len(pts) < 2:
-            self._send_json(400, {"error": '"points" needs >=2 {lat,lon} entries'})
+            self._send_json(400, {"error": '"gpx" or "points" (>=2 {lat,lon}) is required'})
             return
         self._send_json(200, self._color_points(pts, body))
+
+    def _color_gpx(self, gpx, body):
+        """Colour a raw GPX string by climb: hand it straight to track_color.py (which parses
+        GPX) via a temp .gpx file, return its JSON. Mirrors _color_points for the point path."""
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+            f.write(gpx)
+            path = f.name
+        try:
+            args = [path, "--step", str(body.get("step", 30)),
+                    "--window", str(body.get("window", 100))]
+            if body.get("hgt"):
+                args += ["--hgt", str(body["hgt"])]
+            code, out, err = run_tool("track_color.py", args)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        return self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
 
     def _color_points(self, points, body):
         """Shared: hand a point list to track_color.py via a temp file, return its JSON."""
@@ -2005,41 +1982,6 @@ class Handler(BaseHTTPRequestHandler):
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "weather failed"}
         self._send_json(200 if result.get("ok") else 502, result)
-
-    def _handle_poi_search(self, body):
-        """Body: {"db": path, one of "name"|"near":[lon,lat]|"along":[{lat,lon}], plus
-        "radius"?, "buffer"?, "category"?, "limit"?}. Offline POI lookup over a prebuilt
-        SQLite DB (poi_search.py)."""
-        db = body.get("db")
-        if not db:
-            self._send_json(400, {"error": '"db" (path to a .poi.sqlite) is required'})
-            return
-        args = ["search", "--db", str(db), "--limit", str(int(body.get("limit", 20)))]
-        if body.get("category"):
-            args += ["--category", str(body["category"])]
-        along_path = None
-        try:
-            if body.get("name"):
-                args += ["--name", str(body["name"])]
-            elif body.get("near"):
-                near = body["near"]
-                args += ["--near", "%s,%s" % (float(near[0]), float(near[1])),
-                         "--radius", str(body.get("radius", 5000))]
-            elif body.get("along"):
-                with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-                    json.dump({"points": body["along"]}, f)
-                    along_path = f.name
-                args += ["--along", along_path, "--buffer", str(body.get("buffer", 500))]
-            else:
-                self._send_json(400, {
-                    "error": 'need "name", "near":[lon,lat], or "along":[{lat,lon}]'})
-                return
-            code, out, err = run_tool("poi_search.py", args)
-        finally:
-            if along_path:
-                Path(along_path).unlink(missing_ok=True)
-        self._send_json(200 if code == 0 else 502,
-                        self._parse_last_json_line(out) or {"ok": False, "error": err.strip()})
 
     # --- writes: dry-run unless the caller explicitly confirms ---
 

@@ -122,10 +122,11 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Offline route planner (André, 2026-08-28): a route-following feature, so gated
-                // exactly like Routes (Kailash excluded). Reuses the route glyph - the icon font
-                // is a fixed subset (Icons.qml), so no new codepoint without re-subsetting first.
-                visible: DeviceCapabilities.supportsRoutes
+                // Plan = weather + climb for a GPX you bring (2026-08-31 reshape). Unlike the old
+                // BRouter route-planner, it needs no route-capable watch - weather works on any
+                // GPX with nothing plugged in - so it is NOT gated on supportsRoutes any more
+                // (gating a weather tool on a connected watch hid the thing André said he most
+                // needs). Always shown. Reuses the route glyph (fixed icon-font subset, Icons.qml).
                 glyph: Icons.routes
                 label: qsTr("Plan")
                 selected: root.currentPage === "planRoute"

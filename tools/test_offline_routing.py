@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Offline, hardware-free tests for the offline-routing feature (route_plan / track_color /
-poi_search / geo_util). Runs anywhere - no watch, no BRouter server, no downloaded data.
+"""Offline, hardware-free tests for the route-weather feature (track_color / weather_route /
+astro / geo_util). Runs anywhere - no watch, no network, no downloaded data. The offline
+BRouter route-planner (route_plan) and POI-DB search (poi_search) were removed 2026-08-31; see
+docs/offline-routing.md.
 
     ./tools/test_offline_routing.py            # or: python3 -m unittest test_offline_routing
 """
 
-import math
-import tempfile
 import unittest
 
 import astro
 import geo_util
-import poi_search
-import route_plan
 import track_color
 import weather_route
 from datetime import date
@@ -72,38 +70,6 @@ class TrackColor(unittest.TestCase):
         self.assertEqual(track_color.classify(0, b)["key"], "flat")
         self.assertEqual(track_color.classify(7.5, b)["key"], "moderate")
         self.assertEqual(track_color.classify(99, b)["key"], "brutal")
-
-
-class RoutePlan(unittest.TestCase):
-    def test_selftest(self):
-        self.assertEqual(route_plan._selftest(), 0)
-
-    def test_geojson_parse_empty(self):
-        self.assertFalse(route_plan.parse_geojson({"features": []})["ok"])
-
-    def test_unreachable_server_is_clean_error(self):
-        # nothing is listening here; must be a dict error, not an exception
-        r = route_plan.plan_route([(6.0, 46.0), (6.1, 46.1)],
-                                  url="http://127.0.0.1:1", timeout=2)
-        self.assertFalse(r["ok"])
-        self.assertIn("hint", r)
-
-    def test_needs_two_points(self):
-        self.assertFalse(route_plan.plan_route([(6.0, 46.0)])["ok"])
-
-
-class PoiSearch(unittest.TestCase):
-    def test_selftest(self):
-        self.assertEqual(poi_search._selftest(), 0)
-
-    def test_build_and_along(self):
-        db = tempfile.mktemp(suffix=".sqlite")
-        poi_search.build(db, poi_search._SAMPLE)
-        con = poi_search.open_db(db)
-        route = [{"lat": 45.8505, "lon": 6.832}, {"lat": 45.851, "lon": 6.831}]
-        along = poi_search.search_along(con, route, buffer_m=300)
-        self.assertTrue(any("Goûter" in r["name"] for r in along))
-        con.close()
 
 
 class Astro(unittest.TestCase):

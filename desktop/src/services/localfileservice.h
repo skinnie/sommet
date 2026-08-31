@@ -40,6 +40,11 @@ public:
     Q_INVOKABLE QString saveText(const QUrl &fileUrl, const QString &text);
     Q_INVOKABLE QString saveBase64(const QUrl &fileUrl, const QString &base64);
 
+    // Read a local text file (e.g. a GPX the user picked for the Plan page's weather + climb).
+    // Returns the file's UTF-8 contents, or "" if it can't be opened - callers treat an empty
+    // result as "couldn't read" (a real empty file is useless here anyway).
+    Q_INVOKABLE QString readText(const QUrl &fileUrl);
+
     // Real request 2026-08-07 ("replace the rehearse restore button with open backup
     // folder") - opens folderUrl in the system's own file manager (xdg-open on Linux, via
     // QDesktopServices). Returns false if the OS couldn't find a handler for it; there's
