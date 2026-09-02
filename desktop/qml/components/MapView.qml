@@ -73,6 +73,26 @@ Item {
     property real highlightDist: -1
     signal routeHovered(real dist)
     signal routeHoverEnded()
+    // Multi-day boundaries: distances (metres) where a day ends; drawn as draggable numbered
+    // flags on the route. Dragging one snaps to the nearest point on the route and reports its
+    // new distance so the caller can adjust that day's split (André, 2026-09-02).
+    property var dayMarkDists: []
+    signal dayBoundDragged(int index, real dist)
+    // True while the cursor is over (or dragging) a day flag - the caller disables map-panning so
+    // a press on a flag drags the flag instead of panning the map.
+    property bool dayFlagHovered: false
+    function _nearestDist(px, py) {
+        var pts = _routePts, cum = _routeCum
+        if (pts.length < 2) return -1
+        var best = -1, bestD = 1e18
+        for (var i = 0; i < pts.length; i++) {
+            var x = lonToWorldX(pts[i][1]) - originX
+            var y = latToWorldY(pts[i][0]) - originY
+            var dx = x - px, dy = y - py, dd = dx * dx + dy * dy
+            if (dd < bestD) { bestD = dd; best = i }
+        }
+        return best >= 0 ? cum[best] : -1
+    }
     // Whole route flattened to points + cumulative metres, so a distance maps to a coordinate
     // (and back). Rebuilt when coloredSegments changes.
     property var _routePts: []    // [[lat, lon], ...]
@@ -662,6 +682,48 @@ Item {
             function onOriginYChanged() { highlightCanvas.requestPaint() }
             function onWidthChanged() { highlightCanvas.requestPaint() }
             function onHeightChanged() { highlightCanvas.requestPaint() }
+        }
+    }
+
+    // Multi-day boundary flags - a draggable numbered circle where each day ends. Drag one along
+    // the route to make that day longer/shorter.
+    Repeater {
+        model: root.dayMarkDists
+        delegate: Item {
+            required property int index
+            required property real modelData
+            readonly property var _c: root._routePts.length > 0 ? root._coordAtDist(modelData) : null
+            visible: !!_c
+            width: 26; height: 26
+            x: _c ? root.lonToWorldX(_c[1]) - root.originX - width / 2 : -100
+            y: _c ? root.latToWorldY(_c[0]) - root.originY - height / 2 : -100
+            Rectangle {
+                anchors.centerIn: parent
+                width: 22; height: 22; radius: 11
+                color: dayDrag.active ? Theme.mapAccent : "white"
+                border.color: Theme.mapAccent; border.width: 2
+                Text { anchors.centerIn: parent; text: (parent.parent.index + 1).toString()
+                       color: dayDrag.active ? "white" : Theme.mapAccent; font.pixelSize: 11; font.bold: true }
+            }
+            // Panning is disabled while hovering/dragging a flag (see dayFlagHovered), so this
+            // DragHandler grabs the press cleanly - click, hold, drag along the route.
+            HoverHandler {
+                id: dayHover
+                margin: 8
+                onHoveredChanged: root.dayFlagHovered = (hovered || dayDrag.active)
+                cursorShape: dayDrag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            }
+            DragHandler {
+                id: dayDrag
+                target: null
+                onActiveChanged: root.dayFlagHovered = (active || dayHover.hovered)
+                onCentroidChanged: {
+                    if (!active) return
+                    var p = root.mapFromItem(null, centroid.scenePosition.x, centroid.scenePosition.y)
+                    var d = root._nearestDist(p.x, p.y)
+                    if (d >= 0) root.dayBoundDragged(index, d)
+                }
+            }
         }
     }
 

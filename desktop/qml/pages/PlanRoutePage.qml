@@ -62,6 +62,95 @@ Item {
     property real viewEnd: 1
     readonly property real routeLenM: (summary && summary.distance_m) ? summary.distance_m : 0
 
+    // Multi-day planner (André, 2026-09-02, à la Komoot): split the route into N equal-distance
+    // daily stages. Each stage carries its distance, ascent (from the climb profile) and an ETA
+    // guess from pace; tapping one focuses the graphs on it and forecasts that day's weather.
+    property int numDays: 1
+    property int splitMode: 0           // 0 = even distance, 1 = even effort (ascent + km)
+    property int activeStage: -1        // -1 = whole route
+    property var dayBounds: []          // internal day-boundary distances (m), length numDays-1;
+                                        // recomputed from the mode, then draggable to override.
+
+    // Recompute the default boundaries for the current mode + day count. "Even effort" balances
+    // each day's distance PLUS climb (100 m of ascent counted like 1 km flat), so a steep day is
+    // shorter - André, 2026-09-02 ("divide by similar ratio ascent/km").
+    function recomputeBounds() {
+        var n = numDays
+        if (n < 2 || routeLenM <= 0 || profileRows.length < 2) { dayBounds = []; return }
+        var b = [], i
+        if (splitMode === 0) {
+            for (i = 1; i < n; i++) b.push(routeLenM * i / n)
+        } else {
+            var cumEff = [], cd = [], eff = 0, prevD = 0, prevE = null
+            for (var j = 0; j < profileRows.length; j++) {
+                var r = profileRows[j]
+                if (r.ele_m === null) continue
+                var dd = Math.max(0, r.dist_m - prevD)
+                var asc = (prevE !== null && r.ele_m > prevE) ? (r.ele_m - prevE) : 0
+                eff += dd + 100 * asc; prevD = r.dist_m; prevE = r.ele_m
+                cumEff.push(eff); cd.push(r.dist_m)
+            }
+            var total = eff || 1
+            for (i = 1; i < n; i++) {
+                var target = total * i / n, dist = routeLenM * i / n
+                for (var k = 1; k < cumEff.length; k++) {
+                    if (cumEff[k] >= target) {
+                        var t = (target - cumEff[k - 1]) / Math.max(1e-6, cumEff[k] - cumEff[k - 1])
+                        dist = cd[k - 1] + (cd[k] - cd[k - 1]) * t; break
+                    }
+                }
+                b.push(dist)
+            }
+        }
+        dayBounds = b
+    }
+    onNumDaysChanged: recomputeBounds()
+    onSplitModeChanged: recomputeBounds()
+
+    // Move one boundary (from a drag), clamped between its neighbours.
+    function setBound(idx, distM) {
+        if (idx < 0 || idx >= dayBounds.length) return
+        var lo = idx === 0 ? 500 : dayBounds[idx - 1] + 500
+        var hi = idx === dayBounds.length - 1 ? routeLenM - 500 : dayBounds[idx + 1] - 500
+        var b = dayBounds.slice()
+        b[idx] = Math.max(lo, Math.min(hi, distM))
+        dayBounds = b
+        persist()
+    }
+
+    readonly property var stages: {
+        if (numDays < 2 || routeLenM <= 0 || profileRows.length < 2 || dayBounds.length !== numDays - 1) return []
+        var edges = [0].concat(dayBounds).concat([routeLenM])
+        var out = [], pace = parseFloat(paceText) || 20
+        for (var i = 0; i < numDays; i++) {
+            var sm = edges[i], em = edges[i + 1]
+            var asc = 0, prev = null
+            for (var j = 0; j < profileRows.length; j++) {
+                var r = profileRows[j]
+                if (r.ele_m === null || r.dist_m < sm || r.dist_m > em) continue
+                if (prev !== null && r.ele_m > prev) asc += r.ele_m - prev
+                prev = r.ele_m
+            }
+            out.push({ index: i, startFrac: sm / routeLenM, endFrac: em / routeLenM,
+                       startKm: sm / 1000, endKm: em / 1000, distKm: (em - sm) / 1000,
+                       ascentM: Math.round(asc), hours: ((em - sm) / 1000) / pace })
+        }
+        return out
+    }
+    readonly property var dayMarkDists: root.dayBounds
+    function selectStage(i) {
+        if (activeStage === i) {   // tap again = back to whole route
+            activeStage = -1; viewStart = 0; viewEnd = 1; planDate = ""
+        } else {
+            activeStage = i
+            viewStart = stages[i].startFrac; viewEnd = stages[i].endFrac
+            var base = new Date(); base.setDate(base.getDate() + i)
+            planDate = (i === 0) ? "" : (base.getFullYear() + "-" + ("0" + (base.getMonth() + 1)).slice(-2) + "-" + ("0" + base.getDate()).slice(-2))
+        }
+        forecastWeather()
+        persist()
+    }
+
     readonly property string backend: "http://127.0.0.1:8766"
 
     // Restore whatever was loaded before the page was navigated away from (the Loader destroys
@@ -78,7 +167,7 @@ Item {
         windArrows = PlanStore.windArrows; rainMarks = PlanStore.rainMarks; tempMarks = PlanStore.tempMarks
         weatherAstro = PlanStore.weatherAstro; weatherVerdict = PlanStore.weatherVerdict
         weatherSummary = PlanStore.weatherSummary; weatherLegend = PlanStore.weatherLegend
-        overlayMode = PlanStore.overlayMode; reversed = PlanStore.reversed
+        overlayMode = PlanStore.overlayMode; reversed = PlanStore.reversed; numDays = PlanStore.numDays; splitMode = PlanStore.splitMode; dayBounds = PlanStore.dayBounds
     }
 
     function persist() {
@@ -89,7 +178,7 @@ Item {
         PlanStore.windArrows = windArrows; PlanStore.rainMarks = rainMarks; PlanStore.tempMarks = tempMarks
         PlanStore.weatherAstro = weatherAstro; PlanStore.weatherVerdict = weatherVerdict
         PlanStore.weatherSummary = weatherSummary; PlanStore.weatherLegend = weatherLegend
-        PlanStore.overlayMode = overlayMode; PlanStore.reversed = reversed
+        PlanStore.overlayMode = overlayMode; PlanStore.reversed = reversed; PlanStore.numDays = numDays; PlanStore.splitMode = splitMode; PlanStore.dayBounds = dayBounds
         PlanStore.startTime = startTime; PlanStore.paceText = paceText; PlanStore.planDate = planDate
     }
 
@@ -148,6 +237,7 @@ Item {
             profileRows = res.profile || []
             summary = res.summary || ({})
             statusMsg = ""
+            recomputeBounds()
             persist()
         })
     }
@@ -296,6 +386,56 @@ Item {
         onAccepted: root.loadGpx(selectedFile)
     }
 
+    // Save dialog for exporting one day's GPX portion.
+    property string exportGpxText: ""
+    FileDialog {
+        id: saveDayDialog
+        title: qsTr("Export day as GPX")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("GPX files (*.gpx)")]
+        onAccepted: {
+            var err = LocalFileService.saveText(selectedFile, root.exportGpxText)
+            root.statusMsg = err.length ? err : qsTr("Saved.")
+        }
+    }
+    // Right-click menu for a day stage (export / send) - the app's rounded-card menu language.
+    ThemedMenu {
+        id: dayMenu
+        property var stage: null
+        ThemedMenuItem { text: qsTr("Export day as GPX…"); onTriggered: if (dayMenu.stage) root.exportDay(dayMenu.stage) }
+        ThemedMenuItem { text: qsTr("Send day to watch"); onTriggered: if (dayMenu.stage) root.sendDay(dayMenu.stage) }
+    }
+    function sendDay(st) {
+        if (!plannedGpx) return
+        var name = "Day " + (st.index + 1)
+        statusMsg = qsTr("Preparing day %1…").arg(st.index + 1)
+        api("POST", "/api/route/slice",
+            { gpx: plannedGpx, reverse: reversed, start_km: st.startKm, end_km: st.endKm, name: name },
+            function(status, res) {
+                if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("Slice failed"); return }
+                busy = true; statusMsg = qsTr("Sending day %1 to watch…").arg(st.index + 1)
+                api("POST", "/api/routes", { name: name, gpx: res.gpx, confirm: true }, function(s2, r2) {
+                    busy = false
+                    statusMsg = (r2 && r2.ok) ? qsTr("Day %1 sent to watch.").arg(st.index + 1)
+                             : (r2 && r2.error ? r2.error : qsTr("Send failed"))
+                })
+            })
+    }
+    // Slice the loaded GPX to a day's distance range and open the save dialog with a sensible name.
+    function exportDay(st) {
+        if (!plannedGpx) return
+        var name = (routeName || "route").replace(/\.gpx$/i, "") + " - Day " + (st.index + 1)
+        statusMsg = qsTr("Preparing day %1…").arg(st.index + 1)
+        api("POST", "/api/route/slice",
+            { gpx: plannedGpx, reverse: reversed, start_km: st.startKm, end_km: st.endKm, name: name },
+            function(status, res) {
+                if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("Export failed"); return }
+                exportGpxText = res.gpx
+                saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
+                saveDayDialog.open()
+            })
+    }
+
     // --- layout: map on the left, controls + results on the right ----------------------
     Row {
         anchors.fill: parent
@@ -324,6 +464,8 @@ Item {
                 windArrows: root.overlayMode === 1 ? root.windArrows : []
                 rainMarks: root.overlayMode !== 0 ? root.rainMarks : []   // rain shown with wind AND temp
                 tempMarks: root.overlayMode === 2 ? root.tempMarks : []
+                dayMarkDists: root.dayMarkDists
+                onDayBoundDragged: (i, d) => root.setBound(i, d)
                 // graph <-> map cursor: show a dot where the graph is hovered, and push the
                 // reverse (hovering the route moves the graph crosshair).
                 highlightDist: root.cursorDist
@@ -333,9 +475,11 @@ Item {
                 // graphs' distance window (André, 2026-08-31).
                 onRouteVisibleRange: (s, e) => { root.viewStart = s; root.viewEnd = Math.max(e, s + 0.01) }
 
-                // Drag = pan (no tap-to-place any more; the route comes from the GPX).
+                // Drag = pan (no tap-to-place any more; the route comes from the GPX). Suspended
+                // while a day flag is under the cursor, so dragging a flag adjusts the day split.
                 DragHandler {
                     id: panner
+                    enabled: !map.dayFlagHovered
                     target: null
                     property real lastX: 0
                     property real lastY: 0
@@ -544,6 +688,119 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Multi-day planner: split the route into equal daily stages (Komoot-style).
+                    Column {
+                        width: parent.width
+                        visible: root.coloredSegments.length > 0
+                        spacing: Theme.spacingSmall
+                        Rectangle { width: parent.width; height: 1; color: Theme.border }
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - dayMinus.width - dayPlus.width - dayCount.width - Theme.spacingSmall * 3
+                                text: qsTr("Split into days")
+                                color: Theme.mutedText
+                                font.pixelSize: Theme.fontSizeLabel
+                            }
+                            RoundedButton {
+                                id: dayMinus
+                                text: "−"
+                                enabled: root.numDays > 1
+                                onClicked: { root.numDays = Math.max(1, root.numDays - 1); root.activeStage = -1; root.viewStart = 0; root.viewEnd = 1; root.persist() }
+                            }
+                            Text {
+                                id: dayCount
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 22
+                                horizontalAlignment: Text.AlignHCenter
+                                text: root.numDays
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeBodyLarge
+                                font.bold: true
+                            }
+                            RoundedButton {
+                                id: dayPlus
+                                text: "+"
+                                enabled: root.numDays < 14
+                                onClicked: { root.numDays = Math.min(14, root.numDays + 1); root.activeStage = -1; root.viewStart = 0; root.viewEnd = 1; root.persist() }
+                            }
+                        }
+                        // Split mode - even distance vs even effort (distance + climb).
+                        Row {
+                            width: parent.width
+                            visible: root.numDays > 1
+                            spacing: Theme.spacingSmall
+                            RoundedButton {
+                                width: (parent.width - Theme.spacingSmall) / 2
+                                text: qsTr("Even distance")
+                                highlighted: root.splitMode === 0
+                                onClicked: { root.splitMode = 0; root.activeStage = -1; root.viewStart = 0; root.viewEnd = 1; root.persist() }
+                            }
+                            RoundedButton {
+                                width: (parent.width - Theme.spacingSmall) / 2
+                                text: qsTr("Even effort")
+                                highlighted: root.splitMode === 1
+                                onClicked: { root.splitMode = 1; root.activeStage = -1; root.viewStart = 0; root.viewEnd = 1; root.persist() }
+                            }
+                        }
+                        // Per-day list - tap a day to focus the map/graphs on it + forecast that day.
+                        Repeater {
+                            model: root.stages
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: parent.width
+                                height: dayRow.implicitHeight + Theme.spacingSmall
+                                radius: Theme.radiusSmall
+                                color: root.activeStage === modelData.index ? Theme.primary : Theme.cardNested
+                                border.color: Theme.border; border.width: 1
+                                Row {
+                                    id: dayRow
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.margins: Theme.spacingSmall
+                                    spacing: Theme.spacingSmall
+                                    Text {
+                                        width: 44
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: qsTr("Day %1").arg(modelData.index + 1)
+                                        color: root.activeStage === modelData.index ? "white" : Theme.text
+                                        font.pixelSize: Theme.fontSizeCaption
+                                        font.bold: true
+                                    }
+                                    Text {
+                                        width: parent.width - 44 - Theme.spacingSmall
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: modelData.distKm.toFixed(1) + " km · ↑" + modelData.ascentM + " m · ~"
+                                              + modelData.hours.toFixed(1) + " h"
+                                        color: root.activeStage === modelData.index ? "white" : Theme.mutedText
+                                        font.pixelSize: Theme.fontSizeCaption
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                // Left-click focuses the day; right-click opens the export menu.
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: (mouse) => {
+                                        if (mouse.button === Qt.RightButton) { dayMenu.stage = modelData; dayMenu.popup() }
+                                        else root.selectStage(modelData.index)
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            width: parent.width
+                            visible: root.stages.length > 1
+                            text: qsTr("Drag a numbered flag on the map to adjust a day. Tap a day to focus it; right-click a day to export its GPX or send it to the watch.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeTiny
+                            wrapMode: Text.WordWrap
                         }
                     }
 

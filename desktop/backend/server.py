@@ -1105,6 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_route_export(body)
         elif self.path == "/api/router/color":
             self._handle_router_color(body)
+        elif self.path == "/api/route/slice":
+            self._handle_route_slice(body)
         elif self.path == "/api/weather/route":
             self._handle_weather_route(body)
         elif self.path == "/api/agps/update":
@@ -1953,6 +1955,29 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         return self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
+
+    def _handle_route_slice(self, body):
+        """Body: {"gpx": str, "start_km": float, "end_km": float, "reverse"?, "name"?}. Returns
+        {ok, gpx} - the sub-route for that distance range, for the multi-day day export."""
+        gpx = body.get("gpx")
+        if not gpx or body.get("end_km") is None:
+            self._send_json(400, {"error": '"gpx" and "end_km" are required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+            f.write(gpx)
+            path = f.name
+        try:
+            args = [path, "--start-km", str(body.get("start_km", 0)),
+                    "--end-km", str(body["end_km"]), "--name", str(body.get("name") or "Day")]
+            if body.get("reverse"):
+                args += ["--reverse"]
+            code, out, err = run_tool("route_slice.py", args)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        if code != 0 or not out.strip():
+            self._send_json(502, {"ok": False, "error": err.strip() or "slice failed"})
+            return
+        self._send_json(200, {"ok": True, "gpx": out})
 
     def _handle_weather_route(self, body):
         """Body: {"points":[{lat,lon,ele?}] (>=2) OR "gpx": str, "start"?:"HH:MM",

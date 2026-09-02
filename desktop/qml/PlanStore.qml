@@ -25,6 +25,9 @@ QtObject {
     property var weatherSummary: ({})
     property var weatherLegend: []
     property int overlayMode: 1
+    property int numDays: 1
+    property int splitMode: 0
+    property var dayBounds: []
     property bool reversed: false
 
     // UI inputs worth remembering too, so a return trip keeps the same start/pace.
