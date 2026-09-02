@@ -281,7 +281,11 @@ def show(entries, catalog=None):
     for e in entries:
         marker = f"0x{e['marker']:02x}" if "marker" in e else "?"
         binary_length = len(e["binary"]) if "binary" in e else "?"
-        print(f"  offset 0x{e['entry_offset']:x}: name={e.get('name', '?')!r}"
+        # byte0 of the entry header is the guidance flag (Finding 39/60, confirmed against a
+        # genuine Movescount workout on the Ambit3 Sport): 1 = native WORKOUT-menu guided
+        # workout, 0 = display app.
+        kind = {0: "app", 1: "workout"}.get(e.get("reserved"), f"type{e.get('reserved')}")
+        print(f"  offset 0x{e['entry_offset']:x}: [{kind}] name={e.get('name', '?')!r}"
               f"  activityId={e.get('activityId', '?')}"
               f"  marker={marker}"
               f"  binary_length={binary_length}"
