@@ -40,7 +40,7 @@ export default function RouteWeatherScreen() {
   const params = (useRoute<RouteProp<Params, 'RouteWeather'>>().params) || {};
 
   const [start, setStart] = useState('09:00');
-  const [pace, setPace] = useState('4.5');
+  const [pace, setPace] = useState('20');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [result, setResult] = useState<WeatherRoutePlan | undefined>();
@@ -165,7 +165,7 @@ export default function RouteWeatherScreen() {
           {/* Profile */}
           <Card style={{ marginTop: v3Spacing.medium }}>
             <Text style={s.cardTitle}>Profile</Text>
-            <Text style={s.muted}>Elevation coloured by temperature · rain bars · sunset marker.</Text>
+            <Text style={s.muted}>temperature line · numbers = temp/feels (°C) · rain bars (peak mm) · wind (km/h)</Text>
             <WeatherProfile plan={result} theme={theme} />
             <View style={s.legendRow}>
               {result.legend!.map(l => (
@@ -291,57 +291,72 @@ if (all.length) {
 }
 
 // SVG profile: temperature-coloured elevation line, rain bars along the bottom, a sunset marker.
+// The weather "croqui" - matches the desktop Plan page (2026-09-02): a single temperature line
+// with compact temp/feels (21/22) labels at several points, rain bars labelled only at the
+// wettest bar, a wind strip on top, and °C / mm / km+ETA axes. Elevation has its own section.
 function WeatherProfile({ plan, theme }: { plan: WeatherRoutePlan; theme: V3Colors }) {
-  const W = 320, H = 150, padL = 4, padR = 4, padT = 8, padB = 18;
   const prof = plan.profile!;
-  const eles = prof.map(p => p.ele_m).filter((e: any) => e != null) as number[];
-  const hasEle = eles.length > 1;
+  const W = 320, H = 182, mL = 26, mR = 30, mT = 22, mB = 22;
+  const pW = W - mL - mR, pH = H - mT - mB;
   const dMax = prof[prof.length - 1].dist_m || 1;
-  const eMin = hasEle ? Math.min(...eles) : 0, eMax = hasEle ? Math.max(...eles) : 1;
-  const rains = prof.map(p => p.rain_mm);
-  const rMax = Math.max(0.1, ...rains);
+  const X = (d: number) => mL + (d / dMax) * pW;
 
-  const x = (d: number) => padL + (d / dMax) * (W - padL - padR);
-  const y = (e: number) => hasEle ? padT + (1 - (e - eMin) / Math.max(1, eMax - eMin)) * (H - padT - padB) : (H - padB) / 2;
+  // temperature axis (includes feels-like), with a minimum span so a near-constant temp reads flat
+  const vals: number[] = [];
+  prof.forEach((p: any) => { vals.push(p.temp_c, p.feels_c); });
+  let tLo = Math.min(...vals), tHi = Math.max(...vals);
+  const mid = (tLo + tHi) / 2, half = Math.max(4, (tHi - tLo) / 2 + 1);
+  tLo = mid - half; tHi = mid + half;
+  const Yt = (t: number) => mT + pH - ((t - tLo) / Math.max(1, tHi - tLo)) * pH;
+  const rMax = Math.max(1, ...prof.map((p: any) => p.rain_mm || 0));
+  const relCol: Record<string, string> = { headwind: '#d6453f', crosswind: '#e0912f', tailwind: '#2e9e6b' };
 
-  // temperature-coloured elevation segments (one path per consecutive same-colour run)
-  const segs: Array<{ color: string; pts: Array<[number, number]> }> = [];
-  let cur: { color: string; pts: Array<[number, number]> } | null = null;
-  for (let i = 0; i < prof.length; i++) {
-    const p = prof[i]; const px = x(p.dist_m); const py = y(p.ele_m ?? eMin);
-    if (!cur || cur.color !== p.color) { if (cur) segs.push(cur); cur = { color: p.color, pts: [] }; }
-    cur.pts.push([px, py]);
-  }
-  if (cur) segs.push(cur);
-  // stitch: append the first point of the next segment so the line is continuous
-  for (let i = 0; i < segs.length - 1; i++) segs[i].pts.push(segs[i + 1].pts[0]);
+  // rain bars, tracking the wettest to label it alone
+  let peak = { mm: 0, x: 0, h: 0 };
+  const bars = prof.filter((p: any) => (p.rain_mm || 0) >= 0.05).map((p: any, i: number) => {
+    const h = (p.rain_mm / rMax) * (pH * 0.5), bx = X(p.dist_m);
+    if (p.rain_mm > peak.mm) peak = { mm: p.rain_mm, x: bx, h };
+    return { bx, h, key: i };
+  });
+  const tempPath = prof.map((p: any, i: number) => `${i === 0 ? 'M' : 'L'}${X(p.dist_m).toFixed(1)},${Yt(p.temp_c).toFixed(1)}`).join(' ');
 
-  // sunset marker: distance reached at sunset (from the verdict's dark_km, or none)
-  const darkKm = plan.verdict!.dark_km;
-  const sunsetX = darkKm != null ? x(darkKm * 1000) : null;
+  const nLab = Math.min(6, prof.length);
+  const labels = Array.from({ length: nLab }, (_, s) => {
+    const p: any = prof[Math.round(s * (prof.length - 1) / Math.max(1, nLab - 1))];
+    return { x: Math.max(mL + 12, Math.min(mL + pW - 12, X(p.dist_m))), y: Yt(p.temp_c) - 5, t: `${Math.round(p.temp_c)}/${Math.round(p.feels_c)}` };
+  });
+  const nW = Math.min(6, prof.length);
+  const winds = Array.from({ length: nW }, (_, s) => {
+    const p: any = prof[Math.round(s * (prof.length - 1) / Math.max(1, nW - 1))];
+    return { x: X(p.dist_m), rel: p.wind_rel as string, kmh: Math.round(p.wind_kmh) };
+  });
+  const ticks = [0, 0.5, 1].map(f => {
+    const d = dMax * f, p: any = prof[Math.round(f * (prof.length - 1))];
+    return { x: X(d), km: (d / 1000).toFixed(dMax < 20000 ? 1 : 0), eta: p.eta as string };
+  });
 
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={{ marginTop: 8 }}>
-      {/* rain bars */}
-      {prof.map((p, i) => {
-        if (p.rain_mm <= 0) return null;
-        const bx = x(p.dist_m); const bh = (p.rain_mm / rMax) * (H - padT - padB) * 0.5;
-        return <Rect key={`r${i}`} x={bx - 2} y={H - padB - bh} width={4} height={bh} fill="#5b8def" opacity={0.55} />;
-      })}
-      {/* elevation, temp-coloured */}
-      {hasEle && segs.map((seg, i) => (
-        <Path key={`s${i}`} d={seg.pts.map((pt, j) => `${j === 0 ? 'M' : 'L'}${pt[0].toFixed(1)},${pt[1].toFixed(1)}`).join(' ')}
-          stroke={seg.color} strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      {[0, 1, 2].map(g => <Line key={`g${g}`} x1={mL} y1={mT + pH * g / 2} x2={mL + pW} y2={mT + pH * g / 2} stroke={theme.border} strokeWidth={0.5} opacity={0.5} />)}
+      {bars.map(b => <Rect key={`r${b.key}`} x={b.bx - 2} y={mT + pH - b.h} width={4} height={b.h} fill="#4e7cc4" opacity={0.5} />)}
+      {peak.mm >= 0.05 && <SvgText x={peak.x} y={mT + pH - peak.h - 3} fill="#4e7cc4" fontSize={9} fontWeight="bold" textAnchor="middle">{peak.mm.toFixed(1)} mm</SvgText>}
+      <Path d={tempPath} stroke="#e8833a" strokeWidth={2.4} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      {labels.map((l, i) => <SvgText key={`t${i}`} x={l.x} y={l.y} fill={theme.text} fontSize={9} fontWeight="bold" textAnchor="middle">{l.t}</SvgText>)}
+      {winds.map((w, i) => (
+        <React.Fragment key={`w${i}`}>
+          <Path d={w.rel === 'tailwind' ? `M${w.x - 3},${mT - 13} L${w.x + 3},${mT - 13} L${w.x},${mT - 7} Z` : `M${w.x - 3},${mT - 7} L${w.x + 3},${mT - 7} L${w.x},${mT - 13} Z`} fill={relCol[w.rel] || theme.mutedText} />
+          <SvgText x={w.x} y={mT - 15} fill={theme.mutedText} fontSize={8} textAnchor="middle">{w.kmh}</SvgText>
+        </React.Fragment>
       ))}
-      {/* sunset marker */}
-      {sunsetX != null && (
-        <>
-          <Line x1={sunsetX} y1={padT} x2={sunsetX} y2={H - padB} stroke={theme.warning} strokeWidth={1} strokeDasharray="3 3" />
-          <SvgText x={Math.min(sunsetX + 3, W - 40)} y={padT + 9} fill={theme.warning} fontSize={9}>sunset</SvgText>
-        </>
-      )}
-      {/* baseline */}
-      <Line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={theme.border} strokeWidth={1} />
+      <SvgText x={mL - 3} y={mT + 6} fill={theme.mutedText} fontSize={8} textAnchor="end">{Math.round(tHi)}°</SvgText>
+      <SvgText x={mL - 3} y={mT + pH} fill={theme.mutedText} fontSize={8} textAnchor="end">{Math.round(tLo)}°</SvgText>
+      {rMax >= 0.1 && <SvgText x={mL + pW + 3} y={mT + pH} fill={theme.mutedText} fontSize={8} textAnchor="start">{rMax.toFixed(1)}mm</SvgText>}
+      {ticks.map((t, i) => (
+        <React.Fragment key={`x${i}`}>
+          <SvgText x={t.x} y={mT + pH + 10} fill={theme.text} fontSize={8} textAnchor="middle">{t.km}km</SvgText>
+          <SvgText x={t.x} y={mT + pH + 19} fill={theme.mutedText} fontSize={8} textAnchor="middle">{t.eta}</SvgText>
+        </React.Fragment>
+      ))}
     </Svg>
   );
 }
