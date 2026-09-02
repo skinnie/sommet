@@ -58,6 +58,87 @@ Item {
     // speed. Additive: empty by default, so no other MapView caller is affected.
     property var windArrows: []   // [{lat, lon, wind_kmh, wind_dir_deg, rel, color}]
 
+    // Rain markers overlay (PlanRoutePage weather layer) - a raindrop wherever meaningful rain
+    // is forecast along the route (André, 2026-08-31: "some rain icon if they appear"). Additive:
+    // empty by default.
+    property var rainMarks: []    // [{lat, lon, rain_mm}]
+
+    // Temperature labels overlay (PlanRoutePage "climb + temperature" mode) - °C / feels-like at
+    // points along the route (André, 2026-08-31). Additive: empty by default.
+    property var tempMarks: []    // [{lat, lon, temp_c, feels_c}]
+
+    // Route-cursor sync (PlanRoutePage graph<->map, André 2026-08-31). `highlightDist` = metres
+    // along the route to mark with a dot; the page sets it from a graph hover. Reverse: hovering
+    // the route emits routeHovered(dist) so the page can move the graph crosshair. Additive.
+    property real highlightDist: -1
+    signal routeHovered(real dist)
+    signal routeHoverEnded()
+    // Whole route flattened to points + cumulative metres, so a distance maps to a coordinate
+    // (and back). Rebuilt when coloredSegments changes.
+    property var _routePts: []    // [[lat, lon], ...]
+    property var _routeCum: []    // cumulative metres, same length
+    function _haversine(la1, lo1, la2, lo2) {
+        var R = 6371000, d = Math.PI / 180
+        var dLa = (la2 - la1) * d, dLo = (lo2 - lo1) * d
+        var a = Math.sin(dLa / 2) * Math.sin(dLa / 2)
+              + Math.cos(la1 * d) * Math.cos(la2 * d) * Math.sin(dLo / 2) * Math.sin(dLo / 2)
+        return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+    function _rebuildRouteMetrics() {
+        var pts = [], cum = [], total = 0
+        var segs = coloredSegments || []
+        for (var s = 0; s < segs.length; s++) {
+            var cs = segs[s].coords || []
+            for (var i = 0; i < cs.length; i++) {
+                if (pts.length > 0) {
+                    var a = pts[pts.length - 1]
+                    total += _haversine(a[0], a[1], cs[i][0], cs[i][1])
+                }
+                pts.push(cs[i]); cum.push(total)
+            }
+        }
+        _routePts = pts; _routeCum = cum
+        _rangeTimer.restart()
+    }
+    function _coordAtDist(dist) {
+        var pts = _routePts, cum = _routeCum
+        if (pts.length === 0) return null
+        if (dist <= 0) return pts[0]
+        if (dist >= cum[cum.length - 1]) return pts[pts.length - 1]
+        for (var i = 1; i < cum.length; i++) {
+            if (cum[i] >= dist) {
+                var t = (dist - cum[i - 1]) / Math.max(1e-6, cum[i] - cum[i - 1])
+                return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
+                        pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]
+            }
+        }
+        return pts[pts.length - 1]
+    }
+
+    // The fraction of the route [startFrac, endFrac] currently visible in the viewport, emitted
+    // whenever the map pans/zooms so the Plan graphs can follow the map (André, 2026-08-31).
+    signal routeVisibleRange(real startFrac, real endFrac)
+    function _emitVisibleRange() {
+        var pts = _routePts, cum = _routeCum
+        if (pts.length < 2) return
+        var total = cum[cum.length - 1]
+        if (total <= 0) return
+        var minC = -1, maxC = -1
+        for (var i = 0; i < pts.length; i++) {
+            var px = lonToWorldX(pts[i][1]) - originX
+            var py = latToWorldY(pts[i][0]) - originY
+            if (px >= 0 && px <= width && py >= 0 && py <= height) {
+                if (minC < 0 || cum[i] < minC) minC = cum[i]
+                if (cum[i] > maxC) maxC = cum[i]
+            }
+        }
+        if (minC < 0) return    // route not on screen - leave the graphs where they are
+        routeVisibleRange(minC / total, maxC / total)
+    }
+    Timer { id: _rangeTimer; interval: 50; onTriggered: root._emitVisibleRange() }
+    onOriginXChanged: _rangeTimer.restart()
+    onOriginYChanged: _rangeTimer.restart()
+
     clip: true
 
     readonly property int tileSize: 256
@@ -142,10 +223,10 @@ Item {
         }
         currentZoom = z
     }
-    Component.onCompleted: Qt.callLater(_refitZoom)
+    Component.onCompleted: { _rebuildRouteMetrics(); Qt.callLater(_refitZoom) }
     onTrackPointsChanged: Qt.callLater(_refitZoom)
     onMarkersChanged: Qt.callLater(_refitZoom)
-    onColoredSegmentsChanged: Qt.callLater(_refitZoom)
+    onColoredSegmentsChanged: { _rebuildRouteMetrics(); Qt.callLater(_refitZoom) }
     onWidthChanged: _refitZoom()
     onHeightChanged: _refitZoom()
 
@@ -377,6 +458,43 @@ Item {
             for (const seg of segs) {
                 if (trace(seg)) { ctx.strokeStyle = seg.color || Theme.mapAccent; ctx.stroke() }
             }
+
+            // Direction-of-travel chevrons (André, 2026-08-31: "we need direction of the route").
+            // Flatten the whole route to screen points, then drop a ">" chevron every ~75 px,
+            // rotated to the local heading. White halo then dark so it reads over any colour.
+            const pts = []
+            for (const seg of segs) {
+                const cs = seg.coords || []
+                for (let i = 0; i < cs.length; i++)
+                    pts.push([root.lonToWorldX(cs[i][1]) - root.originX,
+                              root.latToWorldY(cs[i][0]) - root.originY])
+            }
+            if (pts.length >= 2) {
+                const step = 75, arm = 6, spread = 2.5
+                let dist = 0, next = step * 0.6
+                for (let i = 1; i < pts.length; i++) {
+                    let dx = pts[i][0] - pts[i - 1][0], dy = pts[i][1] - pts[i - 1][1]
+                    const segLen = Math.hypot(dx, dy)
+                    if (segLen < 0.001) continue
+                    dx /= segLen; dy /= segLen
+                    const ang = Math.atan2(dy, dx)
+                    while (dist + segLen >= next) {
+                        const t = next - dist
+                        const cx = pts[i - 1][0] + dx * t, cy = pts[i - 1][1] + dy * t
+                        for (let pass = 0; pass < 2; pass++) {
+                            ctx.strokeStyle = pass === 0 ? "rgba(255,255,255,0.9)" : "rgba(20,24,28,0.85)"
+                            ctx.lineWidth = pass === 0 ? 4 : 2
+                            ctx.beginPath()
+                            ctx.moveTo(cx - Math.cos(ang - spread) * arm, cy - Math.sin(ang - spread) * arm)
+                            ctx.lineTo(cx, cy)
+                            ctx.lineTo(cx - Math.cos(ang + spread) * arm, cy - Math.sin(ang + spread) * arm)
+                            ctx.stroke()
+                        }
+                        next += step
+                    }
+                    dist += segLen
+                }
+            }
         }
         Connections {
             target: root
@@ -440,6 +558,130 @@ Item {
             function onOriginYChanged() { windCanvas.requestPaint() }
             function onWidthChanged() { windCanvas.requestPaint() }
             function onHeightChanged() { windCanvas.requestPaint() }
+        }
+    }
+
+    // Rain icons (weather layer) - a small blue raindrop wherever rain is forecast along the
+    // route, so wet stretches jump out over the climb-coloured route (André, 2026-08-31). Same
+    // world-pixel projection as everything else, so they track pan/zoom.
+    Canvas {
+        id: rainCanvas
+        anchors.fill: parent
+        visible: root.rainMarks.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const marks = root.rainMarks
+            if (!marks || marks.length === 0) return
+            const r = 5
+            for (const m of marks) {
+                const px = root.lonToWorldX(m.lon) - root.originX
+                const py = root.latToWorldY(m.lat) - root.originY
+                // teardrop: tip up, rounded belly
+                ctx.beginPath()
+                ctx.moveTo(px, py - r * 1.7)
+                ctx.bezierCurveTo(px + r, py - r * 0.3, px + r, py + r * 0.7, px, py + r)
+                ctx.bezierCurveTo(px - r, py + r * 0.7, px - r, py - r * 0.3, px, py - r * 1.7)
+                ctx.closePath()
+                ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.stroke()
+                ctx.fillStyle = "#4e7cc4"; ctx.fill()
+            }
+        }
+        Connections {
+            target: root
+            function onRainMarksChanged() { rainCanvas.requestPaint() }
+            function onOriginXChanged() { rainCanvas.requestPaint() }
+            function onOriginYChanged() { rainCanvas.requestPaint() }
+            function onWidthChanged() { rainCanvas.requestPaint() }
+            function onHeightChanged() { rainCanvas.requestPaint() }
+        }
+    }
+
+    // Temperature labels (weather layer) - a small pill "16°/14°" (temp / feels-like) at points
+    // along the route, so you can read the temperature you'll meet where you'll meet it.
+    Canvas {
+        id: tempCanvas
+        anchors.fill: parent
+        visible: root.tempMarks.length > 0
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const marks = root.tempMarks
+            if (!marks || marks.length === 0) return
+            ctx.font = "600 10px sans-serif"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            for (const m of marks) {
+                const px = root.lonToWorldX(m.lon) - root.originX
+                const py = root.latToWorldY(m.lat) - root.originY
+                const label = Math.round(m.temp_c) + "°/" + Math.round(m.feels_c) + "°"
+                const w = ctx.measureText(label).width + 8
+                const h = 15, ry = py - 13
+                // pill
+                ctx.beginPath()
+                if (ctx.roundRect) ctx.roundRect(px - w / 2, ry - h / 2, w, h, 7)
+                else ctx.rect(px - w / 2, ry - h / 2, w, h)
+                ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.fill()
+                ctx.lineWidth = 1; ctx.strokeStyle = "#e8833a"; ctx.stroke()
+                ctx.fillStyle = "#b4531a"
+                ctx.fillText(label, px, ry)
+            }
+        }
+        Connections {
+            target: root
+            function onTempMarksChanged() { tempCanvas.requestPaint() }
+            function onOriginXChanged() { tempCanvas.requestPaint() }
+            function onOriginYChanged() { tempCanvas.requestPaint() }
+            function onWidthChanged() { tempCanvas.requestPaint() }
+            function onHeightChanged() { tempCanvas.requestPaint() }
+        }
+    }
+
+    // Route-cursor highlight - a dot at highlightDist metres along the route, kept in sync with
+    // the graph hover on PlanRoutePage.
+    Canvas {
+        id: highlightCanvas
+        anchors.fill: parent
+        visible: root.highlightDist >= 0 && root._routePts.length > 0
+        onPaint: {
+            const ctx = getContext("2d"); ctx.reset()
+            if (root.highlightDist < 0) return
+            const c = root._coordAtDist(root.highlightDist)
+            if (!c) return
+            const px = root.lonToWorldX(c[1]) - root.originX
+            const py = root.latToWorldY(c[0]) - root.originY
+            ctx.beginPath(); ctx.arc(px, py, 8, 0, 2 * Math.PI)
+            ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.fill()
+            ctx.beginPath(); ctx.arc(px, py, 5.5, 0, 2 * Math.PI)
+            ctx.fillStyle = Theme.primary; ctx.fill()
+        }
+        Connections {
+            target: root
+            function onHighlightDistChanged() { highlightCanvas.requestPaint() }
+            function onOriginXChanged() { highlightCanvas.requestPaint() }
+            function onOriginYChanged() { highlightCanvas.requestPaint() }
+            function onWidthChanged() { highlightCanvas.requestPaint() }
+            function onHeightChanged() { highlightCanvas.requestPaint() }
+        }
+    }
+
+    // Reverse sync: hovering near the route emits routeHovered(dist) so the graphs can move their
+    // crosshair to the same spot. Only active when there's a route (empty for other MapView users).
+    HoverHandler {
+        id: routeHover
+        enabled: root._routePts.length > 0
+        onPointChanged: {
+            if (!hovered) { root.routeHoverEnded(); return }
+            const mx = point.position.x, my = point.position.y
+            let best = -1, bestD = 24 * 24    // must be within ~24 px of the line
+            for (let i = 0; i < root._routePts.length; i++) {
+                const px = root.lonToWorldX(root._routePts[i][1]) - root.originX
+                const py = root.latToWorldY(root._routePts[i][0]) - root.originY
+                const dx = px - mx, dy = py - my, d = dx * dx + dy * dy
+                if (d < bestD) { bestD = d; best = i }
+            }
+            if (best >= 0) root.routeHovered(root._routeCum[best])
+            else root.routeHoverEnded()
         }
     }
 
@@ -555,12 +797,14 @@ Item {
 
     // Required, not decorative - OpenStreetMap's (and CyclOSM's) tile usage policy expects
     // visible attribution on anything showing its tiles.
+    // Required, not decorative - OpenStreetMap's (and CyclOSM's) tile usage policy expects
+    // visible attribution on anything showing its tiles.
     Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 4
         color: "#CCFFFFFF"
-        radius: 3
+        radius: 6
         width: attributionText.implicitWidth + 8
         height: attributionText.implicitHeight + 4
 

@@ -254,7 +254,11 @@ Item {
                         }
 
                         Column {
-                            width: parent.width - 40 - (todayButton.visible ? todayButton.width + Theme.spacingSmall : 0)
+                            // parent minus the two 20px chevrons AND the Row's own gaps between
+                            // them (2x spacing) - without the gaps the row overflowed and pushed
+                            // the next-month chevron off the right edge (André, 2026-08-31).
+                            width: parent.width - 40 - 2 * Theme.spacingSmall
+                                   - (todayButton.visible ? todayButton.width + Theme.spacingSmall : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             Text {
                                 width: parent.width

@@ -32,22 +32,66 @@ Item {
     property bool busy: false
 
     // Weather + sun/moon along the route (online: Open-Meteo via the backend). Temp-coloured
-    // `weatherSegments` feed the map's coloredSegments; `weatherProfile` feeds a profile canvas;
-    // plus wind, a sun/moon summary and a plain-language verdict. `weatherMode` toggles whether
-    // the map paints weather or climb.
+    // `weatherProfile` feeds the croqui; plus wind, rain marks, a sun/moon summary and a verdict.
+    // The map ALWAYS paints climb (André, 2026-08-31); `overlayMode` cycles what's laid over it:
+    // 0 climb only, 1 + wind & rain, 2 + temperature (°C / feels-like labels along the route).
     property var weatherSegments: []
     property var weatherProfile: []
     property var windArrows: []
+    property var rainMarks: []          // [{lat,lon,rain_mm}] raindrops on the map
+    property var tempMarks: []          // [{lat,lon,temp_c,feels_c}] temperature labels on the map
     property var weatherAstro: ({})
     property var weatherVerdict: ({})
     property var weatherSummary: ({})
-    property bool weatherMode: false
+    property var weatherLegend: []      // [{key,label,color}] temperature buckets
+    // Map overlay over the always-climb route: 0 = climb only, 1 = + wind & rain, 2 = + temperature
+    property int overlayMode: 1
+    // Ride the route the other way (many planners export a loop in the "wrong" direction, so the
+    // graph's time/climb order runs backwards). Flips the map AND the graphs together.
+    property bool reversed: false
     property bool weatherBusy: false
     property string startTime: "09:00"
-    property string paceText: "4.5"
+    property string paceText: "20"       // km/h - a cycling default (André rides; editable)
     property string planDate: ""        // "" = today (YYYY-MM-DD)
 
+    // Graph<->map cursor + zoom (André, 2026-08-31). cursorDist = metres along the route under the
+    // cursor, shared by both graphs and the map dot; viewStart/viewEnd = the fraction of the route
+    // the graphs are zoomed to (0..1 = whole route). Not persisted - transient view state.
+    property real cursorDist: -1
+    property real viewStart: 0
+    property real viewEnd: 1
+    readonly property real routeLenM: (summary && summary.distance_m) ? summary.distance_m : 0
+
     readonly property string backend: "http://127.0.0.1:8766"
+
+    // Restore whatever was loaded before the page was navigated away from (the Loader destroys
+    // it), and write back after every change - see PlanStore's header.
+    Component.onCompleted: restoreFromStore()
+
+    function restoreFromStore() {
+        startTime = PlanStore.startTime; paceText = PlanStore.paceText; planDate = PlanStore.planDate
+        if (!PlanStore.hasRoute) return
+        plannedGpx = PlanStore.plannedGpx; routeName = PlanStore.routeName
+        coloredSegments = PlanStore.coloredSegments; legendRows = PlanStore.legendRows
+        profileRows = PlanStore.profileRows; summary = PlanStore.summary
+        weatherSegments = PlanStore.weatherSegments; weatherProfile = PlanStore.weatherProfile
+        windArrows = PlanStore.windArrows; rainMarks = PlanStore.rainMarks; tempMarks = PlanStore.tempMarks
+        weatherAstro = PlanStore.weatherAstro; weatherVerdict = PlanStore.weatherVerdict
+        weatherSummary = PlanStore.weatherSummary; weatherLegend = PlanStore.weatherLegend
+        overlayMode = PlanStore.overlayMode; reversed = PlanStore.reversed
+    }
+
+    function persist() {
+        PlanStore.plannedGpx = plannedGpx; PlanStore.routeName = routeName
+        PlanStore.coloredSegments = coloredSegments; PlanStore.legendRows = legendRows
+        PlanStore.profileRows = profileRows; PlanStore.summary = summary
+        PlanStore.weatherSegments = weatherSegments; PlanStore.weatherProfile = weatherProfile
+        PlanStore.windArrows = windArrows; PlanStore.rainMarks = rainMarks; PlanStore.tempMarks = tempMarks
+        PlanStore.weatherAstro = weatherAstro; PlanStore.weatherVerdict = weatherVerdict
+        PlanStore.weatherSummary = weatherSummary; PlanStore.weatherLegend = weatherLegend
+        PlanStore.overlayMode = overlayMode; PlanStore.reversed = reversed
+        PlanStore.startTime = startTime; PlanStore.paceText = paceText; PlanStore.planDate = planDate
+    }
 
     // Start/finish dots, derived from the coloured track's first/last coordinate.
     readonly property var startEndMarkers: {
@@ -92,7 +136,7 @@ Item {
         if (!plannedGpx) return
         busy = true
         statusMsg = qsTr("Reading route…")
-        api("POST", "/api/router/color", { gpx: plannedGpx }, function(status, res) {
+        api("POST", "/api/router/color", { gpx: plannedGpx, reverse: reversed }, function(status, res) {
             busy = false
             if (!res || res.ok === false) {
                 coloredSegments = []; legendRows = []; profileRows = []; summary = ({})
@@ -104,6 +148,7 @@ Item {
             profileRows = res.profile || []
             summary = res.summary || ({})
             statusMsg = ""
+            persist()
         })
     }
 
@@ -111,7 +156,7 @@ Item {
         if (!plannedGpx) { statusMsg = qsTr("Upload a GPX first"); return }
         var pace = parseFloat(paceText)
         if (!(pace > 0)) { statusMsg = qsTr("Enter a pace in km/h"); return }
-        var body = { gpx: plannedGpx, start: startTime, pace: pace,
+        var body = { gpx: plannedGpx, reverse: reversed, start: startTime, pace: pace,
                      tz: -(new Date().getTimezoneOffset()) / 60 }
         if (planDate.length) body.date = planDate
         weatherBusy = true
@@ -128,21 +173,37 @@ Item {
             weatherAstro = res.astro || ({})
             weatherVerdict = res.verdict || ({})
             weatherSummary = res.summary || ({})
-            weatherMode = true            // show the weather-coloured track once we have it
+            weatherLegend = res.legend || []
+            rainMarks = res.rain_marks || []; tempMarks = res.temp_marks || []
+            // Map stays on CLIMB colouring; wind + rain overlay it. (Toggle switches the fill.)
             statusMsg = ""
+            persist()
         })
     }
 
     // Clear just the computed results (kept separate so loadGpx can reset before recomputing).
     function clearResults() {
         coloredSegments = []; legendRows = []; profileRows = []; summary = ({})
-        weatherSegments = []; weatherProfile = []; windArrows = []
-        weatherAstro = ({}); weatherVerdict = ({}); weatherSummary = ({}); weatherMode = false
+        weatherSegments = []; weatherProfile = []; windArrows = []; rainMarks = []; tempMarks = []
+        weatherAstro = ({}); weatherVerdict = ({}); weatherSummary = ({})
+        weatherLegend = []; overlayMode = 1
     }
 
     function clearAll() {
         plannedGpx = ""; routeName = ""; statusMsg = ""
         clearResults()
+        persist()
+    }
+
+    // Ride it the other way: flip the direction and recompute climb + weather (both take a
+    // `reverse` flag), so the map and both graphs turn around together.
+    function toggleReverse() {
+        if (!plannedGpx) return
+        reversed = !reversed
+        cursorDist = -1; resetView()
+        colorTrack()
+        forecastWeather()
+        persist()
     }
 
     function doSend() {
@@ -162,6 +223,70 @@ Item {
 
     function fmtKm(m) { return m === undefined || m === null ? "–" : (m / 1000).toFixed(1) + " km" }
     function fmtM(m)  { return m === undefined || m === null ? "–" : Math.round(m) + " m" }
+
+    // Interpolate the weather profile at a distance (metres) - for the crosshair readout that
+    // follows the cursor across the graphs and the map.
+    function sampleAt(dist) {
+        var rows = weatherProfile
+        if (!rows || rows.length < 2) return null
+        if (dist <= rows[0].dist_m) return rows[0]
+        if (dist >= rows[rows.length - 1].dist_m) return rows[rows.length - 1]
+        for (var i = 1; i < rows.length; i++) {
+            if (rows[i].dist_m >= dist) {
+                var a = rows[i - 1], b = rows[i]
+                var t = (dist - a.dist_m) / Math.max(1e-6, b.dist_m - a.dist_m)
+                var lerp = function(x, y) { return x + (y - x) * t }
+                return { dist_m: dist, eta: (t < 0.5 ? a.eta : b.eta),
+                         temp_c: lerp(a.temp_c, b.temp_c), feels_c: lerp(a.feels_c, b.feels_c),
+                         rain_mm: lerp(a.rain_mm, b.rain_mm), wind_kmh: lerp(a.wind_kmh, b.wind_kmh),
+                         ele_m: (a.ele_m != null && b.ele_m != null) ? lerp(a.ele_m, b.ele_m)
+                                : (b.ele_m != null ? b.ele_m : a.ele_m) }
+            }
+        }
+        return rows[rows.length - 1]
+    }
+
+    // Zoom the graphs' distance window around a fraction (0..1 of the route) - shared by wheel-zoom
+    // on either graph, so the temperature croqui and the elevation profile stay aligned.
+    function zoomView(centreFrac, factor) {
+        var span = viewEnd - viewStart
+        var ns = Math.max(0.03, Math.min(1, span * factor))
+        var nStart = centreFrac - (centreFrac - viewStart) * (ns / span)
+        var nEnd = nStart + ns
+        if (nStart < 0) { nStart = 0; nEnd = ns }
+        if (nEnd > 1) { nEnd = 1; nStart = 1 - ns }
+        viewStart = nStart; viewEnd = nEnd
+    }
+    function panView(fracDelta) {
+        var span = viewEnd - viewStart
+        var nStart = viewStart - fracDelta, nEnd = viewEnd - fracDelta
+        if (nStart < 0) { nStart = 0; nEnd = span }
+        if (nEnd > 1) { nEnd = 1; nStart = 1 - span }
+        viewStart = nStart; viewEnd = nEnd
+    }
+    function resetView() { viewStart = 0; viewEnd = 1 }
+
+    // --- forecast day (Open-Meteo gives ~16 days ahead) ------------------------------------
+    function _isoToday() {
+        var t = new Date()
+        return t.getFullYear() + "-" + ("0" + (t.getMonth() + 1)).slice(-2) + "-" + ("0" + t.getDate()).slice(-2)
+    }
+    function planDateDisplay() {
+        var d = planDate.length ? new Date(planDate + "T00:00:00") : new Date()
+        return d.toLocaleDateString(Qt.locale(), "ddd d MMM")
+    }
+    function shiftDay(delta) {
+        var base = planDate.length ? new Date(planDate + "T00:00:00") : new Date()
+        base.setDate(base.getDate() + delta)
+        var today = new Date(); today.setHours(0, 0, 0, 0)
+        var max = new Date(today); max.setDate(max.getDate() + 15)   // Open-Meteo forecast horizon
+        if (base < today) base = today
+        if (base > max) base = max
+        var iso = base.getFullYear() + "-" + ("0" + (base.getMonth() + 1)).slice(-2) + "-" + ("0" + base.getDate()).slice(-2)
+        planDate = (iso === _isoToday()) ? "" : iso    // "" means today
+        if (plannedGpx) forecastWeather()
+        persist()
+    }
 
     // File picker for the GPX (same idiom as RoutesPage's import dialog).
     FileDialog {
@@ -192,9 +317,21 @@ Item {
                 latitude: WeatherService.latitude
                 longitude: WeatherService.longitude
                 markers: root.startEndMarkers
-                coloredSegments: (root.weatherMode && root.weatherSegments.length > 0)
-                                 ? root.weatherSegments : root.coloredSegments
-                windArrows: (root.weatherMode && root.windArrows.length > 0) ? root.windArrows : []
+                // The map fill is ALWAYS climb (André, 2026-08-31: "show only climb" / "show climb
+                // with weather"). The toggle just shows/hides the weather overlay - the wind arrows
+                // + rain icons - over that climb-coloured route.
+                coloredSegments: root.coloredSegments
+                windArrows: root.overlayMode === 1 ? root.windArrows : []
+                rainMarks: root.overlayMode !== 0 ? root.rainMarks : []   // rain shown with wind AND temp
+                tempMarks: root.overlayMode === 2 ? root.tempMarks : []
+                // graph <-> map cursor: show a dot where the graph is hovered, and push the
+                // reverse (hovering the route moves the graph crosshair).
+                highlightDist: root.cursorDist
+                onRouteHovered: (dist) => { root.cursorDist = dist }
+                onRouteHoverEnded: root.cursorDist = -1
+                // The graphs follow the map: whatever portion of the route is on screen sets the
+                // graphs' distance window (André, 2026-08-31).
+                onRouteVisibleRange: (s, e) => { root.viewStart = s; root.viewEnd = Math.max(e, s + 0.01) }
 
                 // Drag = pan (no tap-to-place any more; the route comes from the GPX).
                 DragHandler {
@@ -347,6 +484,14 @@ Item {
                                 onClicked: sendDialog.open()
                             }
                         }
+                        RoundedButton {
+                            width: parent.width
+                            visible: root.plannedGpx.length > 0
+                            text: root.reversed ? qsTr("⇄ Direction: reversed — tap to flip back")
+                                                : qsTr("⇄ Reverse direction")
+                            enabled: !root.busy && !root.weatherBusy
+                            onClicked: root.toggleReverse()
+                        }
                     }
 
                     Text {
@@ -412,6 +557,30 @@ Item {
                             text: qsTr("Weather along route")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeLabel
+                        }
+                        // Day picker - plan ahead within the provider's ~16-day forecast window.
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            RoundedButton {
+                                text: "‹"
+                                enabled: root.planDate.length > 0   // can't go before today
+                                onClicked: root.shiftDay(-1)
+                            }
+                            Text {
+                                width: parent.width - 2 * (prevSpacer.implicitWidth) - Theme.spacingSmall * 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: (root.planDate.length === 0 ? qsTr("Today") : root.planDateDisplay())
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeBody
+                                font.bold: true
+                            }
+                            RoundedButton {
+                                id: prevSpacer
+                                text: "›"
+                                onClicked: root.shiftDay(1)
+                            }
                         }
                         // start time + pace inputs
                         Row {
@@ -509,78 +678,265 @@ Item {
                         }
                         RoundedButton {
                             width: parent.width
-                            visible: root.weatherSegments.length > 0 && root.coloredSegments.length > 0
-                            text: root.weatherMode ? qsTr("Map: showing weather — switch to climb")
-                                                   : qsTr("Map: showing climb — switch to weather")
-                            onClicked: root.weatherMode = !root.weatherMode
+                            visible: root.coloredSegments.length > 0 && root.weatherProfile.length > 1
+                            text: root.overlayMode === 0 ? qsTr("Map: only climb — tap for wind & rain")
+                                : root.overlayMode === 1 ? qsTr("Map: climb + wind & rain — tap for temperature")
+                                : qsTr("Map: climb + temperature — tap for only climb")
+                            onClicked: { root.overlayMode = (root.overlayMode + 1) % 3; root.persist() }
                         }
 
-                        // weather profile: temp-coloured elevation line + rain bars + wind line
-                        Canvas {
-                            id: wxCanvas
+                        // Weather summary chips, with units (mirrors the mobile Route-weather screen)
+                        Flow {
                             width: parent.width
-                            height: 120
                             visible: root.weatherProfile.length > 1
+                            spacing: Theme.spacingSmall / 2
+                            Repeater {
+                                model: {
+                                    var s = root.weatherSummary
+                                    if (!s || s.distance_m === undefined) return []
+                                    return [
+                                        (s.distance_m / 1000).toFixed(1) + " km",
+                                        qsTr("finish ") + (s.finish || "–"),
+                                        (s.temp_min_c !== undefined ? s.temp_min_c + "–" + s.temp_max_c + " °C" : ""),
+                                        (s.rain_max_mm !== undefined ? qsTr("rain ≤ ") + s.rain_max_mm + " mm" : ""),
+                                        (s.wind_max_kmh !== undefined ? qsTr("wind ≤ ") + s.wind_max_kmh + " km/h" : "")
+                                    ].filter(function(t){ return t.length > 0 })
+                                }
+                                delegate: Rectangle {
+                                    required property string modelData
+                                    height: chipTxt.implicitHeight + 6
+                                    width: chipTxt.implicitWidth + Theme.spacingSmall
+                                    radius: height / 2
+                                    color: Theme.cardNested
+                                    border.color: Theme.border
+                                    border.width: 1
+                                    Text {
+                                        id: chipTxt
+                                        anchors.centerIn: parent
+                                        text: parent.modelData
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontSizeTiny
+                                    }
+                                }
+                            }
+                        }
+
+                        // The weather "croqui" - a Komoot-style profile: filled terrain, an
+                        // elevation line coloured by temperature (with °C labels), rain bars, a
+                        // wind strip along the top (arrow up = headwind, down = tailwind, with
+                        // km/h), and distance-km + time-of-day axes. Every axis carries its unit.
+                        Canvas {
+                            id: croqui
+                            width: parent.width
+                            height: 196
+                            visible: root.weatherProfile.length > 1
+                            readonly property real mL: 36
+                            readonly property real mR: 40
+                            // fraction (0..1 of the route) at a canvas x, and the inverse
+                            function fracAtX(px) { return Math.max(0, Math.min(1, (px - mL) / Math.max(1, width - mL - mR))) }
                             onPaint: {
                                 var ctx = getContext("2d"); ctx.reset()
                                 var rows = root.weatherProfile
                                 if (!rows || rows.length < 2) return
                                 var W = width, H = height
+                                var mT = 26, mB = 26
+                                var pW = W - mL - mR, pH = H - mT - mB
                                 var maxD = rows[rows.length - 1].dist_m || 1
-                                var xOf = function(d) { return (d / maxD) * (W - 2) + 1 }
-                                var eles = rows.filter(function(r){ return r.ele_m !== null })
-                                                .map(function(r){ return r.ele_m })
-                                var lo = eles.length ? Math.min.apply(null, eles) : 0
-                                var hi = eles.length ? Math.max.apply(null, eles) : 1
-                                var span = Math.max(1, hi - lo)
-                                var yEle = function(e) { return (H - 3) - ((e - lo) / span) * (H - 22) }
-                                var rmax = Math.max(0.6, Math.max.apply(null,
-                                            rows.map(function(r){ return r.rain_mm || 0 })))
-                                var wmax = Math.max(10, Math.max.apply(null,
-                                            rows.map(function(r){ return r.wind_kmh || 0 })))
-                                var yWind = function(w) { return (H - 3) - (Math.min(w, wmax) / wmax) * (H - 22) }
-                                var bw = Math.max(2, (W / rows.length) * 0.55)
-                                // rain bars from the baseline
-                                ctx.globalAlpha = 0.5
-                                ctx.fillStyle = "#4e7cc4"
-                                for (var i = 0; i < rows.length; i++) {
-                                    var rmm = rows[i].rain_mm || 0
-                                    if (rmm < 0.05) continue
-                                    var rh = (rmm / rmax) * (H * 0.5)
-                                    ctx.fillRect(xOf(rows[i].dist_m) - bw / 2, (H - 3) - rh, bw, rh)
+                                // visible distance window (zoom/scroll)
+                                var dLo = root.viewStart * maxD, dHi = root.viewEnd * maxD
+                                var dSpan = Math.max(1, dHi - dLo)
+                                var X = function(d) { return mL + ((d - dLo) / dSpan) * pW }
+                                var i, s, idx, r
+
+                                // Temperature axis over the VISIBLE rows (so zooming reveals local
+                                // detail), with a minimum span so near-constant temp reads flat.
+                                var vis = rows.filter(function(rr){ return rr.dist_m >= dLo - 1 && rr.dist_m <= dHi + 1 })
+                                if (vis.length < 2) vis = rows
+                                var vals = []
+                                for (i = 0; i < vis.length; i++) { vals.push(vis[i].temp_c); vals.push(vis[i].feels_c) }
+                                var tLo = Math.min.apply(null, vals), tHi = Math.max.apply(null, vals)
+                                var midT = (tLo + tHi) / 2
+                                var half = Math.max(4, (tHi - tLo) / 2 + 1)
+                                tLo = midT - half; tHi = midT + half
+                                var tSpan = Math.max(1, tHi - tLo)
+                                var Yt = function(t) { return mT + pH - ((t - tLo) / tSpan) * pH }
+                                var rMax = Math.max(1, Math.max.apply(null,
+                                            vis.map(function(rr){ return rr.rain_mm || 0 })))
+                                var relCol = { headwind: "#d6453f", crosswind: "#e0912f", tailwind: "#2e9e6b" }
+
+                                // gridlines
+                                ctx.strokeStyle = Theme.border; ctx.lineWidth = 1; ctx.globalAlpha = 0.5
+                                for (s = 0; s <= 2; s++) {
+                                    var gy = mT + pH * s / 2
+                                    ctx.beginPath(); ctx.moveTo(mL, gy); ctx.lineTo(mL + pW, gy); ctx.stroke()
                                 }
                                 ctx.globalAlpha = 1
-                                // elevation line, coloured by temperature bucket
-                                ctx.lineWidth = 1.6; ctx.lineCap = "round"
-                                for (i = 1; i < rows.length; i++) {
-                                    if (rows[i].ele_m === null || rows[i - 1].ele_m === null) continue
-                                    ctx.strokeStyle = rows[i].color
-                                    ctx.beginPath()
-                                    ctx.moveTo(xOf(rows[i - 1].dist_m), yEle(rows[i - 1].ele_m))
-                                    ctx.lineTo(xOf(rows[i].dist_m), yEle(rows[i].ele_m))
-                                    ctx.stroke()
+
+                                // clip the plotted data to the window horizontally
+                                ctx.save(); ctx.beginPath(); ctx.rect(mL, 0, pW, H); ctx.clip()
+
+                                // rain bars - draw the bars, but label only the wettest one in view
+                                // (labelling every bar turned a rainy stretch into an unreadable blob
+                                // of overlapping numbers - André, 2026-08-31).
+                                var bw = Math.max(2, (pW / Math.max(2, vis.length)) * 0.8)
+                                var peakMM = 0, peakX = 0, peakH = 0
+                                ctx.fillStyle = "#4e7cc4"; ctx.globalAlpha = 0.5
+                                for (i = 0; i < rows.length; i++) {
+                                    var rmm = rows[i].rain_mm || 0
+                                    if (rmm < 0.05) continue
+                                    var rh = (rmm / rMax) * (pH * 0.5)
+                                    var bx = X(rows[i].dist_m)
+                                    ctx.fillRect(bx - bw / 2, mT + pH - rh, bw, rh)
+                                    if (rmm > peakMM) { peakMM = rmm; peakX = bx; peakH = rh }
                                 }
-                                // wind line, coloured by head/cross/tail
-                                var relCol = { headwind: "#d6453f", crosswind: "#e0912f", tailwind: "#2e9e6b" }
-                                for (i = 1; i < rows.length; i++) {
-                                    ctx.strokeStyle = relCol[rows[i].wind_rel] || Theme.mutedText
-                                    ctx.beginPath()
-                                    ctx.moveTo(xOf(rows[i - 1].dist_m), yWind(rows[i - 1].wind_kmh))
-                                    ctx.lineTo(xOf(rows[i].dist_m), yWind(rows[i].wind_kmh))
-                                    ctx.stroke()
+                                ctx.globalAlpha = 1
+                                if (peakMM >= 0.05) {
+                                    ctx.fillStyle = "#4e7cc4"; ctx.font = "bold 9px sans-serif"; ctx.textAlign = "center"
+                                    ctx.fillText(peakMM.toFixed(1) + " mm", peakX, mT + pH - peakH - 3)
+                                }
+
+                                // temperature: one full continuous line
+                                ctx.lineWidth = 2.6; ctx.lineCap = "round"; ctx.lineJoin = "round"
+                                ctx.strokeStyle = "#e8833a"; ctx.beginPath()
+                                for (i = 0; i < rows.length; i++) {
+                                    var tx = X(rows[i].dist_m), ty = Yt(rows[i].temp_c)
+                                    if (i === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty)
+                                }
+                                ctx.stroke()
+
+                                // temp/feels numbers at several evenly-spaced points, in a compact
+                                // "temp/feels" form (e.g. 21/22) - the legend explains the format
+                                // (André, 2026-09-02: "put like 21/22 and put it in a legend").
+                                ctx.font = "bold 10px sans-serif"; ctx.fillStyle = Theme.text; ctx.textAlign = "center"
+                                var nLab = Math.min(6, vis.length)
+                                for (s = 0; s < nLab; s++) {
+                                    var rr = vis[Math.round(s * (vis.length - 1) / Math.max(1, nLab - 1))]
+                                    var lx = Math.max(mL + 14, Math.min(mL + pW - 14, X(rr.dist_m)))
+                                    ctx.fillText(Math.round(rr.temp_c) + "/" + Math.round(rr.feels_c), lx, Yt(rr.temp_c) - 6)
+                                }
+
+                                // wind strip (sampled across the window)
+                                var wy = mT - 12
+                                var nW = Math.min(6, vis.length)
+                                for (s = 0; s < nW; s++) {
+                                    r = vis[Math.round(s * (vis.length - 1) / Math.max(1, nW - 1))]
+                                    var wx = X(r.dist_m); var col = relCol[r.wind_rel] || Theme.mutedText
+                                    ctx.fillStyle = col; ctx.beginPath()
+                                    if (r.wind_rel === "tailwind") {
+                                        ctx.moveTo(wx - 3, wy - 3); ctx.lineTo(wx + 3, wy - 3); ctx.lineTo(wx, wy + 3)
+                                    } else {
+                                        ctx.moveTo(wx - 3, wy + 3); ctx.lineTo(wx + 3, wy + 3); ctx.lineTo(wx, wy - 3)
+                                    }
+                                    ctx.closePath(); ctx.fill()
+                                    ctx.fillStyle = Theme.mutedText; ctx.font = "9px sans-serif"; ctx.textAlign = "center"
+                                    ctx.fillText(Math.round(r.wind_kmh), wx, wy - 6)
+                                }
+
+                                // crosshair at the shared cursor, if it's in the window
+                                if (root.cursorDist >= dLo && root.cursorDist <= dHi) {
+                                    var cx = X(root.cursorDist)
+                                    ctx.strokeStyle = Theme.primary; ctx.lineWidth = 1
+                                    ctx.beginPath(); ctx.moveTo(cx, mT); ctx.lineTo(cx, mT + pH); ctx.stroke()
+                                    var sm = root.sampleAt(root.cursorDist)
+                                    if (sm) {
+                                        ctx.beginPath(); ctx.arc(cx, Yt(sm.temp_c), 3, 0, 2 * Math.PI)
+                                        ctx.fillStyle = "#e8833a"; ctx.fill()
+                                    }
+                                }
+                                ctx.restore()
+
+                                // left/right axis labels (outside the clip)
+                                ctx.fillStyle = Theme.mutedText; ctx.font = "9px sans-serif"
+                                ctx.textAlign = "right"
+                                ctx.fillText(Math.round(tHi) + " °C", mL - 4, mT + 8)
+                                ctx.fillText(Math.round(tLo) + " °C", mL - 4, mT + pH)
+                                if (rMax >= 0.1) {
+                                    ctx.textAlign = "left"
+                                    ctx.fillText(rMax.toFixed(1) + " mm", mL + pW + 4, mT + pH)
+                                }
+                                // bottom axis: km + ETA at the window's start / mid / end
+                                ctx.textAlign = "center"
+                                for (s = 0; s <= 2; s++) {
+                                    var d = dLo + dSpan * s / 2
+                                    var smp = root.sampleAt(d)
+                                    ctx.fillStyle = Theme.text
+                                    ctx.fillText((d / 1000).toFixed(dSpan < 20000 ? 1 : 0) + " km", X(d), mT + pH + 11)
+                                    ctx.fillStyle = Theme.mutedText
+                                    ctx.fillText(smp ? smp.eta : "", X(d), mT + pH + 21)
                                 }
                             }
+                            // hover -> shared cursor
+                            HoverHandler {
+                                onPointChanged: {
+                                    if (!hovered) { root.cursorDist = -1; return }
+                                    var f = croqui.fracAtX(point.position.x)
+                                    root.cursorDist = (root.viewStart + f * (root.viewEnd - root.viewStart)) * root.routeLenM
+                                }
+                            }
+                            // (zoom/pan comes from the map now, so the panel keeps its own wheel-scroll)
                             Connections {
                                 target: root
-                                function onWeatherProfileChanged() { wxCanvas.requestPaint() }
+                                function onWeatherProfileChanged() { croqui.requestPaint() }
+                                function onCursorDistChanged() { croqui.requestPaint() }
+                                function onViewStartChanged() { croqui.requestPaint() }
+                                function onViewEndChanged() { croqui.requestPaint() }
                             }
                             onWidthChanged: requestPaint()
+                        }
+
+                        // Live readout at the cursor (hover the graph or the route on the map).
+                        Row {
+                            width: parent.width
+                            visible: root.weatherProfile.length > 1
+                            spacing: Theme.spacingSmall
+                            property var sm: root.cursorDist >= 0 ? root.sampleAt(root.cursorDist) : null
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeTiny
+                                text: {
+                                    var s = parent.sm
+                                    if (!s) return qsTr("Hover the graph or the route to read any point")
+                                    return "@ " + (s.dist_m / 1000).toFixed(1) + " km · " + (s.eta || "") + " · "
+                                        + Math.round(s.temp_c) + "°/" + Math.round(s.feels_c) + "° · "
+                                        + qsTr("wind ") + Math.round(s.wind_kmh) + " km/h · "
+                                        + qsTr("rain ") + (s.rain_mm || 0).toFixed(1) + " mm"
+                                        + (s.ele_m != null ? " · " + Math.round(s.ele_m) + " m" : "")
+                                }
+                            }
+                        }
+
+                        // Temperature legend (the buckets the map/line are coloured by) + wind key
+                        Flow {
+                            width: parent.width
+                            visible: root.weatherLegend.length > 0
+                            spacing: Theme.spacingSmall
+                            Repeater {
+                                model: root.weatherLegend
+                                delegate: Row {
+                                    required property var modelData
+                                    spacing: 3
+                                    Rectangle {
+                                        width: 10; height: 10; radius: 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: modelData.color
+                                        border.color: Theme.border; border.width: 1
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: (modelData.label || "").replace("degC", "°C")
+                                        color: Theme.mutedText
+                                        font.pixelSize: Theme.fontSizeTiny
+                                    }
+                                }
+                            }
                         }
                         Text {
                             width: parent.width
                             visible: root.weatherProfile.length > 1
-                            text: qsTr("line = elevation coloured by temp · bars = rain mm · wind: ")
-                                  + "<font color='#2e9e6b'>tail</font> <font color='#e0912f'>cross</font> <font color='#d6453f'>head</font>"
+                            text: qsTr("temperature line · numbers above = temp/feels (°C) · bars = rain (peak mm) · wind (km/h): ")
+                                  + "<font color='#d6453f'>▲ head</font> <font color='#e0912f'>cross</font> <font color='#2e9e6b'>▼ tail</font>"
                             textFormat: Text.RichText
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeTiny
@@ -601,35 +957,63 @@ Item {
                         Canvas {
                             id: profileCanvas
                             width: parent.width
-                            height: 90
+                            height: 104
+                            readonly property real mL: 36
+                            readonly property real mR: 40
+                            function fracAtX(px) { return Math.max(0, Math.min(1, (px - mL) / Math.max(1, width - mL - mR))) }
                             onPaint: {
-                                var ctx = getContext("2d")
-                                ctx.reset()
+                                var ctx = getContext("2d"); ctx.reset()
                                 var rows = root.profileRows
                                 if (!rows || rows.length < 2) return
-                                var eles = rows.filter(function(r){ return r.ele_m !== null })
-                                                .map(function(r){ return r.ele_m })
-                                if (eles.length < 2) return
-                                var lo = Math.min.apply(null, eles)
-                                var hi = Math.max.apply(null, eles)
-                                var span = Math.max(1, hi - lo)
                                 var maxD = rows[rows.length - 1].dist_m || 1
-                                var baseY = height - 1
+                                var dLo = root.viewStart * maxD, dHi = root.viewEnd * maxD, dSpan = Math.max(1, dHi - dLo)
+                                var pW = width - mL - mR
+                                var X = function(d) { return mL + ((d - dLo) / dSpan) * pW }
+                                var vis = rows.filter(function(r){ return r.ele_m !== null && r.dist_m >= dLo - 1 && r.dist_m <= dHi + 1 })
+                                var pool = vis.length >= 2 ? vis : rows.filter(function(r){ return r.ele_m !== null })
+                                if (pool.length < 2) return
+                                var eles = pool.map(function(r){ return r.ele_m })
+                                var lo = Math.min.apply(null, eles), hi = Math.max.apply(null, eles)
+                                var span = Math.max(1, hi - lo)
+                                var baseY = height - 14
+                                ctx.save(); ctx.beginPath(); ctx.rect(mL, 0, pW, height); ctx.clip()
+                                var bw = Math.max(1, pW / Math.max(2, vis.length) + 0.5)
                                 for (var i = 0; i < rows.length; i++) {
                                     if (rows[i].ele_m === null) continue
-                                    var x = (rows[i].dist_m / maxD) * width
-                                    var h = ((rows[i].ele_m - lo) / span) * (height - 6) + 2
-                                    ctx.strokeStyle = rows[i].color
-                                    ctx.lineWidth = Math.max(1, width / rows.length + 0.5)
-                                    ctx.beginPath()
-                                    ctx.moveTo(x, baseY)
-                                    ctx.lineTo(x, baseY - h)
-                                    ctx.stroke()
+                                    var x = X(rows[i].dist_m)
+                                    var h = ((rows[i].ele_m - lo) / span) * (baseY - 4) + 2
+                                    ctx.strokeStyle = rows[i].color; ctx.lineWidth = bw
+                                    ctx.beginPath(); ctx.moveTo(x, baseY); ctx.lineTo(x, baseY - h); ctx.stroke()
+                                }
+                                if (root.cursorDist >= dLo && root.cursorDist <= dHi) {
+                                    var cx = X(root.cursorDist)
+                                    ctx.strokeStyle = Theme.primary; ctx.lineWidth = 1
+                                    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, baseY); ctx.stroke()
+                                }
+                                ctx.restore()
+                                ctx.fillStyle = Theme.mutedText; ctx.font = "9px sans-serif"; ctx.textAlign = "right"
+                                ctx.fillText(Math.round(hi) + " m", mL - 4, 9)
+                                ctx.fillText(Math.round(lo) + " m", mL - 4, baseY)
+                                ctx.textAlign = "center"
+                                for (var s = 0; s <= 2; s++) {
+                                    var d = dLo + dSpan * s / 2
+                                    ctx.fillStyle = Theme.text
+                                    ctx.fillText((d / 1000).toFixed(dSpan < 20000 ? 1 : 0) + " km", X(d), height - 2)
+                                }
+                            }
+                            HoverHandler {
+                                onPointChanged: {
+                                    if (!hovered) { root.cursorDist = -1; return }
+                                    var f = profileCanvas.fracAtX(point.position.x)
+                                    root.cursorDist = (root.viewStart + f * (root.viewEnd - root.viewStart)) * root.routeLenM
                                 }
                             }
                             Connections {
                                 target: root
                                 function onProfileRowsChanged() { profileCanvas.requestPaint() }
+                                function onCursorDistChanged() { profileCanvas.requestPaint() }
+                                function onViewStartChanged() { profileCanvas.requestPaint() }
+                                function onViewEndChanged() { profileCanvas.requestPaint() }
                             }
                             onWidthChanged: requestPaint()
                         }

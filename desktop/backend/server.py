@@ -1930,6 +1930,8 @@ class Handler(BaseHTTPRequestHandler):
                     "--window", str(body.get("window", 100))]
             if body.get("hgt"):
                 args += ["--hgt", str(body["hgt"])]
+            if body.get("reverse"):
+                args += ["--reverse"]
             code, out, err = run_tool("track_color.py", args)
         finally:
             Path(path).unlink(missing_ok=True)
@@ -1945,6 +1947,8 @@ class Handler(BaseHTTPRequestHandler):
                     "--window", str(body.get("window", 100))]
             if body.get("hgt"):
                 args += ["--hgt", str(body["hgt"])]
+            if body.get("reverse"):
+                args += ["--reverse"]
             code, out, err = run_tool("track_color.py", args)
         finally:
             Path(path).unlink(missing_ok=True)
@@ -1977,6 +1981,8 @@ class Handler(BaseHTTPRequestHandler):
                     "--pace", str(body.get("pace") or 4.5), "--tz", str(tz)]
             if body.get("date"):
                 args += ["--date", str(body["date"])]
+            if body.get("reverse"):
+                args += ["--reverse"]
             code, out, err = run_tool("weather_route.py", args)
         finally:
             Path(path).unlink(missing_ok=True)
@@ -2759,6 +2765,26 @@ class Handler(BaseHTTPRequestHandler):
         conversions (Duration=raw/10, Location=float32 radians) were found and confirmed
         against real hardware. Live-verified end to end this same session against André's own
         watch (1 city/country, Lille France - matches the watch's own "7R" screen exactly)."""
+        if demo_ambit():
+            _dp = [
+                (50.63,3.06,"France"),(45.92,6.87,"France"),(46.02,7.75,"Switzerland"),
+                (46.69,7.86,"Switzerland"),(42.88,-8.54,"Spain"),(31.63,-7.99,"Morocco"),
+                (64.15,-21.94,"Iceland"),(69.65,18.96,"Norway"),(27.72,85.32,"Nepal"),
+                (28.00,86.85,"Nepal"),(29.65,91.14,"China"),(34.16,77.58,"India"),
+                (35.68,139.65,"Japan"),(-33.92,18.42,"South Africa"),(-13.16,-72.54,"Peru"),
+                (-49.33,-72.89,"Argentina"),(-54.80,-68.30,"Argentina"),(-51.00,-73.00,"Chile"),
+                (51.18,-115.57,"Canada"),(63.07,-151.00,"United States"),(38.57,-109.55,"United States"),
+                (-45.03,168.66,"New Zealand"),(-43.60,170.14,"New Zealand"),(-3.07,37.35,"Tanzania"),
+            ]
+            self._send_json(200, {
+                "ok": True, "cities_visited": len(_dp), "countries_visited": 15,
+                "last_known_country": "France", "last_known_time": "2026-08-29T18:42:00",
+                "travelling_days": 168, "travelled_distance_m": 128000000.0,
+                "furthest_from_home_m": 19100000.0, "last_known_location": [50.63, 3.06],
+                "sessions": [],
+                "visited_places": [{"lat": a, "lon": b, "country": c} for (a, b, c) in _dp],
+            })
+            return
         code, out, err = run_tool("kailash_history.py", ["--json"])
         info = self._parse_last_json_line(out)
         if info is None:

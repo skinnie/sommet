@@ -184,6 +184,22 @@ def plan(points, start="09:00", date=None, pace_kmh=4.5, tz_offset_h=0.0,
         "color": WIND_REL[profile[i]["wind_rel"]]["color"],
     } for i in range(n)]
 
+    # rain markers: a raindrop on the map wherever meaningful rain is forecast (>= 0.1 mm),
+    # so the Plan map can show rain icons over the climb-coloured route (André, 2026-08-31).
+    rain_marks = [{
+        "lat": round(lats[i], 6), "lon": round(lons[i], 6),
+        "rain_mm": round(wx[i]["rain_mm"], 2),
+    } for i in range(n) if wx[i]["rain_mm"] >= 0.1]
+
+    # temperature markers: °C / feels-like along the route, for the map's "climb + temperature"
+    # overlay (André, 2026-08-31). Thinned to at most ~8 evenly-spaced points so labels don't
+    # pile up on a long route.
+    _tstep = max(1, n // 8)
+    temp_marks = [{
+        "lat": round(lats[i], 6), "lon": round(lons[i], 6),
+        "temp_c": round(wx[i]["temp_c"], 1), "feels_c": round(wx[i]["feels_c"], 1),
+    } for i in range(0, n, _tstep)]
+
     # sun/moon at the route midpoint, on the start date
     mid = n // 2
     ev = astro.events(d0, lats[mid], lons[mid], tz_offset_h)
@@ -201,6 +217,7 @@ def plan(points, start="09:00", date=None, pace_kmh=4.5, tz_offset_h=0.0,
         "wind_max_kmh": round(max(w["wind_kmh"] for w in wx), 1),
     }
     return {"ok": True, "segments": segments, "profile": profile, "wind_arrows": wind_arrows,
+            "rain_marks": rain_marks, "temp_marks": temp_marks,
             "astro": ev, "verdict": verdict, "summary": summary,
             "legend": [{"key": b["key"], "label": b["label"], "color": b["color"]}
                        for b in TEMP_BUCKETS]}
@@ -344,6 +361,7 @@ def main(argv=None):
     ap.add_argument("--date", help="local start date YYYY-MM-DD (default today)")
     ap.add_argument("--pace", type=float, default=4.5, help="pace in km/h")
     ap.add_argument("--tz", type=float, default=0.0, help="UTC offset hours")
+    ap.add_argument("--reverse", action="store_true", help="reverse the route direction")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
     if args.selftest:
@@ -359,6 +377,8 @@ def main(argv=None):
     if not points:
         print(json.dumps({"ok": False, "error": "no points in track"}))
         return 2
+    if args.reverse:
+        points = list(reversed(points))
     d = datetime.strptime(args.date, "%Y-%m-%d").date() if args.date else None
     result = plan(points, start=args.start, date=d, pace_kmh=args.pace, tz_offset_h=args.tz)
     print(json.dumps(result))

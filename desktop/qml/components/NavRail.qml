@@ -103,6 +103,10 @@ Rectangle {
             width: scroller.width
             spacing: 2
 
+            // Order set by André 2026-08-31: Activities, Routes, POIs, Plan, Health, Ember, Weight,
+            // Coach, Training Program, Gear, Calendar, Totals, Apps, Sync watches, Watch settings,
+            // Firmware, then the gated experimental devices, then Settings. Offline maps + Backup
+            // were moved OUT of the rail and into the Settings page.
             NavItem {
                 width: parent.width
                 glyph: Icons.activities
@@ -122,70 +126,20 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Plan = weather + climb for a GPX you bring (2026-08-31 reshape). Unlike the old
-                // BRouter route-planner, it needs no route-capable watch - weather works on any
-                // GPX with nothing plugged in - so it is NOT gated on supportsRoutes any more
-                // (gating a weather tool on a connected watch hid the thing André said he most
-                // needs). Always shown. Reuses the route glyph (fixed icon-font subset, Icons.qml).
-                glyph: Icons.routes
-                label: qsTr("Plan")
-                selected: root.currentPage === "planRoute"
-                onClicked: root.pageSelected("planRoute")
-            }
-            NavItem {
-                width: parent.width
                 visible: DeviceCapabilities.supportsPOIs
                 glyph: Icons.pois
                 label: qsTr("POIs")
                 selected: root.currentPage === "pois"
                 onClicked: root.pageSelected("pois")
             }
-            // Offline maps (André, 2026-08-30): download any area of the world for use with no
-            // signal. Not device-gated — reachable any time, like Totals.
             NavItem {
                 width: parent.width
-                glyph: Icons.cloudDownload
-                label: qsTr("Offline maps")
-                selected: root.currentPage === "offlineMaps"
-                onClicked: root.pageSelected("offlineMaps")
-            }
-            // Totals - same activity data, summed; no device support to gate on, shown always.
-            NavItem {
-                width: parent.width
-                glyph: Icons.sportModes
-                label: qsTr("Totals")
-                selected: root.currentPage === "totals"
-                onClicked: root.pageSelected("totals")
-            }
-            // Coach - readiness + chat over local history. On by default since 2026-08-28.
-            NavItem {
-                width: parent.width
-                visible: DeviceService.coachEnabled
-                glyph: Icons.coach
-                label: qsTr("Coach")
-                selected: root.currentPage === "coach"
-                onClicked: root.pageSelected("coach")
-            }
-            NavItem {
-                width: parent.width
-                glyph: Icons.calendar
-                label: qsTr("Calendar")
-                selected: root.currentPage === "calendar"
-                onClicked: root.pageSelected("calendar")
-            }
-            NavItem {
-                width: parent.width
-                glyph: Icons.gear
-                label: qsTr("Gear")
-                selected: root.currentPage === "gear"
-                onClicked: root.pageSelected("gear")
-            }
-            NavItem {
-                width: parent.width
-                glyph: Icons.weight
-                label: qsTr("Weight")
-                selected: root.currentPage === "weight"
-                onClicked: root.pageSelected("weight")
+                // Plan = weather + climb for a GPX you bring (2026-08-31 reshape); not gated on a
+                // watch. Reuses the route glyph (fixed icon-font subset, Icons.qml).
+                glyph: Icons.routes
+                label: qsTr("Plan")
+                selected: root.currentPage === "planRoute"
+                onClicked: root.pageSelected("planRoute")
             }
             NavItem {
                 width: parent.width
@@ -205,26 +159,53 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Nothing to back up, or restore to, without a device.
-                visible: HomeViewModel.anyDevice
-                glyph: Icons.backup
-                label: qsTr("Backup")
-                selected: root.currentPage === "backup"
-                onClicked: root.pageSelected("backup")
+                glyph: Icons.weight
+                label: qsTr("Weight")
+                selected: root.currentPage === "weight"
+                onClicked: root.pageSelected("weight")
             }
-            // Sync two watches ("freefly"): copy settings (and, as their write paths land,
-            // POIs/routes/sport-mode layouts) between two watches of a compatible model. Needs
-            // a device; the page itself explains the one-cable-at-a-time A/B flow.
+            // Coach - readiness + chat over local history. On by default since 2026-08-28.
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice
-                glyph: Icons.sync
-                label: qsTr("Sync watches")
-                selected: root.currentPage === "sync"
-                onClicked: root.pageSelected("sync")
+                visible: DeviceService.coachEnabled
+                glyph: Icons.coach
+                label: qsTr("Coach")
+                selected: root.currentPage === "coach"
+                onClicked: root.pageSelected("coach")
             }
-            // Apps - App-Zone builders (Workout + free-form). Suunto Ambit3/Traverse only: no
-            // Garmin equivalent, no Kailash CustomModes region, and Ambit1/2 predate the App Zone.
+            // Training Program - ON HOLD behind FeatureFlags.trainingProgram.
+            NavItem {
+                width: parent.width
+                visible: FeatureFlags.trainingProgram && HomeViewModel.anyDevice
+                         && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
+                glyph: Icons.trainingProgram
+                label: qsTr("Training Program")
+                selected: root.currentPage === "trainingProgram"
+                onClicked: root.pageSelected("trainingProgram")
+            }
+            NavItem {
+                width: parent.width
+                glyph: Icons.gear
+                label: qsTr("Gear")
+                selected: root.currentPage === "gear"
+                onClicked: root.pageSelected("gear")
+            }
+            NavItem {
+                width: parent.width
+                glyph: Icons.calendar
+                label: qsTr("Calendar")
+                selected: root.currentPage === "calendar"
+                onClicked: root.pageSelected("calendar")
+            }
+            // Totals - same activity data, summed; no device support to gate on, shown always.
+            NavItem {
+                width: parent.width
+                glyph: Icons.sportModes
+                label: qsTr("Totals")
+                selected: root.currentPage === "totals"
+                onClicked: root.pageSelected("totals")
+            }
+            // Apps - App-Zone builders (Workout + free-form). Suunto Ambit3/Traverse only.
             NavItem {
                 width: parent.width
                 visible: (DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
@@ -236,25 +217,14 @@ Rectangle {
                 selected: root.currentPage === "appZone"
                 onClicked: root.pageSelected("appZone")
             }
-            // Training Program - ON HOLD behind FeatureFlags.trainingProgram (default false).
+            // Sync two watches ("freefly"): copy settings between two watches of a compatible model.
             NavItem {
                 width: parent.width
-                visible: FeatureFlags.trainingProgram && HomeViewModel.anyDevice
-                         && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
-                glyph: Icons.trainingProgram
-                label: qsTr("Training Program")
-                selected: root.currentPage === "trainingProgram"
-                onClicked: root.pageSelected("trainingProgram")
-            }
-            // Sport Modes - Kailash (no CustomModes region) and Garmin (no sport-mode concept) excluded.
-            NavItem {
-                width: parent.width
-                visible: FeatureFlags.sportModes && HomeViewModel.anyDevice
-                         && !HomeViewModel.isKailash && !HomeViewModel.isGarmin
-                glyph: Icons.sportModes
-                label: qsTr("Sport Modes")
-                selected: root.currentPage === "sportModes"
-                onClicked: root.pageSelected("sportModes")
+                visible: HomeViewModel.anyDevice
+                glyph: Icons.sync
+                label: qsTr("Sync watches")
+                selected: root.currentPage === "sync"
+                onClicked: root.pageSelected("sync")
             }
             // Watch settings - cable-written on-watch settings. Suunto-only, needs a connected watch.
             NavItem {
@@ -275,6 +245,16 @@ Rectangle {
                 label: qsTr("Firmware")
                 selected: root.currentPage === "firmware"
                 onClicked: root.pageSelected("firmware")
+            }
+            // Sport Modes - Kailash (no CustomModes region) and Garmin (no sport-mode concept) excluded.
+            NavItem {
+                width: parent.width
+                visible: FeatureFlags.sportModes && HomeViewModel.anyDevice
+                         && !HomeViewModel.isKailash && !HomeViewModel.isGarmin
+                glyph: Icons.sportModes
+                label: qsTr("Sport Modes")
+                selected: root.currentPage === "sportModes"
+                onClicked: root.pageSelected("sportModes")
             }
             // Suunto Smart Sensor - standalone BLE HR belt, independent of any watch.
             NavItem {

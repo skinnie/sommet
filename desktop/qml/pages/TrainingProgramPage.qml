@@ -323,7 +323,9 @@ Item {
                         }
 
                         Column {
-                            width: parent.width - 40
+                            // minus the two 20px chevrons AND the Row's two gaps, else the row
+                            // overflowed and pushed the next-month chevron off-screen (2026-08-31).
+                            width: parent.width - 40 - 2 * Theme.spacingSmall
                                    - (todayButton.visible ? todayButton.width + Theme.spacingSmall : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             Text {
@@ -536,13 +538,6 @@ Item {
                     Row {
                         spacing: Theme.spacingMedium
 
-                        RoundedButton {
-                            text: qsTr("Preview sync")
-                            enabled: root.entries.length > 0
-                                     && !TrainingProgramService.installing
-                            onClicked: TrainingProgramService.syncCalendar(
-                                root.entriesWithMode(modePicker.currentText), false)
-                        }
                         RoundedButton {
                             text: TrainingProgramService.installing
                                   ? qsTr("Working…") : qsTr("Sync to watch")

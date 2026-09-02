@@ -264,6 +264,7 @@ def main(argv=None):
     ap.add_argument("--window", type=float, default=100.0,
                     help="gradient smoothing window, m (default 100)")
     ap.add_argument("--hgt", help="dir of SRTM .hgt tiles, to fill missing elevation")
+    ap.add_argument("--reverse", action="store_true", help="reverse the track direction")
     ap.add_argument("--selftest", action="store_true", help="run the offline self-test and exit")
     args = ap.parse_args(argv)
 
@@ -281,6 +282,8 @@ def main(argv=None):
     if not points:
         print(json.dumps({"ok": False, "error": "no points found in track"}))
         return 2
+    if args.reverse:
+        points = list(reversed(points))
 
     result = colorize(points, step_m=args.step, window_m=args.window, hgt_dir=args.hgt)
     print(json.dumps(result))  # single machine-readable JSON line (backend reads the last one)

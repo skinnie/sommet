@@ -689,6 +689,39 @@ PageFlickable {
                         onClicked: TileCacheService.clearCache()
                     }
                 }
+                // Offline maps moved here from the nav rail (André, 2026-08-31).
+                RoundedButton {
+                    width: parent.width
+                    text: qsTr("Download offline maps…")
+                    onClicked: NavBus.navigate("offlineMaps")
+                }
+            }
+        }
+
+        // --- Backup & restore (moved here from the nav rail, André 2026-08-31) ---
+        Card {
+            width: parent.width
+            visible: HomeViewModel.anyDevice
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.backup; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Backup & restore"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Back up your watch and app data, and restore from a backup.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                }
+                RoundedButton {
+                    width: parent.width
+                    text: qsTr("Open backup & restore…")
+                    onClicked: NavBus.navigate("backup")
+                }
             }
         }
 
@@ -1134,9 +1167,10 @@ PageFlickable {
                     width: parent.width; wrapMode: Text.WordWrap
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                     text: qsTr("Off, the coach replies from a few pre-written answers. On, it " +
-                               "talks to Claude about your real training. That needs an " +
-                               "Anthropic API key — not your claude.ai login, which won't work " +
-                               "here — and costs a few cents per conversation.")
+                               "talks to Claude about your real training. This needs an API key " +
+                               "you create at console.anthropic.com — that's a developer key, " +
+                               "separate from a claude.ai subscription (your normal Claude login " +
+                               "won't work here), and it's billed separately, a few cents per chat.")
                 }
                 Row {
                     spacing: Theme.spacingSmall

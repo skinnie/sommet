@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.26 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.27 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -126,6 +126,9 @@ set_source_files_properties(qml/viewmodels/ActivityViewModel.qml PROPERTIES
 set_source_files_properties(qml/viewmodels/RouteViewModel.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
+set_source_files_properties(qml/PlanStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE true
+)
 
 qt_add_qml_module(ambitapp
     URI AmbitApp
@@ -189,6 +192,7 @@ qt_add_qml_module(ambitapp
         qml/components/EtrexIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
+        qml/PlanStore.qml
         qml/viewmodels/HomeViewModel.qml
         qml/viewmodels/WeatherViewModel.qml
         qml/viewmodels/ActivityViewModel.qml
