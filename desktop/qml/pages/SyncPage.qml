@@ -2,29 +2,31 @@ import QtQuick
 import QtQuick.Layouts
 import AmbitApp
 
-// Two-watch "freefly" sync. Copy settings (and, as their write paths are wired in,
-// POIs/routes/sport-mode layouts) between two watches of a compatible model - two Kailashes,
-// two Ambit3 Peaks, etc. Only one watch connects at a time over the cable, so the whole page
-// is built around a sequential A/B flow: snapshot the plugged watch into a slot, swap the
-// cable, snapshot the other into the second slot, preview the diff, swap to the target watch
-// and apply. Every write is the same 0x1101 the Watch Settings page uses; the backend
-// re-checks the connected serial before writing, so the wrong watch can never be touched.
+// Copy one watch's setup onto another. Only one watch connects at a time over the cable, so
+// the flow is guided and sequential (André, 2026-09-02, UX fix #3):
+//   1. Plug in the watch to COPY FROM  -> it's read (backed up) automatically into slot A.
+//   2. Unplug it, plug in the watch to COPY TO -> it's read into slot B and a plan is built.
+//   3. Review "what will be written" and confirm -> only then is anything written, and only
+//      to the watch that's plugged in now.
+// Reading a watch (snapshot) is harmless - it only reads settings. Writing happens solely on
+// the explicit confirm. The backend re-checks the connected serial before writing, so the
+// wrong watch can never be touched. Direction is always A(source) -> B(target); there is no
+// mirror/merge choice any more - it copies the source's settings onto the target.
 //
-// Kailash "countries visited" is deliberately absent: it is a firmware-computed query object
-// with no writable region (docs/explanation/kailash-history-write-probe.md).
+// Only the categories both watches actually support end up in effectiveCategories, which is
+// what the plan/apply calls use - so half-finished categories simply don't appear.
+// Kailash "visited cities/countries" is never copyable: the watch computes it, there's no
+// writable region (docs/explanation/kailash-history-write-probe.md).
 PageFlickable {
     id: root
     contentWidth: width
     contentHeight: column.height + Theme.spacingLarge * 2
     clip: true
 
-    // Page-local choices. Categories is settings-only for now; the rest are shown greyed so
-    // the shape of the feature is visible before their write paths land.
-    property string mode: "mirror"          // "mirror" | "merge"
-    property string direction: "AtoB"       // "AtoB" | "BtoA"
-    // Which categories to sync. Only ones both snapshotted watches actually support end up in
-    // effectiveCategories (below), which is what the plan/apply calls use.
-    property var selectedCategories: ["settings", "pois", "routes", "sportModes"]
+    // Always source -> target, always a straight copy.
+    readonly property string mode: "mirror"
+    readonly property string direction: "AtoB"
+    readonly property var allCategories: ["settings", "pois", "routes", "sportModes"]
 
     function catSupported(slot, cat) {
         return !!(slot && slot.categories && slot.categories[cat]
@@ -33,35 +35,49 @@ PageFlickable {
     function bothSupport(cat) {
         return catSupported(root.slotA, cat) && catSupported(root.slotB, cat);
     }
-    function toggleCategory(cat) {
-        var list = root.selectedCategories.slice();
-        var i = list.indexOf(cat);
-        if (i === -1)
-            list.push(cat);
-        else
-            list.splice(i, 1);
-        root.selectedCategories = list;
-    }
     readonly property var effectiveCategories:
-        root.selectedCategories.filter(function (c) { return root.bothSupport(c); })
+        root.allCategories.filter(function (c) { return root.bothSupport(c); })
 
     readonly property var slotA: SyncService.slotA
     readonly property var slotB: SyncService.slotB
-    readonly property bool haveA: slotA && slotA.serial !== undefined
-    readonly property bool haveB: slotB && slotB.serial !== undefined
+    readonly property bool haveSource: slotA && slotA.serial !== undefined
+    readonly property bool haveTarget: slotB && slotB.serial !== undefined
     readonly property string connectedSerial: DeviceService.serial
-    // The slot the swap flow is aiming to write to, given the current direction.
-    readonly property string targetSlot: direction === "AtoB" ? "B" : "A"
-    readonly property var targetSummary: direction === "AtoB" ? slotB : slotA
-    readonly property bool targetPlugged: (targetSummary && targetSummary.serial !== undefined)
-                                          && connectedSerial === targetSummary.serial
+
+    // Is the watch plugged in right now the one we still need to read for this step?
+    readonly property bool sourcePluggedFresh:
+        HomeViewModel.connected && !root.haveSource
+    readonly property bool targetPluggedFresh:
+        HomeViewModel.connected && root.haveSource
+        && root.connectedSerial !== (root.haveSource ? root.slotA.serial : "")
+        && !root.haveTarget
+    // The target is plugged in now (needed to write).
+    readonly property bool targetPluggedNow:
+        root.haveTarget && root.connectedSerial === root.slotB.serial
+
+    function settingsCount(slot) {
+        if (!slot || !slot.categories || !slot.categories.settings) return 0;
+        return slot.categories.settings.count || 0;
+    }
 
     Component.onCompleted: SyncService.refreshState()
 
-    function settingsCount(slot) {
-        if (!slot || !slot.categories || !slot.categories.settings)
-            return 0;
-        return slot.categories.settings.count || 0;
+    // Auto-read the connected watch at the right moment. Snapshot is read-only, so doing it
+    // automatically is safe and matches "plug it in, it backs up silently". Guarded so the
+    // 10s device poll can't re-trigger it in a loop.
+    function _maybeAutoRead() {
+        if (SyncService.busy) return;
+        if (root.sourcePluggedFresh) { SyncService.snapshot("A"); return; }
+        if (root.targetPluggedFresh) { SyncService.snapshot("B"); return; }
+    }
+    // Once the target has just been read, build the plan automatically.
+    onHaveTargetChanged: {
+        if (root.haveTarget && (!SyncService.plan || SyncService.plan.changeCount === undefined))
+            SyncService.buildPlan(root.mode, root.direction, root.effectiveCategories);
+    }
+    Connections {
+        target: DeviceService
+        function onDeviceInfoChanged() { root._maybeAutoRead(); }
     }
 
     Column {
@@ -72,14 +88,14 @@ PageFlickable {
         width: Math.min(560, root.width - Theme.spacingLarge * 2)
         spacing: Theme.spacingMedium
 
-        // ---- Intro / how it works ------------------------------------------------------
+        // ---- Title + how it works ------------------------------------------------------
         Card {
             width: parent.width
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
                 Text {
-                    text: qsTr("Sync two watches")
+                    text: qsTr("Copy one watch to another")
                     font.bold: true
                     font.pixelSize: Theme.fontSizeTitle
                     color: Theme.text
@@ -89,132 +105,105 @@ PageFlickable {
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
-                    text: qsTr("Give two watches of the same kind matching settings. Only one " +
-                                "watch plugs in at a time, so: snapshot the first as A, swap the " +
-                                "cable, snapshot the second as B, preview what would change, then " +
-                                "plug the target watch back in and apply. Nothing is written " +
-                                "until you apply, and only to the watch a plan was built for.")
-                }
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    // Honest limit, per the hardware probe - keep users from expecting it here.
-                    text: qsTr("Note: a Kailash's visited cities/countries can't be copied - the " +
-                                "watch computes those itself and there's no way to write them.")
+                    text: qsTr("Give a second watch the same setup. Plug in the watch to copy " +
+                                "from, then unplug it and plug in the one to copy to. Only one " +
+                                "watch is plugged at a time — you swap the cable. Nothing is " +
+                                "written until you confirm the last step.")
                 }
             }
         }
 
-        // ---- The two slots -------------------------------------------------------------
+        // ---- Step 1: source ------------------------------------------------------------
         Card {
             width: parent.width
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
                 Text {
-                    text: qsTr("The two watches")
-                    font.bold: true
-                    color: Theme.text
+                    text: qsTr("1 · Copy from")
+                    font.bold: true; color: Theme.text
                     font.pixelSize: Theme.fontSizeHeading
                 }
-                RowLayout {
-                    width: parent.width
-                    spacing: Theme.spacingMedium
-                    SlotPanel { slotLabel: "A"; Layout.fillWidth: true }
-                    SlotPanel { slotLabel: "B"; Layout.fillWidth: true }
-                }
                 Text {
-                    visible: SyncService.lastActionText.length > 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: SyncService.lastActionOk ? Theme.success : Theme.error
-                    text: SyncService.lastActionText
+                    visible: !root.haveSource
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
+                    text: SyncService.busy && !root.haveSource
+                        ? qsTr("Reading the watch…")
+                        : qsTr("Plug in the watch you want to copy the setup FROM. It's read " +
+                               "automatically — this only reads, it changes nothing.")
+                }
+                Row {
+                    visible: root.haveSource
+                    spacing: Theme.spacingSmall
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "✓"; color: Theme.success; font.bold: true
+                        font.pixelSize: Theme.fontSizeBody
+                    }
+                    Column {
+                        Text {
+                            text: root.haveSource ? root.slotA.displayName : ""
+                            color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                        }
+                        Text {
+                            text: root.haveSource
+                                ? qsTr("read · %1 settings").arg(root.settingsCount(root.slotA)) : ""
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
                 }
             }
         }
 
-        // ---- Mode & direction ----------------------------------------------------------
+        // ---- Step 2: target ------------------------------------------------------------
         Card {
             width: parent.width
-            visible: root.haveA && root.haveB
+            visible: root.haveSource
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
                 Text {
-                    text: qsTr("How to sync")
-                    font.bold: true
-                    color: Theme.text
+                    text: qsTr("2 · Copy to")
+                    font.bold: true; color: Theme.text
                     font.pixelSize: Theme.fontSizeHeading
                 }
-                Row {
-                    spacing: Theme.spacingSmall
-                    RoundedButton {
-                        text: qsTr("Mirror")
-                        checkable: true
-                        checked: root.mode === "mirror"
-                        onClicked: root.mode = "mirror"
-                    }
-                    RoundedButton {
-                        text: qsTr("Two-way merge")
-                        checkable: true
-                        checked: root.mode === "merge"
-                        onClicked: root.mode = "merge"
-                    }
-                }
                 Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: root.mode === "mirror"
-                        ? qsTr("Mirror: make the target watch match the source for every setting.")
-                        : qsTr("Two-way merge combines lists (POIs, routes) so both watches get " +
-                                "everything - coming with those categories. Settings are single " +
-                                "values, so they still follow the direction you pick below.")
+                    visible: !root.haveTarget
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
+                    text: SyncService.busy && root.haveSource && !root.haveTarget
+                        ? qsTr("Reading the watch…")
+                        : qsTr("Now unplug that watch and plug in the one you want to copy the " +
+                               "setup TO. It's read automatically so we can show you what would " +
+                               "change.")
                 }
-                // Direction. Relevant to mirror always, and to merge's scalar settings.
                 Row {
+                    visible: root.haveTarget
                     spacing: Theme.spacingSmall
-                    RoundedButton {
-                        text: qsTr("A → B")
-                        checkable: true
-                        checked: root.direction === "AtoB"
-                        onClicked: root.direction = "AtoB"
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "✓"; color: Theme.success; font.bold: true
+                        font.pixelSize: Theme.fontSizeBody
                     }
-                    RoundedButton {
-                        text: qsTr("B → A")
-                        checkable: true
-                        checked: root.direction === "BtoA"
-                        onClicked: root.direction = "BtoA"
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.haveTarget ? root.slotB.displayName : ""
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
                     }
-                }
-                // Categories to sync. Settings + POIs are live (tap to toggle); Routes and
-                // Sport modes are placeholders until their write paths are wired in.
-                Text {
-                    text: qsTr("What to sync")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                }
-                Flow {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    CategoryChip { cat: "settings"; label: qsTr("Settings") }
-                    CategoryChip { cat: "pois"; label: qsTr("POIs") }
-                    CategoryChip { cat: "routes"; label: qsTr("Routes") }
-                    CategoryChip { cat: "sportModes"; label: qsTr("Sport modes") }
-                }
-                RoundedButton {
-                    text: SyncService.busy ? qsTr("Working…") : qsTr("Preview changes")
-                    enabled: !SyncService.busy && root.effectiveCategories.length > 0
-                    onClicked: SyncService.buildPlan(root.mode, root.direction, root.effectiveCategories)
                 }
             }
         }
 
-        // ---- Plan / diff ---------------------------------------------------------------
+        // ---- Any read error ------------------------------------------------------------
+        Text {
+            visible: SyncService.lastActionText.length > 0 && !SyncService.lastActionOk
+            width: parent.width; wrapMode: Text.WordWrap
+            color: Theme.error; font.pixelSize: Theme.fontSizeCaption
+            text: SyncService.lastActionText
+        }
+
+        // ---- Step 3: review & confirm --------------------------------------------------
         Card {
             width: parent.width
             visible: SyncService.plan && SyncService.plan.changeCount !== undefined
@@ -237,36 +226,37 @@ PageFlickable {
                     return name;
                 }
 
+                Text {
+                    text: qsTr("3 · Review and confirm")
+                    font.bold: true; color: Theme.text
+                    font.pixelSize: Theme.fontSizeHeading
+                }
+
                 // Different models: syncing is refused outright (sensors/hardware differ).
                 Text {
                     visible: planCol.modelMismatch
-                    width: planCol.width
-                    wrapMode: Text.WordWrap
-                    font.bold: true
-                    color: Theme.error
+                    width: planCol.width; wrapMode: Text.WordWrap
+                    font.bold: true; color: Theme.error
                     font.pixelSize: Theme.fontSizeHeading
-                    text: qsTr("Can't sync different models")
+                    text: qsTr("These two watches are different models")
                 }
                 Text {
                     visible: planCol.modelMismatch
-                    width: planCol.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeLabel
+                    width: planCol.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
                     text: (planCol.plan && planCol.plan.modelMismatchText)
-                          ? planCol.plan.modelMismatchText : ""
+                          ? planCol.plan.modelMismatchText
+                          : qsTr("Settings can only be copied between watches of the same model.")
                 }
 
                 Text {
                     visible: !planCol.modelMismatch
-                    width: planCol.width
-                    wrapMode: Text.WordWrap
-                    font.bold: true
-                    color: Theme.text
+                    width: planCol.width; wrapMode: Text.WordWrap
+                    font.bold: true; color: Theme.text
                     font.pixelSize: Theme.fontSizeHeading
                     text: planCol.changeCount === 0
-                        ? qsTr("Both watches already match")
-                        : qsTr("%1 change%2 to write to %3")
+                        ? qsTr("Nothing to change — they already match")
+                        : qsTr("%1 change%2 will be written to %3")
                             .arg(planCol.changeCount)
                             .arg(planCol.changeCount === 1 ? "" : "s")
                             .arg(planCol.targetName)
@@ -280,12 +270,11 @@ PageFlickable {
                         width: planCol.width
                         spacing: Theme.spacingSmall / 2
                         visible: (modelData.changes && modelData.changes.length > 0)
-                                 || (modelData.skipped && modelData.skipped.length > 0)
 
                         Text {
+                            visible: planCol.cats.length > 1
                             text: planCol.catTitle(modelData.category)
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             font.bold: true
                         }
                         Repeater {
@@ -303,189 +292,81 @@ PageFlickable {
                                     width: parent.width - Theme.spacingSmall * 2
                                     Text {
                                         text: modelData.label
-                                        color: Theme.text
-                                        font.pixelSize: Theme.fontSizeLabel
+                                        color: Theme.text; font.pixelSize: Theme.fontSizeLabel
                                         font.bold: true
                                     }
                                     Text {
                                         text: qsTr("%1  →  %2")
                                             .arg(modelData.fromText !== undefined ? modelData.fromText : modelData.from)
                                             .arg(modelData.toText !== undefined ? modelData.toText : modelData.to)
-                                        color: Theme.mutedText
-                                        font.pixelSize: Theme.fontSizeCaption
+                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                                     }
                                 }
                             }
                         }
-                        Text {
-                            visible: modelData.skipped && modelData.skipped.length > 0
-                            width: planCol.width
-                            wrapMode: Text.WordWrap
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
-                            text: qsTr("%1 skipped (read-only on the target or not present).")
-                                .arg(modelData.skipped ? modelData.skipped.length : 0)
-                        }
                     }
                 }
 
-                // Target-watch prompt / apply.
+                // Confirm / apply. The target must be the plugged-in watch.
                 Text {
-                    visible: planCol.changeCount > 0 && !root.targetPlugged
-                    width: planCol.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.warning
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: root.targetSummary && root.targetSummary.displayName !== undefined
-                        ? qsTr("Plug in %1 (the target) to apply.").arg(root.targetSummary.displayName)
-                        : qsTr("Plug in the target watch to apply.")
+                    visible: planCol.changeCount > 0 && !root.targetPluggedNow
+                    width: planCol.width; wrapMode: Text.WordWrap
+                    color: Theme.warning; font.pixelSize: Theme.fontSizeCaption
+                    text: root.haveTarget
+                        ? qsTr("Plug %1 back in to write these changes.").arg(root.slotB.displayName)
+                        : qsTr("Plug the target watch back in to write these changes.")
                 }
                 RoundedButton {
-                    visible: planCol.changeCount > 0
-                    enabled: root.targetPlugged && !SyncService.busy
-                    text: SyncService.busy ? qsTr("Writing…")
-                        : qsTr("Apply to %1").arg(root.targetSummary && root.targetSummary.displayName !== undefined
-                                                  ? root.targetSummary.displayName : qsTr("target"))
+                    visible: planCol.changeCount > 0 && !planCol.modelMismatch
+                    enabled: root.targetPluggedNow && !SyncService.busy
+                    text: SyncService.busy
+                        ? qsTr("Writing…")
+                        : qsTr("Write %1 change%2 to %3")
+                            .arg(planCol.changeCount)
+                            .arg(planCol.changeCount === 1 ? "" : "s")
+                            .arg(root.haveTarget ? root.slotB.displayName : qsTr("the target"))
                     onClicked: SyncService.apply(root.mode, root.direction, true, root.effectiveCategories)
                 }
                 Text {
                     visible: SyncService.mismatchText.length > 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeCaption
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.error; font.pixelSize: Theme.fontSizeCaption
                     text: SyncService.mismatchText
                 }
             }
         }
-    }
 
-    // ---- Inline component: one slot panel ---------------------------------------------
-    component SlotPanel: Rectangle {
-        property string slotLabel: "A"
-        readonly property var summary: slotLabel === "A" ? root.slotA : root.slotB
-        readonly property bool filled: summary && summary.serial !== undefined
-        readonly property bool pluggedNow: filled && root.connectedSerial === summary.serial
-
-        radius: Theme.radiusSmall
-        color: Theme.cardNested
-        border.width: pluggedNow ? 2 : 1
-        border.color: pluggedNow ? Theme.primary : Theme.border
-        implicitHeight: panelCol.height + Theme.spacingMedium
-
-        Column {
-            id: panelCol
-            x: Theme.spacingSmall
-            y: Theme.spacingSmall
-            width: parent.width - Theme.spacingSmall * 2
-            spacing: Theme.spacingSmall / 2
-
-            Text {
-                text: qsTr("Watch %1").arg(slotLabel)
-                font.bold: true
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeLabel
-            }
-            Text {
-                visible: filled
-                width: parent.width
-                elide: Text.ElideRight
-                text: filled ? summary.displayName : ""
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeBody
-            }
-            Text {
-                visible: filled
-                width: parent.width
-                elide: Text.ElideRight
-                text: filled ? qsTr("SN %1").arg(summary.serial) : ""
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeCaption
-            }
-            Text {
-                visible: filled
-                text: filled ? qsTr("%1 settings").arg(root.settingsCount(summary)) : ""
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeCaption
-            }
-            Text {
-                visible: !filled
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: qsTr("Empty. Plug a watch in and snapshot it here.")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeCaption
-            }
-            Text {
-                visible: pluggedNow
-                text: qsTr("Plugged in now")
-                color: Theme.primary
-                font.pixelSize: Theme.fontSizeCaption
-                font.bold: true
-            }
-
+        // ---- Success confirmation (after a write) --------------------------------------
+        // lastActionText comes from the C++ service in English; "Applied ..." is only ever the
+        // result of a confirmed write, so it's safe to key the green banner on it.
+        Card {
+            width: parent.width
+            visible: SyncService.lastActionOk
+                     && SyncService.lastActionText.indexOf("Applied") === 0
             Row {
-                spacing: Theme.spacingSmall / 2
-                RoundedButton {
-                    text: filled ? qsTr("Re-snapshot") : qsTr("Snapshot")
-                    enabled: HomeViewModel.connected && !SyncService.busy
-                    onClicked: SyncService.snapshot(slotLabel)
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✓"; color: Theme.success; font.bold: true
+                    font.pixelSize: Theme.fontSizeBody
                 }
-                RoundedButton {
-                    visible: filled
-                    text: qsTr("Clear")
-                    enabled: !SyncService.busy
-                    onClicked: SyncService.clearSlot(slotLabel)
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 24
+                    wrapMode: Text.WordWrap
+                    text: qsTr("Done — %1").arg(SyncService.lastActionText)
+                    color: Theme.text; font.pixelSize: Theme.fontSizeBody
                 }
             }
         }
-    }
 
-    // ---- Inline component: a selectable category chip ---------------------------------
-    component CategoryChip: Rectangle {
-        property string cat: ""
-        property string label: ""
-        property bool comingSoon: false
-        // Available to sync only when both snapshotted watches support it.
-        readonly property bool available: !comingSoon && root.bothSupport(cat)
-        readonly property bool selected: available && root.selectedCategories.indexOf(cat) !== -1
-
-        implicitWidth: chipRow.width + Theme.spacingMedium
-        implicitHeight: 26
-        radius: 13
-        opacity: (comingSoon || !available) ? 0.55 : 1.0
-        color: selected ? Theme.primary : Theme.cardNested
-        border.width: 1
-        border.color: selected ? Theme.primary : Theme.border
-        Row {
-            id: chipRow
-            anchors.centerIn: parent
-            spacing: 4
-            Text {
-                text: label
-                color: selected ? Theme.card : Theme.mutedText
-                font.pixelSize: Theme.fontSizeCaption
-                font.bold: selected
-            }
-            Text {
-                visible: comingSoon
-                text: qsTr("(soon)")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeTiny
-            }
-            Text {
-                // A live category that one of the two watches can't do (e.g. POIs on a Kailash).
-                visible: !comingSoon && !available
-                text: qsTr("(n/a)")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeTiny
-            }
-        }
-        MouseArea {
-            anchors.fill: parent
-            enabled: parent.available
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.toggleCategory(parent.cat)
+        // ---- Start over ----------------------------------------------------------------
+        RoundedButton {
+            visible: root.haveSource
+            text: qsTr("Start over")
+            enabled: !SyncService.busy
+            onClicked: { SyncService.clearSlot("A"); SyncService.clearSlot("B"); }
         }
     }
 }

@@ -26,12 +26,17 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
     // watch's per-move synced flag.
     m_markSyncedEnabled =
         QSettings().value(QStringLiteral("experimental/markSynced"), false).toBool();
+    // On by default since 2026-09-02 (UX fix #1): these are core features owners bought the
+    // watch for (structured workouts, the App Zone, the HR belt), yet they were buried behind
+    // experimental toggles almost nobody found. They now show for everyone by default; the
+    // Settings toggles still let a user hide them, and an existing install keeps whatever it
+    // persisted. T6/X6 and GPS Track Pod stay OFF (niche, built without test hardware).
     m_intervalsEnabled =
-        QSettings().value(QStringLiteral("experimental/intervals"), false).toBool();
+        QSettings().value(QStringLiteral("experimental/intervals"), true).toBool();
     m_appZoneEnabled =
-        QSettings().value(QStringLiteral("experimental/appZone"), false).toBool();
+        QSettings().value(QStringLiteral("experimental/appZone"), true).toBool();
     m_smartSensorEnabled =
-        QSettings().value(QStringLiteral("experimental/smartSensor"), false).toBool();
+        QSettings().value(QStringLiteral("experimental/smartSensor"), true).toBool();
     // On by default since 2026-08-28 (UX audit item 3): the Coach was buried behind an
     // experimental toggle almost nobody found, yet it works offline for the basics (readiness
     // beacon + chat over local history). It now shows for everyone by default; the Settings

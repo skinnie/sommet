@@ -119,6 +119,9 @@ PageFlickable {
         const next = pendingEdits.slice();
         next.push(edit);
         pendingEdits = next;
+        // #5 (André, 2026-09-02): no manual Save. Restart the debounce so rapid edits
+        // coalesce into a single full-region write ~1s after the user stops.
+        autosaveTimer.restart();
     }
     function discardEdits() { pendingEdits = [] }
     function saveEdits() {
@@ -126,6 +129,18 @@ PageFlickable {
             return;
         CustomModesService.applyDisplayEdits(root.selectedModeName, pendingEdits);
         pendingEdits = [];
+    }
+    // Debounced auto-save for display/field edits. Each save rewrites the whole ~7.5 KB
+    // CustomModes region, so we wait for edits to settle rather than writing per tap; if a
+    // write is already running, wait and try again.
+    Timer {
+        id: autosaveTimer
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            if (CustomModesService.writingMode) { autosaveTimer.restart(); return }
+            root.saveEdits();
+        }
     }
     // SuuntoLink's own getMaxDisplays() for this watch family.
     // Limits come from the connected watch's own record, not from this one. A Traverse
@@ -585,12 +600,12 @@ PageFlickable {
     }
 
     // ============================= DETAIL VIEW ==============================
-    // Unsaved-changes bar. Sits above the detail view so it is impossible to miss - the
-    // whole point of staging is that nothing reaches the watch until Save, so the state has
-    // to be visible rather than implied.
+    // #5 (André, 2026-09-02): edits save themselves (debounced). No manual Save/Discard - this
+    // slim bar just shows that a save is happening, so changes don't feel silent.
     Card {
         id: pendingBar
-        visible: root.hasPendingEdits && !HomeViewModel.isKailash && root.selectedMode
+        visible: (root.hasPendingEdits || CustomModesService.writingMode)
+                 && !HomeViewModel.isKailash && root.selectedMode
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Theme.spacingSmall
@@ -598,36 +613,17 @@ PageFlickable {
         z: 10
         Row {
             width: parent.width
-            spacing: Theme.spacingMedium
-            Column {
-                width: parent.width - 240
+            spacing: Theme.spacingSmall
+            LoadingPill {
                 anchors.verticalCenter: parent.verticalCenter
-                Text {
-                    text: qsTr("%1 unsaved change(s)").arg(root.pendingEdits.length)
-                    color: Theme.text
-                    font.bold: true
-                    font.pixelSize: Theme.fontSizeBody
-                }
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: qsTr("Nothing has been sent to the watch yet. Saving rewrites this "
-                                + "mode's displays in one go.")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                }
+                visible: CustomModesService.writingMode
             }
-            RoundedButton {
+            Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("Discard")
-                enabled: !CustomModesService.writingMode
-                onClicked: root.discardEdits()
-            }
-            RoundedButton {
-                anchors.verticalCenter: parent.verticalCenter
-                text: CustomModesService.writingMode ? qsTr("Saving...") : qsTr("Save to watch")
-                enabled: !CustomModesService.writingMode
-                onClicked: root.saveEdits()
+                text: CustomModesService.writingMode ? qsTr("Saving to watch…")
+                                                     : qsTr("Saving your changes…")
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeCaption
             }
         }
     }
@@ -636,7 +632,7 @@ PageFlickable {
         id: detailColumn
         visible: !HomeViewModel.isKailash && root.selectedMode
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: root.hasPendingEdits ? pendingBar.bottom : parent.top
+        anchors.top: pendingBar.visible ? pendingBar.bottom : parent.top
         anchors.topMargin: Theme.spacingLarge
         width: 560
         spacing: Theme.spacingMedium

@@ -75,6 +75,9 @@ PageFlickable {
     }
 
     property string poiName: ""
+    // #10 (André, 2026-09-02): shown under the coordinate fields when a typed value is out of
+    // range, instead of silently snapping back.
+    property string coordError: ""
     // Real request 2026-08-07: this used to default to an arbitrary Alps coordinate (46.8,
     // 8.2), so the preview map below showed some unrelated place until the user typed real
     // numbers. WeatherService.latitude/longitude are IP-detected by default now (see
@@ -261,6 +264,15 @@ PageFlickable {
                     }
                 }
 
+                // #10: the watch keeps at most 15 characters - say so when the user hits it,
+                // rather than the field just refusing more keystrokes silently.
+                Text {
+                    visible: poiNameField.length >= 15
+                    text: qsTr("Names can be up to 15 characters.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                }
+
                 Row {
                     width: parent.width
                     spacing: Theme.spacingSmall
@@ -272,8 +284,11 @@ PageFlickable {
                             const v = parseFloat(text)
                             if (!isNaN(v) && v >= -90 && v <= 90) {
                                 root.poiLat = v
+                                root.coordError = ""
                                 addMap.resetView()
                             } else {
+                                // #10: don't silently revert - say why.
+                                root.coordError = qsTr("Latitude must be a number between -90 and 90.")
                                 text = root.poiLat.toFixed(6)
                             }
                         }
@@ -286,12 +301,25 @@ PageFlickable {
                             const v = parseFloat(text)
                             if (!isNaN(v) && v >= -180 && v <= 180) {
                                 root.poiLon = v
+                                root.coordError = ""
                                 addMap.resetView()
                             } else {
+                                // #10: don't silently revert - say why.
+                                root.coordError = qsTr("Longitude must be a number between -180 and 180.")
                                 text = root.poiLon.toFixed(6)
                             }
                         }
                     }
+                }
+
+                // #10 (André, 2026-09-02): validation feedback instead of a silent revert.
+                Text {
+                    width: parent.width
+                    visible: root.coordError.length > 0
+                    wrapMode: Text.WordWrap
+                    text: root.coordError
+                    color: Theme.error
+                    font.pixelSize: Theme.fontSizeCaption
                 }
 
                 Item {

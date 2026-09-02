@@ -30,6 +30,10 @@ Rectangle {
     property bool canRetry: false
     signal retry()
 
+    // #11 (André, 2026-09-02): keep the friendly one-liner up front, but let a curious user
+    // expand the raw detail in place (as well as it going to the log). Never shown until asked.
+    property bool _showDetail: false
+
     visible: detail.length > 0
     width: parent ? parent.width : 0
     height: visible ? column.implicitHeight + Theme.spacingMedium * 2 : 0
@@ -39,6 +43,7 @@ Rectangle {
     border.color: Theme.error
 
     onDetailChanged: {
+        _showDetail = false;   // collapse the detail view whenever the error changes
         if (detail.length > 0)
             LogService.append((context.length > 0 ? context + ": " : "") + detail)
     }
@@ -65,12 +70,39 @@ Rectangle {
                 onClicked: root.retry()
             }
             RoundedButton {
+                text: root._showDetail ? qsTr("Hide details") : qsTr("Details")
+                onClicked: root._showDetail = !root._showDetail
+            }
+            RoundedButton {
                 text: qsTr("Send logs")
                 onClicked: LogService.reportProblem(root.context)
             }
             RoundedButton {
                 text: qsTr("Open log folder")
                 onClicked: LogService.revealLog()
+            }
+        }
+
+        // The raw detail, on demand only. Selectable so it can be copied into a bug report.
+        Rectangle {
+            visible: root._showDetail && root.detail.length > 0
+            width: parent.width
+            height: visible ? detailText.implicitHeight + Theme.spacingSmall * 2 : 0
+            radius: Theme.radiusSmall
+            color: Theme.cardNested
+            border.width: 1
+            border.color: Theme.border
+            TextEdit {
+                id: detailText
+                x: Theme.spacingSmall; y: Theme.spacingSmall
+                width: parent.width - Theme.spacingSmall * 2
+                text: root.detail
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeCaption
+                font.family: "monospace"
             }
         }
     }

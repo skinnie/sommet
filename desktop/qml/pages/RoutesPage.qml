@@ -204,11 +204,6 @@ PageFlickable {
                     spacing: Theme.spacingSmall
 
                     RoundedButton {
-                        visible: !HomeViewModel.isGarmin
-                        text: qsTr("Rehearse (no write)")
-                        onClicked: RouteService.uploadPendingRoute(false)
-                    }
-                    RoundedButton {
                         text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Upload to watch")
                         enabled: !HomeViewModel.isGarmin || GarminService.hasSdCard
                         onClicked: {

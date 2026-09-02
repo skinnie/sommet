@@ -273,7 +273,10 @@ Item {
                         Text { text: qsTr("Coach"); color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge }
                         Text {
                             text: CoachService.chatBackend === "claude"
-                                ? qsTr("Claude API") : qsTr("Reads the beacon on the left")
+                                ? (CoachService.anthropicKeySet
+                                    ? qsTr("AI chat on")
+                                    : qsTr("Add your API key in Settings → Coach to turn on AI chat"))
+                                : qsTr("Pre-written answers — turn on AI chat in Settings → Coach")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                     }

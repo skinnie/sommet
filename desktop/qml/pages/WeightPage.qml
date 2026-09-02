@@ -57,24 +57,36 @@ Item {
                 id: manualRow
                 width: parent.width
                 visible: false
-                Row {
+                Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    RoundedTextField { id: manualDate; width: 120; placeholderText: qsTr("YYYY-MM-DD") }
-                    RoundedTextField { id: manualKg; width: 90; placeholderText: qsTr("kg")
-                        inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                    RoundedTextField { id: manualFat; width: 90; placeholderText: qsTr("fat %")
-                        inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                    RoundedButton {
-                        text: qsTr("Save")
-                        enabled: manualDate.text.length === 10 && parseFloat(manualKg.text) > 0
-                        onClicked: {
-                            WeightService.addManualWeight(manualDate.text,
-                                parseFloat(manualKg.text), parseFloat(manualFat.text) || 0)
-                            manualRow.visible = false
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        RoundedTextField { id: manualDate; width: 120; placeholderText: qsTr("YYYY-MM-DD") }
+                        RoundedTextField { id: manualKg; width: 90; placeholderText: qsTr("kg")
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                        RoundedTextField { id: manualFat; width: 90; placeholderText: qsTr("fat %")
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                        RoundedButton {
+                            text: qsTr("Save")
+                            enabled: manualDate.text.length === 10 && parseFloat(manualKg.text) > 0
+                            onClicked: {
+                                WeightService.addManualWeight(manualDate.text,
+                                    parseFloat(manualKg.text), parseFloat(manualFat.text) || 0)
+                                manualRow.visible = false
+                            }
                         }
+                        RoundedButton { text: qsTr("Cancel"); onClicked: manualRow.visible = false }
                     }
-                    RoundedButton { text: qsTr("Cancel"); onClicked: manualRow.visible = false }
+                    // #10 (André, 2026-09-02): explain why Save is greyed rather than leaving it
+                    // silently disabled.
+                    Text {
+                        visible: manualDate.text.length > 0 && manualDate.text.length !== 10
+                        text: qsTr("Enter the date as YYYY-MM-DD (for example 2026-09-02).")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                    }
                 }
             }
 
@@ -82,13 +94,22 @@ Item {
             Card {
                 width: parent.width
                 visible: !WeightService.connected
-                Text {
+                // #9 (André, 2026-09-02): one-tap route to set up the shared connection.
+                Column {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    text: qsTr("Connect intervals.icu or Garmin Connect in Settings, or add a " +
-                               "weigh-in manually above. All sources are merged, keeping the " +
-                               "reading with the most detail for each day.")
+                    spacing: Theme.spacingSmall
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        color: Theme.mutedText
+                        text: qsTr("Connect intervals.icu or Garmin Connect, or add a " +
+                                   "weigh-in manually above. All sources are merged, keeping the " +
+                                   "reading with the most detail for each day.")
+                    }
+                    RoundedButton {
+                        text: qsTr("Open Settings → Connections")
+                        onClicked: NavBus.navigate("settings")
+                    }
                 }
             }
 

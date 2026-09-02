@@ -219,12 +219,22 @@ Item {
             // (André, 2026-08-18). This page just shows and edits your gear now.
         }
 
-        Text {
+        // #9 (André, 2026-09-02): one intervals.icu connection powers gear; give a one-tap way
+        // to go set it up instead of just saying "in Settings".
+        ColumnLayout {
             Layout.fillWidth: true
             visible: !GearService.connected
-            text: qsTr("Connect Intervals.icu in Settings to import your gear.")
-            color: Theme.warning
-            wrapMode: Text.WordWrap
+            spacing: Theme.spacingSmall / 2
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("Connect Intervals.icu to see and import your gear.")
+                color: Theme.warning
+                wrapMode: Text.WordWrap
+            }
+            RoundedButton {
+                text: qsTr("Open Settings → Connections")
+                onClicked: NavBus.navigate("settings")
+            }
         }
         Text {
             Layout.fillWidth: true

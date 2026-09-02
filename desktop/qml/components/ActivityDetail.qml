@@ -56,6 +56,29 @@ Item {
                                     qsTr("Export"), qsTr("Upload"), qsTr("Notes")]
     property int currentTab: 0
 
+    // #2 (André, 2026-09-02): data-aware tabs - never show a tab that would only display
+    // "not built yet". Each entry keeps the tab's ORIGINAL index so the content sections
+    // below (visible: currentTab === N) keep working unchanged.
+    //   Overview(0), Export(3): always real.
+    //   Charts(1): only when this move actually logged Suunto App outputs.
+    //   Upload(4): real intervals.icu upload.
+    //   Laps(2), Notes(5): no data pipeline yet -> hidden entirely.
+    readonly property var availableTabs: {
+        var out = [{ label: _tabs[0], idx: 0 }];
+        if (_ruleSeries.length > 0) out.push({ label: _tabs[1], idx: 1 });
+        out.push({ label: _tabs[3], idx: 3 });
+        out.push({ label: _tabs[4], idx: 4 });
+        return out;
+    }
+    // If the current tab isn't offered for this activity (e.g. it had Charts, the next one
+    // doesn't), fall back to Overview so no blank panel is shown.
+    onAvailableTabsChanged: {
+        var ok = false;
+        for (var i = 0; i < availableTabs.length; i++)
+            if (availableTabs[i].idx === currentTab) { ok = true; break; }
+        if (!ok) currentTab = 0;
+    }
+
     // Logged Suunto App outputs (ruleoutput1..5) for this move, as an ordered list of
     // {label, times, values} - the data the Charts tab graphs. Empty when the move was
     // recorded without any app logging (LogRule=1); see tools/app_logging.py.
@@ -163,12 +186,12 @@ Item {
             spacing: Theme.spacingMedium
 
             Repeater {
-                model: root._tabs
+                model: root.availableTabs
                 delegate: Text {
-                    text: modelData
-                    font.bold: index === root.currentTab
-                    color: index === root.currentTab ? Theme.primary : Theme.mutedText
-                    TapHandler { onTapped: root.currentTab = index }
+                    text: modelData.label
+                    font.bold: modelData.idx === root.currentTab
+                    color: modelData.idx === root.currentTab ? Theme.primary : Theme.mutedText
+                    TapHandler { onTapped: root.currentTab = modelData.idx }
                 }
             }
         }
@@ -424,30 +447,9 @@ Item {
                 }
             }
 
-            // --- Everything else: honest, not faked ---
-            Text {
-                width: parent.width
-                visible: root.currentTab !== 0 && root.currentTab !== 3 && root.currentTab !== 4
-                         && !(root.currentTab === 1 && root._ruleSeries.length > 0)
-                wrapMode: Text.WordWrap
-                color: Theme.mutedText
-                text: {
-                    switch (root.currentTab) {
-                    case 1: return qsTr("Charts - track-data charts (elevation/pace) still " +
-                                          "need a charting-library decision. Logged Suunto " +
-                                          "App outputs, when a mode has app logging on, appear " +
-                                          "here as their own graph.");
-                    case 2: return qsTr("Laps - not built yet. exercise_log.py doesn't " +
-                                          "expose lap boundaries in its parsed output yet.");
-                    case 4: return qsTr("Upload - not built yet. Needs real auth against " +
-                                          "Intervals.icu/Runalyze/Strava, none of which are " +
-                                          "connected yet (see the Connections card on Home).");
-                    case 5: return qsTr("Notes - not built yet. Needs local persistence " +
-                                          "that doesn't exist anywhere in this app yet.");
-                    default: return "";
-                    }
-                }
-            }
+            // #2 (André, 2026-09-02): the old "not built yet" placeholder block was removed.
+            // Charts/Laps/Notes tabs are simply not shown unless they have real data
+            // (see availableTabs), so there is no fallback text to render here any more.
         }
     }
 }

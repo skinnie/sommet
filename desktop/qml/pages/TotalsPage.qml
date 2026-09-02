@@ -299,14 +299,6 @@ Item {
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeCaption
             }
-
-            Text {
-                visible: root.yearActivities.length > 0
-                width: parent.width
-                text: qsTr("More to come!")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeBody
-            }
         }
     }
 }

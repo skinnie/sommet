@@ -117,8 +117,10 @@ Rectangle {
             NavItem {
                 width: parent.width
                 // Kailash excluded (a travel/adventure watch with no route-following) - gated on
-                // the CAPABILITY, not the model.
-                visible: DeviceCapabilities.supportsRoutes
+                // the CAPABILITY, not the model. Also needs a watch connected (#1a, 2026-09-02):
+                // supportsRoutes is true with no watch (model is empty, not Kailash), so without
+                // anyDevice this would show a watch-only page on an empty app.
+                visible: HomeViewModel.anyDevice && DeviceCapabilities.supportsRoutes
                 glyph: Icons.routes
                 label: qsTr("Routes")
                 selected: root.currentPage === "routes"
@@ -126,7 +128,7 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                visible: DeviceCapabilities.supportsPOIs
+                visible: HomeViewModel.anyDevice && DeviceCapabilities.supportsPOIs
                 glyph: Icons.pois
                 label: qsTr("POIs")
                 selected: root.currentPage === "pois"
@@ -217,12 +219,12 @@ Rectangle {
                 selected: root.currentPage === "appZone"
                 onClicked: root.pageSelected("appZone")
             }
-            // Sync two watches ("freefly"): copy settings between two watches of a compatible model.
+            // Copy one watch's setup onto another of the same model (#3 redesign, 2026-09-02).
             NavItem {
                 width: parent.width
                 visible: HomeViewModel.anyDevice
                 glyph: Icons.sync
-                label: qsTr("Sync watches")
+                label: qsTr("Copy to watch")
                 selected: root.currentPage === "sync"
                 onClicked: root.pageSelected("sync")
             }

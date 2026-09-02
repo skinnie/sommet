@@ -38,10 +38,19 @@ Item {
                 width: parent.width
                 variant: "flat"
                 visible: HealthService.needsLogin
-                Text {
-                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
-                    text: qsTr("Sign in to Garmin Connect in Settings → Connections to see your " +
-                               "resting heart rate, steps, HRV and body battery here.")
+                // #9 (André, 2026-09-02): one-tap route to the shared Garmin connection.
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                        text: qsTr("Connect Garmin Connect to see your resting heart rate, steps, " +
+                                   "HRV and body battery here.")
+                    }
+                    RoundedButton {
+                        text: qsTr("Open Settings → Connections")
+                        onClicked: NavBus.navigate("settings")
+                    }
                 }
             }
 
