@@ -60,12 +60,20 @@ EPOCH_2000 = datetime.date(2000, 1, 1)
 MAX_WORKOUTS_PER_APP_GUESS = 2
 
 
+# Hardware-verified 2026-09-02 on André's Ambit3 Sport (Finch): the firmware's actual
+# SUUNTO_DAYS_AFTER_1_1_2000 for a given calendar date is ONE LESS than (date - 2000-01-01).days.
+# A date-gated plan whose entry was today showed "In 1 d" with the watch clock confirmed correct
+# (set over USB the same minute), i.e. the firmware reported today as our_value - 1. The corpus's
+# 0-based-on-2000-01-01 assumption (from weekday math alone, never date-verified) was off by one:
+# the built-in counts days STRICTLY AFTER 2000-01-01, so 2000-01-02 = 0, and today = ours - 1.
+FIRMWARE_DAYS_OFFSET = 1
+
+
 def date_to_days2000(iso_date):
-    """ISO date -> SUUNTO_DAYS_AFTER_1_1_2000 value. 0-based on 2000-01-01 (a Saturday) -
-    the base the real corpus apps' weekday math (`Suunto.mod(days, 7) == 0 -> "SAT"`)
-    confirms the firmware uses."""
+    """ISO date -> the watch's real SUUNTO_DAYS_AFTER_1_1_2000 value for that date (hardware-
+    verified, see FIRMWARE_DAYS_OFFSET). The built-in counts days strictly after 2000-01-01."""
     d = datetime.date.fromisoformat(iso_date)
-    return (d - EPOCH_2000).days
+    return (d - EPOCH_2000).days - FIRMWARE_DAYS_OFFSET
 
 
 def _indent(source, prefix="\t"):
