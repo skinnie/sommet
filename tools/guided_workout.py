@@ -53,7 +53,8 @@ import custom_modes as cm
 import custom_modes_write as cmw
 import workout_install as WI
 from ambit_pcap import FlashImage
-from write_nav import (CMD_DEVICE_INFO, Link, read_flash, read_memory_map, send_plan)
+from write_nav import (CMD_DEVICE_INFO, Link, is_ambit12, read_flash, read_memory_map,
+                       send_plan)
 
 GUIDANCE_TEMPLATE = 295   # 0x127, PID_RUNNER_GPS_TEMPLATE_GUIDANCE
 GUIDANCE_DISP_TYPE = 15   # 0x0f
@@ -241,6 +242,18 @@ def main():
     # the WRITES (send_plan, below) are gated on --write, so a no --write run is a real dry-run.
     link = Link(dry_run=False)
     link.open()
+    # Poka-yoke (2026-09-02): guided workouts are an Ambit3-only feature. Ambit1/2 have no
+    # native WORKOUT menu - their "workouts" are ordinary Apps the user runs - so this tool
+    # would build a guidance display those watches don't understand. Refuse early with a
+    # pointer to the right path rather than writing something that can't work.
+    pid = getattr(link, "opened_product_id", None)
+    if is_ambit12(pid):
+        from write_nav import PRODUCT_IDS
+        raise SystemExit(
+            f"{PRODUCT_IDS.get(pid, 'this watch')} is an Ambit1/2-generation watch, which has "
+            "no native WORKOUT menu. Guided workouts are Ambit3-only. On Ambit1/2 a workout is "
+            "an ordinary App - install it as an app into a sport mode instead (the legacy path), "
+            "not through guided_workout.py.")
     link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
     mm = read_memory_map(link)
     cm_base, cm_size = mm["CustomModes"]

@@ -462,6 +462,21 @@ def main():
     link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
     check_memory_map(read_memory_map(link))
 
+    # Poka-yoke (2026-09-02): this tool installs DISPLAY-FIELD apps. It also has an
+    # --as-workout mode that flags the Apps entry as a workout (byte0=1) - but on Ambit3 that
+    # is NOT how a workout reaches the [Next]-3s -> WORKOUT menu: a whole session proved such
+    # an entry installs cleanly yet never lists. The working path is guided_workout.py (adds
+    # the guidance display the firmware actually scans). Refuse the trap combination.
+    if args.write and args.as_workout:
+        pid = getattr(link, "opened_product_id", None)
+        from write_nav import is_ambit3
+        if is_ambit3(pid):
+            sys.exit(
+                "--as-workout on an Ambit3 does not produce a WORKOUT-menu entry (hardware-"
+                "confirmed: it installs but never lists). Use guided_workout.py instead - it "
+                "adds the guidance display the firmware scans. See ambit_finch_movescount_"
+                "workout_capture memory / docs Finding 39.")
+
     if args.restore:
         with open(args.restore, "rb") as f:
             new_custom_modes = f.read()

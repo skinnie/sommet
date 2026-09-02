@@ -57,6 +57,14 @@ PRODUCT_IDS = {
     # alongside Bluebird on the same evidence (shared device_driver_ambit driver, device_support.c).
     0x0010: "Ambit (Bluebird)", 0x0019: "Ambit2 (Duck)",
     0x001A: "Ambit2 S (Colibri)", 0x001D: "Ambit2 R (Greentit)",
+    # Generation groups, used by the workout-install poka-yoke (2026-09-02): the two watch
+    # families take DIFFERENT paths to on-watch guided training, and mixing them silently
+    # produces a workout that installs cleanly yet never appears. Ambit1/2 have no native
+    # WORKOUT menu at all - a "workout" there is an ordinary App the user runs (legacy path).
+    # Ambit3 (Peak/Sport/Run/Vertical) DO have the [Next]-3s -> WORKOUT menu, and a guided
+    # workout MUST go in via guided_workout.py (Apps entry byte0=1 + guidance display), NOT
+    # via workout_install.py's display-field app mechanism - the latter installs fine but the
+    # workout never lists (hardware-confirmed the hard way, a whole session of failed writes).
     # Real, 2026-08-22, live on André's own Ambit1: unlike the Ambit3/Kailash family (BSL
     # keeps the app's own product_id, only the 0x0000 model STRING flips to "BSL"),
     # Bluebird's bootloader re-enumerates under its OWN distinct product_id - real lsusb
@@ -71,6 +79,22 @@ PRODUCT_IDS = {
     # is deliberate, not an oversight.
     0x0011: "Ambit Bootloader (AmbitBSL)",
 }
+
+
+AMBIT12_PRODUCT_IDS = frozenset({0x0010, 0x0019, 0x001A, 0x001D})  # Ambit(1) + Ambit2 family
+AMBIT3_PRODUCT_IDS = frozenset({0x001B, 0x001C, 0x001E, 0x002C})   # Peak/Sport/Run/Vertical
+
+
+def is_ambit12(pid):
+    """True for an Ambit1/Ambit2-generation watch (no native WORKOUT menu - guided training is
+    an ordinary App the user runs). See PRODUCT_IDS' generation-groups note."""
+    return pid in AMBIT12_PRODUCT_IDS
+
+
+def is_ambit3(pid):
+    """True for an Ambit3-generation watch (Peak/Sport/Run/Vertical) - the family with the
+    [Next]-3s -> WORKOUT menu that guided_workout.py targets."""
+    return pid in AMBIT3_PRODUCT_IDS
 
 
 def codename_for_pid(pid):
