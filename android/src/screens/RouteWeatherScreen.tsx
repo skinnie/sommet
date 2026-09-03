@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Alert,
 } from 'react-native';
@@ -41,6 +41,10 @@ export default function RouteWeatherScreen() {
 
   const [start, setStart] = useState('09:00');
   const [pace, setPace] = useState('20');
+  // Multi-day (à la Komoot): split the route into daily stages (André, 2026-09-03).
+  const [numDays, setNumDays] = useState(1);
+  const [splitMode, setSplitMode] = useState<0 | 1>(0); // 0 even distance, 1 even effort (dist+climb)
+  const [activeDay, setActiveDay] = useState(-1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [result, setResult] = useState<WeatherRoutePlan | undefined>();
@@ -113,6 +117,55 @@ export default function RouteWeatherScreen() {
     }
   }
 
+  // Daily stages: split by even distance, or even effort (distance + 100 m-ascent-per-km).
+  const stages = useMemo(() => {
+    if (numDays < 2 || route.length < 2) return [] as Array<{ index: number; startIdx: number; endIdx: number; distKm: number; ascentM: number; hours: number }>;
+    const hav = (a: RoutePoint, b: RoutePoint) => {
+      const R = 6371000, d = Math.PI / 180;
+      const dLa = (b.lat - a.lat) * d, dLo = (b.lon - a.lon) * d;
+      const x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * d) * Math.cos(b.lat * d) * Math.sin(dLo / 2) ** 2;
+      return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+    };
+    const cum = [0], ascCum = [0]; let asc = 0;
+    for (let i = 1; i < route.length; i++) {
+      cum[i] = cum[i - 1] + hav(route[i - 1], route[i]);
+      const e0 = route[i - 1].ele, e1 = route[i].ele;
+      if (e0 != null && e1 != null && e1 > e0) asc += e1 - e0;
+      ascCum[i] = asc;
+    }
+    const key = splitMode === 0 ? cum : cum.map((dv, i) => dv + 100 * ascCum[i]);
+    const totalKey = key[key.length - 1] || 1;
+    const bounds = [0];
+    for (let k = 1; k < numDays; k++) {
+      const target = (totalKey * k) / numDays;
+      let idx = route.length - 1;
+      for (let i = 1; i < key.length; i++) { if (key[i] >= target) { idx = i; break; } }
+      bounds.push(idx);
+    }
+    bounds.push(route.length - 1);
+    const paceNum = parseFloat(pace) || 20;
+    return Array.from({ length: numDays }, (_, dI) => {
+      const a = bounds[dI], b = bounds[dI + 1];
+      const distM = cum[b] - cum[a];
+      return { index: dI, startIdx: a, endIdx: b, distKm: distM / 1000, ascentM: Math.round(ascCum[b] - ascCum[a]), hours: distM / 1000 / paceNum };
+    });
+  }, [route, numDays, splitMode, pace]);
+
+  async function forecastStage(st: { index: number; startIdx: number; endIdx: number }) {
+    setLoading(true); setError(undefined); setResult(undefined); setActiveDay(st.index);
+    try {
+      const sub = route.slice(st.startIdx, st.endIdx + 1);
+      const base = new Date(); base.setDate(base.getDate() + st.index);
+      const plan = await planWeatherRoute(sub, {
+        start, pace_kmh: parseFloat(pace) || 20, tzOffsetH,
+        date: { y: base.getFullYear(), mo: base.getMonth() + 1, d: base.getDate() },
+      });
+      if (!plan.ok) setError(plan.error || 'Forecast failed'); else setResult(plan);
+    } catch (e: any) {
+      setError(e?.message || 'Forecast failed (no network?)');
+    } finally { setLoading(false); }
+  }
+
   const verdictColor = (state?: string) =>
     state === 'critical' ? theme.warning : state === 'warn' ? theme.warning : theme.primary;
 
@@ -142,6 +195,37 @@ export default function RouteWeatherScreen() {
           onPress={handleImportGpx} loading={importing} style={{ marginTop: v3Spacing.small }} />
         {error && <Text style={[s.muted, { color: theme.warning, marginTop: 8 }]}>{error}</Text>}
       </Card>
+
+      {/* Multi-day planner */}
+      {route.length >= 2 && (
+        <Card style={{ marginTop: v3Spacing.medium }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={s.cardTitle}>Multi-day</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => { setNumDays(Math.max(1, numDays - 1)); setActiveDay(-1); }} style={s.dayStep}><Text style={s.dayStepTxt}>−</Text></TouchableOpacity>
+            <Text style={[s.cardTitle, { marginHorizontal: 10 }]}>{numDays}</Text>
+            <TouchableOpacity onPress={() => { setNumDays(Math.min(14, numDays + 1)); setActiveDay(-1); }} style={s.dayStep}><Text style={s.dayStepTxt}>+</Text></TouchableOpacity>
+          </View>
+          {numDays > 1 && (
+            <>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <Button label="Even distance" variant={splitMode === 0 ? 'filled' : 'outline'} onPress={() => { setSplitMode(0); setActiveDay(-1); }} style={{ flex: 1 }} />
+                <Button label="Even effort" variant={splitMode === 1 ? 'filled' : 'outline'} onPress={() => { setSplitMode(1); setActiveDay(-1); }} style={{ flex: 1 }} />
+              </View>
+              {stages.map(st => (
+                <TouchableOpacity key={st.index} onPress={() => forecastStage(st)}
+                  style={[s.dayRow, { backgroundColor: activeDay === st.index ? theme.primary : theme.surface, borderColor: theme.border }]}>
+                  <Text style={[s.dayNum, { color: activeDay === st.index ? '#fff' : theme.text }]}>Day {st.index + 1}</Text>
+                  <Text style={[s.muted, { color: activeDay === st.index ? '#fff' : theme.mutedText, marginTop: 0 }]}>
+                    {st.distKm.toFixed(1)} km · ↑{st.ascentM} m · ~{st.hours.toFixed(1)} h
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <Text style={[s.muted, { marginTop: 6 }]}>Tap a day to forecast it (Day 2 = tomorrow, and so on).</Text>
+            </>
+          )}
+        </Card>
+      )}
 
       {result && result.ok && (
         <>
@@ -371,6 +455,10 @@ const styles = (t: V3Colors) => StyleSheet.create({
   verdict: { marginTop: v3Spacing.medium, padding: v3Spacing.medium, borderRadius: v3Radius.card, borderWidth: 1.5, backgroundColor: t.card },
   verdictHead: { fontSize: v3Type.bodyLarge, fontWeight: '700' as const },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: v3Spacing.medium },
+  dayStep: { width: 34, height: 34, borderRadius: v3Radius.small, borderWidth: 1, borderColor: t.border, alignItems: 'center', justifyContent: 'center' },
+  dayStepTxt: { fontSize: 18, color: t.text, fontWeight: '700' as const },
+  dayRow: { borderWidth: 1, borderRadius: v3Radius.small, paddingVertical: 8, paddingHorizontal: 10, marginTop: 6 },
+  dayNum: { fontSize: v3Type.caption, fontWeight: '700' as const },
   mapWrap: { height: 260, marginTop: 8, borderRadius: v3Radius.small, overflow: 'hidden', borderWidth: 1, borderColor: t.border },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
