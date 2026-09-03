@@ -8,7 +8,7 @@ Status legend: 🔲 open · 🚧 in progress · ✅ done
 
 ---
 
-## 1. Feature defaults + a graceful no-watch state 🚧 (desktop done · Android pending)
+## 1. Feature defaults + a graceful no-watch state ✅ (desktop + Android done)
 Clarified by André (2026-09-02) into two SEPARATE things:
 
 ### 1a. Default "no watch connected" state — real data, not fake
@@ -32,7 +32,7 @@ watch for: Smart Sensor (HR belt), Intervals (workout builder), App Zone, Coach.
 - **Keep OFF by default:** T6 / X6HR and GPS Track Pod (niche, no test hardware).
 - Existing users' explicit toggle choices are respected; this changes the default only.
 
-## 2. Activities detail — remove/repair dead tabs 🚧 (desktop done · Android pending)
+## 2. Activities detail — remove/repair dead tabs ✅ (desktop done · Android N/A — detail is a single scroll, no tabs/placeholders)
 Approach (André approved data-aware, 2026-09-02): **never show developer text to the user.**
 - Tabs are **data-aware per activity**: a tab appears only when THAT activity has that data
   (e.g. Laps tab only if it has laps; Charts only if it has HR/elevation/etc. streams).
@@ -44,7 +44,7 @@ Approach (André approved data-aware, 2026-09-02): **never show developer text t
 - **Follow-up issue (deferred):** actually *build* Charts / Laps / Notes. This pass only
   gates/hides them cleanly.
 
-## 3. Sync page — redesign to the simple flow 🚧 (desktop done · Android pending)
+## 3. Sync page — redesign to the simple flow ✅ (desktop done · Android N/A — no watch-to-watch Sync screen on Android)
 Replace the snapshot/freefly/mirror/merge model with André's flow:
 1. Plug in the **main watch** → app **backs it up silently**.
 2. Plug in **watch B**.
@@ -54,30 +54,30 @@ Replace the snapshot/freefly/mirror/merge model with André's flow:
 - **Remove the greyed placeholder chips** (Routes / Sport modes are shown but unfinished) until
   their write paths exist — don't show a button that does nothing.
 
-## 4. Routes — remove "Rehearse (no write)" 🚧 (desktop done · Android pending)
+## 4. Routes — remove "Rehearse (no write)" ✅ (desktop done · Android N/A — already single confirmed upload, no rehearse)
 Delete the separate dry-run button. Fold its validation into the normal **"Send to watch"**:
 validate first, show the preview, then write. One button.
 
-## 5. Sport Modes — make all edits instant (debounced) 🚧 (desktop done · Android pending)
+## 5. Sport Modes — make all edits instant ✅ (desktop debounced · Android N/A — already instant per-field writes)
 Remove the visible "unsaved changes" / "Save to watch" model. Autolap/HR/pods already write
 immediately. Display/field edits rewrite the whole ~7.5 KB region, so (André, 2026-09-02):
 **auto-save debounced** — write once ~1s after the user stops editing, coalescing rapid edits
 into a single write. No Save button; show a small "Saving…/Saved" indicator instead.
 
-## 6. Training Program — single "Sync" button 🚧 (desktop done · Android pending)
+## 6. Training Program — single "Sync" button ✅ (desktop + Android done — WorkoutCalendarScreen)
 Collapse "Preview sync" + "Sync to watch" into one **"Sync"** action (drop the preview step and
 the rotation-diff internals).
 
-## 7. Totals — reword "More to come!" 🚧 (desktop done · Android pending)
+## 7. Totals — remove "More to come!" ✅ (desktop + Android done)
 It means more activity types will be added, not that the screen is unfinished. Reword to
 **"More activity types coming"** (or similar) so it doesn't read as broken.
 
-## 8. Coach — fix the API-key wording 🚧 (desktop done · Android pending)
+## 8. Coach — fix the API-key wording ✅ (desktop done · Android N/A — wording already correct)
 Make clear the chat needs an **API key from console.anthropic.com**, which is **separate from a
 claude.ai subscription login** (that login does not work here) and bills separately. Reword the
 Settings copy and the Coach empty state accordingly.
 
-## 9. Connections — mutualize per service 🚧 (desktop done: data layer already shared via ConnectionsService; added one-tap 'Open Settings → Connections' banners on Gear/Weight/Health · Android pending)
+## 9. Connections — mutualize per service ✅ (desktop: banners on Gear/Weight/Health · Android: 'Open Settings → Connections' buttons on Health/Weight/Coach; Gear empty-state already points to Settings)
 Consolidate so the user signs in **once per service**, and every dependent screen just works:
 - **One Garmin connection** → powers Health, Weight (body composition), Garmin activities.
 - **One intervals.icu connection** → powers Gear, wellness/Health, planned workouts (Calendar /
@@ -85,7 +85,7 @@ Consolidate so the user signs in **once per service**, and every dependent scree
 - Each account-gated screen shows a short **"Connect X in Settings"** banner instead of looking
   broken/empty.
 
-## 10. Silent no-ops — show validation messages 🚧 (desktop: POI coords+name, Weight date done · Training-Program import date + Android pending)
+## 10. Silent no-ops — show validation messages ✅ (desktop: POI coords+name, Weight date · Android: Weight date now alerts; POI already validated · follow-up: Training-Program import date)
 Replace silent reverts with a short message:
 - Invalid coordinates (POI add) → "Coordinates aren't valid."
 - POI name over limit → "Name can be up to 15 characters."

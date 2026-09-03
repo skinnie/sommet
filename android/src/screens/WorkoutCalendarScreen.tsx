@@ -304,10 +304,9 @@ export default function WorkoutCalendarScreen() {
           </View>
         )}
 
+        {/* #6 (André, 2026-09-02): single Sync button - dropped the separate Preview step for
+            desktop parity. */}
         <Row>
-          <TouchableOpacity style={[s.btn, { flex: 1 }, syncBusy && { opacity: 0.5 }]} disabled={syncBusy} onPress={() => doSync(false)}>
-            <Text style={s.btnText}>{t.workoutCalendarPreviewBtn}</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, syncBusy && { opacity: 0.5 }]} disabled={syncBusy} onPress={() => doSync(true)}>
             <Text style={s.primaryBtnText}>{t.workoutCalendarSyncBtn}</Text>
           </TouchableOpacity>

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
 import { fetchWellness, WellnessDay } from '../services/WellnessService';
@@ -35,6 +36,7 @@ const METRICS: Metric[] = [
 
 export default function HealthScreen() {
   const t = useV3Theme();
+  const navigation = useNavigation<any>();
   const [days, setDays] = useState<WellnessDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -86,9 +88,17 @@ export default function HealthScreen() {
       {!loading && present.length === 0 && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No health data yet. Connect intervals.icu in Settings — resting HR, HRV, sleep and
+            No health data yet. Connect intervals.icu — resting HR, HRV, sleep and
             steps sync from whatever device feeds it.
           </Text>
+          {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Settings')}
+            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
+                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
+                     borderRadius: v3Radius.card, borderWidth: 1, borderColor: t.border }}>
+            <Text style={{ color: t.primary, fontSize: v3Type.body }}>Open Settings → Connections</Text>
+          </TouchableOpacity>
         </View>
       )}
 

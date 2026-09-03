@@ -15,6 +15,11 @@ const storageKey = (f: ExpFeature) => `ambitapp:experimental:${f}`;
 
 type FeatureFlags = Record<ExpFeature, boolean>;
 const ALL_OFF: FeatureFlags = { intervals: false, smartSensor: false, workoutCalendar: false };
+// UX fix #1 (André, 2026-09-02): default these ON so owners find the features they bought the
+// watch for (structured workouts / App Zone via `intervals`, the HR belt via `smartSensor`, the
+// workout calendar). Desktop parity. A user who explicitly turned one OFF (stored '0') is still
+// respected below. (Coach is already always-on on Android; there are no T6/GPS-Pod flags here.)
+const DEFAULTS: FeatureFlags = { intervals: true, smartSensor: true, workoutCalendar: true };
 
 interface ExperimentalContextValue {
   features: FeatureFlags;
@@ -29,14 +34,17 @@ const ExperimentalContext = createContext<ExperimentalContextValue>({
 });
 
 export function ExperimentalProvider({ children }: { children: React.ReactNode }) {
-  const [features, setFeatures] = useState<FeatureFlags>(ALL_OFF);
+  const [features, setFeatures] = useState<FeatureFlags>(DEFAULTS);
 
   useEffect(() => {
     (async () => {
-      const loaded: FeatureFlags = { ...ALL_OFF };
+      const loaded: FeatureFlags = { ...DEFAULTS };
       for (const f of EXP_FEATURES) {
         try {
-          if ((await AsyncStorage.getItem(storageKey(f))) === '1') loaded[f] = true;
+          // Explicit stored value wins ('1' on, '0' off); absence keeps the DEFAULTS value.
+          const v = await AsyncStorage.getItem(storageKey(f));
+          if (v === '1') loaded[f] = true;
+          else if (v === '0') loaded[f] = false;
         } catch { /* ignore */ }
       }
       // One-time migration from the old single master toggle: if it was on, enable all three.

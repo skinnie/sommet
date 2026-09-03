@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
 import {
@@ -22,6 +23,7 @@ import {
 
 export default function WeightScreen() {
   const t = useV3Theme();
+  const navigation = useNavigation<any>();
   const [series, setSeries] = useState<WeightPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -50,7 +52,16 @@ export default function WeightScreen() {
 
   async function saveManual() {
     const kg = parseFloat(kgInput.replace(',', '.'));
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput) || !(kg > 0)) return;
+    // #10 (André, 2026-09-02): tell the user why, instead of silently doing nothing.
+    // WeightScreen uses plain literals (no i18n import), so keep these literal.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      Alert.alert('Invalid date', 'Enter the date as YYYY-MM-DD (for example 2026-09-02).');
+      return;
+    }
+    if (!(kg > 0)) {
+      Alert.alert('Invalid weight', 'Enter a valid weight in kg.');
+      return;
+    }
     await addManualWeight(dateInput, kg);
     setShowAdd(false); setKgInput('');
     refresh();
@@ -75,8 +86,16 @@ export default function WeightScreen() {
       {!loading && series.length === 0 && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No weigh-ins yet. Connect intervals.icu in Settings, or add one below.
+            No weigh-ins yet. Connect intervals.icu, or add one below.
           </Text>
+          {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Settings')}
+            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
+                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
+                     borderRadius: v3Radius.card, borderWidth: 1, borderColor: t.border }}>
+            <Text style={{ color: t.primary, fontSize: v3Type.body }}>Open Settings → Connections</Text>
+          </TouchableOpacity>
         </View>
       )}
 

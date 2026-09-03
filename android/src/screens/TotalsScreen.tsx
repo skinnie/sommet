@@ -191,8 +191,6 @@ export default function TotalsScreen() {
             <Text style={styles.cardTitle}>{t.totalsEnergyTitle}</Text>
             <Text style={styles.cardDesc}>{t.totalsEnergyUnavailable}</Text>
           </Card>
-
-          <Text style={styles.moreText}>{t.totalsMore}</Text>
         </>
       )}
     </ScrollView>

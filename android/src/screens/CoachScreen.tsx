@@ -4,6 +4,7 @@ import {
   TextInput, TouchableOpacity,
 } from 'react-native';
 import Svg, { Path, Line } from 'react-native-svg';
+import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { loadCoachData, CoachData, ReadinessLight, WorkoutPick } from '../services/CoachService';
 import {
@@ -19,6 +20,7 @@ import {
 
 export default function CoachScreen() {
   const t = useV3Theme();
+  const navigation = useNavigation<any>();
   const [data, setData] = useState<CoachData>({ readiness: null, chart: [], picks: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -98,9 +100,17 @@ export default function CoachScreen() {
       {!loading && !r && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No training load yet. Connect intervals.icu in Settings — readiness is computed from
+            No training load yet. Connect intervals.icu — readiness is computed from
             the fitness and fatigue it tracks.
           </Text>
+          {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Settings')}
+            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
+                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
+                     borderRadius: v3Radius.card, borderWidth: 1, borderColor: t.border }}>
+            <Text style={{ color: t.primary, fontSize: v3Type.body }}>Open Settings → Connections</Text>
+          </TouchableOpacity>
         </View>
       )}
 
