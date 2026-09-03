@@ -3,7 +3,7 @@ import { base64ToBytes, bytesToBase64 } from './Base64';
 import { resolveRegion } from './MemoryMap';
 import { generateSource, buildCompileRequest, Workout } from './WorkoutSource';
 import { installCompiledApp, InstallState } from './AppInstall';
-import { buildTrainingItem, buildTrainingProgram, TrainingItem } from './TrainingProgramCodec';
+import { BaseDate, buildTrainingItem, buildTrainingProgram, TrainingItem } from './TrainingProgramCodec';
 
 // EXPERIMENTAL - the two Intervals mechanisms (André 2026-08-14, "ship both"):
 //  1) an interval Suunto App: build workout -> App-Zone source -> the user compiles it on
@@ -94,9 +94,12 @@ export interface PlannedMoveState {
 }
 
 /** Write a list of planned moves to the TrainingProgram region (writeRegion, no commit).
- * UNPROVEN format - the watch may not surface it; see TrainingProgramCodec.ts. */
+ * HARDWARE-CONFIRMED format (2026-09-03, Ambit3 Sport fw 2.4.17): the watch shows the native
+ * "Today 1/2" card in TIME mode -> [Next]. `baseDate` is the EARLIEST move's calendar date; each
+ * item's dayOffset counts from it. See TrainingProgramCodec.ts for the header signature the
+ * firmware validates. */
 export async function writePlannedMoves(
-  items: TrainingItem[], baseDate: number, onState: (s: PlannedMoveState) => void,
+  items: TrainingItem[], baseDate: BaseDate, onState: (s: PlannedMoveState) => void,
 ): Promise<boolean> {
   // Transport (André, 2026-08-17): over BLE the link is already open; the USB connect() would
   // pop the OTG prompt and tear down the BLE session. read/writeRegion + writeCustomModesRaw act

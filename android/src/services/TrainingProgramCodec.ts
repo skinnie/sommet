@@ -1,11 +1,9 @@
-// EXPERIMENTAL - Ambit3 TrainingProgram region (native "planned move"), port of
-// tools/training_program.py. UNLIKE everything else in this app, this format has NO real
-// capture to verify against and is decompile-only structural analysis - a test-write once read
-// back byte-exact, but whether the watch's firmware does anything with it is UNCONFIRMED (there
-// is no Training menu in the Ambit3 Peak user guide). Shipped behind the Experimental flag with
-// that caveat, for community testing. The TS build here IS proven to match the Python builder
-// byte-for-byte (TrainingProgramCodec.test.ts) - that only proves the two agree, not that the
-// watch honours it.
+// Ambit3 TrainingProgram region (the NATIVE Movescount-era "planned move" / "Today 1/2" card),
+// port of tools/training_program.py. HARDWARE-CONFIRMED 2026-09-03 on an Ambit3 Sport (fw
+// 2.4.17): with the header signature below, TIME mode -> [Next] shows the planned move exactly
+// as the Movescount-era user guide §3.39 describes. The format was decompiled from the watch's
+// MSP430X firmware (assets/Firmware/re-out/sfi2_code_recovery_notes.md, "MSP430X hunt (pass 7)").
+// The TS builder is proven byte-identical to the Python builder (TrainingProgramCodec.test.ts).
 
 export const TRAINING_PROGRAM_BASE = 0x001000;
 export const TRAINING_PROGRAM_REGION_SIZE = 3072;
@@ -55,16 +53,31 @@ export function buildTrainingItem(it: TrainingItem): Uint8Array {
   return Uint8Array.from(out);
 }
 
-/** The full TrainingProgram blob: 12-byte header [u32 baseDate][u32 0][u16 count][u16 0] then
- * the items back to back. Exact port of build_training_program. `baseDate` packing is still
- * unknown upstream (left caller-supplied, default 0). Returns the USED bytes; the caller writes
- * them via writeRegion(TRAINING_PROGRAM_BASE, blob, blob.length). */
-export function buildTrainingProgram(items: Uint8Array[], baseDate = 0): Uint8Array {
+/** Header bytes 4..7: the watch firmware's signature constant. The MSP430X watch firmware
+ * (fw 2.4.17, FUN_00059a3a via the TrainingProgram reload FUN_0004c250) requires four strictly
+ * increasing bytes with the last < 0x65 here before it will parse the region at all; anything
+ * else makes it substitute an EMPTY program, hiding the TIME-mode "Today" card. Every write
+ * before 2026-09-03 put 0 / 0xFFFFFFFF here - that was the whole reason nothing ever showed. */
+export const HEADER_SIGNATURE = [0x3c, 0x46, 0x50, 0x5a];
+
+export interface BaseDate { year: number; month: number; day: number; }
+
+/** The full TrainingProgram blob: 12-byte header [u16 year][u8 month][u8 day][SIGNATURE 3C 46 50 5A]
+ * [u16 count][u16 0xFFFF] then the items back to back. Exact port of build_training_program
+ * (tools/training_program.py). `baseDate` is the EARLIEST move's calendar date (year 2013-2099);
+ * each item's dayOffset counts from it. Returns the USED bytes; the caller writes them via
+ * writeRegion(TRAINING_PROGRAM_BASE, blob, blob.length). */
+export function buildTrainingProgram(items: Uint8Array[], baseDate: BaseDate): Uint8Array {
+  if (baseDate.year < 2013 || baseDate.year > 2099 || baseDate.month < 1 || baseDate.month > 12 || baseDate.day < 1 || baseDate.day > 31) {
+    throw new Error(`training program base date out of the firmware's range: ${JSON.stringify(baseDate)}`);
+  }
   const header: number[] = [];
-  pushU32(header, baseDate);
-  pushU32(header, 0);
-  pushU16(header, items.length);
-  pushU16(header, 0);
+  pushU16(header, baseDate.year);                // off 0
+  header.push(baseDate.month & 0xff);            // off 2
+  header.push(baseDate.day & 0xff);              // off 3
+  header.push(...HEADER_SIGNATURE);              // off 4..7 (REQUIRED)
+  pushU16(header, items.length);                 // off 8
+  pushU16(header, 0xffff);                       // off 10
   const total = new Uint8Array(header.length + items.reduce((n, i) => n + i.length, 0));
   total.set(header, 0);
   let p = header.length;

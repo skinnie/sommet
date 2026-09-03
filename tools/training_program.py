@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""EXPERIMENTAL - writes one TrainingProgram item to the Ambit3's dedicated (and, on this
-project's reference watch, otherwise empty) TrainingProgram flash region. DRY-RUN BY
+"""Writes planned moves to the Ambit3's TrainingProgram flash region - the NATIVE Movescount-era
+"Today 1/2" planned-move card (Movescount-era user guide §3.39: TIME mode -> [Next]). DRY-RUN BY
 DEFAULT: without --write nothing is emitted, only the exact bytes are logged.
 
-See training_program_andre.md for the full derivation and, importantly, its honesty about
-what isn't confirmed: unlike every other write tool in this project (sgee.py, write_nav.py's
-route/reset/restore), this format has NO real capture anywhere in this project's assets to
-verify against, and openambit/opensportsync's libambit has no read/write for it either. It
-was built from decompiled-source structural analysis alone (cross-confirmed from two
-independent code paths in TrainingProgramAreaConverter, so the 12-byte-header + 40-byte-item
-shape is solid) - --write sends a real, unverified guess to real hardware. A 2026-08-05
-test-write did land correctly (read back byte-exact), but there is no known way yet to
-confirm the watch's firmware does anything with it - no Training menu exists anywhere in the
-Ambit3 Peak's own user guide.
+HARDWARE-CONFIRMED 2026-09-03 on an Ambit3 Sport (Finch, fw 2.4.17): one item dated today ->
+TIME mode -> [Next] displays the planned move. The format is no longer a structural guess: the
+reader and its display gate were decompiled from the watch's own MSP430X firmware (Ghidra
+TI_MSP430X; assets/Firmware/re-out/sfi2_code_recovery_notes.md, "MSP430X hunt (pass 7)"). The
+one field that had defeated every earlier hardware test - header bytes 4..7 - is a fixed
+firmware SIGNATURE (HEADER_SIGNATURE below); everything else (12-byte header shape, 40-byte
+items, count, calendar base date) had been right since Finding 59. Gate, from the decompile:
+the view is shown iff settings[0x1FE] != 0 and d >= -2, d = days(baseDate)+dayOffset[first
+pending item >= today] - days(today); d == 0 -> "Today N/M", d < 0 -> "Training program
+completed!", d > 0 -> "in N days" / weekday (<= 7 d) / dd.mm. Reload is immediate after the
+region write (post-write hook) - no restart. Up to 60 items; base-date year 2013-2099.
 
     # Path (1) re-test: one planned move dated TODAY, then check the watch's reminder/day
     # screen (NOT the WORKOUT menu - that's the separate Workout-Planner/guidance path).
