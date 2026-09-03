@@ -83,6 +83,21 @@ FIRMWARE_DIR = BACKUP_DIR / "firmware"
 # by), so they live in the user's home like backups do, not inside the repo. One JSON file
 # per plan, the same schema tools/training_plan.py documents.
 PLANS_DIR = Path.home() / "AmbitAppPlans"
+
+# Planned-move fallback: Movescount ActivityID by DEFAULT sport-mode name, for when the watch
+# isn't connected to read its own CustomModes (the authoritative source - user-renamed modes
+# resolve there). Values are the ones read off real watches in this project (Ambit3 Peak
+# English defaults, Ambit3 Sport French defaults, 2026-09-02/03 CustomModes decodes).
+PLANNED_MOVE_ACTIVITY_BY_MODE_NAME = {
+    "running": 3, "course": 3, "run a route": 3, "trail running": 3,
+    "cycling": 4, "cyclisme": 4, "mountain biking": 4,
+    "pool swimming": 6, "natat. piscine": 6, "swimming": 6,
+    "openwater swim": 83, "natat. eau libre": 83, "open water swimming": 83,
+    "trekking": 11, "hiking": 11, "walking": 12,
+    "indoor training": 95, "indoor training - cardio": 95, "entraîn. salle": 95,
+    "randonnée": 96, "triathlon": 19, "transition": 1,
+    "mountaineering": 10, "meditation": 10, "yoga hr": 10, "breathing": 10,
+}
 # Ember (fasting/food/coffee/water) log store - so the desktop can LOG, not just display
 # (André, 2026-08-25: "on the desktop side we miss to add coffee, water etc"). One JSON file,
 # the same file-backed pattern as LEGACY_SPORT_MODES_FILE. Phone<->desktop convergence (one
@@ -1199,6 +1214,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_trainingprogram_install(body)
         elif self.path == "/api/trainingprogram/sync-calendar":
             self._handle_trainingprogram_sync_calendar(body)
+        elif self.path == "/api/trainingprogram/planned-moves":
+            self._handle_trainingprogram_planned_moves(body)
         elif self.path == "/api/legacy/sport-modes/write-presets":
             self._handle_legacy_sport_mode_write_presets(body)
         elif self.path == "/api/legacy/sport-modes":
@@ -5304,6 +5321,117 @@ class Handler(BaseHTTPRequestHandler):
                                    "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_trainingprogram_planned_moves(self, body):
+        """POST /api/trainingprogram/planned-moves. Body: {entries:[{date, mode, workout,
+        intensity?}], write}. Writes the plan as NATIVE planned moves - the Movescount-era
+        "Today 1/2" card the watch shows in TIME mode -> [Next] (Movescount-era user guide
+        §3.39) - into the Ambit3's TrainingProgram region via tools/training_program.py --plan.
+        Hardware-confirmed 2026-09-03 (Ambit3 Sport fw 2.4.17) once the header signature
+        3C 46 50 5A was written; the reader and display gate are decompiled from the watch's
+        MSP430X firmware (assets/Firmware/re-out, git-ignored).
+
+        This is the SAME plan the sync-calendar endpoint installs as guided workouts: that one
+        puts the guidance into each mode's WORKOUT menu; this one puts the dated card on the
+        watch face. Movescount did both in a single sync. write:false is a real dry-run (the
+        tool builds and logs the exact bytes, opens no device).
+
+        Per entry: name = the workout's name (the card shows it; 23 bytes), duration = the sum
+        of its time steps (repeat blocks expanded; rounded up to whole minutes), distance = the
+        sum of its distance steps (metres), intensity = entry.intensity or 3 (Movescount's 1-5
+        scale, moderate by default), activityId = the watch's own ActivityID for the entry's
+        sport-mode NAME (one custom_modes.py --json read, so user-named modes like "Running
+        Couch25k -W1" resolve correctly), falling back to workout.activityId, then 3 (Running).
+        The response says which activityIds were resolved from the watch and which fell back."""
+        entries = body.get("entries")
+        if not entries:
+            self._send_json(400, {"ok": False, "error": 'need a non-empty "entries" list'})
+            return
+        missing = [i for i, e in enumerate(entries)
+                   if not (e.get("date") and e.get("mode") and isinstance(e.get("workout"), dict))]
+        if missing:
+            self._send_json(400, {"ok": False,
+                                   "error": f"entries {missing} are missing date/mode/workout"})
+            return
+        if len(entries) > 60:
+            self._send_json(400, {"ok": False,
+                                   "error": "the watch stores at most 60 planned moves"})
+            return
+
+        # Mode name -> the watch's ActivityID. Best effort: a watch that isn't connected (or a
+        # dry-run on a desk with no watch) still gets a plan, from the workout/default ids.
+        mode_activity = {}
+        activity_source = "default"
+        code, out, err = run_tool("custom_modes.py", ["--json"], timeout=120)
+        info = self._parse_last_json_line(out) if code == 0 else None
+        modes = (info or {}).get("modes") if isinstance(info, dict) else None
+        if isinstance(modes, list):
+            for m in modes:
+                if m.get("name") and m.get("activityId") is not None:
+                    mode_activity[str(m["name"]).strip().lower()] = int(m["activityId"])
+            if mode_activity:
+                activity_source = "watch"
+
+        sys.path.insert(0, str(TOOLS_DIR))
+        import workout as W  # noqa: E402  (tools/workout.py: expand_steps)
+
+        items, resolution = [], []
+        for e in entries:
+            wk = e["workout"]
+            try:
+                steps = W.expand_steps(wk) if wk.get("steps") else []
+            except (KeyError, ValueError, NotImplementedError, IndexError) as exc:
+                self._send_json(400, {"ok": False,
+                                       "error": f"entry {e.get('date')}: bad workout steps ({exc})"})
+                return
+            seconds = sum(int(s["duration"]["value"]) for s in steps
+                          if s.get("duration", {}).get("durationName") == "time")
+            metres = sum(int(s["duration"]["value"]) for s in steps
+                         if s.get("duration", {}).get("durationName") == "distance")
+            mode_name = str(e["mode"]).strip().lower()
+            if mode_name in mode_activity:
+                activity_id, how = mode_activity[mode_name], "watch"
+            elif wk.get("activityId") is not None:
+                activity_id, how = int(wk["activityId"]), "workout"
+            elif mode_name in PLANNED_MOVE_ACTIVITY_BY_MODE_NAME:
+                activity_id, how = PLANNED_MOVE_ACTIVITY_BY_MODE_NAME[mode_name], "table"
+            else:
+                activity_id, how = 3, "default"
+            items.append({
+                "date": e["date"],
+                "activityId": activity_id,
+                "durationMinutes": -(-seconds // 60) if seconds else 0,
+                "distance": metres,
+                "intensity": int(e.get("intensity", 3)),
+                "name": str(wk.get("name") or e.get("mode") or "Move"),
+            })
+            resolution.append({"date": e["date"], "mode": e["mode"], "activityId": activity_id,
+                               "activityIdFrom": how})
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"items": items}, f)
+            plan_path = f.name
+        try:
+            args = ["--plan", plan_path, "--json"]
+            if body.get("write"):
+                args.append("--write")
+            code, out, err = run_tool("training_program.py", args, timeout=180)
+        finally:
+            try:
+                os.unlink(plan_path)
+            except OSError:
+                pass
+        result = self._parse_last_json_line(out)
+        if result is None:
+            self._send_json(502, {"ok": False,
+                                   "error": ("training_program.py produced no JSON: "
+                                             + (err or out or "")).strip()[:200],
+                                   "raw_output": out, "stderr": err})
+            return
+        result["items"] = items
+        result["activityIdSource"] = activity_source
+        result["resolution"] = resolution
+        self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_trainingprogram_install(self, body):
         """POST /api/trainingprogram/install. Body: {"plan": {...}, "mode": int,

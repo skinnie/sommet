@@ -29,6 +29,7 @@ navigation database (routes/waypoints/POIs).
 
 import argparse
 import datetime
+import json
 import struct
 import sys
 
@@ -260,21 +261,90 @@ def main():
                      help="restore the region to its pristine empty state (all-0xFF, byte-"
                           "identical to a never-written region) instead of writing a move -"
                           " use with --write to undo a re-test afterwards")
+    ap.add_argument("--plan", metavar="FILE",
+                     help="write a WHOLE program from a JSON file instead of the single-item"
+                          " flags: {\"items\": [{\"date\": \"YYYY-MM-DD\", \"activityId\": 3,"
+                          " \"durationMinutes\": 45, \"intensity\": 3, \"name\": \"Long run\","
+                          " \"distance\": 0, \"moveId\": 0}, ...]}. The header base date is the"
+                          " EARLIEST item's date; each item's dayOffset is derived from it (must"
+                          " fit in 0..255 days); at most 60 items (the firmware's cap). Items"
+                          " are sorted by date. This is what the desktop backend calls.")
+    ap.add_argument("--json", action="store_true",
+                     help="print one final JSON line {ok, written, count, baseDate, dates,"
+                          " bytes} - for desktop/backend/server.py (its usual last-JSON-line"
+                          " convention). Human-readable lines still print before it.")
     ap.add_argument("--write", action="store_true",
                      help="actually emits; without this option nothing is sent")
     ap.add_argument("--verbose", action="store_true", help="logs every 64-byte report")
     args = ap.parse_args()
 
+    def emit_json(ok, **extra):
+        if args.json:
+            print(json.dumps({"ok": ok, "written": bool(args.write) and ok, **extra}))
+
+    plan_items = None
+    if args.plan:
+        try:
+            with open(args.plan) as f:
+                plan = json.load(f)
+            raw = plan["items"] if isinstance(plan, dict) else plan
+            if not isinstance(raw, list) or not raw:
+                raise ValueError("plan has no items")
+            if len(raw) > 60:
+                raise ValueError(f"{len(raw)} items - the watch stores at most 60 planned moves")
+            parsed = []
+            for i, it in enumerate(raw):
+                d = datetime.date.fromisoformat(str(it["date"]))
+                if not 2013 <= d.year <= 2099:
+                    raise ValueError(f"item {i}: year {d.year} outside the firmware's 2013-2099")
+                parsed.append((d, it))
+            parsed.sort(key=lambda t: t[0])
+            base = parsed[0][0]
+            if (parsed[-1][0] - base).days > 255:
+                raise ValueError("plan spans more than 255 days (dayOffset is one byte)")
+            plan_items = [(d, it) for d, it in parsed]
+        except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
+            print(f"bad --plan: {e}")
+            emit_json(False, error=str(e))
+            return 2
+        args.date = plan_items[0][0]
+
     link = Link(dry_run=not args.write, verbose=args.verbose)
     if args.write:
-        print("!! REAL WRITE requested (EXPERIMENTAL, unverified format - see"
-              " training_program_andre.md)")
+        print("!! REAL WRITE requested - native planned moves (TrainingProgram region;"
+              " hardware-confirmed 2026-09-03, see module docstring)")
         link.open()
     else:
         print("dry-run mode: not a byte will be emitted")
 
     link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
     check_memory_map(read_memory_map(link))
+
+    if plan_items is not None:
+        items = []
+        dates = []
+        for d, it in plan_items:
+            items.append(build_training_item(
+                int(it.get("activityId", 3)), int(it.get("durationMinutes", 0)),
+                int(it.get("intensity", 3)), str(it.get("name", "Move")),
+                day_offset=(d - args.date).days, completed=bool(it.get("completed", False)),
+                move_id=int(it.get("moveId", 0)), distance=int(it.get("distance", 0))))
+            dates.append(d.isoformat())
+        flash, layout = build_training_program(items, base_date=args.date)
+        blob = layout[0][2]
+        print(f"  plan: {len(items)} planned move(s), base date {args.date.isoformat()}, "
+              f"{len(blob)} bytes")
+        for (d, it), item in zip(plan_items, items):
+            print(f"    {d.isoformat()}  act={it.get('activityId', 3):<3} "
+                  f"{int(it.get('durationMinutes', 0)):>4} min  int={it.get('intensity', 3)}  "
+                  f"{str(it.get('name', 'Move'))[:23]!r}")
+        send_plan(link, flash, layout, commit=False)
+        total = sum(len(payload) for _, payload, _ in link.sent)
+        print(f"\n{len(link.sent)} messages, {total} payload bytes"
+              + ("" if args.write else " — nothing was emitted"))
+        emit_json(True, count=len(items), baseDate=args.date.isoformat(), dates=dates,
+                  bytes=len(blob))
+        return 0
 
     if args.clear:
         blob = b"\xff" * F.TRAINING_PROGRAM_REGION_SIZE
