@@ -42,7 +42,10 @@ from write_nav import CMD_DEVICE_INFO, Link, check_memory_map, read_memory_map, 
 #   off 0  u16  year   } base date = EARLIEST item's date, packed [u16 y][u8 m][u8 d] via the
 #   off 2  u8   month  }  FUN_00531d20 JDN->Gregorian converter. It derives Y/M/D and packs
 #   off 3  u8   day    }  them - it does NOT store a day-count (kills the days2000 theory).
-#   off 4  u32  = the PRIOR binary's first 4 bytes verbatim; 0xFFFFFFFF on a fresh/erased region
+#   off 4  4B   = SIGNATURE 3C 46 50 5A (CORRECTED 2026-09-03 from the MSP430X watch firmware:
+#                 the desktop packer copies the prior region's bytes 4..7 - which on a
+#                 Movescount-initialised watch were always this constant; on an erased region
+#                 that copied 0xFF and the firmware REJECTED the header. See build_training_program)
 #   off 8  u16  item count = (end-start)/40
 #   off 10 u16  = 0xFFFF  (createBinary only overwrites the low u16 of a 0xFFFFFFFF-seeded field;
 #                          there is NO u32-count "emu" variant - that was a misread of the PARSE
@@ -50,6 +53,8 @@ from write_nav import CMD_DEVICE_INFO, Link, check_memory_map, read_memory_map, 
 # The closing hash MODE is HASH_WRITTEN over the used extent - confirmed firmware-accepted
 # (Finding 59: the watch's own 0x0b21 hash matches SHA256 of header+items after our write).
 TRAINING_ITEM_SIZE = 40
+# Header bytes 4..7: the watch firmware's signature constant (see build_training_program()).
+HEADER_SIGNATURE = b"\x3c\x46\x50\x5a"
 
 
 def build_training_item(activity_id, duration_minutes, intensity, name,
@@ -174,8 +179,11 @@ def build_training_program(items, base_date, date_format="ymd", emu=False):
         off 0  u16  year   (little-endian)
         off 2  u8   month  (1-12)
         off 3  u8   day    (1-31)
-        off 4  u32  = 0xFFFFFFFF for a fresh region (holds the prior binary's first 4 bytes
-                    otherwise; the empty/sentinel value is all-ones)
+        off 4  4B   = SIGNATURE 3C 46 50 5A - REQUIRED. The watch firmware validates these
+                    bytes (strictly increasing, last < 0x65) before parsing anything; 0xFFFFFFFF
+                    (what every hardware test before 2026-09-03 wrote) is REJECTED and the whole
+                    program is treated as empty. Decompiled from the MSP430X watch firmware, see
+                    build_training_program()'s inline comment.
         off 8  u16  item count
         off 10 u16  = 0xFFFF
 
@@ -188,8 +196,18 @@ def build_training_program(items, base_date, date_format="ymd", emu=False):
     the earliest move's date. Earlier writes packed seconds/hours-since-epoch here, producing a
     garbage date, which is why nothing surfaced (Finding 59). For the Path (1) re-test we pack a
     real calendar date so the watch can match "today"."""
-    tail = struct.pack("<II", 0xFFFFFFFF, len(items)) if emu \
-        else struct.pack("<IHH", 0xFFFFFFFF, len(items), 0xFFFF)
+    # Header bytes 4..7 are a fixed SIGNATURE the watch firmware validates before it will
+    # parse the region at all (MSP430X watch fw 2.4.17, FUN_00059a3a via the TrainingProgram
+    # reload FUN_0004c250 -> FUN_00039262; decompiled 2026-09-03, assets/Firmware/re-out/
+    # sfi2_code_recovery_notes.md "MSP430X hunt (pass 7)"): four strictly increasing bytes with
+    # the last < 0x65, firmware constant 3C 46 50 5A. An invalid signature makes the firmware
+    # substitute an EMPTY program {2001-01-01, sig, count 0}, which hides the TIME-mode "Today"
+    # view and silences the daily pop-up - exactly the symptom of every prior hardware test,
+    # all of which wrote 0xFFFFFFFF here. The desktop packer's "copy the prior binary's bytes
+    # 4..7 verbatim" (Finding 59) only ever propagated this constant on a Movescount-initialised
+    # watch; on an erased region it propagated 0xFF and the header was rejected.
+    tail = struct.pack("<4sI", HEADER_SIGNATURE, len(items)) if emu \
+        else struct.pack("<4sHH", HEADER_SIGNATURE, len(items), 0xFFFF)
     header = pack_base_date(base_date, date_format) + tail
     assert len(header) == 12, len(header)
     blob = header + b"".join(items)
