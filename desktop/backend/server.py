@@ -185,6 +185,26 @@ _NOMINATIM_LAST = [0.0]
 # this backend's own requests overlapping - that needs serializing here instead.
 WATCH_LOCK = threading.Lock()
 
+# --- USB keep-alive handle (Ambit1/2 "connecting/disconnecting" chime fix) -------------
+# The Ambit1/2 re-presents on the USB bus every time the LAST open HID handle to it closes -
+# Windows announces each of those with the device connect/disconnect chime. Every watch
+# command in this backend is a short-lived subprocess (device_info.py, write_nav.py, the
+# legacy CLI) that opens and closes its OWN handle, so the watch chimed on every single one -
+# the Home page's ~10s heartbeat alone was enough to make it cycle endlessly (real, Windows
+# Ambit2, 2026-09-05). Suunto Link never does this because it keeps one handle open the whole
+# time; do the same here. We hold ONE idle "keep-alive" HID handle open to the connected
+# watch so its handle count never drops to zero and it stays claimed on the bus, so the
+# subprocess tools' own open/close cycles no longer make it re-present.
+#
+# Two things make this safe where Suunto Link's own hold is NOT (it blocks everyone else):
+#  * hidapi opens shared (FILE_SHARE_READ|FILE_SHARE_WRITE on Windows), so this keep-alive
+#    does not stop the subprocess tools from opening their own handles to the same watch.
+#  * it does zero I/O - it never reads or writes, it only stays open - so it cannot interfere
+#    with the request/response a tool is doing on its own handle (each HID handle has its own
+#    input queue). It is refreshed to follow a hot-swap and closed when the watch unplugs.
+_KEEPALIVE = {"dev": None, "serial": None}
+_KEEPALIVE_LOCK = threading.Lock()
+
 # --- Testing mode ---------------------------------------------------------------------
 # Real request, 2026-08-11 (André): "add on feature on settings: testing mode, where it
 # simulates that an ambit 3 is connected, so people can test it without the watch."
@@ -575,6 +595,56 @@ def read_cache_clear():
     """Drop the cached reads (keeps the device identity - same watch, just stale data now)."""
     with _READ_CACHE_LOCK:
         _READ_CACHE.clear()
+
+
+def _open_hid_path(hid, path):
+    """Open one HID device by path, across both `hid` packagings this project supports (see
+    tools/write_nav.open_hid for the same two-API dance)."""
+    if hasattr(hid, "Device"):
+        return hid.Device(path=path)
+    dev = hid.device()
+    dev.open_path(path)
+    return dev
+
+
+def keepalive_sync(info):
+    """Hold one idle HID handle open to the connected watch so it stays claimed on the USB bus
+    and stops re-presenting (and chiming) on every tool's open/close - see _KEEPALIVE's own
+    comment. `info` is the /api/device device_info dict, or None when nothing is connected.
+    Best-effort: any failure here only means the chime isn't suppressed, never that a request
+    fails. Keyed on USB serial - same watch keeps its handle; a different/absent serial drops
+    the old one and (if a watch is present) opens a fresh one. The enumerate+open runs under
+    WATCH_LOCK so it can't collide with a subprocess tool that is mid-command on the bus."""
+    serial = (info or {}).get("serial") or None
+    with _KEEPALIVE_LOCK:
+        if serial is not None and serial == _KEEPALIVE["serial"] and _KEEPALIVE["dev"] is not None:
+            return  # already holding this exact watch - the steady state on every heartbeat
+        if _KEEPALIVE["dev"] is not None:  # wrong watch, or watch gone: drop what we held
+            try:
+                _KEEPALIVE["dev"].close()
+            except Exception:  # noqa: BLE001 - closing a stale handle must never propagate
+                pass
+            _KEEPALIVE["dev"] = None
+            _KEEPALIVE["serial"] = None
+        if serial is None:
+            return  # nothing connected - nothing to hold open
+        try:
+            import hid  # only imported when a watch is actually present
+            SUUNTO_VENDOR_ID = 0x1493
+            path = None
+            with WATCH_LOCK:  # never touch the bus while a tool is mid-command
+                for entry in hid.enumerate(SUUNTO_VENDOR_ID, 0):
+                    if (entry.get("serial_number") or "") == serial:
+                        path = entry.get("path")
+                        break
+                if path is None:
+                    return  # not found this instant; the next heartbeat retries
+                dev = _open_hid_path(hid, path)
+            _KEEPALIVE["dev"] = dev
+            _KEEPALIVE["serial"] = serial
+        except Exception:  # noqa: BLE001 - keep-alive is comfort, never critical
+            _KEEPALIVE["dev"] = None
+            _KEEPALIVE["serial"] = None
 
 
 def selected_is_legacy():
@@ -2716,11 +2786,16 @@ class Handler(BaseHTTPRequestHandler):
             code, out, err = run_tool("device_info.py", ["--json"])
             info = _parse_info(out) if code == 0 else None
         if info is None:
+            keepalive_sync(None)  # watch gone: let go of the keep-alive handle
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
             return
         # Tie the per-connection read cache to whichever watch is actually on the bus now; if it
         # changed since the last poll (hot-swap), this drops the previous watch's cached reads.
         read_cache_note_device(info)
+        # Hold one idle HID handle open to this watch so it stops re-presenting (and chiming) on
+        # every subprocess tool's open/close - see keepalive_sync / _KEEPALIVE. No-op once it
+        # already holds this watch, so the ~10s heartbeat opens it once per connection, not each poll.
+        keepalive_sync(info)
         self._send_json(200, {"ok": True, **info})
 
     def _handle_devices_list(self):

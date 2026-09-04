@@ -7,6 +7,22 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-05: stop the Ambit1/2 USB connect/disconnect chime (0.2.34)
+
+Hardware-confirmed on Windows (André's Ambit2): the watch no longer chimes on/off every few
+seconds. The Ambit1/2 re-presents on the USB bus whenever the LAST open HID handle to it
+closes, and every watch command here is a short-lived subprocess that opens and closes its own
+handle, so the Home page's ~10s heartbeat alone made it cycle endlessly - Windows announcing
+each re-present with the device connect/disconnect sound. Suunto Link never does this because
+it keeps one handle open the whole time; the backend now does the same. On a successful
+/api/device read it holds ONE idle "keep-alive" HID handle to the connected watch so its handle
+count never drops to zero and it stays claimed on the bus. The handle does zero I/O and opens
+shared (FILE_SHARE_READ|WRITE), so - verified live - it neither blocks nor interferes with the
+subprocess tools reading the watch (orbit, POIs, activities all still work with it held); it
+follows a hot-swap by serial and is released when the watch unplugs. No change for Ambit3+
+(they don't exhibit the re-present), and it's best-effort: if the keep-alive can't open, the
+only consequence is the chime isn't suppressed, never a failed request.
+
 ## 2026-09-05: Windows Ambit1/2 actually works now, take 3 (0.2.33)
 
 Hardware-verified against a real Ambit2 on Windows (André's watch): every Ambit1/2 feature
