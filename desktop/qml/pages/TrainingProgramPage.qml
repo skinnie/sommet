@@ -498,12 +498,12 @@ Item {
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("Each workout installs as a native guided workout in the "
-                                   + "sport mode's WORKOUT menu (hold [Next] to pick it). On "
-                                   + "every sync the watch keeps what's still upcoming and "
-                                   + "erases anything dated before today - a sport mode holds "
-                                   + "only a few at once, so the calendar rotates them in as "
-                                   + "their dates approach.")
+                        text: qsTr("One sync does both halves of a Movescount sync. Each "
+                                   + "workout installs as a native guided workout in the sport "
+                                   + "mode's WORKOUT menu (hold [Next] to pick it), rotating in "
+                                   + "as its date approaches; and every dated move is written as "
+                                   + "the watch's own “Today” planned-move card, shown "
+                                   + "on the time screen with [Next] on its day.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
                     }
@@ -608,6 +608,44 @@ Item {
                             color: Theme.primary
                             font.pixelSize: Theme.fontSizeCaption
                             font.bold: true
+                        }
+                        // The native "Today 1/2" planned-move cards (TIME mode -> [Next]),
+                        // written alongside the WORKOUT-menu guidance by the same Sync action.
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: {
+                                const r = TrainingProgramService.lastInstallResult
+                                return r.dryRun === false && r.nativeCards !== undefined
+                            }
+                            text: {
+                                const r = TrainingProgramService.lastInstallResult
+                                const n = r.nativeCards || 0
+                                if (n === 0)
+                                    return qsTr("No dated planned moves to show on the watch face.")
+                                const range = (r.nativeCardFirst && r.nativeCardLast
+                                               && r.nativeCardFirst !== r.nativeCardLast)
+                                    ? qsTr(" (%1 → %2)").arg(r.nativeCardFirst).arg(r.nativeCardLast)
+                                    : ""
+                                return qsTr("Planned moves on the watch face: %1 dated card%2")
+                                    .arg(n).arg(n === 1 ? "" : "s") + range
+                            }
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.bold: true
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: {
+                                const r = TrainingProgramService.lastInstallResult
+                                return r.nativeCardError !== undefined
+                                    && String(r.nativeCardError).length > 0
+                            }
+                            text: qsTr("Couldn't write the planned-move cards. ")
+                                + TrainingProgramService.lastInstallResult.nativeCardError
+                            color: Theme.warning
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }
