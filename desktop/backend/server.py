@@ -1277,6 +1277,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_hrv_install(body)
         elif self.path == "/api/hrv/strap":
             self._handle_hrv_strap(body)
+        elif self.path == "/api/sleep/process":
+            self._handle_sleep_process(body)
         elif self.path == "/api/apps/import":
             self._handle_apps_import(body)
         elif self.path == "/api/workout/compile":
@@ -5425,6 +5427,41 @@ class Handler(BaseHTTPRequestHandler):
                                    "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_sleep_process(self, body):
+        """POST /api/sleep/process - turn one Polar Verity Sense overnight offline recording into
+        a night of HRV + resting HR. No watch involved. Body is the recording JSON the PolarSleep
+        Android module produces: {start_time, ppg_hz, acc_hz, ppg:[[ch..]..], acc:[[x,y,z]..]}.
+        Runs tools/sleep_stage.py (PPG->R-R via the shared physiologic bounds -> hrv.py) and returns
+        its result: {ok, overnight:{overnight_rmssd_ms, resting_hr_bpm, ...}, overall_hrv, windows}.
+        The overnight recording is large, so it's written to a temp file and passed by path rather
+        than through argv."""
+        body = body or {}
+        if not body.get("ppg"):
+            self._send_json(400, {"ok": False, "error": "no PPG samples in recording"})
+            return
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(prefix="verity_night_", suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                json.dump(body, f)
+            # A full night of PPG can take a while to peak-pick; give it generous headroom.
+            code, out, err = run_tool("sleep_stage.py", [tmp], timeout=600)
+            try:
+                info = json.loads(out.strip()) if out.strip() else None
+            except json.JSONDecodeError:
+                info = None
+            if info is None:
+                self._send_json(502, {"ok": False, "error": "sleep_stage.py produced no parseable "
+                                      "JSON", "raw_output": out[-2000:], "stderr": err[-2000:]})
+                return
+            self._send_json(200 if info.get("ok") else 422, info)
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     # --- Training Program (tools/training_plan.py - see its docstring for the whole
     # design: workouts scheduled on calendar dates as date-gated Suunto Apps, the

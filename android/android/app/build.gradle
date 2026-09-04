@@ -137,4 +137,11 @@ dependencies {
     // Garmin USB Mass Storage support (v2.3 beta) — userspace USB MSC/SCSI/FAT
     // driver, no root/OS automount needed. Apache 2.0. See GARMIN_USB_IMPORT_SPEC.md.
     implementation("me.jahnen.libaums:core:0.10.0")
+
+    // Polar BLE SDK — Verity Sense overnight OFFLINE recording (PolarSleep module). It is
+    // RxJava3-based, so the reactive runtime comes with it. The band records raw PPG+ACC to its
+    // own flash while disconnected; we fetch and process it in the morning (tools/sleep_stage.py).
+    implementation("com.github.polarofficial:polar-ble-sdk:5.5.0")
+    implementation("io.reactivex.rxjava3:rxjava:3.1.8")
+    implementation("io.reactivex.rxjava3:rxandroid:3.0.2")
 }

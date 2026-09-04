@@ -118,6 +118,21 @@ export default function HealthScreen() {
         </View>
       )}
 
+      {/* Sleep & Recovery: overnight HRV + resting-HR trend from a Polar Verity Sense recorded
+          offline. A whole-night companion to the morning spot reading below. */}
+      <TouchableOpacity
+        onPress={() => navigation.navigate('Sleep')}
+        style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card,
+                 flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '700' }}>Sleep & Recovery</Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
+            Overnight HRV + resting HR — sleep with just the Polar band, read it in the morning.
+          </Text>
+        </View>
+        <Text style={{ color: t.primary, fontSize: v3Type.title, marginLeft: v3Spacing.medium }}>›</Text>
+      </TouchableOpacity>
+
       {/* Morning HRV from a heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - no watch needed.
           Shown only when the native strap module is present AND the user enabled it in Settings. */}
       {isHrStrapAvailable() && strapHrvEnabled && (

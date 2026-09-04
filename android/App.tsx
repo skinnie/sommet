@@ -35,6 +35,7 @@ import GearScreen from './src/screens/GearScreen';
 // src/services/WellnessService.ts; see that file for what Android can and cannot reach.
 import WeightScreen from './src/screens/WeightScreen';
 import HealthScreen from './src/screens/HealthScreen';
+import SleepScreen from './src/screens/SleepScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import EmberScreen from './src/screens/EmberScreen';
 import RouteWeatherScreen from './src/screens/RouteWeatherScreen';
@@ -77,6 +78,9 @@ export type RootStackParamList = {
   // wellness, so like Totals/Calendar they need no connected device and are reachable any time.
   Weight: undefined;
   Health: undefined;
+  // Sleep & Recovery (2026-09-04): overnight HRV + resting-HR trend from a Polar Verity Sense
+  // recorded offline (sleepStage.ts on-device; twin of tools/sleep_stage.py). No watch needed.
+  Sleep: undefined;
   // Coach readiness (2026-08-26): intervals.icu training load, no device needed.
   Coach: undefined;
   // Ember recap - hidden until the Settings easter egg unlocks it (EmberUnlock.ts).
@@ -243,6 +247,11 @@ function AppShell() {
             name="Health"
             component={HealthScreen}
             options={{ title: 'Health' }}
+          />
+          <Stack.Screen
+            name="Sleep"
+            component={SleepScreen}
+            options={{ title: 'Sleep & Recovery' }}
           />
           <Stack.Screen
             name="Coach"

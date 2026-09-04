@@ -19,3 +19,12 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// JitPack hosts the Polar BLE SDK (com.github.polarofficial:polar-ble-sdk), used by the
+// PolarSleep module for Verity Sense overnight offline recording. Added at the root so every
+// module resolves it.
+allprojects {
+    repositories {
+        maven { url "https://jitpack.io" }
+    }
+}
