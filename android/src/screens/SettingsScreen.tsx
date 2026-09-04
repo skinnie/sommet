@@ -16,6 +16,7 @@ const EXP_FEATURE_ROWS = [
   { flag: 'workoutCalendar' as const, label: t.experimentalWorkoutCalendar, desc: t.experimentalWorkoutCalendarDesc, screen: 'WorkoutCalendar' as const, icon: 'chart' as const },
 ];
 import { isMarkSyncedEnabled, setMarkSyncedEnabled as persistMarkSynced } from '../services/MarkSynced';
+import { isStrapHrvEnabled, setStrapHrvEnabled as persistStrapHrv } from '../services/StrapHrvPref';
 import { useDemo } from '../config/DemoContext';
 import { DemoDevicePicker } from '../components/ui/DemoDevicePicker';
 import Icon, { IconName } from '../components/ui/Icon';
@@ -124,6 +125,9 @@ export default function SettingsScreen() {
   // Experimental "mark synced workouts as synced" toggle - own persisted flag (MarkSynced.ts),
   // independent of the master experimental switch, default OFF.
   const [markSyncedEnabled, setMarkSyncedEnabledState] = useState(false);
+  // Morning HRV from a BLE heart-rate strap - own persisted flag (StrapHrvPref.ts), default OFF.
+  // Mirrors the desktop health/coospoHrvEnabled toggle so both platforms gate the strap card.
+  const [strapHrvEnabled, setStrapHrvEnabledState] = useState(false);
 
   const [tileCacheBytes, setTileCacheBytes] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
@@ -180,11 +184,17 @@ export default function SettingsScreen() {
     getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
+    isStrapHrvEnabled().then(setStrapHrvEnabledState);
   }, []));
 
   function handleToggleMarkSynced(v: boolean) {
     setMarkSyncedEnabledState(v);
     persistMarkSynced(v);
+  }
+
+  function handleToggleStrapHrv(v: boolean) {
+    setStrapHrvEnabledState(v);
+    persistStrapHrv(v);
   }
 
   function handleSetMapProvider(p: MapProvider) {
@@ -456,6 +466,28 @@ export default function SettingsScreen() {
         </View>
         <Text style={styles.sectionDesc}>{t.markSyncedDesc}</Text>
 
+      </View>
+
+      {/* ── Health - morning HRV from a BLE heart-rate strap (André, 2026-09-04). Opt-in,
+          default OFF, mirroring the desktop health/coospoHrvEnabled toggle: an intervals.icu-
+          only user sees nothing; a strap user turns this on and the "Measure morning HRV" card
+          appears on the Health screen. Any strap advertising the HR service works (Verity Sense,
+          COOSPO, …) - the reader is device-agnostic. ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="health" />
+          <Text style={styles.cardTitle}>Health</Text>
+        </View>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>
+            Morning HRV from a heart-rate strap
+          </Text>
+          <Toggle value={strapHrvEnabled} onValueChange={handleToggleStrapHrv} />
+        </View>
+        <Text style={styles.sectionDesc}>
+          Measure your morning HRV directly from a Bluetooth heart-rate strap (Polar Verity Sense,
+          COOSPO, …) - no watch needed. When on, a Measure card appears on the Health screen.
+        </Text>
       </View>
 
       {/* ── Watch Settings - real, 2026-08-08. Cable settings-write is confirmed working

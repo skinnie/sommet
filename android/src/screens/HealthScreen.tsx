@@ -7,6 +7,7 @@ import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
 import { fetchWellness, WellnessDay } from '../services/WellnessService';
 import { isHrStrapAvailable, measureHrv, type HrStrapReading } from '../services/HrStrapService';
+import { isStrapHrvEnabled } from '../services/StrapHrvPref';
 
 // Health — the Android counterpart of desktop/qml/pages/HealthPage.qml (André, 2026-08-26:
 // "port everything to android"). Resting HR, HRV, sleep, steps and VO2max from intervals.icu's
@@ -55,6 +56,15 @@ export default function HealthScreen() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Strap morning-HRV is opt-in (Settings → Health), default OFF, mirroring the desktop toggle.
+  // Re-read on focus so flipping it in Settings takes effect without a restart.
+  const [strapHrvEnabled, setStrapHrvEnabled] = useState(false);
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => { isStrapHrvEnabled().then(setStrapHrvEnabled); });
+    isStrapHrvEnabled().then(setStrapHrvEnabled);
+    return unsub;
+  }, [navigation]);
 
   // Morning HRV straight from a BLE heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - the
   // mobile equivalent of the desktop's "Measure HRV". The native HrStrap module does the BLE and
@@ -108,8 +118,9 @@ export default function HealthScreen() {
         </View>
       )}
 
-      {/* Morning HRV from a heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - no watch needed. */}
-      {isHrStrapAvailable() && (
+      {/* Morning HRV from a heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - no watch needed.
+          Shown only when the native strap module is present AND the user enabled it in Settings. */}
+      {isHrStrapAvailable() && strapHrvEnabled && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '700' }}>
             Morning HRV (heart-rate strap)
