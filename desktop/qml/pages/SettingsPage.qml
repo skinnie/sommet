@@ -558,9 +558,9 @@ PageFlickable {
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.parent.width - 60
                         wrapMode: Text.WordWrap
-                        text: qsTr("COOSPO / heart-rate-strap morning HRV — measure directly over " +
-                                   "Bluetooth, no watch. Turn on to show the Measure button below " +
-                                   "and on the Health page.")
+                        text: qsTr("Heart-rate-strap morning HRV (Polar Verity Sense, COOSPO, …) — " +
+                                   "measure directly over Bluetooth, no watch. Turn on to show the " +
+                                   "Measure button below and on the Health page.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeBody
                     }
@@ -618,7 +618,7 @@ PageFlickable {
                     width: parent.width; spacing: Theme.spacingSmall
                     visible: HealthService.coospoHrvEnabled
                 Rectangle { width: parent.width; height: 1; color: Theme.mutedText; opacity: 0.2 }
-                Text { text: qsTr("Morning HRV from a heart-rate strap (COOSPO HW9)")
+                Text { text: qsTr("Morning HRV from a heart-rate strap (Polar Verity Sense, COOSPO, …)")
                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
                 Text {
                     width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
@@ -631,7 +631,7 @@ PageFlickable {
                     width: parent.width; spacing: Theme.spacingSmall
                     RoundedButton {
                         text: HealthService.strapMeasuring ? qsTr("Measuring…")
-                                                           : qsTr("Measure HRV (COOSPO)")
+                                                           : qsTr("Measure HRV")
                         enabled: !HealthService.strapMeasuring
                         onClicked: { strapMeasure.requested = true; HealthService.readStrapHrv(120) }
                     }

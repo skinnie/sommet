@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Read HRV from a standard BLE heart-rate strap that reports R-R intervals, and compute HRV with
-this project's own hrv.py. Built for André's COOSPO HW9 (an optical armband that streams raw R-R
-over the standard Heart Rate service) but works for any strap that sets the RR-Interval flag:
-Polar H10, most chest straps, etc. This is the "morning HRV" path - no watch, no Ambit 5+5: wear
-the strap, sit/lie still ~2-5 min, run this.
+this project's own hrv.py. Works with any strap that sets the RR-Interval flag on the standard
+Heart Rate service - Polar Verity Sense, COOSPO HW9, Polar H10, most chest straps, etc. With no
+--mac/--name it just picks any peripheral advertising the HR service. This is the "morning HRV"
+path - no watch, no Ambit 5+5: wear the strap, sit/lie still ~2-5 min, run this.
 
 Uses `bleak` (the project's existing BLE dependency, also used by ble_link.py) so it runs on
 Linux (BlueZ), macOS (CoreBluetooth) and Windows (WinRT) - the same backend that runs the rest of

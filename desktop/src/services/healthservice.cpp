@@ -99,8 +99,9 @@ void HealthService::setAmbitHrvEnabled(bool on)
 
 bool HealthService::coospoHrvEnabled() const
 {
-    // Opt-in (default off): only strap users see the "Measure HRV (COOSPO)" UI. Independent of
-    // the Ambit toggle; both feed the same Morning-HRV line (health/watchHrv).
+    // Opt-in (default off): only strap users see the "Measure HRV" strap UI. The key name is
+    // "coospo" for history, but any standard BLE HR strap works (Polar Verity Sense, COOSPO, …).
+    // Independent of the Ambit toggle; both feed the same Morning-HRV line (health/watchHrv).
     return QSettings().value(QStringLiteral("health/coospoHrvEnabled"), false).toBool();
 }
 

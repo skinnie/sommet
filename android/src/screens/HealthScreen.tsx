@@ -56,15 +56,16 @@ export default function HealthScreen() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Morning HRV straight from a BLE strap (COOSPO HW9) - the mobile equivalent of the desktop's
-  // "Measure HRV (COOSPO)". The native HrStrap module does the BLE; hrv.ts does the math.
+  // Morning HRV straight from a BLE heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - the
+  // mobile equivalent of the desktop's "Measure HRV". The native HrStrap module does the BLE and
+  // finds any peripheral advertising the Heart Rate service; hrv.ts does the math.
   const [measuring, setMeasuring] = useState(false);
   const [strapResult, setStrapResult] = useState<HrStrapReading | null>(null);
   const [strapErr, setStrapErr] = useState('');
   const measureStrap = useCallback(async () => {
     setMeasuring(true); setStrapErr(''); setStrapResult(null);
     try {
-      const r = await measureHrv(120, 'HW9');
+      const r = await measureHrv(120);
       if (r.ok) setStrapResult(r);
       else setStrapErr('Strap not reading - wear it snugly and try again.');
     } catch (e: any) {
@@ -107,15 +108,15 @@ export default function HealthScreen() {
         </View>
       )}
 
-      {/* Morning HRV from a heart-rate strap (COOSPO HW9) - no watch needed. */}
+      {/* Morning HRV from a heart-rate strap (Polar Verity Sense, COOSPO HW9, …) - no watch needed. */}
       {isHrStrapAvailable() && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '700' }}>
             Morning HRV (heart-rate strap)
           </Text>
           <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
-            Wear the strap (COOSPO HW9), sit or lie still, and tap Measure. It reads ~2 min of
-            heart-beats over Bluetooth and computes your RMSSD.
+            Wear your heart-rate strap (Polar Verity Sense, COOSPO HW9, …), sit or lie still, and
+            tap Measure. It reads ~2 min of heart-beats over Bluetooth and computes your RMSSD.
           </Text>
           <TouchableOpacity
             disabled={measuring}
@@ -125,7 +126,7 @@ export default function HealthScreen() {
                      borderRadius: v3Radius.card, borderWidth: 1,
                      borderColor: measuring ? t.border : t.primary, opacity: measuring ? 0.6 : 1 }}>
             <Text style={{ color: t.primary, fontSize: v3Type.body }}>
-              {measuring ? 'Measuring… stay still' : 'Measure HRV (COOSPO)'}
+              {measuring ? 'Measuring… stay still' : 'Measure HRV'}
             </Text>
           </TouchableOpacity>
           {strapResult && (

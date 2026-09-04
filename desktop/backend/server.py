@@ -5398,8 +5398,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_hrv_strap(self, body):
         """POST /api/hrv/strap - read a morning-HRV spot reading straight from a BLE heart-rate
-        strap that streams R-R (André's COOSPO HW9, or any strap with the RR flag) and return the
-        computed HRV. No watch involved. Body: {"mac": str} or {"name": str} (default name "HW9"),
+        strap that streams R-R (Polar Verity Sense, COOSPO HW9, or any strap with the RR flag) and
+        return the computed HRV. No watch involved. Body: {"mac": str} or {"name": str} to target a
+        specific strap, else any peripheral advertising the Heart Rate service (0x180D) is used;
         optional {"seconds": int, default 120}. Runs tools/hrv_strap.py (bleak) and returns its
         JSON: {ok, mac, seconds, rr_ms, rmssd_ms, sdnn_ms, mean_hr_bpm, pnn50_pct, ...}. The app's
         HealthService stores the rmssd on the Morning-HRV line (health/watchHrv)."""
@@ -5411,8 +5412,10 @@ class Handler(BaseHTTPRequestHandler):
         args = ["--json", "--seconds", str(seconds)]
         if mac:
             args += ["--mac", str(mac)]
-        else:
-            args += ["--name", str(name or "HW9")]
+        elif name:
+            args += ["--name", str(name)]
+        # else: no --mac/--name -> hrv_strap.py picks any peripheral advertising the HR service,
+        # so a Polar Verity Sense / COOSPO / any RR-capable strap is discovered without config.
         # BLE scan + capture can take the whole window; give run_tool headroom over `seconds`.
         code, out, err = run_tool("hrv_strap.py", args, timeout=seconds + 60)
         info = self._parse_last_json_line(out)

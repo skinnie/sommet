@@ -1,8 +1,8 @@
 import { NativeModules } from 'react-native';
 import { hrvSummary, type HrvSummary } from './hrv';
 
-// Morning-HRV from a standard BLE heart-rate strap (André's COOSPO HW9, or any strap that reports
-// R-R). This is the mobile twin of the desktop's tools/hrv_strap.py: the native module does the
+// Morning-HRV from a standard BLE heart-rate strap (Polar Verity Sense, COOSPO HW9, or any strap
+// that reports R-R). This is the mobile twin of the desktop's tools/hrv_strap.py: the native does
 // BLE (scan 0x180D → connect → notify 0x2A37 → collect R-R for N seconds), and the HRV math is the
 // shared TS port in ./hrv.ts — so iOS and Android compute the same RMSSD as the desktop.
 //
@@ -38,11 +38,12 @@ export function isHrStrapAvailable(): boolean {
 
 /**
  * Take a morning-HRV spot reading: collect ~`seconds` of R-R from the strap, then compute HRV
- * with the shared math. `nameFilter` defaults to "HW9" (COOSPO) but any RR-capable strap works.
+ * with the shared math. `nameFilter` is null by default, so any peripheral advertising the Heart
+ * Rate service is used (Polar Verity Sense, COOSPO HW9, …); pass a substring to target one strap.
  */
 export async function measureHrv(
   seconds = 120,
-  nameFilter: string | null = 'HW9',
+  nameFilter: string | null = null,
 ): Promise<HrStrapReading> {
   if (!Native) throw new Error('native-missing');
   const raw = await Native.measure(seconds, nameFilter);
