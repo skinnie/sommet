@@ -7,6 +7,15 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-04: Windows packaging fix, take 2 (0.2.32)
+
+The Windows `.zip` now always builds. v0.2.31 got past the CMake error but then hit a compile
+error building the vendored Ambit1/2 helper on Windows (`le16toh`/`htole32` don't exist under
+MinGW — the same missing-`<endian.h>` class of break macOS had). Fixed with a Windows endian
+shim, and the helper's build step is now non-fatal: if that vendored code ever fails to compile,
+the Windows app still ships (Ambit3/Traverse/Kailash unaffected; only Ambit1/2-over-USB on
+Windows would degrade, exactly as before the step existed). Otherwise identical to 0.2.30/0.2.31.
+
 ## 2026-09-04: Windows packaging fix (0.2.31)
 
 Same as 0.2.30, plus a Windows-build fix: the Windows desktop package failed to build the

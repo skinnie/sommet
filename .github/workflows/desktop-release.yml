@@ -117,12 +117,26 @@ jobs:
             mingw-w64-x86_64-libiconv
       - name: Build ambit_legacy_cli (Ambit1/2 support)
         shell: msys2 {0}
+        # Non-fatal (2026-09-04): this helper only powers Ambit1/2 on Windows; Ambit3/Traverse/
+        # Kailash work without it. Building the vendored libambit under MinGW is new and unverified
+        # end to end, so a compile break here must NOT sink the whole Windows package - the app
+        # still ships, and Ambit1/2 endpoints degrade exactly as they did before this step existed
+        # ("ambit_legacy_cli is not built"). The step below verifies whether the binary was made.
+        continue-on-error: true
         run: |
           # MSYS2's mingw-w64-x86_64-toolchain ships gcc.exe, not a bare `cc` alias -
           # build.sh's "${CC:-cc}" would otherwise fail with "command not found".
           export CC=gcc
           ./tools/vendor/ambit_legacy_cli/build.sh
-          test -f tools/vendor/ambit_legacy_cli/ambit_legacy_cli.exe
+      - name: Note whether ambit_legacy_cli.exe built
+        shell: msys2 {0}
+        run: |
+          if [ -f tools/vendor/ambit_legacy_cli/ambit_legacy_cli.exe ]; then
+            echo "ambit_legacy_cli.exe built - Ambit1/2 support included."
+          else
+            echo "::warning::ambit_legacy_cli.exe did NOT build; the Windows package ships "\
+                 "without Ambit1/2 support (Ambit3/Traverse/Kailash unaffected)."
+          fi
 
       - name: Freeze the watch helper (PyInstaller)
         run: |

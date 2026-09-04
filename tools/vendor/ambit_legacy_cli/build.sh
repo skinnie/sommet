@@ -56,6 +56,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
 elif [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
     HIDAPI_DRIVER=windows
     OUT="$HERE/ambit_legacy_cli.exe"          # legacy_link.py._binary_path() looks for this
+    # MinGW has no <endian.h> either, so libambit's le16toh/htole32/... are undeclared and every
+    # byte-swapping source fails to compile - same class of break macOS hit, fixed the same way:
+    # force-include a Windows endian shim so the vendored sources stay byte-identical to upstream.
+    EXTRA_CMAKE+=(-DCMAKE_C_FLAGS="-include $HERE/endian_compat_win.h")
+    EXTRA_CC+=(-include "$HERE/endian_compat_win.h")
     # PE has no rpath concept - Windows resolves libambit.dll by searching the loading exe's
     # own directory first, so the CI step copies the built DLL next to ambit_legacy_cli.exe
     # (same directory ambit_backend.spec's glob("libambit*") already bundles wholesale).
