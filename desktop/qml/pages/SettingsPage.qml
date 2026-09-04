@@ -540,17 +540,36 @@ PageFlickable {
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.parent.width - 60
                         wrapMode: Text.WordWrap
-                        text: qsTr("Show Ambit3 morning HRV as its own line. This is a spot " +
-                                   "reading you take (a 5+5 or lie-still test) - a different " +
-                                   "measurement from the overnight value, tracked on its own, " +
-                                   "not compared to it.")
+                        text: qsTr("Ambit3 morning HRV — the watch's own 5+5 / lie-still test. " +
+                                   "Turn on to set it up and show it on the Health page. Off by " +
+                                   "default so intervals.icu-only users aren't bothered.")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeBody
+                    }
+                }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedSwitch {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: HealthService.coospoHrvEnabled
+                        onToggled: HealthService.coospoHrvEnabled = checked
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.parent.width - 60
+                        wrapMode: Text.WordWrap
+                        text: qsTr("COOSPO / heart-rate-strap morning HRV — measure directly over " +
+                                   "Bluetooth, no watch. Turn on to show the Measure button below " +
+                                   "and on the Health page.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeBody
                     }
                 }
 
-                // --- Ambit3 morning-HRV: set up the watch app + import a reading. Kept here in
-                // Settings (it's setup, not a daily glance); a finished import jumps to Health. ---
+                // --- Ambit3 morning-HRV setup (shown only when its toggle is on). ---
+                Column {
+                    width: parent.width; spacing: Theme.spacingSmall
+                    visible: HealthService.ambitHrvEnabled
                 Rectangle { width: parent.width; height: 1; color: Theme.mutedText; opacity: 0.2 }
                 Text { text: qsTr("Morning HRV from your Ambit3")
                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
@@ -591,6 +610,51 @@ PageFlickable {
                     visible: HealthService.hrvInstallMessage.length > 0
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
                     text: HealthService.hrvInstallMessage
+                }
+                }  // end Ambit3 setup Column
+
+                // --- Morning HRV from a BLE heart-rate strap (shown only when its toggle is on). ---
+                Column {
+                    width: parent.width; spacing: Theme.spacingSmall
+                    visible: HealthService.coospoHrvEnabled
+                Rectangle { width: parent.width; height: 1; color: Theme.mutedText; opacity: 0.2 }
+                Text { text: qsTr("Morning HRV from a heart-rate strap (COOSPO HW9)")
+                       color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    text: qsTr("Wear the strap, sit or lie still, and tap Measure. It reads ~2 min " +
+                               "of heart-beats directly over Bluetooth and records your RMSSD on " +
+                               "the Morning HRV line. No watch, no 5+5 needed.")
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: HealthService.strapMeasuring ? qsTr("Measuring…")
+                                                           : qsTr("Measure HRV (COOSPO)")
+                        enabled: !HealthService.strapMeasuring
+                        onClicked: { strapMeasure.requested = true; HealthService.readStrapHrv(120) }
+                    }
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    visible: HealthService.strapMessage.length > 0
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
+                    text: HealthService.strapMessage
+                }
+                }  // end COOSPO strap Column
+
+                // When a strap measurement finishes (busy → idle) and it succeeded, jump to Health.
+                QtObject { id: strapMeasure; property bool requested: false }
+                Connections {
+                    target: HealthService
+                    function onChanged() {
+                        if (strapMeasure.requested && !HealthService.strapMeasuring) {
+                            strapMeasure.requested = false
+                            if (HealthService.latestHrvAmbit > 0)
+                                NavBus.navigate("health")
+                        }
+                    }
                 }
                 // When the import finishes, open the Health page to show the new reading.
                 QtObject { id: hrvImport; property bool requested: false }

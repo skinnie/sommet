@@ -1184,6 +1184,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_apps_logging_write(body)
         elif self.path == "/api/hrv/install":
             self._handle_hrv_install(body)
+        elif self.path == "/api/hrv/strap":
+            self._handle_hrv_strap(body)
         elif self.path == "/api/apps/import":
             self._handle_apps_import(body)
         elif self.path == "/api/workout/compile":
@@ -5261,6 +5263,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         result["hrvModeIndex"] = hrv_idx
         self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_hrv_strap(self, body):
+        """POST /api/hrv/strap - read a morning-HRV spot reading straight from a BLE heart-rate
+        strap that streams R-R (André's COOSPO HW9, or any strap with the RR flag) and return the
+        computed HRV. No watch involved. Body: {"mac": str} or {"name": str} (default name "HW9"),
+        optional {"seconds": int, default 120}. Runs tools/hrv_strap.py (bleak) and returns its
+        JSON: {ok, mac, seconds, rr_ms, rmssd_ms, sdnn_ms, mean_hr_bpm, pnn50_pct, ...}. The app's
+        HealthService stores the rmssd on the Morning-HRV line (health/watchHrv)."""
+        body = body or {}
+        mac = body.get("mac")
+        name = body.get("name")
+        seconds = int(body.get("seconds", 120))
+        seconds = max(20, min(600, seconds))   # sane bounds
+        args = ["--json", "--seconds", str(seconds)]
+        if mac:
+            args += ["--mac", str(mac)]
+        else:
+            args += ["--name", str(name or "HW9")]
+        # BLE scan + capture can take the whole window; give run_tool headroom over `seconds`.
+        code, out, err = run_tool("hrv_strap.py", args, timeout=seconds + 60)
+        info = self._parse_last_json_line(out)
+        if info is None:
+            self._send_json(502, {"ok": False, "error": "hrv_strap.py produced no parseable JSON "
+                                   "(is the strap on/worn and in range?)", "raw_output": out,
+                                   "stderr": err})
+            return
+        self._send_json(200 if info.get("ok") else 502, info)
 
     # --- Training Program (tools/training_plan.py - see its docstring for the whole
     # design: workouts scheduled on calendar dates as date-gated Suunto Apps, the

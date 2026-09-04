@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
 import { fetchWellness, WellnessDay } from '../services/WellnessService';
+import { isHrStrapAvailable, measureHrv, type HrStrapReading } from '../services/HrStrapService';
 
 // Health — the Android counterpart of desktop/qml/pages/HealthPage.qml (André, 2026-08-26:
 // "port everything to android"). Resting HR, HRV, sleep, steps and VO2max from intervals.icu's
@@ -55,6 +56,27 @@ export default function HealthScreen() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Morning HRV straight from a BLE strap (COOSPO HW9) - the mobile equivalent of the desktop's
+  // "Measure HRV (COOSPO)". The native HrStrap module does the BLE; hrv.ts does the math.
+  const [measuring, setMeasuring] = useState(false);
+  const [strapResult, setStrapResult] = useState<HrStrapReading | null>(null);
+  const [strapErr, setStrapErr] = useState('');
+  const measureStrap = useCallback(async () => {
+    setMeasuring(true); setStrapErr(''); setStrapResult(null);
+    try {
+      const r = await measureHrv(120, 'HW9');
+      if (r.ok) setStrapResult(r);
+      else setStrapErr('Strap not reading - wear it snugly and try again.');
+    } catch (e: any) {
+      const m = String(e?.message ?? e);
+      setStrapErr(m === 'native-missing'
+        ? 'Heart-rate-strap support needs a newer build.'
+        : `Measurement failed: ${m}`);
+    } finally {
+      setMeasuring(false);
+    }
+  }, []);
+
   // Per metric: the points that actually have a value. Most wellness days are null for most
   // fields, so each chart gets its own filtered series rather than one shared date axis.
   const seriesFor = useMemo(() => {
@@ -82,6 +104,44 @@ export default function HealthScreen() {
       {error.length > 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.error, fontSize: v3Type.body }}>{error}</Text>
+        </View>
+      )}
+
+      {/* Morning HRV from a heart-rate strap (COOSPO HW9) - no watch needed. */}
+      {isHrStrapAvailable() && (
+        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
+          <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '700' }}>
+            Morning HRV (heart-rate strap)
+          </Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
+            Wear the strap (COOSPO HW9), sit or lie still, and tap Measure. It reads ~2 min of
+            heart-beats over Bluetooth and computes your RMSSD.
+          </Text>
+          <TouchableOpacity
+            disabled={measuring}
+            onPress={measureStrap}
+            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
+                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
+                     borderRadius: v3Radius.card, borderWidth: 1,
+                     borderColor: measuring ? t.border : t.primary, opacity: measuring ? 0.6 : 1 }}>
+            <Text style={{ color: t.primary, fontSize: v3Type.body }}>
+              {measuring ? 'Measuring… stay still' : 'Measure HRV (COOSPO)'}
+            </Text>
+          </TouchableOpacity>
+          {strapResult && (
+            <Text style={{ color: t.text, fontSize: v3Type.subtitle, fontWeight: '700',
+                           marginTop: v3Spacing.medium }}>
+              RMSSD {Math.round(strapResult.rmssdMs ?? 0)} ms
+              <Text style={{ color: t.mutedText, fontSize: v3Type.body, fontWeight: '400' }}>
+                {'  ·  '}HR {Math.round(strapResult.meanHrBpm ?? 0)} bpm · {strapResult.nBeats} beats
+              </Text>
+            </Text>
+          )}
+          {strapErr.length > 0 && (
+            <Text style={{ color: t.error, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
+              {strapErr}
+            </Text>
+          )}
         </View>
       )}
 

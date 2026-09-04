@@ -82,9 +82,10 @@ void HealthService::setHrvSource(const QString &s)
 
 bool HealthService::ambitHrvEnabled() const
 {
-    // The Ambit3 morning/spot HRV line is opt-in but on by default for anyone who records it;
-    // its data (health/watchHrv) is written by ActivityService after a sync regardless.
-    return QSettings().value(QStringLiteral("health/ambitHrvEnabled"), true).toBool();
+    // Opt-IN (default off): an intervals.icu-only user shouldn't see the Ambit3 5+5 HRV UI or line
+    // at all. Ambit users turn it on in Settings. Data (health/watchHrv) is still written by a
+    // sync regardless; the toggle only governs whether the feature/line is shown.
+    return QSettings().value(QStringLiteral("health/ambitHrvEnabled"), false).toBool();
 }
 
 void HealthService::setAmbitHrvEnabled(bool on)
@@ -92,6 +93,22 @@ void HealthService::setAmbitHrvEnabled(bool on)
     if (on == ambitHrvEnabled())
         return;
     QSettings().setValue(QStringLiteral("health/ambitHrvEnabled"), on);
+    emit changed();
+    rebuild();
+}
+
+bool HealthService::coospoHrvEnabled() const
+{
+    // Opt-in (default off): only strap users see the "Measure HRV (COOSPO)" UI. Independent of
+    // the Ambit toggle; both feed the same Morning-HRV line (health/watchHrv).
+    return QSettings().value(QStringLiteral("health/coospoHrvEnabled"), false).toBool();
+}
+
+void HealthService::setCoospoHrvEnabled(bool on)
+{
+    if (on == coospoHrvEnabled())
+        return;
+    QSettings().setValue(QStringLiteral("health/coospoHrvEnabled"), on);
     emit changed();
     rebuild();
 }
@@ -170,7 +187,9 @@ void HealthService::rebuild()
     const QString hsrc = hrvSource();
     const QVariantList overnightHrv = (hsrc == QStringLiteral("garmin")) ? m_gHrv : m_iHrv;
     m_hrv = mergeByDate({overnightHrv, manualSeries(QStringLiteral("hrv"))});
-    m_hrvAmbit = ambitHrvEnabled() ? watchHrvSeries() : QVariantList{};
+    // The Morning-HRV line holds readings from either capture path (Ambit 5+5 or COOSPO strap) —
+    // both write health/watchHrv — so show it if either feature is enabled.
+    m_hrvAmbit = (ambitHrvEnabled() || coospoHrvEnabled()) ? watchHrvSeries() : QVariantList{};
     m_bodyBattery = mergeByDate({m_gBattery});
     // Sleep is a single chosen source (not merged), or off.
     const QString sp = sleepProvider();
@@ -326,6 +345,57 @@ void HealthService::installHrvApp()
             const QString e = obj.value(QStringLiteral("error")).toString();
             m_hrvInstallMessage = e.isEmpty() ? tr("Install failed. Please try again.")
                                               : tr("Install failed: %1").arg(e);
+        }
+        emit changed();
+    });
+}
+
+void HealthService::readStrapHrv(int seconds)
+{
+    if (m_strapMeasuring)
+        return;
+    m_strapMeasuring = true;
+    m_strapMessage = tr("Measuring… wear the strap and stay still for %1s.").arg(seconds);
+    emit changed();
+
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/hrv/strap")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    const QByteArray payload = QJsonDocument(QJsonObject{
+        {QStringLiteral("seconds"), seconds}}).toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, payload);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        m_strapMeasuring = false;
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError && obj.isEmpty()) {
+            m_strapMessage = tr("Couldn't reach the strap. Make sure it's on and worn.");
+        } else if (obj.value(QStringLiteral("ok")).toBool()
+                   && obj.value(QStringLiteral("rmssd_ms")).isDouble()) {
+            const double rmssd = obj.value(QStringLiteral("rmssd_ms")).toDouble();
+            const double hr = obj.value(QStringLiteral("mean_hr_bpm")).toDouble();
+            // Store on the Morning-HRV line (same store the watch's 5+5 uses).
+            const QString date = QDate::currentDate().toString(Qt::ISODate);
+            const QString raw = QSettings().value(QStringLiteral("health/watchHrv")).toString();
+            QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
+            bool replaced = false;
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr.at(i).toObject().value(QStringLiteral("date")).toString() == date) {
+                    arr[i] = QJsonObject{{QStringLiteral("date"), date},
+                                         {QStringLiteral("value"), rmssd}};
+                    replaced = true; break;
+                }
+            if (!replaced)
+                arr.append(QJsonObject{{QStringLiteral("date"), date},
+                                       {QStringLiteral("value"), rmssd}});
+            QSettings().setValue(QStringLiteral("health/watchHrv"),
+                QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+            m_strapMessage = tr("Saved: RMSSD %1 ms (HR %2 bpm).")
+                                 .arg(qRound(rmssd)).arg(qRound(hr));
+            rebuild();   // refresh the Morning-HRV series/tile from health/watchHrv
+        } else {
+            const QString e = obj.value(QStringLiteral("error")).toString();
+            m_strapMessage = e.isEmpty() ? tr("Measurement failed. Try again.")
+                                         : tr("Failed: %1").arg(e);
         }
         emit changed();
     });
