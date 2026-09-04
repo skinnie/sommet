@@ -7,6 +7,13 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-04: Windows packaging fix (0.2.31)
+
+Same as 0.2.30, plus a Windows-build fix: the Windows desktop package failed to build the
+Ambit1/2 helper (`ambit_legacy_cli`) because the vendored libambit's old CMake minimum is now
+rejected by the CI's CMake. The build script already worked around this on macOS; it now does so
+on every platform, so the Windows `.zip` builds again. No app behaviour change from 0.2.30.
+
 ## 2026-09-04: average-user UX pass, Training Program native cards, morning HRV (0.2.30)
 
 A release focused on making the app clearer for a non-technical owner, plus two feature
