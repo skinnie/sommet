@@ -37,14 +37,17 @@ LIBAMBIT_DIR="$HERE/../openambit_libambit"
 # step that calls this script. UNVERIFIED end-to-end: written and reasoned through, but this
 # repo has no Windows machine to actually run it on - the next Windows CI run is the real
 # test, not this script by itself.
-EXTRA_CMAKE=()
+# libambit's CMakeLists declares a cmake_minimum_required below 3.5, which CMake 4 (and now the
+# Windows CI runner's CMake) refuses outright - CMAKE_POLICY_VERSION_MINIMUM re-admits it without
+# editing upstream. Set for EVERY platform: macOS already needed it, the Windows job hit the same
+# wall on 2026-09-04 (v0.2.30 release), and it future-proofs Linux against the same CMake bump.
+EXTRA_CMAKE=(-DCMAKE_POLICY_VERSION_MINIMUM=3.5)
 EXTRA_CC=()
 EXTRA_LINK=()
 OUT="$HERE/ambit_legacy_cli"
 if [ "$(uname -s)" = "Darwin" ]; then
     HIDAPI_DRIVER=system
-    EXTRA_CMAKE+=(-DCMAKE_POLICY_VERSION_MINIMUM=3.5
-                  -DCMAKE_C_FLAGS="-include $HERE/endian_compat_apple.h")
+    EXTRA_CMAKE+=(-DCMAKE_C_FLAGS="-include $HERE/endian_compat_apple.h")
     EXTRA_CC+=(-include "$HERE/endian_compat_apple.h")
     if command -v pkg-config >/dev/null; then
         EXTRA_CC+=($(pkg-config --cflags hidapi 2>/dev/null || true))
