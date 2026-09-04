@@ -108,16 +108,26 @@ if _hidapi_dylib and Path(_hidapi_dylib).is_file():
 # at tools/vendor/ambit_legacy_cli/ because legacy_link._binary_path() resolves it relative to
 # the bundled tools/ dir. Its libambit dylib/so goes to the root, where the loader finds it.
 _legacy_dir = REPO / "tools" / "vendor" / "ambit_legacy_cli"
+_legacy_cli_name = None
 for _name in ("ambit_legacy_cli", "ambit_legacy_cli.exe"):
     _legacy_cli = _legacy_dir / _name
     if _legacy_cli.is_file():
         binaries.append((str(_legacy_cli), "tools/vendor/ambit_legacy_cli"))
+        _legacy_cli_name = _name
         break
 _libambit_build = REPO / "tools" / "vendor" / "openambit_libambit" / "build"
 if _libambit_build.is_dir():
     for _lib in sorted(_libambit_build.glob("libambit*")):
         if _lib.is_file() and not _lib.is_symlink():
             binaries.append((str(_lib), "."))
+            # Windows only: backendprocess.cpp's DYLD_LIBRARY_PATH trick (below) is macOS-
+            # specific, and Windows has no PATH injection of its own for this child process,
+            # so root-only placement leaves ambit_legacy_cli.exe unable to find libambit.dll
+            # at runtime. Windows always checks the LAUNCHING exe's own directory first, no
+            # env var needed - so also drop a copy right next to the .exe. Harmless duplicate
+            # on every other platform; only actually taken when _legacy_cli_name ends in .exe.
+            if _legacy_cli_name == "ambit_legacy_cli.exe":
+                binaries.append((str(_lib), "tools/vendor/ambit_legacy_cli"))
 
 a = Analysis(
     [str(BACKEND / "frozen_entry.py")],

@@ -74,7 +74,13 @@ Item {
                         visible: HealthService.latestSteps > 0
                         Text { text: qsTr("Steps (latest day)"); color: Theme.mutedText
                                font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestSteps).toLocaleString()
+                        // Explicit locale + format, not the bare no-arg toLocaleString(): besides
+                        // following the ambient OS locale (see DateFormat.qml's note), the
+                        // no-arg form switches to scientific notation past 6 digits (e.g.
+                        // "1,23457e+06"), which is a step count, never a number anyone wants in
+                        // scientific notation.
+                        Text { text: Math.round(HealthService.latestSteps)
+                                     .toLocaleString(Qt.locale("en"), 'f', 0)
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
                     }
                     Column {
@@ -90,8 +96,9 @@ Item {
                         // The Ambit3's own morning/spot rMSSD - a DIFFERENT measurement from the
                         // overnight value above, so it gets its own tile (and its own coloured
                         // line below), tracked against its own baseline, not compared to it.
-                        visible: HealthService.ambitHrvEnabled && HealthService.latestHrvAmbit > 0
-                        Text { text: qsTr("Morning HRV (Ambit3)"); color: Theme.mutedText
+                        visible: (HealthService.ambitHrvEnabled || HealthService.coospoHrvEnabled)
+                                 && HealthService.latestHrvAmbit > 0
+                        Text { text: qsTr("Morning HRV"); color: Theme.mutedText
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: Math.round(HealthService.latestHrvAmbit) + qsTr(" ms")
                                color: Theme.text
@@ -159,13 +166,14 @@ Item {
                 width: parent.width
                 // Separate card, separate colour: the Ambit3 morning/spot HRV line is its own
                 // measurement (compare it to its own history, not to the overnight line above).
-                visible: HealthService.ambitHrvEnabled && HealthService.hrvAmbit.length > 1
+                visible: (HealthService.ambitHrvEnabled || HealthService.coospoHrvEnabled)
+                         && HealthService.hrvAmbit.length > 1
                 variant: "flat"   // trend chart
                 height: 220
                 MetricChart {
                     anchors.fill: parent
                     anchors.margins: Theme.spacingSmall
-                    label: qsTr("Morning HRV (Ambit3)")
+                    label: qsTr("Morning HRV")
                     unit: qsTr(" ms")
                     series: HealthService.hrvAmbit
                 }

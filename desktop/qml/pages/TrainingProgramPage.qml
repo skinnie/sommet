@@ -111,8 +111,11 @@ Item {
 
     readonly property var weekdayLabels: {
         const labels = []
+        // Pinned to English (Qt.locale("en"), not the ambient Qt.locale()) - see
+        // desktop/qml/DateFormat.qml's note: this app has no translations, so an unpinned
+        // locale can swap these letters to a different script entirely (e.g. Chinese).
         for (let i = 1; i <= 7; i++)
-            labels.push(Qt.locale().dayName(i, Locale.NarrowFormat))
+            labels.push(Qt.locale("en").dayName(i, Locale.NarrowFormat))
         return labels
     }
 
@@ -332,7 +335,8 @@ Item {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 text: new Date(root.viewYear, root.viewMonth, 1)
-                                      .toLocaleDateString(Qt.locale(), "MMMM yyyy")
+                                      // Pinned to English - see DateFormat.qml's note.
+                                      .toLocaleDateString(Qt.locale("en"), "MMMM yyyy")
                                 color: Theme.text
                                 font.pixelSize: Theme.fontSizeHeading
                                 font.bold: true

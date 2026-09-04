@@ -206,10 +206,13 @@ Item {
 
     readonly property var weekdayLabels: {
         const labels = []
-        // Qt.locale().dayName(1..7): 1=Monday - locale-aware, same "single letter" read as
-        // the reference screenshot's own M T W T F S S, without hardcoding English.
+        // Qt.locale("en").dayName(1..7): 1=Monday - single-letter M T W T F S S, matching the
+        // reference screenshot. Pinned to English (not the ambient Qt.locale()) since this app
+        // has no translations at all - an unpinned locale doesn't just pick a different word for
+        // the same letter, it can swap script entirely (e.g. 一 for Monday on a Chinese Windows
+        // region setting) next to an otherwise all-English calendar. See DateFormat.qml.
         for (let i = 1; i <= 7; i++)
-            labels.push(Qt.locale().dayName(i, Locale.NarrowFormat))
+            labels.push(Qt.locale("en").dayName(i, Locale.NarrowFormat))
         return labels
     }
 
@@ -264,7 +267,8 @@ Item {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
                                 text: new Date(root.viewYear, root.viewMonth, 1)
-                                      .toLocaleDateString(Qt.locale(), "MMMM yyyy")
+                                      // Pinned to English - see DateFormat.qml's note.
+                                      .toLocaleDateString(Qt.locale("en"), "MMMM yyyy")
                                 color: Theme.text
                                 font.pixelSize: Theme.fontSizeHeading
                                 font.bold: true
@@ -518,8 +522,9 @@ Item {
     ThemedDialog {
         id: dayDialog
         title: root.plannerDay > 0
+               // Pinned to English - see DateFormat.qml's note.
                ? Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
-                               Qt.locale(), Locale.LongFormat)
+                               Qt.locale("en"), Locale.LongFormat)
                : qsTr("Day")
         anchors.centerIn: Overlay.overlay
         standardButtons: Dialog.Close
@@ -651,8 +656,9 @@ Item {
                 color: Theme.mutedText
                 text: qsTr("Choose the sport and shape for %1.\n\n\"Create workout\" opens "
                             + "the builder, ready to fine-tune and install.")
+                    // Pinned to English - see DateFormat.qml's note.
                     .arg(Qt.formatDate(new Date(root.viewYear, root.viewMonth, root.plannerDay),
-                                        Qt.locale(), Locale.LongFormat))
+                                        Qt.locale("en"), Locale.LongFormat))
             }
 
             // Activity dropdown

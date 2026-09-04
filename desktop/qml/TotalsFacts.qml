@@ -51,7 +51,11 @@ QtObject {
     readonly property real beer: 150              // 330 ml lager
 
     function _n(value, decimals) {
-        return Number(value).toLocaleString(Qt.locale(),
+        // Pinned to English (Qt.locale("en"), not the ambient Qt.locale()) - same reasoning
+        // as DateFormat.qml: this app has no translations, so an unpinned locale can silently
+        // swap the thousands/decimal separators (or, on some locales, the digit glyphs
+        // themselves) into something inconsistent with the rest of this all-English page.
+        return Number(value).toLocaleString(Qt.locale("en"),
                                             'f', decimals === undefined ? 0 : decimals)
     }
 

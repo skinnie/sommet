@@ -15,9 +15,20 @@ import QtQuick
 //
 // Times are 24-hour for the same reason - "1:31 AM" is the same en_US artefact.
 //
-// Deliberately NOT applied to the spelled-out formats elsewhere ("MMMM yyyy" on the Calendar
-// header, "ddd" on the weather strip): those are words, and translating words is a language
-// question this change has no business answering.
+// UPDATE 2026-09-04: the spelled-out formats elsewhere ("MMMM yyyy" on the Calendar header,
+// "ddd" on the weather strip, day-name letters) were deliberately left locale-derived - the
+// reasoning above was "those are words, translating words is a language question this app has
+// no business answering". A real Windows user with a Chinese regional format (not language -
+// their Windows display language was English) proved that reasoning wrong: Qt.locale() with
+// no argument does not just swap word CHOICE, it can swap SCRIPT - 周六/周日 next to an
+// otherwise all-English Home page, 一/二/三 for weekday letters, 九月 for "September". This
+// app ships no translations at all (main.cpp loads no QTranslator - every qsTr() string is
+// its English source, everywhere, always), so a spelled-out date going non-Latin is never a
+// deliberate localization, only ambient-locale leakage into an English-only UI. Every such
+// site (CalendarPage/TrainingProgramPage's weekday letters and month header, PlanRoutePage's
+// forecast day strip, WeatherViewModel's own forecast day strip) now pins Qt.locale("en")
+// instead of the ambient one, same principle as this file's numeric dates - a label should
+// not silently change script because of an OS region setting nobody here chose.
 QtObject {
     // 27/08/2026 - the everyday date, used by every activity card, row and summary line.
     function date(value) {

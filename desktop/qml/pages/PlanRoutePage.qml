@@ -363,7 +363,8 @@ Item {
     }
     function planDateDisplay() {
         var d = planDate.length ? new Date(planDate + "T00:00:00") : new Date()
-        return d.toLocaleDateString(Qt.locale(), "ddd d MMM")
+        // Pinned to English - see DateFormat.qml's note.
+        return d.toLocaleDateString(Qt.locale("en"), "ddd d MMM")
     }
     function shiftDay(delta) {
         var base = planDate.length ? new Date(planDate + "T00:00:00") : new Date()

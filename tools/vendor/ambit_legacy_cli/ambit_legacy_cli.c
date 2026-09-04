@@ -47,6 +47,7 @@
  *   ambit_legacy_cli device-info
  *   ambit_legacy_cli settings
  *   ambit_legacy_cli logs OUTDIR              # writes OUTDIR/<n>.gpx + prints an index
+ *   ambit_legacy_cli gps-orbit-status
  *   ambit_legacy_cli gps-orbit-write FILE
  *   ambit_legacy_cli poi-add NAME LAT LON     # preserves existing waypoints
  *   ambit_legacy_cli poi-clear                # writes back 0 waypoints
@@ -488,6 +489,61 @@ static int cmd_logs(const char *outdir) {
     libambit_close(dev);
     libambit_free_enumeration(devices);
     return ok ? 0 : 1;
+}
+
+/* Read-only status query, added 2026-09-04: desktop's /api/agps/status and /api/agps/update
+ * never had an Ambit1/2 branch at all - they always shelled out to tools/sgee.py, which is
+ * the SBEM path (0x0b21 memory map + an SBEM-flavored device-info call) and this family
+ * doesn't speak SBEM, so the Home page's "GPS orbit" card just showed "Failed" for every
+ * legacy watch. libambit_gps_orbit_header_read() is NOT new code, though: it's the exact
+ * call cmd_gps_orbit_write() below already makes internally (device_driver_ambit.c's own
+ * gps_orbit_write() reads the header first to decide whether the watch already has this
+ * generation), so this only exposes an already hardware-exercised call as its own command
+ * instead of writing a fresh untested one. Layout is the driver's own 8-byte convention
+ * (device_driver_ambit.c: reply_data[1..8], i.e. one byte shorter than sgee.py's SBEM 9-byte
+ * reply because that extra leading byte there is a separate SBEM validity flag this older
+ * protocol doesn't send) - [u16 LE year][u8 month][u8 day][u32 LE seconds-since-midnight
+ * UTC]. All-zero is the real "no orbit data written yet" reply, not an error - same
+ * decode_orbit_head() convention sgee.py already uses for the Ambit3-family SBEM reply.
+ * "glonass": {"supported": false} always - this family has no GlonassSGEE region (same fact
+ * cmd_gps_orbit_write's own docstring below already established), so there's nothing to
+ * probe; matches the shape sgee.py's glonass_status() returns for a watch without the
+ * region, which is what desktop/backend/server.py's _handle_agps_update() branches on.
+ * UNVERIFIED against real hardware as its own standalone command - flag for HW confirmation
+ * on an Ambit1/2 before shipping the "wrote"/"Updated" UI states that build on this. */
+static int cmd_gps_orbit_status(void) {
+    ambit_device_info_t *devices, *info;
+    ambit_object_t *dev = open_selected_device(&devices, &info);
+    if (!dev) {
+        fputs("@@JSON@@\n", stdout);
+        printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n");
+        return 1;
+    }
+
+    uint8_t header[8] = {0};
+    int rc = libambit_gps_orbit_header_read(dev, header);
+    fputs("@@JSON@@\n", stdout);
+    if (rc != 0) {
+        printf("{\"ok\": false, \"error\": \"failed to read GPS orbit header\"}\n");
+        libambit_close(dev);
+        libambit_free_enumeration(devices);
+        return 1;
+    }
+
+    unsigned year = header[0] | (header[1] << 8);
+    unsigned month = header[2], day = header[3];
+    unsigned seconds = header[4] | (header[5] << 8) | (header[6] << 16) | ((unsigned)header[7] << 24);
+    int valid = month >= 1 && month <= 12 && day >= 1 && day <= 31 && seconds < 86400;
+    if (valid) {
+        printf("{\"ok\": true, \"valid\": true, \"date\": \"%04u-%02u-%02u\", "
+               "\"time\": \"%02u:%02u:%02u\", \"glonass\": {\"supported\": false}}\n",
+               year, month, day, seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    } else {
+        printf("{\"ok\": true, \"valid\": false, \"glonass\": {\"supported\": false}}\n");
+    }
+    libambit_close(dev);
+    libambit_free_enumeration(devices);
+    return 0;
 }
 
 /* Real write, added 2026-08-22 for André's Ambit1: the legacy family has no 0x0b21 memory
@@ -1326,7 +1382,7 @@ int main(int argc, char **argv) {
     }
     if (argc < 2) {
         fprintf(stderr, "usage: %s [--device PID] device-info|settings|logs OUTDIR|"
-                "gps-orbit-write FILE\n", argv[0]);
+                "gps-orbit-status|gps-orbit-write FILE\n", argv[0]);
         return 2;
     }
     if (strcmp(argv[1], "device-info") == 0) return cmd_device_info();
@@ -1336,6 +1392,7 @@ int main(int argc, char **argv) {
         if (argc < 3) { fprintf(stderr, "usage: %s logs OUTDIR\n", argv[0]); return 2; }
         return cmd_logs(argv[2]);
     }
+    if (strcmp(argv[1], "gps-orbit-status") == 0) return cmd_gps_orbit_status();
     if (strcmp(argv[1], "gps-orbit-write") == 0) {
         if (argc < 3) { fprintf(stderr, "usage: %s gps-orbit-write FILE\n", argv[0]); return 2; }
         return cmd_gps_orbit_write(argv[2]);

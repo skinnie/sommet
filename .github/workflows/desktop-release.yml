@@ -98,6 +98,32 @@ jobs:
           $dll = Resolve-Path "hidapi-win\x64\hidapi.dll"
           "HIDAPI_DLL=$dll" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "hidapi.dll -> $dll"
+
+      # Ambit1/2 (routes, POIs, personal settings, GPS orbit) go through the compiled
+      # ambit_legacy_cli, which this job never built - so every packaged Windows build shipped
+      # without it and those endpoints 502'd with "ambit_legacy_cli is not built" (real bug,
+      # reported live by a Windows Ambit2 user, 2026-09-04; macOS got this same step
+      # 2026-08-27, Windows was simply missed). build.sh expects a Unix-y build environment
+      # (Makefiles, a `cc` that understands GNU-style flags) that Windows doesn't have
+      # natively, so this runs it inside an MSYS2 MinGW64 shell - see build.sh's own Windows
+      # branch for HIDAPI_DRIVER=windows (the native Win32 HID backend, needs no libusb).
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-libiconv
+      - name: Build ambit_legacy_cli (Ambit1/2 support)
+        shell: msys2 {0}
+        run: |
+          # MSYS2's mingw-w64-x86_64-toolchain ships gcc.exe, not a bare `cc` alias -
+          # build.sh's "${CC:-cc}" would otherwise fail with "command not found".
+          export CC=gcc
+          ./tools/vendor/ambit_legacy_cli/build.sh
+          test -f tools/vendor/ambit_legacy_cli/ambit_legacy_cli.exe
+
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip

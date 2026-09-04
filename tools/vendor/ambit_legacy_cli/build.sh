@@ -24,8 +24,23 @@ LIBAMBIT_DIR="$HERE/../openambit_libambit"
 #     snapshot, so we link the platform's own modern hidapi instead (HIDAPI_DRIVER=system).
 #   * libambit's CMakeLists declares a cmake_minimum_required below 3.5, which CMake 4
 #     refuses outright; CMAKE_POLICY_VERSION_MINIMUM re-admits it without editing upstream.
+# Windows (desktop-release.yml's windows job, 2026-09-04): never had a build step at all -
+# the Windows CI job only froze ambit-backend.exe, so ambit_legacy_cli.exe never existed in
+# a shipped build and every Ambit1/2 endpoint 502'd with "ambit_legacy_cli is not built" on
+# Windows specifically (macOS got its own build step 2026-08-27; Windows was simply missed).
+# HIDAPI_DRIVER=windows: the vendored hid-windows.c talks straight to the native Win32 HID
+# API (SetupAPI + hid.dll), so - unlike Linux/macOS above - this needs no libusb at all, only
+# `iconv` (this family's text fields are ISO-8859, see json_str()'s own comment; MSYS2's
+# mingw-w64-x86_64-libiconv ships it) and `setupapi` (part of the MinGW/Windows SDK import
+# libs already, no separate install). Expects an MSYS2 MINGW64 shell (uname -s reports
+# MINGW64_NT-...) with mingw-w64-x86_64-{toolchain,cmake,libiconv} installed - see the CI
+# step that calls this script. UNVERIFIED end-to-end: written and reasoned through, but this
+# repo has no Windows machine to actually run it on - the next Windows CI run is the real
+# test, not this script by itself.
 EXTRA_CMAKE=()
 EXTRA_CC=()
+EXTRA_LINK=()
+OUT="$HERE/ambit_legacy_cli"
 if [ "$(uname -s)" = "Darwin" ]; then
     HIDAPI_DRIVER=system
     EXTRA_CMAKE+=(-DCMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -34,19 +49,27 @@ if [ "$(uname -s)" = "Darwin" ]; then
     if command -v pkg-config >/dev/null; then
         EXTRA_CC+=($(pkg-config --cflags hidapi 2>/dev/null || true))
     fi
+    EXTRA_LINK+=(-Wl,-rpath,"$LIBAMBIT_DIR/build")
+elif [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+    HIDAPI_DRIVER=windows
+    OUT="$HERE/ambit_legacy_cli.exe"          # legacy_link.py._binary_path() looks for this
+    # PE has no rpath concept - Windows resolves libambit.dll by searching the loading exe's
+    # own directory first, so the CI step copies the built DLL next to ambit_legacy_cli.exe
+    # (same directory ambit_backend.spec's glob("libambit*") already bundles wholesale).
 else
     # HIDAPI_DRIVER=libusb, not the default libudev/hidraw backend: real, 2026-08-22 - see
     # the note below, kept from the original Linux-only version of this script.
     HIDAPI_DRIVER=libusb
+    EXTRA_LINK+=(-Wl,-rpath,"$LIBAMBIT_DIR/build")
 fi
 
 cmake -S "$LIBAMBIT_DIR" -B "$LIBAMBIT_DIR/build" -DCMAKE_BUILD_TYPE=Release \
       -DHIDAPI_DRIVER="$HIDAPI_DRIVER" "${EXTRA_CMAKE[@]}"
 cmake --build "$LIBAMBIT_DIR/build" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 
-"${CC:-cc}" -O2 -Wall "${EXTRA_CC[@]}" -I"$LIBAMBIT_DIR" -o "$HERE/ambit_legacy_cli" \
+"${CC:-cc}" -O2 -Wall "${EXTRA_CC[@]}" -I"$LIBAMBIT_DIR" -o "$OUT" \
     "$HERE/ambit_legacy_cli.c" "$HERE/ambit1_sport_mode.c" \
-    -L"$LIBAMBIT_DIR/build" -lambit -lm -Wl,-rpath,"$LIBAMBIT_DIR/build"
+    -L"$LIBAMBIT_DIR/build" -lambit -lm "${EXTRA_LINK[@]}"
 
 echo ""
-echo "Binary: $HERE/ambit_legacy_cli"
+echo "Binary: $OUT"

@@ -37,7 +37,13 @@ QtObject {
     function dayLabel(isoDate, index) {
         if (index === 0) return qsTr("Today");
         const d = new Date(isoDate);
-        return d.toLocaleDateString(Qt.locale(), "ddd");
+        // Qt.locale() (no args) is the OS's default *regional* locale, which can be set to
+        // e.g. Chinese even when Windows' display language is English - the app ships no
+        // translations at all (main.cpp never loads a QTranslator), so every other string
+        // here stays English regardless of OS locale. Pin this one to English too instead
+        // of letting it go rogue and mix 周六/周日 into an otherwise-English forecast row
+        // (real bug, reported by a Windows user with an Ambit2, 2026-09-04).
+        return d.toLocaleDateString(Qt.locale("en"), "ddd");
     }
 
     readonly property string currentIcon: iconFor(WeatherService.currentWeatherCode)

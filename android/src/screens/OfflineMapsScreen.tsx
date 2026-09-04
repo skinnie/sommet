@@ -244,7 +244,7 @@ export default function OfflineMapsScreen() {
         {/* Estimate + name + download */}
         <View style={[s.estRow, { marginTop: v3Spacing.medium }]}>
           <Text style={[s.est, tooBig && { color: theme.warning }]}>
-            {bbox ? `≈ ${estTiles.toLocaleString()} tiles · ~${estMB.toFixed(estMB < 10 ? 1 : 0)} MB` : 'Move the map to pick an area'}
+            {bbox ? `≈ ${estTiles.toLocaleString('en-GB')} tiles · ~${estMB.toFixed(estMB < 10 ? 1 : 0)} MB` : 'Move the map to pick an area'}
           </Text>
         </View>
         {tooBig && <Text style={[s.muted, { color: theme.warning }]}>Too large — zoom in or choose a lower detail.</Text>}
@@ -279,7 +279,7 @@ export default function OfflineMapsScreen() {
                 webRef.current?.injectJavaScript(`window.flyToBox(${r.bbox.minLat},${r.bbox.minLon},${r.bbox.maxLat},${r.bbox.maxLon}); true;`)}>
                 <Text style={s.regionName}>{r.name}</Text>
                 <Text style={s.muted}>
-                  {MAP_PROVIDER_LABELS[r.provider]} · z{r.zooms[0]}–{r.zooms[r.zooms.length - 1]} · {r.tileCount.toLocaleString()} tiles · ~{(r.bytes / 1e6).toFixed(1)} MB
+                  {MAP_PROVIDER_LABELS[r.provider]} · z{r.zooms[0]}–{r.zooms[r.zooms.length - 1]} · {r.tileCount.toLocaleString('en-GB')} tiles · ~{(r.bytes / 1e6).toFixed(1)} MB
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => handleDelete(r)} style={s.delBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>

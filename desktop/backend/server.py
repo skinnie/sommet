@@ -2241,6 +2241,24 @@ class Handler(BaseHTTPRequestHandler):
                 return None, str(exc)
             except (RuntimeError, TimeoutError) as exc:
                 return None, str(exc)
+        # Ambit1/2 ("Bluebird" family) predate SBEM entirely - sgee.py's --status below is
+        # the SBEM path (0x0b21 memory map + an SBEM CMD_DEVICE_INFO probe) and simply
+        # doesn't work on this family (same fact every other legacy-branched endpoint in this
+        # file already accounts for). Real bug, found live 2026-09-04: this was the one AGPS
+        # code path with no selected_is_legacy() branch at all, so the Home page's "GPS
+        # orbit" card just showed "Failed" for every Ambit1/2, unconditionally. Route to
+        # legacy_link.py's own gps-orbit-status instead (ambit_legacy_cli.c, built on the
+        # exact libambit_gps_orbit_header_read() call gps-orbit-write already exercises live
+        # for this family - see that command's own docstring). UNVERIFIED against real
+        # Ambit1/2 hardware as its own standalone read - device_info/gps-orbit-write are
+        # HW-proven, this specific status decode is not yet.
+        if selected_is_legacy():
+            code, out, err = run_tool("legacy_link.py", ["gps-orbit-status"])
+            status = self._parse_last_json_line(out)
+            if status is None or not status.get("ok"):
+                return None, (status or {}).get("error") or err.strip() or out.strip() \
+                    or "couldn't read orbit status from the watch"
+            return status, None
         code, out, err = run_tool("sgee.py", ["--status", "--json"])
         status = self._parse_last_json_line(out)
         if status is None:
@@ -2336,10 +2354,24 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(data)
                 bin_path = f.name
             try:
-                args = [bin_path] + (["--glonass"] if glonass else [])
-                if confirm:
-                    args.append("--write")
-                code, out, err = run_tool("sgee.py", args)
+                # Ambit1/2 speak the legacy PMEM 2.0 protocol (no GpsSGEE flash region for
+                # sgee.py's SBEM write to find - see ambit_legacy_cli.c's own
+                # cmd_gps_orbit_write() docstring); glonass is never reached for this family
+                # since _read_orbit_status()'s legacy branch always reports
+                # glonass.supported=false, so this only needs to handle the GPS case.
+                if selected_is_legacy():
+                    if confirm:
+                        code, out, err = run_tool("legacy_link.py",
+                                                   ["gps-orbit-write", bin_path])
+                    else:
+                        code, out, err = 0, json.dumps(
+                            {"ok": True, "dry_run": True, "bytes": Path(bin_path).stat().st_size}
+                        ), ""
+                else:
+                    args = [bin_path] + (["--glonass"] if glonass else [])
+                    if confirm:
+                        args.append("--write")
+                    code, out, err = run_tool("sgee.py", args)
             finally:
                 Path(bin_path).unlink(missing_ok=True)
             return {"ok": code == 0, "wrote": confirm and code == 0,

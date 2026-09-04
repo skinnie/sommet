@@ -28,6 +28,8 @@ memory), so there's nothing safe to send for THAT specific piece yet.
     ./tools/legacy_link.py logs OUTDIR
     ./tools/legacy_link.py poi-add NAME LAT LON
     ./tools/legacy_link.py poi-clear
+    ./tools/legacy_link.py gps-orbit-status
+    ./tools/legacy_link.py gps-orbit-write FILE
 """
 
 import json
@@ -365,6 +367,7 @@ def sport_mode_write(modes, dry_run=False):
 
 
 _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-clear",
+             "gps-orbit-status", "gps-orbit-write",
              "sport-mode-write-presets", "routes", "route-head",
              "route-region-save", "route-region-restore", "nav-restore-json")
 
@@ -411,6 +414,10 @@ def main():
             result = waypoints_restore(payload.get("waypoints", payload) if isinstance(payload, dict) else payload)
         elif cmd == "sport-mode-write-presets":
             result = sport_mode_write_presets(dry_run="--dry-run" in sys.argv[2:])
+        elif cmd == "gps-orbit-write":
+            if len(sys.argv) < 3:
+                sys.exit(f"usage: {sys.argv[0]} gps-orbit-write FILE")
+            result = run(["gps-orbit-write", sys.argv[2]])
         else:
             result = run([cmd])
     except RuntimeError as exc:
