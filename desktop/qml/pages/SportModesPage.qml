@@ -1080,6 +1080,35 @@ PageFlickable {
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
 
+                    // This is a HORIZONTAL strip, but a plain Flickable still accepts a vertical
+                    // wheel (it tries to flick vertically, finds contentHeight==height, and
+                    // swallows the event anyway) - so a mouse wheel over this 140px strip could
+                    // not scroll the PAGE past it in a short window (André, 2026-09-05, same
+                    // report as the POI map). A WheelHandler on a Flickable is delivered before
+                    // its built-in wheel handling (see PageFlickable), so this takes over: a
+                    // horizontal gesture scrolls the strip, a vertical wheel is forwarded to the
+                    // page (root) instead of being eaten.
+                    WheelHandler {
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: (event) => {
+                            const horizontal = Math.abs(event.angleDelta.x) > Math.abs(event.angleDelta.y)
+                                || (event.pixelDelta.x !== 0
+                                    && Math.abs(event.pixelDelta.x) > Math.abs(event.pixelDelta.y))
+                            if (horizontal) {
+                                const dx = event.pixelDelta.x !== 0
+                                    ? event.pixelDelta.x : (event.angleDelta.x / 120) * 64
+                                const maxX = Math.max(0, filmStrip.contentWidth - filmStrip.width)
+                                filmStrip.contentX = Math.max(0, Math.min(maxX, filmStrip.contentX - dx))
+                            } else {
+                                const dy = event.pixelDelta.y !== 0
+                                    ? event.pixelDelta.y : (event.angleDelta.y / 120) * root.wheelStep
+                                const maxY = Math.max(0, root.contentHeight - root.height)
+                                root.contentY = Math.max(0, Math.min(maxY, root.contentY - dy))
+                            }
+                            event.accepted = true
+                        }
+                    }
+
                     Row {
                         id: filmRow
                         spacing: Theme.spacingMedium

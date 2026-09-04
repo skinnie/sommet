@@ -328,7 +328,15 @@ PageFlickable {
 
                     MapView {
                         id: addMap
-                        scrollZoom: true
+                        // scrollZoom deliberately OFF here: this map is embedded mid-way down a
+                        // scrolling page (PageFlickable), and MapView's scroll-to-zoom
+                        // WheelHandler swallows the wheel, so with it on the page couldn't be
+                        // scrolled past this 300px map in a short/windowed window (André,
+                        // 2026-09-05 - "on poi screen it doesn't scroll fully unless full
+                        // screen"). Zoom is still available via the map's own +/- buttons.
+                        // Full-screen/dedicated maps (MapWindow, OfflineMaps, Plan) keep
+                        // scrollZoom because there is no page to scroll past them.
+                        scrollZoom: false
                         anchors.fill: parent
                         clip: true
                         latitude: root.poiLat

@@ -19,6 +19,16 @@ watches plugged, and both still read fine with two idle handles held (Ambit2 act
 legacy CLI, Ambit3 via SBEM - no interference). The multi-watch picker is also steady now (the
 unselected watch used to flicker out of the list while it was mid-re-present).
 
+Also in 0.2.35 - a desktop scroll fix (André: "on poi screen it doesn't scroll fully unless full
+screen"). A wheel handler on a nested item is delivered before, and can fully swallow, the wheel
+meant for the page it sits in, so in a short/windowed window the page couldn't be scrolled past
+that item. Audited all 24 pages; two were affected: (1) PoisPage's mid-column "Add POI" map had
+scroll-to-zoom on (scrollZoom) - turned off there so the wheel scrolls the page (zoom stays on
+the map's own +/- buttons; full-screen/dedicated maps keep scroll-zoom, there's no page to
+scroll past them); (2) SportModesPage's horizontal display filmstrip is a Flickable that still
+ate the vertical wheel even though it only scrolls sideways - it now forwards a vertical wheel to
+the page and keeps horizontal gestures for itself. The other 22 pages were already correct.
+
 ## 2026-09-05: stop the Ambit1/2 USB connect/disconnect chime (0.2.34)
 
 Hardware-confirmed on Windows (André's Ambit2): the watch no longer chimes on/off every few
