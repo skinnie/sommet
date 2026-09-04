@@ -55,8 +55,35 @@ from write_nav import CMD_DEVICE_INFO, Link, check_memory_map, read_memory_map, 
 # The closing hash MODE is HASH_WRITTEN over the used extent - confirmed firmware-accepted
 # (Finding 59: the watch's own 0x0b21 hash matches SHA256 of header+items after our write).
 TRAINING_ITEM_SIZE = 40
-# Header bytes 4..7: the watch firmware's signature constant (see build_training_program()).
-HEADER_SIGNATURE = b"\x3c\x46\x50\x5a"
+# Header bytes 4..7 are the athlete's four HR-ZONE boundary percentages
+# (Moderate/Hard/VeryHard/Maximal), NOT a magic signature. Refined 2026-09-04 from an
+# adversarially-verified recheck of all evidence (host: Android libkomposti trainingProgHeadMap
+# @0xd1c4e4 + Moveslink2 Mac StructMap @0x74fd60, both mapping sml.DeviceSettings.Personal.
+# HeartRateZones.{Moderate,Hard,VeryHard,Maximal} -> header +4..+7; watch: FUN_0003ed3e reads
+# tp+0x10..0x13 as zone% and computes the in-exercise HR target band zone% x maxHR / 100).
+# The firmware (FUN_00059a3a) REQUIRES them strictly increasing with the last < 0x65 (101%) or
+# it rejects the whole header and shows nothing. Suunto's default zones 60/70/80/90 = 3C 46 50 5A,
+# which is also the firmware's own baked fallback - so it always validates and produces sane
+# targets. Pass real zones to personalise the on-watch HR band; the default is safe and correct.
+DEFAULT_HR_ZONES = (60, 70, 80, 90)  # Moderate/Hard/VeryHard/Maximal % of max HR -> 3C 46 50 5A
+
+
+def pack_hr_zones(zones=DEFAULT_HR_ZONES):
+    """The 4-byte header field at offset 4: HR-zone boundary percentages, one byte each.
+    Validated by the watch (FUN_00059a3a): strictly increasing, each < 101. Raises if invalid -
+    an out-of-order or >=101 set makes the firmware silently drop the whole training program."""
+    z = tuple(int(v) for v in zones)
+    if len(z) != 4:
+        raise ValueError("HR zones must be exactly 4 percentages (Moderate/Hard/VeryHard/Maximal)")
+    if not (z[0] < z[1] < z[2] < z[3] and z[3] < 101 and z[0] >= 1):
+        raise ValueError(f"HR zones {z} must be strictly increasing and each 1..100 "
+                         "(the watch firmware rejects the whole header otherwise)")
+    return bytes(z)
+
+
+# Back-compat alias: the working default packed bytes (60/70/80/90). Kept because callers/tests
+# referenced HEADER_SIGNATURE before the HR-zone semantics were understood.
+HEADER_SIGNATURE = pack_hr_zones()
 
 
 def build_training_item(activity_id, duration_minutes, intensity, name,
@@ -171,45 +198,33 @@ def pack_base_date(base_date, date_format):
     raise ValueError(date_format)
 
 
-def build_training_program(items, base_date, date_format="ymd", emu=False):
-    """items: a list of build_training_item() results. See the EXPERIMENTAL notice above.
+def build_training_program(items, base_date, date_format="ymd", emu=False,
+                           hr_zones=DEFAULT_HR_ZONES):
+    """items: a list of build_training_item() results.
 
-    HEADER (12 bytes) - base-date packing DECODED (Finding 59, 2026-08-13, from
-    TrainingProgramAreaConverter::createBinary's FUN_00531d20 JDN->Gregorian converter),
-    which closed this format's last unknown:
+    HEADER (12 bytes):
 
         off 0  u16  year   (little-endian)
         off 2  u8   month  (1-12)
         off 3  u8   day    (1-31)
-        off 4  4B   = SIGNATURE 3C 46 50 5A - REQUIRED. The watch firmware validates these
-                    bytes (strictly increasing, last < 0x65) before parsing anything; 0xFFFFFFFF
-                    (what every hardware test before 2026-09-03 wrote) is REJECTED and the whole
-                    program is treated as empty. Decompiled from the MSP430X watch firmware, see
-                    build_training_program()'s inline comment.
+        off 4  4B   = HR-ZONE boundary percentages (Moderate/Hard/VeryHard/Maximal), one byte
+                    each. The watch firmware (FUN_00059a3a) REQUIRES them strictly increasing
+                    with the last < 101; an invalid set (e.g. 0xFFFFFFFF - what every hardware
+                    test before 2026-09-03 wrote) makes it drop the whole header and show
+                    nothing. It also CONSUMES them (FUN_0003ed3e) to compute the in-exercise HR
+                    target band. Default 60/70/80/90 = 3C 46 50 5A (Suunto's own default, also
+                    the firmware's baked fallback). Pass real zones to personalise the band.
         off 8  u16  item count
         off 10 u16  = 0xFFFF
 
-    emu=True is REFUTED (2026-08-19): the "u32 count, off10=0x0000" idea came from FUN_00770100,
-    which is the PARSE side (handleMCServiceTrainingPrograms). The PACKER the Ambit3-Peak save
-    path actually calls is the generic createBinary (FUN_007f4770), which writes a u16 count and
-    leaves off 10 = 0xFFFF. Kept selectable only to reproduce the refuted trial.
+    emu=True is REFUTED (2026-08-19): the "u32 count, off10=0x0000" idea came from the PARSE side
+    (FUN_00770100), not the packer. Kept selectable only to reproduce the refuted trial.
 
     `base_date` (a datetime.date) is the reference date every item's day_offset counts from -
-    the earliest move's date. Earlier writes packed seconds/hours-since-epoch here, producing a
-    garbage date, which is why nothing surfaced (Finding 59). For the Path (1) re-test we pack a
-    real calendar date so the watch can match "today"."""
-    # Header bytes 4..7 are a fixed SIGNATURE the watch firmware validates before it will
-    # parse the region at all (MSP430X watch fw 2.4.17, FUN_00059a3a via the TrainingProgram
-    # reload FUN_0004c250 -> FUN_00039262; decompiled 2026-09-03, assets/Firmware/re-out/
-    # sfi2_code_recovery_notes.md "MSP430X hunt (pass 7)"): four strictly increasing bytes with
-    # the last < 0x65, firmware constant 3C 46 50 5A. An invalid signature makes the firmware
-    # substitute an EMPTY program {2001-01-01, sig, count 0}, which hides the TIME-mode "Today"
-    # view and silences the daily pop-up - exactly the symptom of every prior hardware test,
-    # all of which wrote 0xFFFFFFFF here. The desktop packer's "copy the prior binary's bytes
-    # 4..7 verbatim" (Finding 59) only ever propagated this constant on a Movescount-initialised
-    # watch; on an erased region it propagated 0xFF and the header was rejected.
-    tail = struct.pack("<4sI", HEADER_SIGNATURE, len(items)) if emu \
-        else struct.pack("<4sHH", HEADER_SIGNATURE, len(items), 0xFFFF)
+    the earliest move's date, a real calendar date the watch matches against 'today'."""
+    zone_bytes = pack_hr_zones(hr_zones)
+    tail = struct.pack("<4sI", zone_bytes, len(items)) if emu \
+        else struct.pack("<4sHH", zone_bytes, len(items), 0xFFFF)
     header = pack_base_date(base_date, date_format) + tail
     assert len(header) == 12, len(header)
     blob = header + b"".join(items)
