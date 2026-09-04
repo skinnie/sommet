@@ -210,9 +210,9 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
 
     QNetworkReply *reply = m_network.post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, write] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, write, entries] {
         reply->deleteLater();
-        setInstalling(false);
+        // installing stays true until the native-card write (below) also finishes.
 
         const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
         const bool ok = (reply->error() == QNetworkReply::NoError)
@@ -237,6 +237,52 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
                       .arg(reply->errorString())
                 : obj.value(QStringLiteral("error")).toString();
             setLastError(result[QStringLiteral("error")].toString());
+        }
+        m_lastInstallResult = result;
+        emit lastInstallResultChanged();
+
+        // Second half: the native "Today 1/2" planned-move cards. Fire it regardless of the
+        // rotation result - the two are independent watch writes (WORKOUT-menu guidance vs the
+        // TIME-mode card), and a user whose guided-workout compile failed still wants the cards.
+        writePlannedMoves(entries, write);
+    });
+}
+
+void TrainingProgramService::writePlannedMoves(const QVariantList &entries, bool write)
+{
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/trainingprogram/planned-moves")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QJsonObject body;
+    body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
+    body[QStringLiteral("write")] = write;
+
+    QNetworkReply *reply = m_network.post(
+        request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        setInstalling(false);  // the whole "Sync to watch" action ends here
+
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool ok = (reply->error() == QNetworkReply::NoError)
+            && obj.value(QStringLiteral("ok")).toBool();
+
+        // Merge into the rotation result already shown; never overwrite its ok/error - the
+        // guided-workout half and the native-card half report independently.
+        QVariantMap result = m_lastInstallResult;
+        if (ok) {
+            result[QStringLiteral("nativeCards")] =
+                obj.value(QStringLiteral("count")).toInt();
+            const auto dates = obj.value(QStringLiteral("dates")).toArray().toVariantList();
+            if (!dates.isEmpty()) {
+                result[QStringLiteral("nativeCardFirst")] = dates.first();
+                result[QStringLiteral("nativeCardLast")] = dates.last();
+            }
+        } else {
+            result[QStringLiteral("nativeCardError")] =
+                reply->error() != QNetworkReply::NoError
+                    ? QStringLiteral("POST /api/trainingprogram/planned-moves: %1")
+                          .arg(reply->errorString())
+                    : obj.value(QStringLiteral("error")).toString();
         }
         m_lastInstallResult = result;
         emit lastInstallResultChanged();

@@ -69,11 +69,13 @@ public:
                                          const QString &mode, const QString &athleteId,
                                          const QString &apiKey);
 
-    // POST /api/trainingprogram/sync-calendar - install the plan as native guided workouts in the
-    // sport mode's WORKOUT menu, rotating by date (upcoming installed, past erased) via
-    // tools/training_calendar.py. This is the current design (2026-08-21) that supersedes the
-    // date-gated App-Zone install() above. write:false is a real dry-run (compile + diff, no
-    // watch write). Result lands in lastInstallResult, same as install().
+    // POST /api/trainingprogram/sync-calendar THEN /api/trainingprogram/planned-moves - one
+    // "Sync to watch" action does both halves of what a Movescount sync did: (1) install the
+    // plan as native guided workouts in each sport mode's WORKOUT menu, rotating by date
+    // (tools/training_calendar.py), and (2) write the plan as NATIVE dated planned moves - the
+    // "Today 1/2" card the watch shows in TIME mode -> [Next] (hardware-confirmed 2026-09-03,
+    // tools/training_program.py). write:false is a real dry-run for both. Both results merge
+    // into lastInstallResult (the rotation fields plus nativeCards/nativeCardError).
     Q_INVOKABLE void syncCalendar(const QVariantList &entries, bool write);
 
 signals:
@@ -97,6 +99,10 @@ private:
     void setLoading(bool value);
     void setLastError(const QString &message);
     void setInstalling(bool value);
+
+    // Second half of syncCalendar(): POST /api/trainingprogram/planned-moves and merge the
+    // native-card result (count / error) into the rotation result already in m_lastInstallResult.
+    void writePlannedMoves(const QVariantList &entries, bool write);
 
     static QUrl backendUrl(const QString &path);
 };

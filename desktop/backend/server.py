@@ -5397,12 +5397,32 @@ class Handler(BaseHTTPRequestHandler):
                 activity_id, how = PLANNED_MOVE_ACTIVITY_BY_MODE_NAME[mode_name], "table"
             else:
                 activity_id, how = 3, "default"
+            # Intensity (Movescount's 1-5 scale), André's rule 2026-09-04: derived from the
+            # workout's targets unless the entry sets it. Work steps (interval/active/work)
+            # with an HR or power target -> 4 (hard); any other target (pace/speed/cadence)
+            # on a work step -> 3; no targets at all -> 2 (easy) if the workout is only
+            # warmup/recovery/cooldown-type steps, else 3 (moderate).
+            if e.get("intensity") is not None:
+                intensity = int(e["intensity"])
+            else:
+                easy_types = {"warmup", "cooldown", "recovery", "rest"}
+                work_targets = [str((s.get("target") or {}).get("targetName") or "none")
+                                for s in steps
+                                if str((s.get("type") or {}).get("typeName")) not in easy_types]
+                if any(t in ("hr", "power") for t in work_targets):
+                    intensity = 4
+                elif any(t not in ("none", "") for t in work_targets):
+                    intensity = 3
+                elif work_targets:
+                    intensity = 3
+                else:
+                    intensity = 2
             items.append({
                 "date": e["date"],
                 "activityId": activity_id,
                 "durationMinutes": -(-seconds // 60) if seconds else 0,
                 "distance": metres,
-                "intensity": int(e.get("intensity", 3)),
+                "intensity": intensity,
                 "name": str(wk.get("name") or e.get("mode") or "Move"),
             })
             resolution.append({"date": e["date"], "mode": e["mode"], "activityId": activity_id,
