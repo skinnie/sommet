@@ -642,19 +642,34 @@ def autopin_if_needed():
         pass
 
 
-def run_tool(script, args, timeout=180, stdin=None):
+def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
     that means for the specific tool. Serialized across all callers via WATCH_LOCK - see its
     own comment for why. `stdin`, when given, is a string fed to the tool's stdin (set_pois.py
-    reads its POI list that way)."""
-    if script != "list_watches.py":
+    reads its POI list that way).
+
+    `product_id` (optional, 2026-09-04): pin THIS call to a specific watch on the bus without
+    touching the global SELECTED_PRODUCT_ID. Used to read a second connected watch (e.g. a Peak
+    and a Sport plugged at once) without changing which watch the rest of the UI is pinned to.
+    When None, behaves exactly as before (uses the global pin).
+
+    `serial` (optional, 2026-09-04): pin THIS call to one physical watch by its USB serial, so
+    two watches of the SAME model (two Ambit3 Peaks) can be driven individually - product_id
+    alone can't tell them apart. Passed to the tool as AMBIT_SERIAL; None means don't filter by
+    serial."""
+    if script != "list_watches.py" and product_id is None and serial is None:
         autopin_if_needed()
+    effective_pid = product_id if product_id is not None else SELECTED_PRODUCT_ID
     env = os.environ.copy()
-    if SELECTED_PRODUCT_ID is not None:
-        env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
+    if effective_pid is not None:
+        env["AMBIT_PRODUCT_ID"] = hex(effective_pid)
     else:
         env.pop("AMBIT_PRODUCT_ID", None)
+    if serial:
+        env["AMBIT_SERIAL"] = serial
+    else:
+        env.pop("AMBIT_SERIAL", None)
     with WATCH_LOCK:
         # In a normal checkout PYTHON is the real interpreter, so it runs tools/<script>
         # directly. In the frozen download PYTHON is this same helper's own executable (there
@@ -1397,12 +1412,34 @@ class Handler(BaseHTTPRequestHandler):
         # The desktop DeviceService appends ?mark_synced=1 when the user has it on; the
         # backend never marks on its own. See tools/mark_synced.py.
         mark_synced = query.get("mark_synced", ["0"])[0] in ("1", "true")
-        if ble_bridge.bridge.status().get("handshake_done"):
-            self._handle_activities_ble(int(known_count), mark_synced=mark_synced)
-            return
-        if selected_is_legacy():
-            self._handle_activities_legacy()
-            return
+        # ?device=<pid> & ?serial=<serial> (2026-09-04): read a SPECIFIC connected watch, not the
+        # globally pinned one, so several watches plugged at once each import. `device` (product
+        # id, hex "0x001b" or decimal) narrows the USB open to that model; `serial` picks the one
+        # physical watch when two share a model (two Ambit3 Peaks). When a serial is given the
+        # activities are tagged by SERIAL - the only identity that tells same-model watches apart
+        # - so their histories never clobber. Only the modern exercise_log path honours these; a
+        # legacy/BLE override isn't needed and isn't offered.
+        device_pid = None
+        raw_device = query.get("device", [None])[0]
+        if raw_device:
+            try:
+                device_pid = int(raw_device, 16) if raw_device.lower().startswith("0x") \
+                    else int(raw_device)
+            except ValueError:
+                device_pid = None
+        device_serial = (query.get("serial", [None])[0] or "").strip() or None
+        if device_pid is None and device_serial is None:
+            if ble_bridge.bridge.status().get("handshake_done"):
+                self._handle_activities_ble(int(known_count), mark_synced=mark_synced)
+                return
+            if selected_is_legacy():
+                self._handle_activities_legacy()
+                return
+        # Tag by serial when we have one (unique per physical watch); else by product id; else
+        # the global device_key() for the plain pinned read.
+        response_device = (device_serial if device_serial is not None
+                           else hex(device_pid) if device_pid is not None
+                           else device_key())
         with tempfile.TemporaryDirectory() as tmpdir:
             tool_args = ["--gpx-out", tmpdir, "--fit-out", tmpdir, "--known-count", known_count]
             if mark_synced:
@@ -1414,7 +1451,8 @@ class Handler(BaseHTTPRequestHandler):
             for m in query.get("map", []):
                 if "=" in m:
                     tool_args += ["--map", m]
-            code, out, err = run_tool("exercise_log.py", tool_args)
+            code, out, err = run_tool("exercise_log.py", tool_args,
+                                      product_id=device_pid, serial=device_serial)
             if code != 0:
                 self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
                 return
@@ -1439,7 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
             total_entries = (json.loads(master_path.read_text())["total_entries"]
                               if master_path.exists() else len(activities))
             self._send_json(200, {"ok": True, "activities": activities,
-                                   "total_entries": total_entries, "device": device_key(),
+                                   "total_entries": total_entries, "device": response_device,
                                    "raw_output": out})
 
     def _handle_activities_legacy(self):

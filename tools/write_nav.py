@@ -194,7 +194,7 @@ def open_hid(hid, path):
 class Link:
     """HID transport. In dry-run no device is opened."""
 
-    def __init__(self, dry_run=True, verbose=False, product_id=None):
+    def __init__(self, dry_run=True, verbose=False, product_id=None, serial=None):
         self.dry_run = dry_run
         self.verbose = verbose
         # Real, 2026-08-08: with an Ambit3 and a Kailash plugged in at once (a real, ongoing
@@ -218,7 +218,18 @@ class Link:
                 except ValueError:
                     pass
         self.product_id = product_id
+        # AMBIT_SERIAL env / serial arg (2026-09-04): pick ONE physical watch by its USB serial
+        # number, so two watches of the SAME model (two Ambit3 Peaks, same product_id 0x001b)
+        # can be told apart and driven individually. Product_id alone can't distinguish them.
+        # An explicit serial argument wins over the env var; None means "don't filter by serial"
+        # (prior behavior - first matching product_id wins).
+        if serial is None:
+            env_serial = os.environ.get("AMBIT_SERIAL")
+            if env_serial:
+                serial = env_serial.strip()
+        self.serial = serial or None
         self.opened_product_id = None  # set by open() to the pid that actually opened
+        self.opened_serial = None      # set by open() to the serial that actually opened
         self.sequence = 0
         self.device = None
         self.sent = []
@@ -254,6 +265,10 @@ class Link:
         for attempt in range(1, attempts + 1):
             found = [(entry, label, product_id) for product_id, label in wanted.items()
                      for entry in hid.enumerate(VENDOR_ID, product_id)]
+            # Narrow to ONE physical watch by serial when asked (two same-model watches on the
+            # bus). hid.enumerate() reports each device's serial_number; match it exactly.
+            if self.serial is not None:
+                found = [f for f in found if (f[0].get("serial_number") or "") == self.serial]
             if not found:
                 if attempt < attempts:
                     time.sleep(delay_s)
@@ -282,6 +297,7 @@ class Link:
                 # stays 0x001b, only its device_info string becomes "BSL"), so this is how a
                 # bricked watch is identified for recovery. See codename_for_pid().
                 self.opened_product_id = product_id
+                self.opened_serial = entry.get("serial_number")
                 print(f"  watch: {label}")
                 return label
             if attempt < attempts:

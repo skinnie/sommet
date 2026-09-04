@@ -224,5 +224,13 @@ private:
     int m_exportUploaded = 0;
     int m_exportFailed = 0;
     void requestActivities(int knownCount, bool alreadyRetried);
+    // Multi-watch (2026-09-04): the primary requestActivities() above reads the PINNED watch.
+    // When more than one watch is on the bus (a Peak and a Sport plugged at once), these read
+    // the OTHER connected watches into their own per-device rows, so both watches' activities
+    // import instead of only the pinned one's. Purely additive - they never touch m_lastDevice,
+    // the wrap/retry logic, or the loading/error state of the primary fetch.
+    void refreshAllWatches();
+    void readWatchActivities(int productId, const QString &serial, bool retriedFromZero = false);
+    int m_pendingWatchReads = 0;
     QVariantMap intervalsStreamMap() const;
 };

@@ -7,6 +7,48 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-04: average-user UX pass, Training Program native cards, morning HRV (0.2.30)
+
+A release focused on making the app clearer for a non-technical owner, plus two feature
+additions. All new watch-facing features default OFF or are opt-in, so nothing changes for an
+existing setup unless you turn it on.
+
+**Usability pass (from a full average-user audit; desktop + Android):**
+- **Copy one watch to another** — the old two-watch "freefly" Sync page was rewritten as a
+  guided flow: plug the watch to copy *from* (read automatically), swap the cable, plug the
+  watch to copy *to*, review exactly what will change, then one **Write** button. No more
+  mirror/merge/snapshot jargon or greyed-out placeholder options.
+- **Activity detail** — tabs now appear only when that activity actually has the data (charts
+  when it logged app outputs, etc.); no more empty "not built yet" tabs.
+- **Routes** — removed the confusing "Rehearse (no write)" button; it's just one **Upload to
+  watch**, which validates before writing.
+- **Sport Modes** — screen/field edits now save themselves (no separate "Save to watch").
+- **Training Program** — a single **Sync to watch** button.
+- **Totals** — removed the "More to come!" placeholder.
+- **Coach** — clearer wording that AI chat needs a developer API key from console.anthropic.com
+  (separate from a claude.ai login).
+- **Connections** — one-tap "Open Settings → Connections" from the Health / Weight / Coach /
+  Gear empty states.
+- **Feedback** — invalid coordinates, over-long names and bad dates now say what's wrong instead
+  of silently reverting; backend errors show a friendly line with an expandable **Details**.
+- **Feature discovery** — the workout builder, App Zone and the HR-belt features are on by
+  default now (T6/X6 and GPS Pod stay off); watch-only menu items are hidden when no watch is
+  connected.
+
+**Training Program — native "Today" planned-move cards:** one **Sync to watch** now writes both
+the WORKOUT-menu guided workouts *and* the watch's own "Today 1/2" planned-move cards shown on
+the time screen.
+
+**Morning HRV from a heart-rate strap (opt-in):** measure morning HRV (RMSSD) from a COOSPO/BLE
+chest strap on desktop and Android — no watch needed. Off by default; enable in Settings → Health.
+Desktop measuring needs the `bleak` Python package.
+
+**Fixes:**
+- **Two watches at once** — with a Peak and a Sport (or any two Ambit3) plugged in together,
+  activities now import from **both**, not just the selected one. Each watch is read scoped to
+  itself and its activities are kept under its own device, so neither clobbers the other.
+- Locale-dependent GUI text, Ambit1/2 GPS-orbit status, and the Windows legacy-CLI build.
+
 ## 2026-08-30: two-watch "freefly" sync (0.2.16)
 
 André: "we have the option to backup our watch... would be nice both [watches] had the same

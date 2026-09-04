@@ -185,10 +185,96 @@ void ActivityService::refresh()
 {
     setLoading(true);
     setLastError(QString());
-    // known_count is per-watch now: compute it for the watch the last fetch was about. If that
-    // differs from the one actually plugged in, the response's device tag flags the switch and
-    // requestActivities re-fetches scoped to the real watch (see its handler).
-    requestActivities(dbKnownCount(m_lastDevice), false);
+    // Read EVERY connected watch, each scoped to its own USB serial, so two watches of the same
+    // model (two Ambit3 Peaks) don't collapse into one identity and clobber each other's history
+    // (André, 2026-09-04). Falls back to the single pinned read when the device list isn't
+    // available (BLE, or an older/erroring backend).
+    refreshAllWatches();
+}
+
+void ActivityService::refreshAllWatches()
+{
+    const QUrl url(kBackendBase + QStringLiteral("/api/devices"));
+    QNetworkReply *reply = m_network.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        const bool netOk = reply->error() == QNetworkReply::NoError;
+        const auto root = netOk ? QJsonDocument::fromJson(reply->readAll()).object()
+                                : QJsonObject{};
+        const auto watches = root.value(QStringLiteral("watches")).toArray();
+        if (!netOk || !root.value(QStringLiteral("ok")).toBool() || watches.isEmpty()) {
+            // No enumerable USB watches (BLE handshake, no watch, or backend error): keep the
+            // original single-read behaviour, which also covers the BLE path server-side.
+            requestActivities(dbKnownCount(m_lastDevice), false);
+            return;
+        }
+        m_pendingWatchReads = watches.size();
+        for (const auto &wv : watches) {
+            const auto w = wv.toObject();
+            readWatchActivities(w.value(QStringLiteral("productId")).toInt(),
+                                w.value(QStringLiteral("serial")).toString());
+        }
+    });
+}
+
+void ActivityService::readWatchActivities(int productId, const QString &serial,
+                                          bool retriedFromZero)
+{
+    // Identity for this physical watch: its serial when we have one (unique even between two
+    // same-model watches), else the product-id hex as a fallback. The backend echoes this same
+    // string back as the response "device", so rows key to it consistently.
+    const QString tag = !serial.isEmpty()
+        ? serial
+        : QStringLiteral("0x") + QString::number(productId, 16);
+    QString path = QStringLiteral("/api/activities?known_count=%1&device=%2")
+                       .arg(retriedFromZero ? 0 : dbKnownCount(tag)).arg(productId);
+    if (!serial.isEmpty())
+        path += QStringLiteral("&serial=") + QString::fromUtf8(QUrl::toPercentEncoding(serial));
+
+    QNetworkReply *reply = m_network.get(QNetworkRequest(QUrl(kBackendBase + path)));
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, productId, serial, tag, retriedFromZero] {
+        reply->deleteLater();
+        auto finishOne = [this] {
+            if (--m_pendingWatchReads <= 0) {
+                m_pendingWatchReads = 0;
+                setLoading(false);
+                m_ok = true;                 // an empty result is a valid "no activities" state
+                m_showingCachedData = false;
+                dbLoadAll();                 // one reload + de-dupe after every watch is in
+                emit activitiesChanged();
+            }
+        };
+        if (reply->error() != QNetworkReply::NoError) { finishOne(); return; }
+        const auto root = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!root.value(QStringLiteral("ok")).toBool()) { finishOne(); return; }
+
+        // Watch log wrapped/reset since our cache was built: our cached indices for this watch no
+        // longer mean the same moves. Re-read this one watch from scratch, once.
+        const int totalEntries = root.value(QStringLiteral("total_entries")).toInt();
+        if (!retriedFromZero && totalEntries < dbKnownCount(tag)) {
+            dbClear(tag);
+            readWatchActivities(productId, serial, /*retriedFromZero=*/true);
+            return;                          // this slot's finishOne fires on the retry's reply
+        }
+
+        const QString device = root.value(QStringLiteral("device")).toString();
+        const auto rawList = root.value(QStringLiteral("activities")).toArray();
+        for (const auto &rawValue : rawList) {
+            const auto rawObj = rawValue.toObject();
+            const int index = rawObj.value(QStringLiteral("index")).toInt();
+            const QString gpxText = rawObj.value(QStringLiteral("gpx")).toString();
+            const QString fitBase64 = rawObj.value(QStringLiteral("fit_base64")).toString();
+            const QVariantMap parsed = parseGpx(gpxText);
+            const QJsonValue ruleOutputs = rawObj.value(QStringLiteral("rule_outputs"));
+            const QString ruleOutputsJson = ruleOutputs.isObject()
+                ? QString::fromUtf8(QJsonDocument(ruleOutputs.toObject()).toJson(
+                      QJsonDocument::Compact))
+                : QString();
+            dbInsert(index, device, parsed, gpxText, fitBase64, ruleOutputsJson);
+        }
+        finishOne();
+    });
 }
 
 QVariantMap ActivityService::intervalsStreamMap() const
@@ -404,6 +490,21 @@ void ActivityService::openDatabase()
     // circular log has no delete of its own, so this is the only durable way to keep it gone.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS deleted_activities (key TEXT PRIMARY KEY)"));
+
+    // One-time migration to serial-based watch identity (2026-09-04): watch activities used to
+    // be tagged by product-id hex ("0x1b"); they are now tagged by the watch's USB serial so two
+    // same-model watches stay distinct. Old product-id-tagged watch rows would otherwise show as
+    // duplicates of the freshly re-read serial-tagged ones (different device -> both survive the
+    // de-dupe). Clear those old rows ONCE; they re-read from the watch on the next sync. Imports
+    // (device 'intervals'/'garmin'/…) and already-serial rows are untouched. Matched by the
+    // product-id-hex shape: "0x" + up to four hex digits.
+    if (!QSettings().value(QStringLiteral("activities/serialTagMigrationDone"), false).toBool()) {
+        q.exec(QStringLiteral(
+            "DELETE FROM activities WHERE device GLOB '0x[0-9a-fA-F]*' "
+            "AND length(device) <= 6"));
+        QSettings().setValue(QStringLiteral("activities/serialTagMigrationDone"), true);
+    }
+
     loadTombstones();
 }
 
@@ -599,6 +700,14 @@ void ActivityService::dedupeActivities()
     // the intervals aggregator, so turning intervals off (the stated goal) loses nothing that a
     // direct source already provides. Watch-native moves (empty source) always win.
     //   watch(empty) > garmin > suunto > eltrex/garmin-usb > intervals > other
+    // Device-aware (André, 2026-09-04: "two Ambit3 plugged, same sport, only one loads... some
+    // filter for identical/duplicates?"). Two DIFFERENT watches recording the same minute (a
+    // Peak and a Sport on the same ride) are two real, separate recordings - keep BOTH. What we
+    // still collapse is the SAME move arriving from more than one source: a watch move plus its
+    // Garmin/intervals copy, or two aggregator copies. So: a start-minute that has any watch move
+    // keeps every distinct watch device and drops the non-watch copies; a start-minute with no
+    // watch move keeps the single highest-priority source.
+    //   watch(empty) > garmin > suunto > etrex/garmin-usb > intervals > other
     auto priority = [](const QString &src) -> int {
         if (src.isEmpty() || src == QStringLiteral("watch")) return 100;
         if (src == QStringLiteral("garmin")) return 80;
@@ -607,28 +716,57 @@ void ActivityService::dedupeActivities()
         if (src == QStringLiteral("intervals")) return 20;
         return 10;
     };
-    QHash<QString, int> bestIndexForKey;   // start-minute -> index in kept list
+    auto minuteKey = [](const QVariantMap &a) -> QString {
+        const QString s = a.value(QStringLiteral("startTime")).toString();
+        return s.size() >= 16 ? s.left(16) : s;   // "YYYY-MM-DDTHH:MM"
+    };
+    auto isWatch = [](const QVariantMap &a) -> bool {
+        const QString src = a.value(QStringLiteral("source")).toString();
+        return src.isEmpty() || src == QStringLiteral("watch");
+    };
+
+    // Pass 1: which start-minutes have at least one watch-native move.
+    QSet<QString> minutesWithWatch;
+    for (const QVariant &v : std::as_const(m_activities)) {
+        const QVariantMap a = v.toMap();
+        const QString key = minuteKey(a);
+        if (!key.isEmpty() && isWatch(a))
+            minutesWithWatch.insert(key);
+    }
+
+    // Pass 2: keep, in the existing (date-sorted) order.
+    QSet<QString> keptWatchDevPerMinute;   // "minute|device" already kept
+    QHash<QString, int> bestNonWatchIdx;   // minute -> index in kept (only when no watch move)
     QVariantList kept;
     for (const QVariant &v : std::as_const(m_activities)) {
         const QVariantMap a = v.toMap();
-        // Key on the start time trimmed to the minute (sources round seconds differently).
-        QString key = a.value(QStringLiteral("startTime")).toString();
-        if (key.size() >= 16)
-            key = key.left(16);            // "YYYY-MM-DDTHH:MM"
+        const QString key = minuteKey(a);
         if (key.isEmpty()) {               // no start time -> can't match, always keep
             kept.append(v);
             continue;
         }
-        const int prio = priority(a.value(QStringLiteral("source")).toString());
-        if (!bestIndexForKey.contains(key)) {
-            bestIndexForKey.insert(key, kept.size());
+        if (isWatch(a)) {
+            // One row per (minute, device): different watches both kept; a genuine re-read of
+            // the same watch's same move collapses.
+            const QString devKey = key + QLatin1Char('|')
+                                 + a.value(QStringLiteral("device")).toString();
+            if (keptWatchDevPerMinute.contains(devKey))
+                continue;
+            keptWatchDevPerMinute.insert(devKey);
             kept.append(v);
         } else {
-            const int idx = bestIndexForKey.value(key);
-            const int keptPrio = priority(kept.at(idx).toMap()
-                                          .value(QStringLiteral("source")).toString());
-            if (prio > keptPrio)
-                kept[idx] = v;             // a higher-priority source for the same move wins
+            if (minutesWithWatch.contains(key))
+                continue;                  // a watch move owns this minute -> drop the copy
+            const int prio = priority(a.value(QStringLiteral("source")).toString());
+            if (!bestNonWatchIdx.contains(key)) {
+                bestNonWatchIdx.insert(key, kept.size());
+                kept.append(v);
+            } else {
+                const int idx = bestNonWatchIdx.value(key);
+                if (prio > priority(kept.at(idx).toMap()
+                                    .value(QStringLiteral("source")).toString()))
+                    kept[idx] = v;
+            }
         }
     }
     m_activities = kept;
