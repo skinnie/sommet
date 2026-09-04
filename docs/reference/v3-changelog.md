@@ -7,6 +7,18 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-05: keep-alive holds EVERY plugged watch (0.2.35)
+
+Follow-up to 0.2.34, found with an Ambit2 and an Ambit3 Sport plugged at once: the chime came
+back for the UNSELECTED watch. hid_enumerate opens every watch to read its product/serial
+strings, which the Home watch-picker (/api/devices) does every ~10s, so a watch with no
+keep-alive still re-presented on each of those. keepalive_sync now reconciles a handle for
+EVERY Suunto watch on the bus (serial -> handle), not just the selected one, opening for any
+newly-plugged watch and closing for any that unplugged. Hardware-confirmed: no chime with both
+watches plugged, and both still read fine with two idle handles held (Ambit2 activities via the
+legacy CLI, Ambit3 via SBEM - no interference). The multi-watch picker is also steady now (the
+unselected watch used to flicker out of the list while it was mid-re-present).
+
 ## 2026-09-05: stop the Ambit1/2 USB connect/disconnect chime (0.2.34)
 
 Hardware-confirmed on Windows (André's Ambit2): the watch no longer chimes on/off every few
