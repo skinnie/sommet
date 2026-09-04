@@ -296,7 +296,8 @@ def initial_pid_for_flash(app_pid):
     return app_pid
 
 
-def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=False):
+def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=False,
+          expect_serial=None):
     header, payload = parse_container(path)
     n_chunks = (len(payload) + CHUNK - 1) // CHUNK
 
@@ -341,6 +342,19 @@ def flash(path, expect_model, do_commit, stream_only, probe_enter=False, diag=Fa
     else:
         watch_registry.record(info)  # remember serial -> codename/hw for future recovery
 
+    # Serial guard (added 2026-09-04): the flasher opens by PRODUCT_ID, which does NOT
+    # disambiguate two watches of the same model on the bus (e.g. two Ambit3 Peaks both at
+    # 0x001b). --expect-serial makes a multi-watch flash safe: if the opened watch's serial
+    # isn't the intended one, abort BEFORE entering BSL / streaming anything. Serial is
+    # reported in BSL too, so this guards the resume path as well. It can only REFUSE, never
+    # redirect - with two same-model watches the other(s) must still be unplugged so the OS
+    # opens the right one; this just guarantees we never flash the wrong watch.
+    if expect_serial and info["serial"].upper() != expect_serial.upper():
+        event("error", None, message=f"connected serial {info['serial']!r} != expected "
+              f"{expect_serial!r}; refusing to flash the wrong watch")
+        raise SystemExit(f"  ABORT: connected serial {info['serial']!r} != --expect-serial "
+                         f"{expect_serial!r}. Refusing to flash the wrong watch (unplug the "
+                         f"other same-model watches so the target enumerates).")
     if not in_bsl and info["model"] != expect_model:
         event("error", None, message=f"connected model {info['model']!r} != expected "
               f"{expect_model!r}; refusing to flash a mismatched image")
@@ -439,6 +453,11 @@ def main():
     ap.add_argument("--expect-model", required=True,
                      help="the connected watch MUST report this model, else abort "
                           "(e.g. Emu). Guards against flashing a mismatched image.")
+    ap.add_argument("--expect-serial", default=None,
+                     help="the connected watch MUST report this serial, else abort. REQUIRED "
+                          "for safety when more than one watch of the same model is on the USB "
+                          "bus (the flasher opens by product_id and cannot otherwise tell two "
+                          "same-model watches apart).")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--probe-enter", action="store_true",
                     help="only send 0x0202 and confirm the watch re-enumerates into BSL, "
@@ -457,7 +476,7 @@ def main():
     _JSON = args.json
     try:
         return flash(args.file, args.expect_model, args.commit, args.stream_only,
-                     probe_enter=args.probe_enter)
+                     probe_enter=args.probe_enter, expect_serial=args.expect_serial)
     except SystemExit:
         raise
     except Exception as exc:
