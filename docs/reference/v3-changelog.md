@@ -7,6 +7,28 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-05: Windows Ambit1/2 actually works now, take 3 (0.2.33)
+
+Hardware-verified against a real Ambit2 on Windows (André's watch): every Ambit1/2 feature
+that goes through the compiled helper — GPS orbit update, activities, POIs, personal settings,
+routes — now works, where before the Windows `.zip` shipped without the helper at all and each
+of those endpoints 502'd with "ambit_legacy_cli is not built". Takes 1 and 2 (0.2.31/0.2.32)
+got the CMake and endian breaks but the helper still never built on Windows (the vendored
+libambit hit more MinGW gaps: `fmemopen`, one-arg `mkdir`, BSD `u_intN_t`, `setenv`, a 64-bit
+`time_t` vs 32-bit `tv_sec` mismatch, and it needed libiconv, which MinGW ships no dev files
+for). Fixed by making the Windows build **self-contained and static**: `build.sh` now compiles
+the whole thing in one gcc call — no cmake, no `libambit.dll`, no external libiconv. A small
+`tools/vendor/ambit_legacy_cli/win_compat/` supplies a tiny iconv (the vendored `utils.c` only
+ever converts to UTF-8) plus `u_intN_t`/`setenv` shims, alongside the existing endian shim; the
+helper also now keeps stdout binary (so the `@@JSON@@` marker survives), retries the device open
+across the Ambit1/2 USB re-present window, and reads its activity index without `fmemopen`.
+
+Also: `/api/device` (the Home page's 10s heartbeat) now reads identity first and only
+enumerates the bus if that fails, instead of doing both on every poll — one USB open per beat
+instead of two. On the Ambit1/2, whose USB link drops and re-presents on each handle close, that
+halved the open/close churn that showed as the watch constantly "connecting/disconnecting" and a
+status stuck on "Checking…", and cut the read from ~0.7–1.2s to ~0.3s. No change for Ambit3+.
+
 ## 2026-09-04: Windows packaging fix, take 2 (0.2.32)
 
 The Windows `.zip` now always builds. v0.2.31 got past the CMake error but then hit a compile

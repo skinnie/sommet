@@ -64,6 +64,16 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <math.h>
+#ifdef _WIN32
+#include <io.h>       /* _setmode, _fileno */
+#include <fcntl.h>    /* _O_BINARY */
+#include <direct.h>   /* _mkdir - MinGW's mkdir() takes the path only, not a mode */
+#include <windows.h>  /* Sleep */
+static void sleep_ms(int ms) { Sleep(ms); }
+#else
+#include <unistd.h>   /* usleep */
+static void sleep_ms(int ms) { usleep((useconds_t)ms * 1000); }
+#endif
 #include "libambit.h"
 #include "protocol.h"   /* libambit_protocol_command - raw 0x0b17 flash read, see cmd_sport_mode_dump */
 #include "ambit1_sport_mode.h"  /* Ambit1-only 76-byte layout, hard-guarded to pid 0x0010 */
@@ -192,21 +202,36 @@ static int is_legacy_pid(int pid) {
  * legacy-family device in the list - never silently pick an Ambit3+. */
 static ambit_object_t *open_selected_device(ambit_device_info_t **out_devices,
                                              ambit_device_info_t **out_info) {
-    ambit_device_info_t *devices = libambit_enumerate();
-    if (!devices) return NULL;
-
+    /* Retry enumeration a few times before giving up. Each tools/ command is its own
+     * short-lived process, so the watch is opened and closed many times in quick succession
+     * (the Home page's ~10s heartbeat alone fires several device reads back to back). The
+     * Ambit1/2 over USB HID can briefly drop off the bus in the re-present window between one
+     * command's close and the next open, during which libambit_enumerate() transiently returns
+     * the watch missing - which surfaced as endpoints intermittently failing with "no Suunto
+     * device found" even though the watch was plugged the whole time (real, Windows Ambit2,
+     * 2026-09-04: /api/pois and /api/settings would fail while /api/nav right before them
+     * succeeded). A short settle delay between attempts rides out that window. */
+    ambit_device_info_t *devices = NULL;
     ambit_device_info_t *target = NULL;
-    for (ambit_device_info_t *d = devices; d; d = d->next) {
-        if (g_selected_pid >= 0) {
-            if (d->product_id == g_selected_pid) { target = d; break; }
-        } else if (is_legacy_pid(d->product_id)) {
-            target = d;
-            break;
+    for (int attempt = 0; attempt < 5 && !target; attempt++) {
+        if (attempt > 0) sleep_ms(250);
+        devices = libambit_enumerate();
+        if (!devices) continue;
+        for (ambit_device_info_t *d = devices; d; d = d->next) {
+            if (g_selected_pid >= 0) {
+                if (d->product_id == g_selected_pid) { target = d; break; }
+            } else if (is_legacy_pid(d->product_id)) {
+                target = d;
+                break;
+            }
+        }
+        if (!target) {
+            libambit_free_enumeration(devices);
+            devices = NULL;
         }
     }
     if (!target) {
-        libambit_free_enumeration(devices);
-        return NULL;
+        return NULL;   /* devices already freed (or was never allocated) on the last attempt */
     }
 
     ambit_object_t *dev = libambit_new(target);
@@ -446,7 +471,11 @@ static int cmd_settings(void) {
 
 static int cmd_logs(const char *outdir) {
     struct stat st;
+#ifdef _WIN32
+    if (stat(outdir, &st) != 0) _mkdir(outdir);   /* MinGW mkdir() is one-arg (path only) */
+#else
     if (stat(outdir, &st) != 0) mkdir(outdir, 0755);
+#endif
 
     ambit_device_info_t *devices, *info;
     ambit_object_t *dev = open_selected_device(&devices, &info);
@@ -454,9 +483,17 @@ static int cmd_logs(const char *outdir) {
 
     log_ctx_t ctx = { .idx = NULL, .outdir = (char *)outdir, .index = 0, .first = 1 };
     char idxbuf[65536];
+    idxbuf[0] = '\0';
+#ifdef _WIN32
+    /* MinGW has no fmemopen(). Buffer the JSON index in a temp file and read it back into
+     * idxbuf below - same end result (idxbuf holds the pretty-printed logs[] body) without the
+     * POSIX-only in-memory stream. */
+    ctx.idx = tmpfile();
+#else
     ctx.idx = fmemopen(idxbuf, sizeof(idxbuf), "w");
+#endif
     if (!ctx.idx) {
-        fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"fmemopen failed\"}\n");
+        fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"could not open log index buffer\"}\n");
         libambit_close(dev);
         libambit_free_enumeration(devices);
         return 1;
@@ -474,6 +511,18 @@ static int cmd_logs(const char *outdir) {
      * backwards. */
     int rc = libambit_log_read(dev, NULL, log_push_cb, log_progress_cb, &ctx);
     fflush(ctx.idx);
+#ifdef _WIN32
+    /* Pull the buffered index back out of the temp file into idxbuf (on POSIX fmemopen wrote
+     * straight into it). Cap at the buffer size; the index is small JSON. */
+    {
+        long n = ftell(ctx.idx);
+        if (n < 0) n = 0;
+        if (n > (long)sizeof(idxbuf) - 1) n = (long)sizeof(idxbuf) - 1;
+        rewind(ctx.idx);
+        size_t got = fread(idxbuf, 1, (size_t)n, ctx.idx);
+        idxbuf[got] = '\0';
+    }
+#endif
     fclose(ctx.idx);
 
     /* libambit_log_read()'s return convention is driver-specific: device_driver_ambit.c
@@ -1372,6 +1421,13 @@ static int cmd_waypoints_restore(const char *file) {
 }
 
 int main(int argc, char **argv) {
+#ifdef _WIN32
+    /* Keep stdout byte-exact. UCRT opens stdout in text mode, which rewrites every '\n' to
+     * "\r\n"; that turns the "@@JSON@@\n" marker legacy_link.py splits on into "@@JSON@@\r\n",
+     * the split misses, and the wrapper reports "no parseable JSON" for a command that in fact
+     * succeeded. Binary mode leaves the marker and the JSON payload exactly as written. */
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     /* Optional leading "--device PID" (decimal or 0x-hex) picks which connected Suunto
      * device this invocation talks to - required whenever more than one might be on the
      * bus (see open_selected_device()'s own comment for the real bug this fixes). */

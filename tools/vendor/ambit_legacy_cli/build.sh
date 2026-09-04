@@ -54,16 +54,37 @@ if [ "$(uname -s)" = "Darwin" ]; then
     fi
     EXTRA_LINK+=(-Wl,-rpath,"$LIBAMBIT_DIR/build")
 elif [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
-    HIDAPI_DRIVER=windows
+    # Windows/MinGW: build ONE self-contained, statically-linked ambit_legacy_cli.exe in a single
+    # gcc invocation - no cmake, no libambit.dll, no external libiconv. Proven end-to-end against
+    # a real Ambit2 on Windows (2026-09-04): device-info/settings/waypoints/logs/gps-orbit all
+    # work. This replaces the earlier cmake-shared-library approach, which depended on MSYS2's
+    # libiconv package and on shipping libambit.dll next to the exe - both fragile moving parts
+    # that left the Windows CI build (continue-on-error) silently producing no exe, so every
+    # Ambit1/2 endpoint 502'd with "ambit_legacy_cli is not built" on Windows.
+    #
+    # What the static build needs, all of which MinGW-w64 already ships (no extra packages):
+    #   * hidapi hid-windows.c -> native Win32 HID (SetupAPI + hid.dll), so no libusb at all.
+    #     Links -lsetupapi -lhid.
+    #   * endian_compat_win.h  -> le16toh/htole32/... (MinGW has no <endian.h>).
+    #   * win_compat/win_shims.h -> BSD u_intN_t names + a setenv() mapped onto _putenv_s.
+    #   * win_compat/iconv.h + iconv_win.c -> a tiny iconv() covering exactly the three
+    #     to-UTF-8 conversions utils.c does, so no external libiconv is needed. Picked up first
+    #     via -I win_compat, so the vendored utils.c #include <iconv.h> resolves to the shim and
+    #     stays byte-identical to upstream.
+    # pmem20.c also carries one genuine portability fix (time_t is 64-bit here, tv_sec 32-bit).
     OUT="$HERE/ambit_legacy_cli.exe"          # legacy_link.py._binary_path() looks for this
-    # MinGW has no <endian.h> either, so libambit's le16toh/htole32/... are undeclared and every
-    # byte-swapping source fails to compile - same class of break macOS hit, fixed the same way:
-    # force-include a Windows endian shim so the vendored sources stay byte-identical to upstream.
-    EXTRA_CMAKE+=(-DCMAKE_C_FLAGS="-include $HERE/endian_compat_win.h")
-    EXTRA_CC+=(-include "$HERE/endian_compat_win.h")
-    # PE has no rpath concept - Windows resolves libambit.dll by searching the loading exe's
-    # own directory first, so the CI step copies the built DLL next to ambit_legacy_cli.exe
-    # (same directory ambit_backend.spec's glob("libambit*") already bundles wholesale).
+    LIBSRCS=("$LIBAMBIT_DIR"/*.c "$LIBAMBIT_DIR/hidapi/hid-windows.c")
+    "${CC:-cc}" -O2 -std=gnu99 -Wall -Wno-unused-parameter \
+        -Wno-stringop-truncation -Wno-format-truncation \
+        -include "$HERE/endian_compat_win.h" -include "$HERE/win_compat/win_shims.h" \
+        -I "$HERE/win_compat" -I "$LIBAMBIT_DIR" -I "$LIBAMBIT_DIR/hidapi" \
+        -o "$OUT" \
+        "$HERE/ambit_legacy_cli.c" "$HERE/ambit1_sport_mode.c" "$HERE/win_compat/iconv_win.c" \
+        "${LIBSRCS[@]}" \
+        -lsetupapi -lhid -lm
+    echo ""
+    echo "Binary: $OUT (static, no libambit.dll needed)"
+    exit 0
 else
     # HIDAPI_DRIVER=libusb, not the default libudev/hidraw backend: real, 2026-08-22 - see
     # the note below, kept from the original Linux-only version of this script.

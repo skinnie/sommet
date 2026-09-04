@@ -2683,27 +2683,40 @@ class Handler(BaseHTTPRequestHandler):
         if ble_bridge.bridge.status().get("handshake_done"):
             self._handle_device_ble()
             return
-        # Heal a stale pin first (issue #16): after a hot-swap SELECTED_PRODUCT_ID may still
-        # point at the unplugged watch, and this endpoint is the model/connected source the UI
-        # uses to decide whether to show the legacy Routes/POIs cards. If it returned ok:false
-        # here, those cards vanished until /api/devices happened to be polled. Enumerate and
-        # heal so the very next /api/device poll after a swap already reports the right watch.
-        try:
-            _lc, _lo, _le = run_tool("list_watches.py", [])
-            _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
-            self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
-        except (json.JSONDecodeError, IndexError, ValueError):
-            pass  # enumeration hiccup - fall through to the read, which self-reports if it fails
+        # Read identity first, enumerate+heal only if that FAILS. The Home page re-reads this
+        # endpoint every 10s, and it used to enumerate the whole bus (list_watches.py) AND read
+        # device_info.py on every one of those polls - two USB open/close cycles per heartbeat.
+        # On an Ambit1/2, whose USB link drops and re-presents on each handle close, that doubled
+        # churn showed as the watch constantly "connecting/disconnecting" and left the status on
+        # "Checking..." for the length of two reads instead of one (Windows Ambit2, 2026-09-04).
+        # The enumerate+heal exists only for the hot-swap/stale-pin case (issue #16): the pinned
+        # watch was unplugged, so device_info can't open its pid and comes back not-ok. That is
+        # exactly - and only - when we now pay for it: enumerate, heal the pin to whatever IS
+        # plugged, and read once more. The common steady state (pinned watch still present, no
+        # swap) does a single open per poll, matching how snappy the Ambit3 path already felt.
+        def _parse_info(raw):
+            line = raw.strip().splitlines()[-1] if raw.strip() else ""
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                return None
+
         code, out, err = run_tool("device_info.py", ["--json"])
-        if code != 0:
+        info = _parse_info(out) if code == 0 else None
+        if info is None:
+            # Likely a stale pin after a hot-swap (the model/connected source the UI uses to
+            # decide whether to show the legacy Routes/POIs cards). Heal to whatever is on the
+            # bus now, then read again so this same poll already reports the right watch.
+            try:
+                _lc, _lo, _le = run_tool("list_watches.py", [])
+                _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
+                self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
+            except (json.JSONDecodeError, IndexError, ValueError):
+                pass  # enumeration hiccup - fall through to the retry, which self-reports if it fails
+            code, out, err = run_tool("device_info.py", ["--json"])
+            info = _parse_info(out) if code == 0 else None
+        if info is None:
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
-            return
-        last_line = out.strip().splitlines()[-1] if out.strip() else ""
-        try:
-            info = json.loads(last_line)
-        except json.JSONDecodeError:
-            self._send_json(502, {"ok": False, "error": "device_info.py --json produced "
-                                   "no parseable JSON", "raw_output": out})
             return
         # Tie the per-connection read cache to whichever watch is actually on the bus now; if it
         # changed since the last poll (hot-swap), this drops the previous watch's cached reads.

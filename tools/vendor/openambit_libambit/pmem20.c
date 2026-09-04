@@ -1158,7 +1158,11 @@ static void add_time(ambit_date_time_t *intime, int32_t offset, ambit_date_time_
         timeval.tv_usec += 1000000;
     }
 
-    struct tm *tm = gmtime(&timeval.tv_sec);
+    /* time_t is 64-bit on Windows/MinGW while struct timeval.tv_sec is a 32-bit long, so
+     * &tv_sec is not a time_t* there - copy into a real time_t first (a no-op on Linux/macOS
+     * where the two already match). */
+    time_t _tv_secs = timeval.tv_sec;
+    struct tm *tm = gmtime(&_tv_secs);
     outtime->msec = tm->tm_sec * 1000 + (timeval.tv_usec / 1000);
     outtime->minute = tm->tm_min;
     outtime->hour = tm->tm_hour;
