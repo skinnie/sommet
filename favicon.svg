@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <style>
+    .mk{fill:#16171A;stroke:#16171A}
+    @media (prefers-color-scheme:dark){.mk{fill:#F1F0EC;stroke:#F1F0EC}}
+  </style>
+  <g class="mk">
+    <circle cx="120" cy="122" r="78" fill="none" stroke-width="13" stroke-linecap="round" stroke-dasharray="15 18"/>
+    <path d="M76 166 L120 76 L164 166 Z" stroke="none"/>
+  </g>
+</svg>
