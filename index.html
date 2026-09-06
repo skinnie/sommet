@@ -271,9 +271,14 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
 <meta property="og:description" content="Free, open-source software to sync and manage legacy Suunto Ambit, Traverse and Kailash watches (and Garmin eTrex handhelds) on Android, Linux, macOS and Windows — GPX routes, POIs, workouts, activity export and backups, fully offline with no Movescount and no account.">
 <meta property="og:url" content="https://skinnie.github.io/sommet/">
 <meta property="og:locale" content="en">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://skinnie.github.io/sommet/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A mountain ridgeline at golden hour — Sommet, field software for Suunto watches">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Sommet — Keep Your Old Suunto Alive">
 <meta name="twitter:description" content="Free, open-source software to sync and manage legacy Suunto Ambit, Traverse and Kailash watches — and Garmin eTrex handhelds — offline, with no Movescount and no account.">
+<meta name="twitter:image" content="https://skinnie.github.io/sommet/og.jpg">
 
 <!-- Structured data for Google & AI/LLM search. Invisible to visitors. -->
 <script type="application/ld+json">
@@ -315,6 +320,34 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
   "author": { "@type": "Person", "name": "André Faria" }
 }
 </script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Do I need a phone or a smartphone to use the watch?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Suunto Ambit, Traverse and Kailash watches are standalone GPS instruments — they record and navigate on the wrist, with no phone required on the trail. Sommet runs on your own computer or phone only to sync routes, waypoints, workouts and activities, and works almost entirely offline." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is there a subscription or a cloud account?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Sommet is free and open-source, with no account, no login and no subscription. It runs on your own machine and keeps your data local — no cloud you don't control." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I use a Suunto Ambit without Movescount?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes — that is exactly what Sommet is for. When Movescount closed, these watches lost easy route and workout syncing. Sommet gives it back offline, so an Ambit 1, 2 or 3, a Traverse or a Kailash stays fully useful without Movescount." }
+    },
+    {
+      "@type": "Question",
+      "name": "Will the Spartan, Suunto 5, 9 and later Suunto watches be supported?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. SuuntoLink and the Suunto app already provide great features for those. Sommet focuses on the older Ambit, Traverse and Kailash families that lost features when Movescount closed." }
+    }
+  ]
+}
+</script>
 </head>
 <body>
 <div id="app">
@@ -354,7 +387,7 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
     <div class="wrap">
       <div class="eyebrow">Free field software · Suunto &amp; Garmin</div>
       <h1>Keep your Ambit<br>in the field.</h1>
-      <p class="lede">The desktop &amp; mobile app that syncs routes, waypoints, workouts and activities to the Suunto Ambit watches — no account, no login, almost entirely offline.</p>
+      <p class="lede">The desktop &amp; mobile app that syncs routes, waypoints, workouts and activities to the Suunto Ambit watches — no account, no login, no subscription, almost entirely offline.</p>
       <div class="links">
         <a class="arrow" href="#/get">Get Sommet <span aria-hidden="true">→</span></a>
         <a class="arrow" href="#/features">See what it does <span aria-hidden="true">→</span></a>
@@ -382,6 +415,7 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
           <p class="reveal in">Newer watches have the convenience of changing settings on the go through your smartphone. Ambits lost that. Because of it, a lot of watches went into a drawer. Some went into landfill.</p>
           <p class="reveal in">Sommet brings those abilities back, and adds a lot on top. The whole point is to keep these classic instruments — and the old computers and phones that run the app — out of the bin and out on the trail a little longer.</p>
           <p class="reveal in">Sommet also brings the desktop back to these watches — whether you love a big screen or you're now into the “dumb phone” scene, Sommet has you covered.</p>
+          <p class="reveal in">At heart they're standalone GPS watches — they record and navigate on the wrist, no phone required — for anyone who wants something simpler, offline and their own.</p>
           <p class="sig reveal in">— built in stubbornness, coffee &amp; good will · vibe-coded with AI + community work</p>
         </div>
         <div style="display:flex;flex-direction:column;gap:30px;justify-content:center">
@@ -622,6 +656,23 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
       <p style="margin-top:40px"><a class="arrow" href="#/get">Then get Sommet and bring it back to life <span aria-hidden="true">→</span></a></p>
     </div>
   </section>
+
+  <section class="blk why" style="border-top:1px solid var(--hair)">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow reveal in">New to this</div>
+        <h2 class="reveal in">Don't own one yet?</h2>
+        <p class="reveal in">If you're after a rugged GPS sports watch that works on its own — no phone strapped to your arm, no subscription, no cloud you don't control — an older Suunto is worth a look.&nbsp;</p>
+      </div>
+      <ul class="terms">
+        <li class="reveal in"><span class="t">What they are</span><span class="d">Standalone outdoor instruments: GPS, barometric altimeter, compass and days of battery. A Suunto Ambit, Traverse or Kailash records and navigates entirely on the wrist — the phone can stay at home.</span></li>
+        <li class="reveal in"><span class="t">Why an older one</span><span class="d">They were built to last and cost a fraction of a new watch second-hand. If you want something simpler, offline and independent of a big ecosystem, they hold up remarkably well a decade on.</span></li>
+        <li class="reveal in"><span class="t">Which to look for</span><span class="d">The Ambit3 Peak is the all-round mountaineering watch; the Traverse and Traverse Alpha add mapping and outdoor tools; the featherweight Kailash is the travel companion. The Ambit 1 and 2 are the affordable way in. All are supported here.</span></li>
+        <li class="reveal in"><span class="t">Where Sommet fits</span><span class="d">When Movescount closed, these watches lost easy route and workout syncing. Sommet gives it back — offline, from your own computer or phone — so a good used watch becomes fully useful again.</span></li>
+      </ul>
+      <p style="margin-top:40px"><a class="arrow reveal in" href="#/watches">See the watches Sommet supports <span aria-hidden="true">→</span></a></p>
+    </div>
+  </section>
 </div>
 
 <!-- ==================== LEGAL ==================== -->
@@ -683,6 +734,9 @@ footer{border-top:1px solid var(--hair);padding:56px 0 64px}
     <div class="wrap">
       <div class="page-head"><div class="eyebrow">Questions</div><h1>F.A.Q.</h1></div>
       <div style="margin-top:34px">
+        <div class="qa"><h3>Do I need a phone to use the watch?</h3><p>No. Suunto Ambit, Traverse and Kailash watches are standalone GPS instruments — they record and navigate on the wrist, no phone required on the trail. Sommet runs on your own computer or phone only to sync, and works almost entirely offline.</p></div>
+        <div class="qa"><h3>Is there a subscription or a cloud account?</h3><p>No. Sommet is free and open-source — no account, no login, no subscription. It runs on your own machine and keeps your data local.</p></div>
+        <div class="qa"><h3>Can I use a Suunto Ambit without Movescount?</h3><p>Yes — that's exactly what Sommet is for. When Movescount closed, these watches lost easy route and workout syncing; Sommet gives it back, offline.</p></div>
         <div class="qa"><h3>Found something that's not right from a dev perspective?</h3><p><a href="mailto:andrepsfaria@gmail.com?subject=Sommet">Contact me</a>. I have zero experience, but I'm willing to learn.</p></div>
         <div class="qa"><h3>Found a bug?</h3><p>Open an issue with logs and screenshots — <a href="https://github.com/skinnie/sommet/issues" target="_blank" rel="noopener">right here</a>.</p></div>
         <div class="qa"><h3>Will the Spartan, Suunto 5, 9 and later Suuntos be supported?</h3><p>No. SuuntoLink and the Suunto app already provide great features for them.</p></div>
