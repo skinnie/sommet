@@ -746,7 +746,16 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
         env["AMBIT_SERIAL"] = serial
     else:
         env.pop("AMBIT_SERIAL", None)
-    with WATCH_LOCK:
+    # WATCH_LOCK serialises access to the watch's USB HID bus. The MTP tools (Edge/Karoo import
+    # and FIT decoding) don't touch that bus at all - they read the phone/gvfs filesystem - so
+    # holding the watch lock across a multi-minute ride pull needlessly blocked every watch poll
+    # behind it, which surfaced as "server didn't reply" with several devices plugged (André,
+    # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
+    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py"}
+    lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
+    if lock is not None:
+        lock.acquire()
+    try:
         # In a normal checkout PYTHON is the real interpreter, so it runs tools/<script>
         # directly. In the frozen download PYTHON is this same helper's own executable (there
         # is no separate python), so it can't run a .py file - instead it re-invokes itself
@@ -757,6 +766,9 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
             cmd, cwd=TOOLS_DIR, capture_output=True, text=True, timeout=timeout, env=env,
             input=stdin)
         return proc.returncode, proc.stdout, proc.stderr
+    finally:
+        if lock is not None:
+            lock.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1255,6 +1267,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_garmin_upload(body)
         elif self.path == "/api/device/select":
             self._handle_device_select(body)
+        elif self.path == "/api/mtp/import":
+            self._handle_mtp_import(body)
         elif self.path == "/api/time/sync":
             self._handle_time_sync(body)
         elif self.path == "/api/demo":
@@ -1573,17 +1587,27 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"ok": False, "error": "mtp_import.py produced no JSON", "stderr": err}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
-    def _handle_mtp_import(self):
-        """GET /api/mtp/import[?since=NAME] - pull every ride .fit off the connected bike
-        computer(s) and decode each to a summary + GPX track (tools/mtp_import.py + fit_decode.py).
-        Returns activities ready for the desktop's local library, tagged by device kind
-        ('edge'/'karoo'), external_id = the .fit filename (unique per ride, used to de-dup on
-        re-import). Read-only on the device. Rough direct-USB import (André, 2026-09-04)."""
+    def _handle_mtp_import(self, body=None):
+        """Pull ride .fit files off the connected bike computer(s) and decode each to a summary +
+        GPX track (tools/mtp_import.py + fit_decode.py). Returns activities ready for the local
+        library, tagged by device kind ('edge'/'karoo'), external_id = the .fit filename (unique
+        per ride). Read-only on the device (André, 2026-09-04).
+
+        GET /api/mtp/import[?since=NAME]  - pull ALL rides (optionally newer than NAME).
+        POST /api/mtp/import {"files":[{"kind","name"}]} - pull ONLY those files (incremental
+        sync: the client already knows the device's file list and which it has processed, so it
+        asks for just the new ones instead of re-pulling everything every time)."""
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         since = query.get("since", [None])[0]
+        stdin = None
         with tempfile.TemporaryDirectory() as tmpdir:
-            pull_args = ["--pull", tmpdir] + (["--since", since] if since else [])
-            code, out, err = run_tool("mtp_import.py", pull_args, timeout=600)
+            pull_args = ["--pull", tmpdir]
+            if body and isinstance(body.get("files"), list):
+                pull_args.append("--only-stdin")
+                stdin = json.dumps({"files": body["files"]})
+            elif since:
+                pull_args += ["--since", since]
+            code, out, err = run_tool("mtp_import.py", pull_args, timeout=600, stdin=stdin)
             try:
                 pulled = (json.loads(out.strip().splitlines()[-1]).get("copied", [])
                           if out.strip() else [])

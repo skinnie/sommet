@@ -505,6 +505,14 @@ void ActivityService::openDatabase()
         QSettings().setValue(QStringLiteral("activities/serialTagMigrationDone"), true);
     }
 
+    // Bike-computer sync history (André, 2026-09-04): every device ride file we've already
+    // handled (imported OR skipped as a duplicate), keyed "kind|filename". Next sync pulls only
+    // files NOT in here, so a re-sync doesn't re-pull and re-decode all 50 rides to add 3 - the
+    // "history like FreeFileSync" idea. Cheap and separate from the activities table (duplicates
+    // leave no activity row but must still be remembered so they aren't re-processed).
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS bike_seen (key TEXT PRIMARY KEY)"));
+
     loadTombstones();
 }
 
@@ -1272,26 +1280,87 @@ void ActivityService::importGarminActivitiesInto(const QJsonArray &arr)
 
 void ActivityService::importFromBikeComputers()
 {
-    const QUrl url(kBackendBase + QStringLiteral("/api/mtp/import"));
     setLoading(true);
-    // Pulling + decoding many rides off MTP is slow; give it plenty of headroom.
-    QNetworkRequest req(url);
-    req.setTransferTimeout(600000);
-    QNetworkReply *reply = m_network.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        reply->deleteLater();
-        setLoading(false);
-        if (reply->error() != QNetworkReply::NoError) {
-            emit bikeImportError(reply->errorString());
+    // Step 1 - list the connected device(s) and their ride files (cheap: listed, not pulled).
+    QNetworkReply *list = m_network.get(QNetworkRequest(
+        QUrl(kBackendBase + QStringLiteral("/api/mtp/devices"))));
+    connect(list, &QNetworkReply::finished, this, [this, list]() {
+        list->deleteLater();
+        if (list->error() != QNetworkReply::NoError) {
+            setLoading(false);
+            emit bikeImportError(list->errorString());
             return;
         }
-        const auto o = QJsonDocument::fromJson(reply->readAll()).object();
-        if (!o.value(QStringLiteral("ok")).toBool(false)) {
-            emit bikeImportError(o.value(QStringLiteral("error"))
-                                 .toString(tr("Import from the bike computer failed.")));
+        const auto root = QJsonDocument::fromJson(list->readAll()).object();
+        if (!root.value(QStringLiteral("ok")).toBool(false)) {
+            setLoading(false);
+            emit bikeImportError(root.value(QStringLiteral("error"))
+                                 .toString(tr("Couldn't reach the bike computer.")));
             return;
         }
-        importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+        // The sync history: which device files have we already handled?
+        QSet<QString> seen;
+        if (m_db.isOpen()) {
+            QSqlQuery q(QStringLiteral("SELECT key FROM bike_seen"), m_db);
+            while (q.next())
+                seen.insert(q.value(0).toString());
+        }
+        QJsonArray toPull;      // {kind,name} of files not yet handled
+        QStringList allKeys;    // "kind|name" of every file currently on the device(s)
+        for (const auto &dv : root.value(QStringLiteral("devices")).toArray()) {
+            const auto d = dv.toObject();
+            const QString kind = d.value(QStringLiteral("kind")).toString();
+            for (const auto &fv : d.value(QStringLiteral("files")).toArray()) {
+                const QString name = fv.toString();
+                const QString key = kind + QLatin1Char('|') + name;
+                allKeys << key;
+                if (!seen.contains(key)) {
+                    QJsonObject f;
+                    f.insert(QStringLiteral("kind"), kind);
+                    f.insert(QStringLiteral("name"), name);
+                    toPull.append(f);
+                }
+            }
+        }
+        if (toPull.isEmpty()) {                 // nothing new on any device - instant, no pull
+            setLoading(false);
+            emit bikeImportFinished(0);
+            return;
+        }
+        // Step 2 - pull + decode ONLY the new files, then import the non-duplicates.
+        QJsonObject payload;
+        payload.insert(QStringLiteral("files"), toPull);
+        QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/mtp/import")));
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        req.setTransferTimeout(600000);        // pulling/decoding is slow; plenty of headroom
+        QNetworkReply *imp = m_network.post(req, QJsonDocument(payload).toJson());
+        connect(imp, &QNetworkReply::finished, this, [this, imp, allKeys]() {
+            imp->deleteLater();
+            setLoading(false);
+            if (imp->error() != QNetworkReply::NoError) {
+                emit bikeImportError(imp->errorString());
+                return;
+            }
+            const auto o = QJsonDocument::fromJson(imp->readAll()).object();
+            if (!o.value(QStringLiteral("ok")).toBool(false)) {
+                emit bikeImportError(o.value(QStringLiteral("error"))
+                                     .toString(tr("Import from the bike computer failed.")));
+                return;
+            }
+            importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+            // Mark every file now on the device(s) as handled - duplicates included, so they are
+            // never pulled/decoded again on the next sync (the FreeFileSync-style history).
+            if (m_db.isOpen()) {
+                m_db.transaction();
+                QSqlQuery ins(m_db);
+                ins.prepare(QStringLiteral("INSERT OR IGNORE INTO bike_seen (key) VALUES (?)"));
+                for (const QString &k : allKeys) {
+                    ins.addBindValue(k);
+                    ins.exec();
+                }
+                m_db.commit();
+            }
+        });
     });
 }
 

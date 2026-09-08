@@ -95,11 +95,18 @@ def discover():
             "mount": mount,
             "activitiesDir": adir or "",
             "activityCount": len(fits),
+            "files": fits,          # ride filenames on the device (cheap - listed, not pulled)
         })
     return devices
 
 
-def pull(dest, since=None):
+def pull(dest, since=None, only=None):
+    """Copy ride .fit files off the connected device(s) into `dest`.
+
+    `only`, when given, is a set of (kind, name) pairs - only those exact files are pulled. This
+    is the incremental path (2026-09-04): the client already knows the device's full file list
+    from discover() and which it has processed before, so it asks for just the new ones instead
+    of re-pulling everything each sync. `since` is the older name-prefix filter (Edge only)."""
     os.makedirs(dest, exist_ok=True)
     copied = []
     for dev in discover():
@@ -108,6 +115,8 @@ def pull(dest, since=None):
             continue
         for name in sorted(os.listdir(adir)):
             if not name.lower().endswith(".fit"):
+                continue
+            if only is not None and (dev["kind"], name) not in only:
                 continue
             if since and name <= since:
                 continue
@@ -130,11 +139,21 @@ def main():
     ap.add_argument("--list", action="store_true", help="JSON of connected MTP bike computers")
     ap.add_argument("--pull", metavar="DEST", help="copy activity .fit files into DEST")
     ap.add_argument("--since", metavar="NAME", help="only files whose name sorts after NAME")
+    ap.add_argument("--only-stdin", action="store_true",
+                    help="with --pull, read JSON {\"files\":[{\"kind\",\"name\"}]} from stdin and "
+                         "pull ONLY those (incremental sync)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args()
 
     if args.pull:
-        copied = pull(args.pull, since=args.since)
+        only = None
+        if args.only_stdin:
+            try:
+                spec = json.loads(sys.stdin.read() or "{}")
+                only = {(f.get("kind"), f.get("name")) for f in spec.get("files", [])}
+            except (json.JSONDecodeError, AttributeError):
+                only = set()          # unparseable -> pull nothing rather than everything
+        copied = pull(args.pull, since=args.since, only=only)
         print(json.dumps({"ok": True, "copied": copied, "count": len(copied)}))
         return 0
     # default / --list
