@@ -708,65 +708,75 @@ void ActivityService::dedupeActivities()
     // keeps every distinct watch device and drops the non-watch copies; a start-minute with no
     // watch move keeps the single highest-priority source.
     //   watch(empty) > garmin > suunto > etrex/garmin-usb > intervals > other
+    // The same ride reaches the library from several sources (a Suunto/Edge/Karoo move AND its
+    // intervals.icu / Garmin Connect copy), and their recorded start times rarely match to the
+    // second - so an exact start-minute key missed real duplicates. This matches within a time
+    // WINDOW instead (André, 2026-09-04: "huge chance some rides are already in our library").
+    // Rules:
+    //   * A duplicate is kept once, as its highest-priority source (direct device beats the
+    //     intervals aggregator). watch > garmin > edge > karoo > suunto > etrex > intervals.
+    //   * Two DIFFERENT physical watches recording at the same time are NOT duplicates (a Peak
+    //     and a Sport on one ride) - both kept, keyed by device.
+    //   * Two rides that start close together but have very different durations are treated as
+    //     different rides, not merged (e.g. a stop/restart), guarding against false merges.
     auto priority = [](const QString &src) -> int {
         if (src.isEmpty() || src == QStringLiteral("watch")) return 100;
         if (src == QStringLiteral("garmin")) return 80;
+        if (src == QStringLiteral("edge")) return 76;      // direct-from-Edge (USB/MTP)
+        if (src == QStringLiteral("karoo")) return 75;     // direct-from-Karoo (USB/MTP)
         if (src == QStringLiteral("suunto")) return 70;
         if (src == QStringLiteral("etrex")) return 60;
         if (src == QStringLiteral("intervals")) return 20;
         return 10;
     };
-    auto minuteKey = [](const QVariantMap &a) -> QString {
-        const QString s = a.value(QStringLiteral("startTime")).toString();
-        return s.size() >= 16 ? s.left(16) : s;   // "YYYY-MM-DDTHH:MM"
-    };
     auto isWatch = [](const QVariantMap &a) -> bool {
         const QString src = a.value(QStringLiteral("source")).toString();
         return src.isEmpty() || src == QStringLiteral("watch");
     };
+    auto startEpoch = [](const QVariantMap &a) -> qint64 {
+        const QString s = a.value(QStringLiteral("startTime")).toString();
+        if (s.isEmpty())
+            return -1;
+        const QDateTime dt = QDateTime::fromString(s, Qt::ISODate);
+        return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
+    };
+    const qint64 kWindowSecs = 180;   // cross-source start times rarely differ by more than this
 
-    // Pass 1: which start-minutes have at least one watch-native move.
-    QSet<QString> minutesWithWatch;
-    for (const QVariant &v : std::as_const(m_activities)) {
-        const QVariantMap a = v.toMap();
-        const QString key = minuteKey(a);
-        if (!key.isEmpty() && isWatch(a))
-            minutesWithWatch.insert(key);
-    }
-
-    // Pass 2: keep, in the existing (date-sorted) order.
-    QSet<QString> keptWatchDevPerMinute;   // "minute|device" already kept
-    QHash<QString, int> bestNonWatchIdx;   // minute -> index in kept (only when no watch move)
+    struct Meta { qint64 epoch; bool watch; QString device; int dur; };
     QVariantList kept;
+    QList<Meta> meta;
     for (const QVariant &v : std::as_const(m_activities)) {
         const QVariantMap a = v.toMap();
-        const QString key = minuteKey(a);
-        if (key.isEmpty()) {               // no start time -> can't match, always keep
+        const qint64 e = startEpoch(a);
+        const bool w = isWatch(a);
+        const QString dev = a.value(QStringLiteral("device")).toString();
+        const int dur = a.value(QStringLiteral("durationSeconds")).toInt();
+        if (e < 0) {                       // no usable start time -> can't match, always keep
             kept.append(v);
+            meta.append({-1, w, dev, dur});
             continue;
         }
-        if (isWatch(a)) {
-            // One row per (minute, device): different watches both kept; a genuine re-read of
-            // the same watch's same move collapses.
-            const QString devKey = key + QLatin1Char('|')
-                                 + a.value(QStringLiteral("device")).toString();
-            if (keptWatchDevPerMinute.contains(devKey))
+        int match = -1;
+        for (int j = 0; j < kept.size(); ++j) {
+            if (meta[j].epoch < 0 || qAbs(e - meta[j].epoch) > kWindowSecs)
                 continue;
-            keptWatchDevPerMinute.insert(devKey);
-            kept.append(v);
-        } else {
-            if (minutesWithWatch.contains(key))
-                continue;                  // a watch move owns this minute -> drop the copy
-            const int prio = priority(a.value(QStringLiteral("source")).toString());
-            if (!bestNonWatchIdx.contains(key)) {
-                bestNonWatchIdx.insert(key, kept.size());
-                kept.append(v);
-            } else {
-                const int idx = bestNonWatchIdx.value(key);
-                if (prio > priority(kept.at(idx).toMap()
-                                    .value(QStringLiteral("source")).toString()))
-                    kept[idx] = v;
+            if (w && meta[j].watch && dev != meta[j].device)
+                continue;                  // two different watches, same time = separate rides
+            if (dur > 0 && meta[j].dur > 0) {
+                const double r = double(dur) / double(meta[j].dur);
+                if (r > 1.5 || r < 0.66)
+                    continue;              // durations too different = different rides
             }
+            match = j;
+            break;
+        }
+        if (match < 0) {
+            kept.append(v);
+            meta.append({e, w, dev, dur});
+        } else if (priority(a.value(QStringLiteral("source")).toString())
+                   > priority(kept.at(match).toMap().value(QStringLiteral("source")).toString())) {
+            kept[match] = v;               // a higher-priority source for the same ride wins
+            meta[match] = {e, w, dev, dur};
         }
     }
     m_activities = kept;
@@ -1258,6 +1268,132 @@ void ActivityService::importGarminActivitiesInto(const QJsonArray &arr)
     dbLoadAll();
     emit activitiesChanged();
     emit importFinished(count);
+}
+
+void ActivityService::importFromBikeComputers()
+{
+    const QUrl url(kBackendBase + QStringLiteral("/api/mtp/import"));
+    setLoading(true);
+    // Pulling + decoding many rides off MTP is slow; give it plenty of headroom.
+    QNetworkRequest req(url);
+    req.setTransferTimeout(600000);
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        setLoading(false);
+        if (reply->error() != QNetworkReply::NoError) {
+            emit bikeImportError(reply->errorString());
+            return;
+        }
+        const auto o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!o.value(QStringLiteral("ok")).toBool(false)) {
+            emit bikeImportError(o.value(QStringLiteral("error"))
+                                 .toString(tr("Import from the bike computer failed.")));
+            return;
+        }
+        importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+    });
+}
+
+void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
+{
+    if (!m_db.isOpen()) {
+        emit importError(tr("Local activity store isn't open."));
+        return;
+    }
+    // Only import rides we DON'T already have (André, 2026-09-04: "only allow to sync non-
+    // duplicates... huge chance some rides are already in our library"). Load the start time +
+    // duration of every activity already stored, and skip any incoming ride that matches one
+    // within a few minutes with a comparable duration - whatever source it came from (a watch,
+    // intervals.icu, Garmin, or a previous sync of this same device). This is the same match
+    // dedupeActivities() uses for the display, applied here so duplicates never even land.
+    auto epochOf = [](const QString &iso) -> qint64 {
+        if (iso.isEmpty()) return -1;
+        const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+        return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
+    };
+    struct Existing { qint64 epoch; int dur; };
+    QList<Existing> existing;
+    {
+        QSqlQuery q(QStringLiteral("SELECT start_time, duration_s FROM activities"), m_db);
+        while (q.next())
+            existing.append({epochOf(q.value(0).toString()), q.value(1).toInt()});
+    }
+    // A ride counts as already-present if an existing activity starts at the same instant
+    // (within 5 min - no duration check, since elapsed vs moving time differ across sources),
+    // OR at a whole-hour offset of 1-2 h with a comparable duration. That hour offset is real:
+    // some intervals.icu rides in André's own library were stored with a 1-hour timezone/DST
+    // discrepancy vs the device's UTC, so an exact-instant match alone missed ~9 of 50 known
+    // duplicates (verified 2026-09-04). The hour-offset arm is kept tight (±2 min + duration
+    // like) so it can't swallow a genuinely different ride.
+    auto durLike = [](int a, int b) -> bool {
+        if (a <= 0 || b <= 0) return true;
+        const double r = double(a) / double(b);
+        return r >= 0.5 && r <= 2.0;
+    };
+    auto alreadyHave = [&](qint64 epoch, int dur) -> bool {
+        if (epoch < 0) return false;                 // no start time -> can't match, treat as new
+        for (const Existing &e : existing) {
+            if (e.epoch < 0) continue;
+            const qint64 dd = qAbs(epoch - e.epoch);
+            if (dd <= 300)
+                return true;                         // same instant (±5 min)
+            if ((qAbs(dd - 3600) <= 120 || qAbs(dd - 7200) <= 120) && durLike(dur, e.dur))
+                return true;                         // whole-hour tz/DST storage offset
+        }
+        return false;
+    };
+
+    m_db.transaction();
+    int idx = -2000000;   // its own negative range, clear of intervals and garmin(-1e6) imports
+    int count = 0, skipped = 0;
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        const int duration = o.value(QStringLiteral("durationSeconds")).toInt();
+        const double distance = o.value(QStringLiteral("distanceMeters")).toDouble();
+        if (duration < 60 && distance < 100.0)   // skip junk/aborted, same rule as other imports
+            continue;
+        const qint64 epoch = epochOf(o.value(QStringLiteral("startTime")).toString());
+        if (alreadyHave(epoch, duration)) {      // already in the library from some source
+            ++skipped;
+            continue;
+        }
+        const QString source = o.value(QStringLiteral("kind")).toString();      // edge | karoo
+        const QString extId = o.value(QStringLiteral("external_id")).toString();
+        const QString gpx = o.value(QStringLiteral("gpx")).toString();
+        // A GPS track (when the ride had one) for the map; indoor rides carry an empty gpx.
+        QString trackJson;
+        if (!gpx.isEmpty()) {
+            const QVariantMap parsed = parseGpx(gpx);
+            trackJson = QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(
+                parsed.value(QStringLiteral("track")).toList())).toJson(QJsonDocument::Compact));
+        }
+        QSqlQuery ins(m_db);
+        ins.prepare(QStringLiteral(
+            "INSERT INTO activities "
+            "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
+            " start_time, track_json, gpx_text, source, external_id, device) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"));
+        ins.addBindValue(idx--);
+        ins.addBindValue(o.value(QStringLiteral("sport")).toString());
+        ins.addBindValue(duration);
+        ins.addBindValue(distance);
+        ins.addBindValue(o.value(QStringLiteral("ascentMeters")).toDouble());
+        ins.addBindValue(o.value(QStringLiteral("energyKcal")).toInt());
+        ins.addBindValue(o.value(QStringLiteral("startTime")).toString());
+        ins.addBindValue(trackJson);
+        ins.addBindValue(gpx);
+        ins.addBindValue(source);
+        ins.addBindValue(extId);
+        ins.addBindValue(source);            // device = the source tag (edge/karoo)
+        ins.exec();
+        existing.append({epoch, duration});  // so two incoming copies of one ride also de-dup
+        ++count;
+    }
+    m_db.commit();
+    dbLoadAll();
+    emit activitiesChanged();
+    emit bikeImportFinished(count);
 }
 
 void ActivityService::exportToIntervals()

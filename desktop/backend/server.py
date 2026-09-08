@@ -1083,6 +1083,10 @@ class Handler(BaseHTTPRequestHandler):
             self._cached_get("nav", self._handle_nav)   # keep the read cache (v0.2.x)
         elif self.path == "/api/activities" or self.path.startswith("/api/activities?"):
             self._handle_activities()
+        elif self.path == "/api/mtp/devices":
+            self._handle_mtp_devices()
+        elif self.path == "/api/mtp/import" or self.path.startswith("/api/mtp/import?"):
+            self._handle_mtp_import()
         elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
             self._handle_garmin_weight()
         elif self.path.startswith("/api/garmin/activities"):
@@ -1557,6 +1561,66 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "activities": activities,
                                    "total_entries": total_entries, "device": response_device,
                                    "raw_output": out})
+
+    def _handle_mtp_devices(self):
+        """GET /api/mtp/devices - bike computers (Garmin Edge, Hammerhead Karoo) reachable over
+        MTP right now, with how many recorded rides each has. tools/mtp_import.py --list.
+        Linux-only in practice (uses gvfs/gio); returns an empty list elsewhere, not an error."""
+        code, out, err = run_tool("mtp_import.py", ["--list"])
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            payload = {"ok": False, "error": "mtp_import.py produced no JSON", "stderr": err}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_mtp_import(self):
+        """GET /api/mtp/import[?since=NAME] - pull every ride .fit off the connected bike
+        computer(s) and decode each to a summary + GPX track (tools/mtp_import.py + fit_decode.py).
+        Returns activities ready for the desktop's local library, tagged by device kind
+        ('edge'/'karoo'), external_id = the .fit filename (unique per ride, used to de-dup on
+        re-import). Read-only on the device. Rough direct-USB import (André, 2026-09-04)."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        since = query.get("since", [None])[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pull_args = ["--pull", tmpdir] + (["--since", since] if since else [])
+            code, out, err = run_tool("mtp_import.py", pull_args, timeout=600)
+            try:
+                pulled = (json.loads(out.strip().splitlines()[-1]).get("copied", [])
+                          if out.strip() else [])
+            except (json.JSONDecodeError, IndexError):
+                self._send_json(502, {"ok": False, "error": "MTP pull failed",
+                                       "raw_output": out, "stderr": err})
+                return
+            activities = []
+            for item in pulled:
+                fit_path = item["path"]
+                gpx_path = fit_path + ".gpx"
+                dcode, dout, _derr = run_tool("fit_decode.py", [fit_path, "--gpx", gpx_path])
+                if dcode != 0 or not dout.strip():
+                    continue
+                try:
+                    summary = json.loads(dout.strip().splitlines()[-1])
+                except (json.JSONDecodeError, IndexError):
+                    continue
+                gpx_text = ""
+                if summary.get("trackPoints"):
+                    try:
+                        with open(gpx_path) as fh:
+                            gpx_text = fh.read()
+                    except OSError:
+                        pass
+                activities.append({
+                    "kind": item["kind"],           # 'edge' | 'karoo' - the library source tag
+                    "external_id": item["name"],    # the .fit filename, unique per ride
+                    "sport": summary.get("sport"),
+                    "startTime": summary.get("startTime"),
+                    "durationSeconds": summary.get("durationSeconds"),
+                    "distanceMeters": summary.get("distanceMeters"),
+                    "ascentMeters": summary.get("ascentMeters"),
+                    "energyKcal": summary.get("energyKcal"),
+                    "gpx": gpx_text,                 # empty for indoor/no-GPS rides
+                })
+            self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
     def _handle_activities_legacy(self):
         """The Ambit1/2 path for GET /api/activities - tools/legacy_link.py's `logs`

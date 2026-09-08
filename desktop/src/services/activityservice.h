@@ -110,6 +110,12 @@ public:
     // tagged source="garmin"; a pull-only refresh, watch rows untouched.
     Q_INVOKABLE void importFromGarmin(int days);
 
+    // Import activities directly off a bike computer connected over USB/MTP - Garmin Edge and
+    // Hammerhead Karoo (André, 2026-09-04). The backend (/api/mtp/import) pulls each ride's .fit
+    // and decodes it (tools/mtp_import.py + fit_decode.py); rows are tagged source="edge"/"karoo"
+    // with the .fit filename as external_id (de-dups on re-import). No account, no settings.
+    Q_INVOKABLE void importFromBikeComputers();
+
     // Export (upload) the watch's own activities TO intervals.icu as FIT files (André,
     // 2026-08-24). Only rows we haven't already uploaded; each is marked once it lands.
     Q_INVOKABLE void exportToIntervals();
@@ -151,6 +157,11 @@ signals:
     void lastErrorChanged();
     void importFinished(int count);
     void importError(const QString &message);
+    // Dedicated to the Edge/Karoo (MTP) import so its Home status can't be crossed with the
+    // shared importFinished/importError that the intervals and Garmin imports also emit
+    // (André, 2026-09-04 - an intervals auto-import's count was showing on the bike-sync card).
+    void bikeImportFinished(int count);
+    void bikeImportError(const QString &message);
     // Emitted after an activity is removed locally (the intervals.icu delete, when it applies,
     // is fire-and-forget - a cloud failure is surfaced via lastError, not this signal).
     void activityDeleted(const QString &name);
@@ -211,6 +222,7 @@ private:
     void dedupeActivities();
     void importActivitiesInto(const QJsonArray &activities);
     void importGarminActivitiesInto(const QJsonArray &activities);
+    void importBikeActivitiesInto(const QJsonArray &activities);
     void uploadOneToIntervals(int idx, const QByteArray &fit,
                               const QString &athlete, const QString &key);
     // Generic single-file uploader used by the per-activity export (FIT or GPX). idx<0 means

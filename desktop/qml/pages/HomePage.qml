@@ -28,6 +28,49 @@ PageFlickable {
         WeatherService.detectLocationFromIp();
         ActivityService.refresh();
         DeviceService.checkGpsOrbitStatus();
+        root.refreshBikeComputers();
+    }
+
+    // --- Bike computer over USB: Garmin Edge / Hammerhead Karoo (André, 2026-09-04) ---
+    // Detected by polling the backend's /api/mtp/devices (Linux/gvfs MTP). Shown on Home like
+    // any other connected device; its rides import into the library on Sync, reusing
+    // ActivityService.importFromBikeComputers(). No account, no settings.
+    property var bikeComputers: []
+    property string bikeSyncMsg: ""
+    property bool bikeSyncOk: false
+
+    function refreshBikeComputers() {
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            try {
+                const r = JSON.parse(xhr.responseText);
+                root.bikeComputers = (r && r.ok && r.devices) ? r.devices : [];
+            } catch (e) {
+                root.bikeComputers = [];
+            }
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/mtp/devices");
+        xhr.send();
+    }
+
+    Timer {
+        interval: 8000; running: true; repeat: true
+        onTriggered: root.refreshBikeComputers()
+    }
+
+    Connections {
+        target: ActivityService
+        function onBikeImportFinished(n) {
+            root.bikeSyncMsg = n > 0 ? qsTr("Imported %1 new ride(s).").arg(n)
+                                     : qsTr("No new rides — already in your library.");
+            root.bikeSyncOk = true;
+        }
+        function onBikeImportError(e) {
+            root.bikeSyncMsg = e;
+            root.bikeSyncOk = false;
+        }
     }
 
     // Keep the multi-watch picker current: the heartbeat re-reads /api/device every ~10s, so
@@ -268,8 +311,10 @@ PageFlickable {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingMedium
+                    // When a bike computer (Edge/Karoo) is plugged but no watch, the bike-computer
+                    // hero below takes this card's place (André, 2026-09-04).
                     visible: !HomeViewModel.connected && !HomeViewModel.isGarmin
-                             && !DeviceService.demoMode
+                             && !DeviceService.demoMode && root.bikeComputers.length === 0
 
                     Row {
                         width: parent.width
@@ -305,6 +350,64 @@ PageFlickable {
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.fontSizeBody
                             }
+                        }
+                    }
+                }
+
+                // Bike computer as the hero when it's the only thing plugged in - replaces the
+                // "No watch connected" card (André, 2026-09-04). Shows the device and syncs its
+                // rides. When a watch is ALSO connected, the watch stays the hero and a compact
+                // bike card appears lower down instead (see below).
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingMedium
+                    visible: !HomeViewModel.connected && !HomeViewModel.isGarmin
+                             && root.bikeComputers.length > 0
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingMedium
+                        Rectangle {
+                            width: 64; height: 64; radius: Theme.radiusSmall
+                            color: Theme.cardNested
+                            BikeComputerIcon {
+                                anchors.centerIn: parent
+                                size: 34; color: Theme.primary
+                                kind: root.bikeComputers.length > 0
+                                    ? root.bikeComputers[0].kind : "edge"
+                            }
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 2
+                            Text {
+                                text: root.bikeComputers.length > 0
+                                    ? (root.bikeComputers[0].kind === "edge"
+                                        ? qsTr("Garmin Edge") : qsTr("Hammerhead Karoo"))
+                                    : ""
+                                font.pixelSize: Theme.fontSizeTitle; font.bold: true
+                                color: Theme.text
+                            }
+                            Text {
+                                text: root.bikeComputers.length > 0
+                                    ? qsTr("%1 rides on the device · Sync adds only new ones").arg(root.bikeComputers[0].activityCount)
+                                    : ""
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                            }
+                        }
+                    }
+                    Row {
+                        spacing: Theme.spacingSmall
+                        RoundedButton {
+                            enabled: !ActivityService.loading
+                            text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync rides")
+                            onClicked: { root.bikeSyncMsg = ""; ActivityService.importFromBikeComputers() }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: root.bikeSyncMsg.length > 0
+                            text: root.bikeSyncMsg
+                            color: root.bikeSyncOk ? Theme.success : Theme.error
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }
@@ -650,7 +753,12 @@ PageFlickable {
                 // stops once connected, retries every 1s until it isn't), so a manual
                 // "Refresh" button has nothing left to do that isn't already happening.
                 Text {
+                    // Suppressed when a bike computer (Edge/Karoo) is the connected device: a
+                    // watch simply isn't plugged in then, so the "no watch on the USB bus" error
+                    // is noise, not a fault (André, 2026-09-04 - nobody plugs a watch and a bike
+                    // computer at once).
                     visible: !HomeViewModel.isGarmin && DeviceService.lastError.length > 0
+                             && root.bikeComputers.length === 0
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.error
@@ -717,6 +825,64 @@ PageFlickable {
                                 onClicked: DeviceService.selectWatch(modelData.productId)
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Bike computer over USB (Garmin Edge / Hammerhead Karoo) - the compact card shown when a
+        // WATCH is also connected (the watch is the hero; this sits below it). When no watch is
+        // connected, the bike computer is the hero card up top instead, so this stays hidden then.
+        Card {
+            width: parent.width
+            visible: root.bikeComputers.length > 0
+                     && (HomeViewModel.connected || HomeViewModel.isGarmin)
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Repeater {
+                    model: root.bikeComputers
+                    delegate: Row {
+                        required property var modelData
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        BikeComputerIcon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            size: 28; color: Theme.primary
+                            kind: modelData.kind
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 2
+                            Text {
+                                text: modelData.kind === "edge" ? qsTr("Garmin Edge")
+                                                                : qsTr("Hammerhead Karoo")
+                                color: Theme.text; font.bold: true
+                                font.pixelSize: Theme.fontSizeBodyLarge
+                            }
+                            Text {
+                                text: qsTr("%1 rides on the device · Sync adds only new ones").arg(modelData.activityCount)
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            }
+                        }
+                    }
+                }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        enabled: !ActivityService.loading
+                        text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync rides")
+                        onClicked: {
+                            root.bikeSyncMsg = "";
+                            ActivityService.importFromBikeComputers();
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.bikeSyncMsg.length > 0
+                        text: root.bikeSyncMsg
+                        color: root.bikeSyncOk ? Theme.success : Theme.error
+                        font.pixelSize: Theme.fontSizeCaption
                     }
                 }
             }

@@ -190,6 +190,9 @@ qt_add_qml_module(ambitapp
         qml/components/ActivityDetail.qml
         qml/components/RuleOutputChart.qml
         qml/components/EtrexIcon.qml
+        qml/components/BikeComputerIcon.qml
+        qml/components/EdgeIcon.qml
+        qml/components/KarooIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
         qml/PlanStore.qml
