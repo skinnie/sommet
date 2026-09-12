@@ -49,6 +49,12 @@ class DeviceService : public QObject
     // then target it), or -1 for "whichever is plugged".
     Q_PROPERTY(QVariantList connectedWatches READ connectedWatches NOTIFY connectedWatchesChanged)
     Q_PROPERTY(int selectedProductId READ selectedProductId NOTIFY connectedWatchesChanged)
+    // The unified "active device" model (André, 2026-09-04): a Garmin Edge / Hammerhead Karoo can
+    // be the active device instead of a watch. When activeBikeKind is set ("edge"/"karoo"), the
+    // app is focused on that bike computer - Home shows it, watch-only sections hide. Empty means
+    // a watch (or nothing) is active, the prior behaviour.
+    Q_PROPERTY(QString activeBikeKind READ activeBikeKind NOTIFY activeDeviceChanged)
+    Q_PROPERTY(bool bikeActive READ bikeActive NOTIFY activeDeviceChanged)
 
     // GPS orbit (AGPS/SGEE) update - real, 2026-08-07. The backend side
     // (POST /api/agps/update, sgee_andre.md) was already built and hardware-verified; only
@@ -186,6 +192,8 @@ public:
     int batteryPercent() const { return m_batteryPercent; }
     QVariantList connectedWatches() const { return m_connectedWatches; }
     int selectedProductId() const { return m_selectedProductId; }
+    QString activeBikeKind() const { return m_activeBikeKind; }
+    bool bikeActive() const { return !m_activeBikeKind.isEmpty(); }
 
     // Checks /api/health, then /api/device (identity, battery). Read-only on the backend
     // side, safe to call any time.
@@ -196,6 +204,8 @@ public:
     // POST /api/device/select then re-read: pin every backend tool to this one watch when
     // several share the bus (productId < 0 clears the pin). Mirrors Android's selectWatch().
     Q_INVOKABLE void selectWatch(int productId);
+    // Make a bike computer the active device ("edge"/"karoo"), or "" to hand back to the watch.
+    Q_INVOKABLE void selectBikeComputer(const QString &kind);
 
     bool gpsOrbitBusy() const { return m_gpsOrbitBusy; }
     QString gpsOrbitStatusText() const { return m_gpsOrbitStatusText; }
@@ -322,6 +332,7 @@ signals:
     void smartSensorEnabledChanged();
     void coachEnabledChanged();
     void connectedWatchesChanged();
+    void activeDeviceChanged();
 
 private:
     QNetworkAccessManager m_network;
@@ -346,6 +357,7 @@ private:
     int m_batteryPercent = -1;
     QVariantList m_connectedWatches;
     int m_selectedProductId = -1;
+    QString m_activeBikeKind;   // "" = watch active; "edge"/"karoo" = that bike computer active
 
     bool m_gpsOrbitBusy = false;
     bool m_glonassSupported = false;

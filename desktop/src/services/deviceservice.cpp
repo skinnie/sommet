@@ -290,8 +290,21 @@ void DeviceService::refreshDevices()
     });
 }
 
+void DeviceService::selectBikeComputer(const QString &kind)
+{
+    if (m_activeBikeKind == kind)
+        return;
+    m_activeBikeKind = kind;
+    emit activeDeviceChanged();
+}
+
 void DeviceService::selectWatch(int productId)
 {
+    // Picking a watch hands the "active device" back from any bike computer.
+    if (!m_activeBikeKind.isEmpty()) {
+        m_activeBikeKind.clear();
+        emit activeDeviceChanged();
+    }
     QNetworkRequest request(backendUrl(QStringLiteral("/api/device/select")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QJsonObject payload;

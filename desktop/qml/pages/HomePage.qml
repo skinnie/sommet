@@ -38,6 +38,38 @@ PageFlickable {
     property var bikeComputers: []
     property string bikeSyncMsg: ""
     property bool bikeSyncOk: false
+    // Bumped after every bike sync so anything that reads the (notify-less) sync history - the
+    // "Sync rides" enabled state below - re-evaluates immediately, not only on the next poll.
+    property int bikeSyncTick: 0
+
+    // How many of the active bike computer's rides a Sync would still pull (0 => up to date).
+    readonly property int activeBikeUnsynced: {
+        void bikeSyncTick;   // dependency: re-run when a sync finishes
+        return root.activeBike
+            ? ActivityService.unsyncedBikeCount(root.activeBike.kind, root.activeBike.files || [])
+            : 0;
+    }
+
+    // The bike computer that is the active device right now (matching DeviceService.activeBikeKind),
+    // or null. The unified device model: one active device across watches and bike computers.
+    readonly property var activeBike: {
+        for (var i = 0; i < bikeComputers.length; i++)
+            if (bikeComputers[i].kind === DeviceService.activeBikeKind)
+                return bikeComputers[i];
+        return null;
+    }
+
+    // Keep the active device sensible as things are plugged/unplugged (André, 2026-09-04):
+    // auto-pick the bike computer when nothing else is active and no watch is connected; and if
+    // the active bike computer is unplugged, hand the active device back to the watch.
+    function reconcileActiveDevice() {
+        if (DeviceService.bikeActive && !activeBike)
+            DeviceService.selectBikeComputer("");
+        else if (!DeviceService.bikeActive && !HomeViewModel.connected
+                 && bikeComputers.length > 0)
+            DeviceService.selectBikeComputer(bikeComputers[0].kind);
+    }
+    onBikeComputersChanged: reconcileActiveDevice()
 
     function refreshBikeComputers() {
         const xhr = new XMLHttpRequest();
@@ -62,14 +94,45 @@ PageFlickable {
 
     Connections {
         target: ActivityService
-        function onBikeImportFinished(n) {
-            root.bikeSyncMsg = n > 0 ? qsTr("Imported %1 new ride(s).").arg(n)
-                                     : qsTr("No new rides — already in your library.");
+        function onBikeImportFinished(added, skipped) {
+            if (added > 0)
+                root.bikeSyncMsg = skipped > 0
+                    ? qsTr("Imported %1 new · %2 already in your library.").arg(added).arg(skipped)
+                    : qsTr("Imported %1 new ride(s).").arg(added);
+            else
+                root.bikeSyncMsg = qsTr("No new rides — all already in your library.");
             root.bikeSyncOk = true;
+            root.bikeSyncTick += 1;   // re-evaluate the "Sync rides" enabled state now
         }
         function onBikeImportError(e) {
             root.bikeSyncMsg = e;
             root.bikeSyncOk = false;
+        }
+    }
+
+    // One tappable pill for the unified device switcher (watches + bike computers).
+    component DeviceChip: Rectangle {
+        property string label: ""
+        property bool active: false
+        signal picked()
+        radius: height / 2
+        implicitHeight: _chipLabel.implicitHeight + 12
+        implicitWidth: _chipLabel.implicitWidth + 24
+        color: active ? Qt.alpha(Theme.primary, 0.13) : "transparent"
+        border.width: 1
+        border.color: active ? Theme.primary : Qt.alpha(Theme.mutedText, 0.4)
+        Text {
+            id: _chipLabel
+            anchors.centerIn: parent
+            text: parent.label
+            color: parent.active ? Theme.text : Theme.mutedText
+            font.pixelSize: Theme.fontSizeBody
+            font.bold: parent.active
+        }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: parent.picked()
         }
     }
 
@@ -240,7 +303,9 @@ PageFlickable {
                     // specific model name/icon/status dot for a watch that was never plugged
                     // in - genuinely misleading, not just an aesthetic gap. Hidden entirely
                     // once nothing is connected; the emptyState Column below takes its place.
-                    visible: HomeViewModel.connected || HomeViewModel.isGarmin
+                    // Also hidden when a bike computer is the active device (its hero shows instead).
+                    visible: (HomeViewModel.connected || HomeViewModel.isGarmin)
+                             && !DeviceService.bikeActive
 
                     // Standing in for the real Ambit3 Peak Sapphire product photo the spec
                     // asks for (from Suunto's own Android app resources) - not pulled in
@@ -354,15 +419,13 @@ PageFlickable {
                     }
                 }
 
-                // Bike computer as the hero when it's the only thing plugged in - replaces the
-                // "No watch connected" card (André, 2026-09-04). Shows the device and syncs its
-                // rides. When a watch is ALSO connected, the watch stays the hero and a compact
-                // bike card appears lower down instead (see below).
+                // Bike computer as the hero - shown whenever a bike computer is the ACTIVE device
+                // (André, 2026-09-04: one active device across watches and bike computers). Shows
+                // the device and syncs its rides; the watch hero above hides while this is active.
                 Column {
                     width: parent.width
                     spacing: Theme.spacingMedium
-                    visible: !HomeViewModel.connected && !HomeViewModel.isGarmin
-                             && root.bikeComputers.length > 0
+                    visible: DeviceService.bikeActive && root.activeBike !== null
                     Row {
                         width: parent.width
                         spacing: Theme.spacingMedium
@@ -372,25 +435,32 @@ PageFlickable {
                             BikeComputerIcon {
                                 anchors.centerIn: parent
                                 size: 34; color: Theme.primary
-                                kind: root.bikeComputers.length > 0
-                                    ? root.bikeComputers[0].kind : "edge"
+                                kind: root.activeBike ? root.activeBike.kind : "edge"
                             }
                         }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
                             Text {
-                                text: root.bikeComputers.length > 0
-                                    ? (root.bikeComputers[0].kind === "edge"
+                                text: root.activeBike
+                                    ? (root.activeBike.kind === "edge"
                                         ? qsTr("Garmin Edge") : qsTr("Hammerhead Karoo"))
                                     : ""
                                 font.pixelSize: Theme.fontSizeTitle; font.bold: true
                                 color: Theme.text
                             }
                             Text {
-                                text: root.bikeComputers.length > 0
-                                    ? qsTr("%1 rides on the device · Sync adds only new ones").arg(root.bikeComputers[0].activityCount)
-                                    : ""
+                                // "51 rides, N new" - N is how many the device holds that aren't
+                                // yet in the sync history (what a Sync would pull). 0 -> just the
+                                // total. The real added/duplicate split is reported by Sync itself.
+                                text: {
+                                    if (!root.activeBike)
+                                        return "";
+                                    var total = root.activeBike.activityCount;
+                                    return root.activeBikeUnsynced > 0
+                                        ? qsTr("%1 rides, %2 new").arg(total).arg(root.activeBikeUnsynced)
+                                        : qsTr("%1 rides").arg(total);
+                                }
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
                             }
                         }
@@ -398,8 +468,13 @@ PageFlickable {
                     Row {
                         spacing: Theme.spacingSmall
                         RoundedButton {
-                            enabled: !ActivityService.loading
-                            text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync rides")
+                            // Greyed out when there's nothing new to pull (André, 2026-09-12):
+                            // the sync history already covers every ride on the device.
+                            enabled: !ActivityService.loading && root.activeBikeUnsynced > 0
+                            text: ActivityService.loading
+                                ? qsTr("Syncing…")
+                                : (root.activeBikeUnsynced > 0 ? qsTr("Sync rides")
+                                                               : qsTr("Up to date"))
                             onClicked: { root.bikeSyncMsg = ""; ActivityService.importFromBikeComputers() }
                         }
                         Text {
@@ -777,15 +852,18 @@ PageFlickable {
         Card {
             width: parent.width
             variant: "nested"   // secondary utility strip under the device card - recedes
-            visible: DeviceService.connectedWatches.length > 1
+            // Unified device switcher (André, 2026-09-04): EVERY plugged device - watches AND bike
+            // computers - as one "tap to switch" strip, so you pick the one active device rather
+            // than seeing watch + GPS at once. Shown when there's more than one to choose from.
+            visible: (DeviceService.connectedWatches.length + root.bikeComputers.length) > 1
 
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
                 Text {
-                    text: qsTr("%1 watches connected — tap to switch:")
-                          .arg(DeviceService.connectedWatches.length)
+                    text: qsTr("%1 devices connected — tap to switch:")
+                          .arg(DeviceService.connectedWatches.length + root.bikeComputers.length)
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
@@ -794,95 +872,31 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingSmall
 
+                    // Watches
                     Repeater {
                         model: DeviceService.connectedWatches
-                        delegate: Rectangle {
+                        delegate: DeviceChip {
                             required property var modelData
-                            // The active one: the explicitly pinned watch, or - when nothing is
-                            // pinned - whichever the backend currently reports as connected.
-                            readonly property bool active:
-                                DeviceService.selectedProductId >= 0
-                                    ? modelData.productId === DeviceService.selectedProductId
-                                    : DeviceService.model === modelData.codename
-                            radius: height / 2
-                            implicitHeight: chipLabel.implicitHeight + 12
-                            implicitWidth: chipLabel.implicitWidth + 24
-                            color: active ? Qt.alpha(Theme.primary, 0.13) : "transparent"
-                            border.width: 1
-                            border.color: active ? Theme.primary : Qt.alpha(Theme.mutedText, 0.4)
-
-                            Text {
-                                id: chipLabel
-                                anchors.centerIn: parent
-                                text: modelData.name
-                                color: active ? Theme.text : Theme.mutedText
-                                font.pixelSize: Theme.fontSizeBody
-                                font.bold: active
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: DeviceService.selectWatch(modelData.productId)
-                            }
+                            label: modelData.name
+                            // Active only when no bike computer has taken over, and this is the
+                            // pinned watch (or the connected one when nothing is explicitly pinned).
+                            active: !DeviceService.bikeActive
+                                    && (DeviceService.selectedProductId >= 0
+                                        ? modelData.productId === DeviceService.selectedProductId
+                                        : DeviceService.model === modelData.codename)
+                            onPicked: DeviceService.selectWatch(modelData.productId)
                         }
                     }
-                }
-            }
-        }
-
-        // Bike computer over USB (Garmin Edge / Hammerhead Karoo) - the compact card shown when a
-        // WATCH is also connected (the watch is the hero; this sits below it). When no watch is
-        // connected, the bike computer is the hero card up top instead, so this stays hidden then.
-        Card {
-            width: parent.width
-            visible: root.bikeComputers.length > 0
-                     && (HomeViewModel.connected || HomeViewModel.isGarmin)
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-                Repeater {
-                    model: root.bikeComputers
-                    delegate: Row {
-                        required property var modelData
-                        width: parent.width
-                        spacing: Theme.spacingSmall
-                        BikeComputerIcon {
-                            anchors.verticalCenter: parent.verticalCenter
-                            size: 28; color: Theme.primary
-                            kind: modelData.kind
+                    // Bike computers (Edge / Karoo)
+                    Repeater {
+                        model: root.bikeComputers
+                        delegate: DeviceChip {
+                            required property var modelData
+                            label: modelData.kind === "edge" ? qsTr("Garmin Edge")
+                                                             : qsTr("Hammerhead Karoo")
+                            active: DeviceService.activeBikeKind === modelData.kind
+                            onPicked: DeviceService.selectBikeComputer(modelData.kind)
                         }
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
-                            Text {
-                                text: modelData.kind === "edge" ? qsTr("Garmin Edge")
-                                                                : qsTr("Hammerhead Karoo")
-                                color: Theme.text; font.bold: true
-                                font.pixelSize: Theme.fontSizeBodyLarge
-                            }
-                            Text {
-                                text: qsTr("%1 rides on the device · Sync adds only new ones").arg(modelData.activityCount)
-                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                            }
-                        }
-                    }
-                }
-                Row {
-                    spacing: Theme.spacingSmall
-                    RoundedButton {
-                        enabled: !ActivityService.loading
-                        text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync rides")
-                        onClicked: {
-                            root.bikeSyncMsg = "";
-                            ActivityService.importFromBikeComputers();
-                        }
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: root.bikeSyncMsg.length > 0
-                        text: root.bikeSyncMsg
-                        color: root.bikeSyncOk ? Theme.success : Theme.error
-                        font.pixelSize: Theme.fontSizeCaption
                     }
                 }
             }

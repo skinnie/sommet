@@ -1278,6 +1278,21 @@ void ActivityService::importGarminActivitiesInto(const QJsonArray &arr)
     emit importFinished(count);
 }
 
+int ActivityService::unsyncedBikeCount(const QString &kind, const QStringList &files) const
+{
+    if (!m_db.isOpen() || files.isEmpty())
+        return files.size();
+    QSet<QString> seen;
+    QSqlQuery q(QStringLiteral("SELECT key FROM bike_seen"), m_db);
+    while (q.next())
+        seen.insert(q.value(0).toString());
+    int n = 0;
+    for (const QString &f : files)
+        if (!seen.contains(kind + QLatin1Char('|') + f))
+            ++n;
+    return n;
+}
+
 void ActivityService::importFromBikeComputers()
 {
     setLoading(true);
@@ -1324,7 +1339,7 @@ void ActivityService::importFromBikeComputers()
         }
         if (toPull.isEmpty()) {                 // nothing new on any device - instant, no pull
             setLoading(false);
-            emit bikeImportFinished(0);
+            emit bikeImportFinished(0, 0);   // nothing new on the device since last sync
             return;
         }
         // Step 2 - pull + decode ONLY the new files, then import the non-duplicates.
@@ -1462,7 +1477,7 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
     m_db.commit();
     dbLoadAll();
     emit activitiesChanged();
-    emit bikeImportFinished(count);
+    emit bikeImportFinished(count, skipped);
 }
 
 void ActivityService::exportToIntervals()

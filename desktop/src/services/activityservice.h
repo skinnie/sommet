@@ -115,6 +115,10 @@ public:
     // and decodes it (tools/mtp_import.py + fit_decode.py); rows are tagged source="edge"/"karoo"
     // with the .fit filename as external_id (de-dups on re-import). No account, no settings.
     Q_INVOKABLE void importFromBikeComputers();
+    // How many of a bike computer's ride files a Sync would still pull (not yet in the bike_seen
+    // history). Used only to decide whether "Sync rides" has anything to do - NOT a count of new
+    // library entries (that needs decoding). 0 => everything's been checked, grey the button out.
+    Q_INVOKABLE int unsyncedBikeCount(const QString &kind, const QStringList &files) const;
 
     // Export (upload) the watch's own activities TO intervals.icu as FIT files (André,
     // 2026-08-24). Only rows we haven't already uploaded; each is marked once it lands.
@@ -160,7 +164,10 @@ signals:
     // Dedicated to the Edge/Karoo (MTP) import so its Home status can't be crossed with the
     // shared importFinished/importError that the intervals and Garmin imports also emit
     // (André, 2026-09-04 - an intervals auto-import's count was showing on the bike-sync card).
-    void bikeImportFinished(int count);
+    // added = rides actually imported (genuinely new); skipped = rides on the device that were
+    // already in the library (dedup). Kept separate so Home can show the real split, since a
+    // pre-sync "new" guess isn't possible without decoding every file.
+    void bikeImportFinished(int added, int skipped);
     void bikeImportError(const QString &message);
     // Emitted after an activity is removed locally (the intervals.icu delete, when it applies,
     // is fire-and-forget - a cloud failure is surfaced via lastError, not this signal).

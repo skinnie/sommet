@@ -120,7 +120,7 @@ Rectangle {
                 // the CAPABILITY, not the model. Also needs a watch connected (#1a, 2026-09-02):
                 // supportsRoutes is true with no watch (model is empty, not Kailash), so without
                 // anyDevice this would show a watch-only page on an empty app.
-                visible: HomeViewModel.anyDevice && DeviceCapabilities.supportsRoutes
+                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && DeviceCapabilities.supportsRoutes
                 glyph: Icons.routes
                 label: qsTr("Routes")
                 selected: root.currentPage === "routes"
@@ -128,7 +128,7 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice && DeviceCapabilities.supportsPOIs
+                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && DeviceCapabilities.supportsPOIs
                 glyph: Icons.pois
                 label: qsTr("POIs")
                 selected: root.currentPage === "pois"
@@ -178,7 +178,7 @@ Rectangle {
             // Training Program - ON HOLD behind FeatureFlags.trainingProgram.
             NavItem {
                 width: parent.width
-                visible: FeatureFlags.trainingProgram && HomeViewModel.anyDevice
+                visible: FeatureFlags.trainingProgram && (HomeViewModel.anyDevice && !DeviceService.bikeActive)
                          && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
                 glyph: Icons.trainingProgram
                 label: qsTr("Training Program")
@@ -211,7 +211,7 @@ Rectangle {
             NavItem {
                 width: parent.width
                 visible: (DeviceService.appZoneEnabled || DeviceService.intervalsEnabled)
-                         && HomeViewModel.anyDevice
+                         && (HomeViewModel.anyDevice && !DeviceService.bikeActive)
                          && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
                          && DeviceCapabilities.supportsApps
                 glyph: Icons.apps
@@ -222,7 +222,7 @@ Rectangle {
             // Copy one watch's setup onto another of the same model (#3 redesign, 2026-09-02).
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice
+                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive)
                 glyph: Icons.sync
                 label: qsTr("Copy to watch")
                 selected: root.currentPage === "sync"
@@ -231,7 +231,7 @@ Rectangle {
             // Watch settings - cable-written on-watch settings. Suunto-only, needs a connected watch.
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && !HomeViewModel.isGarmin
                 glyph: Icons.watch
                 label: qsTr("Watch settings")
                 selected: root.currentPage === "watchSettings"
@@ -241,7 +241,7 @@ Rectangle {
             // that can brick the watch, and flashing was never ported to BLE).
             NavItem {
                 width: parent.width
-                visible: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && !HomeViewModel.isGarmin
                          && !DeviceService.bleHandshakeDone
                 glyph: Icons.sync
                 label: qsTr("Firmware")
@@ -251,7 +251,7 @@ Rectangle {
             // Sport Modes - Kailash (no CustomModes region) and Garmin (no sport-mode concept) excluded.
             NavItem {
                 width: parent.width
-                visible: FeatureFlags.sportModes && HomeViewModel.anyDevice
+                visible: FeatureFlags.sportModes && (HomeViewModel.anyDevice && !DeviceService.bikeActive)
                          && !HomeViewModel.isKailash && !HomeViewModel.isGarmin
                 glyph: Icons.sportModes
                 label: qsTr("Sport Modes")
