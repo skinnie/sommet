@@ -211,6 +211,27 @@ WATCH_LOCK = threading.Lock()
 _KEEPALIVE = {}                        # serial -> open hid handle, one per plugged watch
 _KEEPALIVE_LOCK = threading.Lock()
 
+
+def drop_keepalive_handles():
+    """Close and forget every held keep-alive handle. Called by run_tool while it owns
+    WATCH_LOCK, right before it spawns a watch tool: on a system where hidapi uses the LIBUSB
+    backend (no /dev/hidraw node for the watch - e.g. usbhid isn't bound to it), an open CLAIMS
+    the USB interface EXCLUSIVELY, so a keep-alive handle we're still holding makes the tool's
+    own open fail with "open failed" - which surfaces to the user as "watch not connected" even
+    though the watch is right there (André, 2026-09-12, hardware-seen). Dropping the handle here
+    lets the tool claim the device; the next /api/devices poll's keepalive_sync re-acquires it
+    (that re-open blocks on WATCH_LOCK until the tool is done, so it can't race the tool). On a
+    hidraw-backend system two opens coexist fine and this is simply a harmless close/re-open.
+    Best-effort: a keep-alive hiccup must never fail a real watch read. Caller MUST hold
+    WATCH_LOCK so keepalive_sync can't re-open mid-tool."""
+    with _KEEPALIVE_LOCK:
+        for serial in list(_KEEPALIVE.keys()):
+            try:
+                _KEEPALIVE[serial].close()
+            except Exception:  # noqa: BLE001 - closing a handle must never propagate
+                pass
+            _KEEPALIVE.pop(serial, None)
+
 # --- Testing mode ---------------------------------------------------------------------
 # Real request, 2026-08-11 (André): "add on feature on settings: testing mode, where it
 # simulates that an ambit 3 is connected, so people can test it without the watch."
@@ -404,6 +425,7 @@ def _sync_summary(snap):
         "displayName": snap.get("displayName"),
         "fw_version": snap.get("fw_version"),
         "capturedAt": snap.get("capturedAt"),
+        "fromBackup": snap.get("fromBackup"),
         "categories": cats,
     }
 
@@ -558,10 +580,10 @@ def _sync_diff_sportmodes(src, tgt, mode):
         return [], []
     return [{
         "key": "sportModes:mirror",
-        "label": "All sport modes",
+        "label": "All sport modes (screens, sports & data fields)",
         "from": t.get("count"), "to": s.get("count"),
-        "fromText": "%d modes" % (t.get("count") or 0),
-        "toText": "replace with %d modes" % (s.get("count") or 0),
+        "fromText": "the watch's current %d sport modes" % (t.get("count") or 0),
+        "toText": "the base's %d sport modes" % (s.get("count") or 0),
     }], []
 
 
@@ -619,38 +641,45 @@ def keepalive_sync():
     its strings - opens and closes its own handle. See _KEEPALIVE's comment. Reconciles each
     call: opens a handle for any newly-plugged watch, closes the one held for any that's gone.
     Keyed on USB serial. Best-effort: a failure here only means the chime isn't suppressed,
-    never that a request fails. Enumerate+open run under WATCH_LOCK so they can't collide with a
-    subprocess tool mid-command on the bus."""
+    never that a request fails.
+
+    LOCK ORDER (critical): the WHOLE body runs under WATCH_LOCK, and _KEEPALIVE_LOCK is taken
+    NESTED inside it - always WATCH_LOCK -> _KEEPALIVE_LOCK, the SAME order run_tool uses when it
+    calls drop_keepalive_handles(). The earlier version took _KEEPALIVE_LOCK first and then
+    WATCH_LOCK per-open, the opposite order, which deadlocked against a tool run that overlapped a
+    device poll (André, 2026-09-13: a Copy froze for minutes - one thread held WATCH_LOCK waiting
+    for _KEEPALIVE_LOCK while this one held _KEEPALIVE_LOCK waiting for WATCH_LOCK). Callers never
+    hold WATCH_LOCK when calling this (both call sites are in _handle_device after run_tool has
+    already released it), so taking it here can't re-enter."""
     try:
         import hid  # only imported once a watch has actually been seen
     except Exception:  # noqa: BLE001
         return
     SUUNTO_VENDOR_ID = 0x1493
-    present = {}  # serial -> path, for every watch on the bus right now
-    try:
-        with WATCH_LOCK:
+    with WATCH_LOCK:
+        present = {}  # serial -> path, for every watch on the bus right now
+        try:
             for entry in hid.enumerate(SUUNTO_VENDOR_ID, 0):
                 serial = entry.get("serial_number")
                 if serial and serial not in present:
                     present[serial] = entry.get("path")
-    except Exception:  # noqa: BLE001 - enumeration hiccup; try again next poll
-        return
-    with _KEEPALIVE_LOCK:
-        for serial in list(_KEEPALIVE.keys()):        # let go of watches no longer plugged
-            if serial not in present:
+        except Exception:  # noqa: BLE001 - enumeration hiccup; try again next poll
+            return
+        with _KEEPALIVE_LOCK:
+            for serial in list(_KEEPALIVE.keys()):        # let go of watches no longer plugged
+                if serial not in present:
+                    try:
+                        _KEEPALIVE[serial].close()
+                    except Exception:  # noqa: BLE001 - closing a stale handle must never propagate
+                        pass
+                    _KEEPALIVE.pop(serial, None)
+            for serial, path in present.items():          # claim watches we're not already holding
+                if serial in _KEEPALIVE or not path:
+                    continue
                 try:
-                    _KEEPALIVE[serial].close()
-                except Exception:  # noqa: BLE001 - closing a stale handle must never propagate
-                    pass
-                _KEEPALIVE.pop(serial, None)
-        for serial, path in present.items():          # claim watches we're not already holding
-            if serial in _KEEPALIVE or not path:
-                continue
-            try:
-                with WATCH_LOCK:
                     _KEEPALIVE[serial] = _open_hid_path(hid, path)
-            except Exception:  # noqa: BLE001 - keep-alive is comfort, never critical
-                pass
+                except Exception:  # noqa: BLE001 - keep-alive is comfort, never critical
+                    pass
 
 
 def selected_is_legacy():
@@ -755,6 +784,11 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     if lock is not None:
         lock.acquire()
+        # Now that we own the bus, let go of any keep-alive handle so this tool can open the
+        # watch - critical on a libusb-backend host where a held handle claims the interface
+        # exclusively (see drop_keepalive_handles). Safe under the lock: keepalive_sync's
+        # re-open blocks on WATCH_LOCK until we release, so it can't re-grab mid-tool.
+        drop_keepalive_handles()
     try:
         # In a normal checkout PYTHON is the real interpreter, so it runs tools/<script>
         # directly. In the frozen download PYTHON is this same helper's own executable (there
@@ -1245,6 +1279,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_settings_write(body)
         elif self.path == "/api/sync/snapshot":
             self._handle_sync_snapshot(body)
+        elif self.path == "/api/sync/snapshot-from-backup":
+            self._handle_sync_snapshot_from_backup(body)
         elif self.path == "/api/sync/plan":
             self._handle_sync_plan(body)
         elif self.path == "/api/sync/apply":
@@ -2728,6 +2764,19 @@ class Handler(BaseHTTPRequestHandler):
                 "hasLegacy": Path(f"{prefix}-legacy-settings.json").exists(),
             })
             seen_prefixes.add(prefix)
+        # A backup that captured a sync snapshot (-sync.json, from 2026-09-12 on) can be a Copy
+        # SOURCE. Tag each entry with hasSettings + a lightweight per-category summary (counts
+        # only, never the heavy items) so the Copy page can list "choose a backup" and show what
+        # it holds. Older backups simply lack the file and read hasSettings:false.
+        for b in backups:
+            snap_file = Path(f"{b['prefix']}-sync.json")
+            b["hasSettings"] = snap_file.exists()
+            b["sync"] = None
+            if snap_file.exists():
+                try:
+                    b["sync"] = _sync_summary(json.loads(snap_file.read_text()))
+                except Exception:  # noqa: BLE001 - a bad snapshot just isn't offered as a source
+                    b["hasSettings"] = False
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
         self._send_json(200, {"ok": True, "backups": backups})
 
@@ -3922,21 +3971,13 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": err or "sync_write_sportmodes.py produced no JSON"}
         return info
 
-    def _handle_sync_snapshot(self, body):
-        """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
-        CONNECTED watch's syncable state into that slot and returns its summary. Only
-        "settings" is wired today; any other category is recorded as unsupported rather than
-        failing the whole snapshot, so the UI can already show it greyed."""
-        slot = (body.get("slot") or "").upper()
-        if slot not in ("A", "B"):
-            self._send_json(400, {"ok": False, "error": "slot must be \"A\" or \"B\""})
-            return
-        categories = body.get("categories") or ["settings"]
-        dev = self._sync_connected_device()
-        if not dev:
-            self._send_json(502, {"ok": False, "error": "no watch detected - plug in the "
-                                  "watch to snapshot and try again"})
-            return
+    def _sync_capture(self, dev, categories, slot=None):
+        """Read the CONNECTED watch's syncable state for `categories` into one snapshot dict -
+        the exact shape _SYNC_SNAPSHOTS[slot] holds, so it can be stored in a sync slot OR
+        written to a backup file and loaded back later. `dev` is a _sync_connected_device()
+        result. Any category not wired / not on this watch is recorded as unsupported rather
+        than failing the whole snapshot, so the UI can show it greyed. Shared by the live
+        snapshot endpoint and the backup writer."""
         snap = {
             "slot": slot, "serial": dev["serial"], "model": dev["model"],
             "displayName": dev["displayName"], "fw_version": dev.get("fw_version"),
@@ -3978,6 +4019,57 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 snap["categories"][cat] = {"supported": False,
                                            "error": f"category \"{cat}\" not wired yet"}
+        return snap
+
+    # Every category a copy source can carry: "everything available" (André, 2026-09-12).
+    SYNC_ALL_CATEGORIES = ["settings", "pois", "routes", "sportModes"]
+
+    def _handle_sync_snapshot(self, body):
+        """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
+        CONNECTED watch's syncable state into that slot and returns its summary. Any category
+        not wired / not on this watch is recorded as unsupported rather than failing the whole
+        snapshot, so the UI can already show it greyed."""
+        slot = (body.get("slot") or "").upper()
+        if slot not in ("A", "B"):
+            self._send_json(400, {"ok": False, "error": "slot must be \"A\" or \"B\""})
+            return
+        categories = body.get("categories") or ["settings"]
+        dev = self._sync_connected_device()
+        if not dev:
+            self._send_json(502, {"ok": False, "error": "no watch detected - plug in the "
+                                  "watch to snapshot and try again"})
+            return
+        snap = self._sync_capture(dev, categories, slot=slot)
+        with _SYNC_LOCK:
+            _SYNC_SNAPSHOTS[slot] = snap
+        self._send_json(200, {"ok": True, "snapshot": _sync_summary(snap)})
+
+    def _handle_sync_snapshot_from_backup(self, body):
+        """POST /api/sync/snapshot-from-backup. Body {"slot":"A"|"B", "prefix": str}. Loads a
+        backup's stored sync snapshot (the -sync.json written at backup time) into that slot,
+        so a Copy can use a saved backup as its SOURCE without the source watch replugged
+        (André, 2026-09-12: "choose a backup ... or plug in the watch to base your copy on")."""
+        slot = (body.get("slot") or "").upper()
+        if slot not in ("A", "B"):
+            self._send_json(400, {"ok": False, "error": "slot must be \"A\" or \"B\""})
+            return
+        prefix = body.get("prefix")
+        if not prefix:
+            self._send_json(400, {"ok": False, "error": "missing \"prefix\""})
+            return
+        snap_file = Path(f"{prefix}-sync.json")
+        if not snap_file.exists():
+            self._send_json(404, {"ok": False, "error": "this backup has no saved settings - "
+                                  "it was made before backups captured them. Make a fresh "
+                                  "backup, or plug in the watch to copy from instead."})
+            return
+        try:
+            snap = json.loads(snap_file.read_text())
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(502, {"ok": False, "error": f"backup snapshot unreadable: {exc}"})
+            return
+        snap["slot"] = slot
+        snap["fromBackup"] = Path(prefix).name
         with _SYNC_LOCK:
             _SYNC_SNAPSHOTS[slot] = snap
         self._send_json(200, {"ok": True, "snapshot": _sync_summary(snap)})
@@ -6288,6 +6380,7 @@ class Handler(BaseHTTPRequestHandler):
         # Serial is the genuinely unique key (device_key()'s own comment says so); model is
         # what the UI shows. Best-effort: a backup must not fail because identity didn't answer.
         dev_model = dev_serial = ""
+        di = None
         try:
             di_code, di_out, di_err = run_tool("device_info.py", ["--json"])
             di = self._parse_last_json_line(di_out)
@@ -6303,6 +6396,28 @@ class Handler(BaseHTTPRequestHandler):
                 }, indent=2))
         except Exception:  # noqa: BLE001 - identity is a label, never a reason to lose a backup
             pass
+        # A copy source lives in a backup now (André, 2026-09-12: "Add settings to Backups" +
+        # "everything available"). Capture the same sync snapshot /api/sync/snapshot reads -
+        # settings + POIs + routes + sport modes, exactly the shape a sync slot holds - and
+        # write it as -sync.json so the Copy page can load this backup as its SOURCE without
+        # the source watch replugged. Best-effort: only when a watch answered identity, and
+        # never a reason to lose the backup (a read that fails is just an absent category).
+        # Skipped on legacy Ambit1/2: their settings/nav live in a different region the SBEM
+        # readers here don't speak (that family has its own -legacy-settings.json below), so
+        # the calls would only cost failed USB round-trips.
+        has_settings = False
+        if (dev_serial or dev_model) and not selected_is_legacy():
+            try:
+                snap = self._sync_capture(
+                    {"model": dev_model, "serial": dev_serial,
+                     "displayName": _sync_display_name(dev_model),
+                     "fw_version": (di or {}).get("fw_version")},
+                    self.SYNC_ALL_CATEGORIES)
+                if any(c.get("supported") for c in snap["categories"].values()):
+                    Path(f"{prefix}-sync.json").write_text(json.dumps(snap, indent=2))
+                    has_settings = True
+            except Exception:  # noqa: BLE001 - a copy source is a bonus, never a backup failure
+                pass
         # Skipped entirely on a Kailash - see the branch below for what its regions actually
         # contain. This is a ~250 KB flash read over USB that comes back blank on that watch,
         # so it costs real seconds to produce three useless files.
@@ -6432,12 +6547,12 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 legacy_err = (lg_err or lg_out or "legacy_link.py settings produced no JSON")
 
-        ok = routes_ok or has_ember or has_kailash or has_legacy
+        ok = routes_ok or has_ember or has_kailash or has_legacy or has_settings
         self._send_json(200 if ok else 502, {
             "ok": ok, "prefix": prefix, "label": label, "hasEmber": has_ember,
             "hasRoutes": routes_ok, "hasKailash": has_kailash,
             "deviceModel": dev_model, "deviceSerial": dev_serial,
-            "hasLegacy": has_legacy, "legacyError": legacy_err,
+            "hasLegacy": has_legacy, "legacyError": legacy_err, "hasSettings": has_settings,
             "kailashError": kailash_err, "raw_output": out, "stderr": err})
 
     def _handle_restore(self, body):

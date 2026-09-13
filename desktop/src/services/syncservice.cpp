@@ -85,6 +85,22 @@ void SyncService::snapshot(const QString &slot)
              });
 }
 
+void SyncService::snapshotFromBackup(const QString &slot, const QString &prefix)
+{
+    QVariantMap body;
+    body[QStringLiteral("slot")] = slot;
+    body[QStringLiteral("prefix")] = prefix;
+    postJson(QStringLiteral("/api/sync/snapshot-from-backup"), body,
+             [this, slot](const QVariantMap &obj, bool) {
+                 m_lastActionOk = obj.value(QStringLiteral("ok")).toBool();
+                 m_lastActionText = m_lastActionOk
+                     ? QStringLiteral("Loaded backup into slot %1").arg(slot)
+                     : obj.value(QStringLiteral("error")).toString();
+                 emit lastActionChanged();
+                 refreshState();
+             });
+}
+
 void SyncService::buildPlan(const QString &mode, const QString &direction,
                             const QStringList &categories)
 {
@@ -133,8 +149,39 @@ void SyncService::apply(const QString &mode, const QString &direction, bool conf
                          .arg(applied).arg(applied == 1 ? QString() : QStringLiteral("s"));
                  }
                  emit lastActionChanged();
+                 if (confirm && m_lastActionOk) {
+                     // The write is done: drop the stale plan so the review card (and its
+                     // "plug the target back in to write these changes" warning) disappears -
+                     // the target's snapshot is gone backend-side, so that plan can never be
+                     // applied again anyway. Leaves the "Done" banner + "copy to another watch".
+                     m_plan = {};
+                     emit planChanged();
+                 }
                  if (confirm)
                      refreshState();  // the target changed; its snapshot was dropped backend-side
+             });
+}
+
+void SyncService::copyToConnected(const QString &mode, const QString &direction,
+                                  const QStringList &categories)
+{
+    // Step 1: read the connected watch into slot B.
+    QVariantMap snapBody;
+    snapBody[QStringLiteral("slot")] = QStringLiteral("B");
+    snapBody[QStringLiteral("categories")] = QVariant(categories).toList();
+    postJson(QStringLiteral("/api/sync/snapshot"), snapBody,
+             [this, mode, direction, categories](const QVariantMap &obj, bool) {
+                 if (!obj.value(QStringLiteral("ok")).toBool()) {
+                     m_lastActionOk = false;
+                     m_lastActionText = obj.value(QStringLiteral("error")).toString();
+                     emit lastActionChanged();
+                     refreshState();
+                     return;
+                 }
+                 // Step 2: the base (slot A) is already stored; apply it onto the watch we just
+                 // read. apply() builds the plan from slots A and B server-side and writes.
+                 refreshState();
+                 apply(mode, direction, true, categories);
              });
 }
 

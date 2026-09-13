@@ -53,6 +53,9 @@ public:
     Q_INVOKABLE void refreshState();
     // Snapshot the CONNECTED watch into slot "A" or "B" - captures every category it supports.
     Q_INVOKABLE void snapshot(const QString &slot);
+    // Load a saved BACKUP's captured snapshot into a slot (usually "A", the copy source), so a
+    // copy can be based on a backup with no watch plugged. `prefix` is a backup's own prefix.
+    Q_INVOKABLE void snapshotFromBackup(const QString &slot, const QString &prefix);
     // Compute (dry-run) the diff for the given mode/direction over the chosen categories.
     // direction is "AtoB" or "BtoA"; categories e.g. ["settings","pois"].
     Q_INVOKABLE void buildPlan(const QString &mode, const QString &direction,
@@ -60,6 +63,13 @@ public:
     // Apply the plan to the connected watch. confirm=false re-previews; true writes for real.
     Q_INVOKABLE void apply(const QString &mode, const QString &direction, bool confirm,
                            const QStringList &categories);
+    // One-shot for the "copy the base onto the plugged-in watch" button: reads the CONNECTED
+    // watch into slot B, then immediately applies the base (slot A) onto it. Chains snapshot ->
+    // apply so the user presses ONE button per target. The backend still rechecks the connected
+    // serial and refuses a cross-model write, and backs the target up first, so one-click is
+    // still safe. Slot A (the base) is left untouched, ready for the next watch.
+    Q_INVOKABLE void copyToConnected(const QString &mode, const QString &direction,
+                                     const QStringList &categories);
     // Forget a stored slot ("A"/"B"), or both when slot is empty.
     Q_INVOKABLE void clearSlot(const QString &slot);
 

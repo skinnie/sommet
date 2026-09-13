@@ -7,6 +7,42 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-13: Copy a watch's setup from a backup, one button per watch (0.2.36)
+
+Reworked "Copy one watch to another" end-to-end (hardware-tested on André's Ambit3 fleet: one
+correctly-set-up Peak copied onto several others).
+
+- **A backup can now be the copy SOURCE.** Every backup writes a `-sync.json` alongside its
+  other files — the same snapshot the Copy page reads off a live watch, containing *everything
+  available*: settings, POIs, routes and custom sport modes. So you no longer have to keep the
+  base watch on hand (André: "I already had a backup of an Ambit that I used to copy — give me
+  the option of 'choose a backup' … or 'plug in the watch to base your copy on'"). Best-effort
+  and never a reason to fail a backup; older backups simply don't have it. `/api/backups`
+  reports `hasSettings` plus a lightweight per-category summary; the page lists the backups that
+  carry a snapshot, each labelled with what it holds, and picking one loads it as the source
+  (`/api/sync/snapshot-from-backup`).
+- **One button per target watch.** Set the base once (read a watch, or pick a backup), then for
+  each watch: plug it in and press *"Copy the base onto the plugged-in watch."* That single
+  press reads the watch, backs it up, writes the base's setup and verifies every byte — no
+  separate read/review/confirm steps. Plug the next watch, press again. Every write still
+  rechecks the connected serial, refuses a cross-model write, and backs the target up first.
+- **Sport-mode difference is shown honestly.** The device-settings of two same-model watches are
+  often identical (units, HR, backlight); what actually differs is usually the sport modes. The
+  copy compares a content signature of the sport-mode regions and copies them when they differ.
+
+Also in 0.2.36, two USB reliability fixes to the keep-alive handles (both hardware-seen while
+testing the above, both on the libusb hidapi backend some Linux setups use — where a watch has
+no `/dev/hidraw` node and opening the device claims its USB interface *exclusively*):
+
+- **Keep-alive no longer makes a watch read as "not connected."** A held keep-alive handle
+  claimed the interface, so a tool couldn't open the watch — the device showed as absent though
+  it was plugged in. `run_tool` now drops the keep-alive handle for the duration of a watch
+  tool (the next device poll re-acquires it); harmless on a hidraw host where two opens coexist.
+- **Fixed a keep-alive/tool deadlock that froze a long Copy.** The drop above took `WATCH_LOCK`
+  then `_KEEPALIVE_LOCK` while `keepalive_sync` took them in the opposite order, so a device
+  poll overlapping a write deadlocked the two threads. `keepalive_sync` now takes both in the
+  same order (`WATCH_LOCK → _KEEPALIVE_LOCK`); stress-tested with concurrent reads and polls.
+
 ## 2026-09-05: keep-alive holds EVERY plugged watch (0.2.35)
 
 Follow-up to 0.2.34, found with an Ambit2 and an Ambit3 Sport plugged at once: the chime came
