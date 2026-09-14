@@ -32,14 +32,21 @@ type SyncListener = (state: SyncState) => void;
 export async function runSync(
   onState: SyncListener,
   provider: DeviceProvider = ambitDeviceProvider,
-  opts: { forceRefresh?: boolean } = {},
+  opts: { forceRefresh?: boolean; reimportForFit?: boolean } = {},
 ): Promise<number> {
   // forceRefresh (André, 2026-08-30): re-read and OVERWRITE the GPX of activities already on the
   // phone — so a decode fix (e.g. the trekking "no GPS data" periodic-sample fix) reaches moves
   // that were synced before it. The watch is an immutable logbook that re-sends everything, so we
   // just skip the deleted blacklist instead of every already-synced id, and overwrite on write.
   // Deleted activities are still never resurrected (isActivityDeleted guard below).
-  const refresh = !!opts.forceRefresh || !!provider.refreshExisting;
+  //
+  // reimportForFit (2026-09-14): a one-time re-read after upgrading to the native-FIT build, so
+  // every move still on the watch gets its <id>.fit rebuilt (with hr/power/etc.) - existing moves
+  // never stored those channels on the phone, only the GPS track. Same re-read+overwrite as
+  // forceRefresh, but it must NOT resurrect user-deleted moves, so it leaves the deleted
+  // blacklist intact (only forceRefresh clears it).
+  const reReadAll = !!opts.forceRefresh || !!opts.reimportForFit;
+  const refresh = reReadAll || !!provider.refreshExisting;
   const emit = (partial: Partial<SyncState> & { phase: SyncState['phase'] }) =>
     onState({ current: 0, total: 0, newCount: 0, ...partial });
 
@@ -63,7 +70,7 @@ export async function runSync(
   // back) and treat NOTHING as known, so the watch re-sends every activity; otherwise skip
   // everything already synced.
   if (opts.forceRefresh) await clearDeletedActivities();
-  const knownIds = opts.forceRefresh ? [] : await getAllSyncedIds();
+  const knownIds = reReadAll ? [] : await getAllSyncedIds();
 
   let current = 0;
   let total = 0;

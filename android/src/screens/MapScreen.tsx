@@ -12,9 +12,9 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { readGpxFile } from '../services/GpxService';
-import { parseTrackPoints, computeElevationStats, TrackPoint } from '../services/GpxParser';
+import { parseTrackPoints, computeElevationStats, extractGpxMetadata, GpxMetadata, TrackPoint } from '../services/GpxParser';
 import ElevationChart from '../components/ElevationChart';
-import { t } from '../i18n';
+import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
 import { getMapProvider, setMapProvider, MapProvider } from '../services/MapProviderService';
 import { mapTileLayersJs } from '../services/MapHtml';
@@ -261,6 +261,7 @@ export default function MapScreen() {
   const { activity } = route.params;
 
   const [points, setPoints] = useState<TrackPoint[]>([]);
+  const [meta, setMeta] = useState<GpxMetadata | null>(null);   // summary (used for no-GPS moves)
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -303,7 +304,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     readGpxFile(activity.gpx_path)
-      .then(xml => setPoints(parseTrackPoints(xml)))
+      .then(xml => { setPoints(parseTrackPoints(xml)); setMeta(extractGpxMetadata(xml)); })
       .catch(e => Alert.alert(t.error, t.readError + e?.message))
       .finally(() => setLoading(false));
   }, [activity.gpx_path]);
@@ -626,10 +627,71 @@ export default function MapScreen() {
     );
   }
 
+  // No GPS track (indoor / home-trainer move). Instead of a dead "No GPS" screen, show the
+  // activity's summary and the SAME export controls - an indoor move is still a real move to
+  // export (its FIT carries hr/cadence/power/etc. once it's been synced by a build that writes
+  // the native FIT). Heart rate / cadence / energy show when the GPX carries them.
   if (points.length === 0) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.errorText}>{t.noGps}</Text>
+      <View style={styles.container}>
+        <View style={styles.noGpsContent}>
+          <View>
+            <Text style={styles.noGpsTitle}>{activity.activity_type || t.unknownActivity}</Text>
+            <Text style={styles.noGpsSub}>{(fmtDate(activity.date) || t.unknownDate)} · {t.noTrack}</Text>
+          </View>
+          <View style={styles.noGpsCard}>
+            <View style={styles.statsRow}>
+              <StatChip styles={styles} label={t.duration} value={formatDurationMinSec(activity.duration_s)} />
+              {activity.distance_m > 0 &&
+                <StatChip styles={styles} label={t.distance} value={formatDist(activity.distance_m)} />}
+              {!!meta && meta.avgHr > 0 &&
+                <StatChip styles={styles} label={t.avgHr} value={`${meta.avgHr} bpm`} />}
+            </View>
+            {!!meta && (meta.maxHr > 0 || meta.avgCadence > 0 || meta.energyKcal > 0) && (
+              <View style={styles.statsRow}>
+                {meta.maxHr > 0 &&
+                  <StatChip styles={styles} label={t.maxHr} value={`${meta.maxHr} bpm`} />}
+                {meta.avgCadence > 0 &&
+                  <StatChip styles={styles} label={t.cadence} value={`${meta.avgCadence}`} />}
+                {meta.energyKcal > 0 &&
+                  <StatChip styles={styles} label={t.energy} value={`${meta.energyKcal} kcal`} />}
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Same export FAB + menu as the map view, so an indoor move is exportable too. */}
+        <TouchableOpacity
+          style={[styles.exportFab, exporting && styles.btnDisabled]}
+          onPress={() => setShowExportMenu(v => !v)}
+          disabled={exporting}
+        >
+          {exporting
+            ? <Text style={styles.exportFabText}>…</Text>
+            : <Icon name="upload" size={22} color={theme.primary} />}
+        </TouchableOpacity>
+
+        {showExportMenu && (
+          <View style={styles.exportMenu}>
+            <ExportMenuItem styles={styles} label={t.shareGpx}       onPress={handleShareGpx} />
+            <ExportMenuItem styles={styles} label={t.saveDownloads}  onPress={handleSaveToDownloads} />
+            <ExportMenuItem styles={styles} label={t.shareFit}       onPress={handleShareFit} />
+            <ExportMenuItem styles={styles} label={t.saveFitDownloads} onPress={handleSaveFitToDownloads} />
+            <ExportMenuItem styles={styles} label={t.uploadRunalyze} onPress={handleUploadRunalyze} />
+            <ExportMenuItem styles={styles} label={t.uploadIntervals} onPress={handleUploadIntervals} />
+            <ExportMenuItem styles={styles} label={t.uploadStrava}   onPress={handleUploadStrava} />
+            <ExportMenuItem styles={styles} label={t.gearSetForActivity} onPress={() => { setShowExportMenu(false); setShowGearPicker(true); }} />
+          </View>
+        )}
+
+        <GearPicker
+          visible={showGearPicker}
+          activityId={activity.id}
+          distanceM={activity.distance_m}
+          timeS={activity.duration_s}
+          date={activity.date}
+          onClose={() => setShowGearPicker(false)}
+        />
       </View>
     );
   }
@@ -812,6 +874,19 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     chip: { alignItems: 'center', flex: 1 },
     chipLabel: { fontSize: 10, color: t.mutedText, marginBottom: 2 },
     chipValue: { fontSize: 13, fontWeight: '700', color: t.text },
+    // No-GPS (indoor) detail: a plain summary + the same export controls, instead of a map.
+    noGpsContent: { flex: 1, padding: 16, gap: 16 },
+    noGpsTitle: { fontSize: 20, fontWeight: '700', color: t.text },
+    noGpsSub: { fontSize: 13, color: t.mutedText, marginTop: 2 },
+    noGpsCard: {
+      backgroundColor: t.card,
+      borderColor: t.mutedText + '33',
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 8,
+      gap: 12,
+    },
     exportFab: {
       position: 'absolute',
       bottom: 188,

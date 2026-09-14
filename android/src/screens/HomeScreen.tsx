@@ -8,6 +8,9 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { runSync, SyncState } from '../services/SyncService';
+import { initFitReimport, isFitReimportPending, markFitReimportDone } from '../services/FitReimport';
+import { runSommetSync } from '../services/SommetSync';
+import { runSommetGearSync } from '../services/SommetGearSync';
 import { getGearAlerts } from '../services/GearAlerts';
 import { updateOrbitalData, OrbitalUpdateState } from '../services/SgeeService';
 import { refreshActivityClassOnWatch } from '../services/AmbitSettingsService';
@@ -469,6 +472,10 @@ export default function HomeScreen() {
   // claiming "Connected" long after the real link was gone, with no visible way to retry.
   // Mirrors the existing connect-error cleanup (handleBleConnect's own catch block) rather
   // than inventing a new UI state.
+  // Arm the one-time post-upgrade FIT re-import (see FitReimport.ts) once at mount. No-op on every
+  // launch after the first for this build generation.
+  useEffect(() => { initFitReimport(); }, []);
+
   useEffect(() => {
     return onBleDisconnected(() => {
       if (!bleConnectedRef.current) return;   // already knew (e.g. mid handleBleConnect retry)
@@ -667,12 +674,24 @@ export default function HomeScreen() {
       const provider = bleConnectedRef.current
         ? ambitBleDeviceProvider
         : (isKailash(ambitInfo) ? kailashDeviceProvider : undefined);
-      await runSync(setSync, provider, { forceRefresh });
+      // One-time post-upgrade re-import: rebuild every still-on-watch move's native FIT (with
+      // hr/power/etc.) since existing GPX never carried those. Runs on the first sync after the
+      // upgrade; the flag clears only once this sync succeeds, so a watch-less first launch just
+      // re-imports on the next sync. A user-triggered forceRefresh takes precedence and also
+      // satisfies the pending re-import.
+      const reimportForFit = !forceRefresh && await isFitReimportPending();
+      await runSync(setSync, provider, { forceRefresh, reimportForFit });
+      if (forceRefresh || reimportForFit) await markFitReimportDone();
       // Recalculate the watch's activity class from the athlete's latest intervals.icu
       // training on every sync (André, 2026-08-18: "recalculate activity level on each sync
       // usb and bluetooth"). No-op if intervals.icu isn't connected, or on Ambit1/2/Kailash;
       // writes only when the class changed. Fire-and-forget - must never break activity sync.
       refreshActivityClassOnWatch().catch(() => {});
+      // Sommet Sync (#SYNC-3): after a watch read, converge with the user's own shared store so
+      // these moves reach their other devices and any logged elsewhere come down. No-op when
+      // unconfigured; fire-and-forget, must never break activity sync.
+      runSommetSync().catch(() => {});
+      runSommetGearSync().catch(() => {});   // gear too (#SYNC-4b), same fire-and-forget
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
       setSync(s => ({ ...s, phase: 'error' }));
