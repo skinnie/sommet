@@ -7,7 +7,7 @@ import { getRunalyzeApiKey, uploadFitToRunalyze } from '../services/ApiRunalyze'
 import { getIntervalsIcuCredentials, uploadFitToIntervalsIcu } from '../services/ApiIntervalsIcu';
 import { pushGearToIntervals } from '../services/GearAutoAssign';
 import { GearPicker } from '../components/GearPicker';
-import { generateFitFile } from '../services/FitExport';
+import { getFitFile } from '../services/FitExport';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
@@ -482,7 +482,7 @@ export default function MapScreen() {
     }
     setExporting(true);
     try {
-      const fitPath = await generateFitFile(activity.gpx_path, activity);
+      const fitPath = await getFitFile(activity.gpx_path, activity);
       const result  = await uploadFitToRunalyze(fitPath, apiKey);
       Alert.alert('Runalyze ✓', t.runalyzeOk(result.activityId));
     } catch (e: any) {
@@ -508,8 +508,10 @@ export default function MapScreen() {
     }
     setExporting(true);
     try {
-      const fitPath = await generateFitFile(activity.gpx_path, activity);
-      const result  = await uploadFitToIntervalsIcu(fitPath, creds.athleteId, creds.apiKey);
+      const fitPath = await getFitFile(activity.gpx_path, activity);
+      // activity_type holds the watch's real activity name (custom mode names included), so the
+      // upload titles the activity with it rather than the .fit filename.
+      const result  = await uploadFitToIntervalsIcu(fitPath, creds.athleteId, creds.apiKey, activity.activity_type);
       // Auto-assign the default bike/shoes for this sport type (best-effort, non-fatal).
       const assignedGear = await pushGearToIntervals(result.activityId, activity.activity_type);
       Alert.alert(
@@ -591,7 +593,7 @@ export default function MapScreen() {
     setShowExportMenu(false);
     setExporting(true);
     try {
-      const fitPath = await generateFitFile(activity.gpx_path, activity);
+      const fitPath = await getFitFile(activity.gpx_path, activity);
       await shareFile(fitPath, 'application/vnd.ant.fit');
     } catch (e: any) {
       Alert.alert(t.error, t.shareError + e?.message);
@@ -604,7 +606,7 @@ export default function MapScreen() {
     setShowExportMenu(false);
     setExporting(true);
     try {
-      const fitPath  = await generateFitFile(activity.gpx_path, activity);
+      const fitPath  = await getFitFile(activity.gpx_path, activity);
       const fileName = fitPath.split('/').pop() ?? `${activity.id}.fit`;
       await saveToDownloads(fitPath, fileName, 'application/vnd.ant.fit');
       Alert.alert(t.savedOk, t.savedMsg(fileName));

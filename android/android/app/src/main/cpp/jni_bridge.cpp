@@ -8,6 +8,8 @@
 #include <vector>
 #include <set>
 #include <cmath>
+#include <climits>
+#include <cstdint>
 #include <pthread.h>
 
 // ─── libambit ─────────────────────────────────────────────────────────────────
@@ -130,6 +132,11 @@ static ambit_object_t *g_device = nullptr;
 
 // Cache des logs lus (rempli lors de nativeAmbitGetLogCount, consommé par nativeAmbitGetLogAsGpx)
 static std::vector<std::string> g_log_cache;
+
+// Parallel to g_log_cache (same index): each read move's native FIT, base64-encoded (or "" for a
+// move with no usable samples). Consumed by nativeAmbitGetLogAsFit. Cleared everywhere
+// g_log_cache is. See fitexport::build / log_push_callback.
+static std::vector<std::string> g_log_fit_b64;
 
 // Parallel to g_log_cache: each read move's own header date_time, kept so
 // nativeAmbitMarkReadLogsSynced can rebuild the minimal ambit_log_entry_t that
@@ -328,6 +335,307 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
     return gpx.str();
 }
 
+// ─── Conversion log → FIT (moves GPS-less / indoor uniquement) ─────────────────
+//
+// Twin of the desktop Python encoder (tools/exercise_log.py: _to_fit_no_gps /
+// extract_indoor_records) and of the iOS copy in AmbitBle/AmbitUsbModule.mm — change all
+// three together. Deliberately handles ONLY moves with no GPS track (treadmill, home
+// trainer, gym, pool): those have no track to build the usual FIT from, so today they
+// can't be exported at all. Moves WITH GPS return "" here and keep going through the
+// device-proven TS FitExport (generateFitFile on the GPX) unchanged. The FIT carries every
+// sensor channel the watch recorded this move — heart rate, cadence, speed, power,
+// distance, altitude (barometric on devices that have it), temperature — one record per
+// periodic sample. Units and scalings come straight from libambit.h's periodic-value
+// struct (see ambit_log_sample_periodic_value_s). Logged-Suunto-App developer fields the
+// desktop adds are intentionally NOT ported (mobile never had them).
+
+namespace fitexport {
+
+static const uint32_t GARMIN_EPOCH = 631065600u;  // 1989-12-31T00:00:00Z as Unix time
+static const uint16_t CRC_TABLE[16] = {
+    0x0000,0xCC01,0xD801,0x1400,0xF001,0x3C00,0x2800,0xE401,
+    0xA001,0x6C00,0x7800,0xB401,0x5000,0x9C01,0x8801,0x4400};
+
+static uint16_t crc16(const uint8_t *data, size_t len) {
+    uint16_t crc = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint16_t tmp = CRC_TABLE[crc & 0x0F];
+        crc = ((crc >> 4) ^ tmp ^ CRC_TABLE[data[i] & 0x0F]) & 0xFFFF;
+        tmp = CRC_TABLE[crc & 0x0F];
+        crc = ((crc >> 4) ^ tmp ^ CRC_TABLE[(data[i] >> 4) & 0x0F]) & 0xFFFF;
+    }
+    return crc;
+}
+
+// FIT base-type codes (mirror the Python _E/_S8/_U8/_U16/_U32/_S32).
+enum { FE = 0x00, FS8 = 0x01, FU8 = 0x02, FU16 = 0x84, FU32 = 0x86, FS32 = 0x85 };
+
+struct Buf {
+    std::vector<uint8_t> d;
+    void u8(uint32_t v)  { d.push_back((uint8_t)(v & 0xFF)); }
+    void u16(uint32_t v) { u8(v); u8(v >> 8); }
+    void u32(uint32_t v) { u8(v); u8(v >> 8); u8(v >> 16); u8(v >> 24); }
+    void s8(int v)       { if (v < -128) v = -128; if (v > 127) v = 127; u8((uint8_t)(int8_t)v); }
+    // A definition-message field: number, byte size, base type.
+    struct F { uint8_t num, size, base; };
+    void def(uint8_t local, uint16_t gnum, const std::vector<F> &fields) {
+        u8(0x40 | local); u8(0); u8(0); u16(gnum); u8((uint8_t)fields.size());
+        for (const F &f : fields) { u8(f.num); u8(f.size); u8(f.base); }
+    }
+};
+
+// One decoded sample. A channel is "absent" (never seen yet, or reported its sentinel) as
+// ABSENT; carry-forward keeps the last real value. Raw libambit units.
+static const long ABSENT = LONG_MIN;
+struct Rec {
+    uint32_t t_g;   // timestamp, garmin seconds
+    bool has_pos = false; double lat = 0, lon = 0, ele = 0;   // GPS position (outdoor only)
+    long hr = ABSENT, cad = ABSENT, spd = ABSENT, pwr = ABSENT,
+         dist = ABSENT, alt = ABSENT, temp = ABSENT;
+};
+
+// Channel accessor by index, matching the CH table below.
+static long chan_val(const Rec &r, int idx) {
+    switch (idx) { case 0: return r.hr; case 1: return r.cad; case 2: return r.dist;
+                   case 3: return r.spd; case 4: return r.pwr; case 5: return r.alt;
+                   default: return r.temp; }
+}
+// Write one channel's value (raw libambit units) as its FIT field, invalid-filled when ABSENT.
+// Scalings mirror the desktop Python _FIT_SENSOR_FIELDS exactly.
+// FIT session/lap `sport` enum from the watch's activity NAME — port of the desktop
+// _to_fit_sport() (tools/exercise_log.py). Keyword-matched on the lowercased name (ASCII lower;
+// UTF-8 accented bytes like "vélo" are matched as-is). 0 = generic. So an uploaded FIT is
+// categorised (Running/Cycling/…) rather than landing as a generic activity on intervals/Garmin.
+static uint8_t to_fit_sport(const char *name) {
+    if (!name) return 0;
+    std::string t;
+    for (const char *p = name; *p; p++) {
+        char c = *p; if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a'); t += c;
+    }
+    auto has = [&](const char *k) { return t.find(k) != std::string::npos; };
+    if (has("run") || has("course") || has("jogging")) return 1;   // running
+    if (has("cycl") || has("vtt") || has("vélo") || has("velo") || has("bike")) return 2;  // cycling
+    if (has("alpin")) return 13;                                   // alpine skiing
+    if (has("fond") || has("nordic") || has("cross")) return 12;   // cross-country skiing
+    if (has("randon") || has("hik")) return 17;                    // hiking
+    if (has("walk") || has("march")) return 11;                    // walking
+    return 0;
+}
+
+static void chan_write(Buf &b, int idx, long v) {
+    switch (idx) {
+        case 0: /* hr  bpm */ b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
+        case 1: /* cad rpm */ b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
+        case 2: /* dist m→cm (×100) */ b.u32(v == ABSENT ? 0xFFFFFFFFu : (uint32_t)(v < 0 ? 0 : v * 100)); break;
+        case 3: /* speed raw m/s×100 → mm/s (×10) */ {
+            if (v == ABSENT) { b.u16(0xFFFF); break; }
+            long o = v * 10; if (o < 0) o = 0; if (o > 0xFFFE) o = 0xFFFE; b.u16(o); break; }
+        case 4: /* power watts */ b.u16(v == ABSENT ? 0xFFFF : (v < 0 ? 0 : (v > 0xFFFE ? 0xFFFE : v))); break;
+        case 5: /* altitude m → (m+500)×5 */ {
+            if (v == ABSENT) { b.u16(0xFFFF); break; }
+            long o = (v + 500) * 5; if (o < 0) o = 0; if (o > 0xFFFE) o = 0xFFFE; b.u16(o); break; }
+        default: /* temperature raw C×10 → C */
+            b.s8(v == ABSENT ? 0x7F : (int)((v < 0 ? v - 5 : v + 5) / 10)); break;
+    }
+}
+
+// Returns raw FIT bytes for a move (outdoor OR indoor), or an empty vector if it carries no
+// usable samples at all. Twin of the desktop Python to_fit / _to_fit_no_gps.
+static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
+    const ambit_log_header_t &h = entry->header;
+
+    // Start epoch — same construction as convertEntryToGpx (header local time via mktime), so
+    // FIT and GPX timestamps line up for a given move.
+    struct tm start_tm = {};
+    start_tm.tm_year = h.date_time.year  - 1900;
+    start_tm.tm_mon  = h.date_time.month - 1;
+    start_tm.tm_mday = h.date_time.day;
+    start_tm.tm_hour = h.date_time.hour;
+    start_tm.tm_min  = h.date_time.minute;
+    start_tm.tm_sec  = (int)(h.date_time.msec / 1000);
+    time_t start_epoch = mktime(&start_tm);
+
+    // Pass 1: does this move have GPS at all? (any gps_* sample, or a periodic sample carrying
+    // both lat and lon). Mirrors extract_track_points()'s emit condition.
+    bool has_gps = false;
+    for (uint32_t i = 0; i < entry->samples_count && !has_gps; i++) {
+        const ambit_log_sample_t &s = entry->samples[i];
+        if (s.type == ambit_log_sample_type_gps_base ||
+            s.type == ambit_log_sample_type_gps_small ||
+            s.type == ambit_log_sample_type_gps_tiny) { has_gps = true; break; }
+        if (s.type == ambit_log_sample_type_periodic) {
+            bool lat_ok = false, lon_ok = false;
+            for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
+                uint32_t t = s.u.periodic.values[v].type;
+                if (t == ambit_log_sample_periodic_type_latitude)  lat_ok = true;
+                if (t == ambit_log_sample_periodic_type_longitude) lon_ok = true;
+            }
+            if (lat_ok && lon_ok) has_gps = true;
+        }
+    }
+
+    // Pass 2: walk, carrying forward position (outdoor) and every sensor channel. For an outdoor
+    // move emit a record at each GPS position (same points as the GPX track, now enriched with
+    // sensors); for an indoor move emit one record per periodic sample (no position).
+    std::vector<Rec> recs;
+    double cur_lat = 0, cur_lon = 0, cur_ele = 0; bool has_pos = false;
+    long cur_hr = ABSENT, cur_cad = ABSENT, cur_spd = ABSENT, cur_pwr = ABSENT,
+         cur_dist = ABSENT, cur_alt = ABSENT, cur_temp = ABSENT;
+    bool saw_pod_cadence = false;
+
+    for (uint32_t i = 0; i < entry->samples_count; i++) {
+        const ambit_log_sample_t &s = entry->samples[i];
+        bool emit = false;
+
+        if (s.type == ambit_log_sample_type_periodic) {
+            double lat = cur_lat, lon = cur_lon; bool lat_ok = false, lon_ok = false;
+            for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
+                const ambit_log_sample_periodic_value_t &pv = s.u.periodic.values[v];
+                switch (pv.type) {
+                    case ambit_log_sample_periodic_type_latitude:  lat = pv.u.latitude  / 1e7; lat_ok = true; break;
+                    case ambit_log_sample_periodic_type_longitude: lon = pv.u.longitude / 1e7; lon_ok = true; break;
+                    case ambit_log_sample_periodic_type_hr:
+                        if (pv.u.hr != 0xFF) cur_hr = pv.u.hr; break;
+                    case ambit_log_sample_periodic_type_cadence:
+                        if (pv.u.cadence != 0xFF) { cur_cad = pv.u.cadence; saw_pod_cadence = true; } break;
+                    case ambit_log_sample_periodic_type_wristcadence:
+                        if (pv.u.wristcadence != 0xFFFF && !saw_pod_cadence) cur_cad = pv.u.wristcadence; break;
+                    case ambit_log_sample_periodic_type_speed:
+                        if (pv.u.speed != 0xFFFF) cur_spd = pv.u.speed; break;
+                    case ambit_log_sample_periodic_type_bikepower:
+                        if (pv.u.bikepower != 0xFFFF) cur_pwr = pv.u.bikepower; break;
+                    case ambit_log_sample_periodic_type_distance:
+                        cur_dist = pv.u.distance; break;
+                    case ambit_log_sample_periodic_type_altitude:
+                        cur_alt = pv.u.altitude; break;
+                    case ambit_log_sample_periodic_type_temperature:
+                        cur_temp = pv.u.temperature; break;
+                    default: break;
+                }
+            }
+            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; has_pos = true; }
+            // Outdoor: emit only at positions (matches the GPX track). Indoor: emit every sample.
+            if (has_gps) emit = (lat_ok && lon_ok && (cur_lat != 0.0 || cur_lon != 0.0));
+            else         emit = true;
+        }
+        else if (s.type == ambit_log_sample_type_gps_base) {
+            cur_lat = s.u.gps_base.latitude / 1e7; cur_lon = s.u.gps_base.longitude / 1e7;
+            cur_ele = s.u.gps_base.altitude / 100.0; has_pos = true;
+            emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+        else if (s.type == ambit_log_sample_type_gps_small) {
+            cur_lat = s.u.gps_small.latitude / 1e7; cur_lon = s.u.gps_small.longitude / 1e7;
+            has_pos = true; emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+        else if (s.type == ambit_log_sample_type_gps_tiny) {
+            cur_lat = s.u.gps_tiny.latitude / 1e7; cur_lon = s.u.gps_tiny.longitude / 1e7;
+            has_pos = true; emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+
+        if (emit) {
+            Rec r;
+            r.t_g = (uint32_t)((long)start_epoch + (long)(s.time / 1000) - (long)GARMIN_EPOCH);
+            if (has_gps) { r.has_pos = has_pos; r.lat = cur_lat; r.lon = cur_lon; r.ele = cur_ele; }
+            r.hr = cur_hr; r.cad = cur_cad; r.spd = cur_spd; r.pwr = cur_pwr;
+            r.dist = cur_dist; r.alt = cur_alt; r.temp = cur_temp;
+            recs.push_back(r);
+        }
+    }
+    if (recs.empty()) return {};
+
+    // Which sensor channels this move actually carried (present in >=1 record). Field number,
+    // byte size, base type per the standard FIT record profile. An outdoor move takes position/
+    // altitude/distance from the GPS track, so only the non-positional subset comes from sensors
+    // (HR/cadence/speed/power/temperature — indices 0,1,3,4,6); an indoor move uses all of them
+    // (0,1,2,3,4,5,6). Order fixes the record layout.
+    struct Chan { int idx; uint8_t num, size, base; };
+    static const Chan CH[] = {
+        {0, 3,  1, FU8 }, {1, 4,  1, FU8 }, {2, 5,  4, FU32}, {3, 6,  2, FU16},
+        {4, 7,  2, FU16}, {5, 2,  2, FU16}, {6, 13, 1, FS8 },
+    };
+    const int GPS_ORDER[]    = {0, 1, 3, 4, 6};              // hr, cad, speed, power, temp
+    const int INDOOR_ORDER[] = {0, 1, 2, 3, 4, 5, 6};        // + distance, altitude
+    std::vector<Chan> present;
+    const int *order = has_gps ? GPS_ORDER : INDOOR_ORDER;
+    size_t order_n   = has_gps ? 5 : 7;
+    for (size_t k = 0; k < order_n; k++) {
+        const Chan &c = CH[order[k]];
+        for (const Rec &r : recs) { if (chan_val(r, c.idx) != ABSENT) { present.push_back(c); break; } }
+    }
+
+    uint32_t start_g = recs.front().t_g;
+    uint32_t end_g   = recs.back().t_g;
+    uint32_t dur_ms  = h.duration;
+    uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
+    uint8_t  sport   = to_fit_sport(h.activity_name);   // categorise the uploaded FIT
+
+    Buf b;
+    // file_id (local 0, global 0)
+    b.def(0, 0, {{0,1,FE},{1,2,FU16},{2,2,FU16},{4,4,FU32}});
+    b.u8(0); b.u8(4); b.u16(255); b.u16(0); b.u32(start_g);
+    // activity (local 1, global 34)
+    b.def(1, 34, {{253,4,FU32},{1,2,FU16},{2,1,FE},{3,1,FE},{4,1,FE}});
+    b.u8(1); b.u32(end_g); b.u16(1); b.u8(0); b.u8(26); b.u8(1);
+    // session (local 2, global 18)
+    b.def(2, 18, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
+                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{0,1,FE},{1,1,FE}});
+    b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
+    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(8); b.u8(1);
+    // lap (local 3, global 19)
+    b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
+    b.u8(3); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dist_cm); b.u8(9); b.u8(1);
+
+    // record (local 4, global 20): timestamp, then (outdoor) lat/lon/altitude/distance, then the
+    // present sensor channels.
+    std::vector<Buf::F> rfields;
+    rfields.push_back({253,4,FU32});
+    if (has_gps) { rfields.push_back({0,4,FS32}); rfields.push_back({1,4,FS32});
+                   rfields.push_back({2,2,FU16}); rfields.push_back({5,4,FU32}); }
+    for (const Chan &c : present) rfields.push_back({c.num, c.size, c.base});
+    b.def(4, 20, rfields);
+
+    const double SEMI = 2147483648.0 / 180.0;   // 2^31 / 180, degrees → semicircles
+    double cum_dist = 0.0;
+    for (size_t i = 0; i < recs.size(); i++) {
+        const Rec &r = recs[i];
+        b.u8(4);
+        b.u32(r.t_g);
+        if (has_gps) {
+            long lat = (long)llround(r.lat * SEMI);
+            long lon = (long)llround(r.lon * SEMI);
+            long alt = (long)llround((r.ele + 500) * 5); if (alt < 0) alt = 0;
+            b.u32((uint32_t)(int32_t)lat);
+            b.u32((uint32_t)(int32_t)lon);
+            b.u16(alt);
+            if (i > 0) {
+                const Rec &q = recs[i - 1];
+                double dy = (r.lat - q.lat) * 111320.0;
+                double dx = (r.lon - q.lon) * 111320.0 * cos(r.lat * M_PI / 180.0);
+                cum_dist += sqrt(dy * dy + dx * dx);
+            }
+            b.u32((uint32_t)llround(cum_dist * 100.0));
+        }
+        for (const Chan &c : present) chan_write(b, c.idx, chan_val(r, c.idx));
+    }
+
+    // 14-byte header + data + file CRC.
+    std::vector<uint8_t> out;
+    out.push_back(14); out.push_back(0x10);
+    out.push_back(0x34); out.push_back(0x08);          // profile version 2100, little-endian
+    uint32_t dl = (uint32_t)b.d.size();
+    out.push_back(dl & 0xFF); out.push_back((dl >> 8) & 0xFF);
+    out.push_back((dl >> 16) & 0xFF); out.push_back((dl >> 24) & 0xFF);
+    out.push_back('.'); out.push_back('F'); out.push_back('I'); out.push_back('T');
+    uint16_t hcrc = crc16(out.data(), out.size());
+    out.push_back(hcrc & 0xFF); out.push_back((hcrc >> 8) & 0xFF);
+    out.insert(out.end(), b.d.begin(), b.d.end());
+    uint16_t fcrc = crc16(b.d.data(), b.d.size());
+    out.push_back(fcrc & 0xFF); out.push_back((fcrc >> 8) & 0xFF);
+    return out;
+}
+
+}  // namespace fitexport
+
 // ─── Callback libambit_log_read ────────────────────────────────────────────────
 
 static void log_push_callback(void *userdata, ambit_log_entry_t *log_entry)
@@ -336,8 +644,15 @@ static void log_push_callback(void *userdata, ambit_log_entry_t *log_entry)
     std::string gpx = convertEntryToGpx(log_entry);
     g_log_cache.push_back(gpx);
     g_log_dates.push_back(log_entry->header.date_time);   // for mark-synced (same index)
-    LOGI("log_push_callback: log #%zu ajouté (%zu bytes)",
-         g_log_cache.size(), gpx.size());
+    // Native FIT for this move — outdoor (GPS track + sensor channels) and indoor (sensor
+    // channels only) alike, so every move exports to FIT with HR/cadence/power/etc, not just
+    // the track. "" only if the move had no usable samples. Same index as g_log_cache.
+    // Best-effort: a FIT build failure must never break the GPX sync the user asked for.
+    std::vector<uint8_t> fit = fitexport::build(log_entry);
+    g_log_fit_b64.push_back(fit.empty() ? std::string()
+                                        : base64Encode(fit.data(), fit.size()));
+    LOGI("log_push_callback: log #%zu ajouté (%zu bytes gpx, %zu bytes fit)",
+         g_log_cache.size(), gpx.size(), fit.size());
     // Ne pas libérer ici : device_driver_ambit.c appelle libambit_log_entry_free après push_cb
 }
 
@@ -378,6 +693,7 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitInit(
         g_device = nullptr;
     }
     g_log_cache.clear();
+    g_log_fit_b64.clear();
     g_log_dates.clear();
 
     g_device = libambit_new_from_fd(fd, epIn, epOut,
@@ -470,6 +786,7 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitGetLogCount(
     }
 
     g_log_cache.clear();
+    g_log_fit_b64.clear();
     g_log_dates.clear();
     int ret = libambit_log_read(g_device,
                                 log_skip_callback,
@@ -500,6 +817,25 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitGetLogAsGpx(
         return nullptr;
     }
     return env->NewStringUTF(g_log_cache[(size_t)index].c_str());
+}
+
+/**
+ * nativeAmbitGetLogAsFit
+ *
+ * Returns the base64-encoded native FIT of the log at `index` from g_log_fit_b64 (same index
+ * as nativeAmbitGetLogAsGpx). Empty string when this move produced no FIT (no usable samples);
+ * null when the index is out of range. Must be called after nativeAmbitGetLogCount.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitGetLogAsFit(
+        JNIEnv *env, jobject /* thiz */, jint index)
+{
+    if ((size_t)index >= g_log_fit_b64.size()) {
+        LOGE("nativeAmbitGetLogAsFit: index %d hors limites (cache=%zu)",
+             index, g_log_fit_b64.size());
+        return nullptr;
+    }
+    return env->NewStringUTF(g_log_fit_b64[(size_t)index].c_str());
 }
 
 /**
@@ -1506,6 +1842,7 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitDisconnect(
 {
     LOGI("nativeAmbitDisconnect");
     g_log_cache.clear();
+    g_log_fit_b64.clear();
     g_log_dates.clear();
     if (g_device) {
         libambit_close(g_device);
@@ -1542,6 +1879,7 @@ Java_com_ambitsyncmodern_ble_AmbitBleModule_nativeAmbitBleInit(
         g_device = nullptr;
     }
     g_log_cache.clear();
+    g_log_fit_b64.clear();
     g_log_dates.clear();
 
     JavaVM *jvm = nullptr;

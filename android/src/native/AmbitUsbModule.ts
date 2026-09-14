@@ -36,6 +36,10 @@ export const ambitConnector: DeviceConnector = {
     return NativeAmbit.getLogs(knownIds);
   },
 
+  getLogFits(): Promise<string[]> {
+    return NativeAmbit.getLogFits();
+  },
+
   updateSgee(path: string): Promise<boolean> {
     return NativeAmbit.updateSgee(path);
   },
@@ -77,6 +81,11 @@ export const disconnect = async (): Promise<void> => {
   return ambitConnector.disconnect();
 };
 export const getLogs    = (knownIds?: string[]) => ambitConnector.getLogs(knownIds);
+/** Native FIT (base64) of each move from the most recent getLogs(), aligned index-for-index with
+ * that GPX array; "" for a move with no FIT. Reads the native cache getLogs() filled - call it
+ * right after getLogs(), before any reconnect. Outdoor = track + sensor channels, indoor = sensor
+ * channels. See fitexport::build (jni_bridge.cpp / AmbitUsbModule.mm). */
+export const getLogFits = (): Promise<string[]> => NativeAmbit.getLogFits();
 export const updateSgee = (path: string) => ambitConnector.updateSgee!(path);
 
 /** Experimental "mark synced" write-back (OFF by default). Marks every move read this session

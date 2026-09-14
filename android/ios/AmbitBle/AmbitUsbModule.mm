@@ -28,6 +28,8 @@
 #include <vector>
 #include <set>
 #include <cmath>
+#include <climits>
+#include <cstdint>
 #include <ctime>
 #import <os/log.h>
 
@@ -93,6 +95,9 @@ static NSString *friendlyName(NSString *model) {
 static std::vector<std::string> g_log_cache;
 static std::vector<ambit_date_time_t> g_log_dates;
 static std::set<std::string> g_known_dates;
+// Parallel to g_log_cache (same index): each read move's native FIT, base64-encoded (or "" for a
+// move with no usable samples). Consumed by getLogFits. Twin of jni_bridge.cpp's g_log_fit_b64.
+static std::vector<std::string> g_log_fit_b64;
 
 static std::string formatLogId(const ambit_log_header_t *h) {
     char buf[20];
@@ -186,10 +191,271 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry) {
     return gpx.str();
 }
 
+// ─── Conversion log → FIT — twin of jni_bridge.cpp's fitexport (change both together) ────────
+// See the Android copy for the full commentary. Handles outdoor (GPS track + sensor channels)
+// and indoor (sensor channels only) moves alike; units mirror the desktop Python
+// _FIT_SENSOR_FIELDS. Logged-Suunto-App developer fields are intentionally not ported.
+namespace fitexport {
+
+static const uint32_t GARMIN_EPOCH = 631065600u;
+static const uint16_t CRC_TABLE[16] = {
+    0x0000,0xCC01,0xD801,0x1400,0xF001,0x3C00,0x2800,0xE401,
+    0xA001,0x6C00,0x7800,0xB401,0x5000,0x9C01,0x8801,0x4400};
+
+static uint16_t crc16(const uint8_t *data, size_t len) {
+    uint16_t crc = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint16_t tmp = CRC_TABLE[crc & 0x0F];
+        crc = ((crc >> 4) ^ tmp ^ CRC_TABLE[data[i] & 0x0F]) & 0xFFFF;
+        tmp = CRC_TABLE[crc & 0x0F];
+        crc = ((crc >> 4) ^ tmp ^ CRC_TABLE[(data[i] >> 4) & 0x0F]) & 0xFFFF;
+    }
+    return crc;
+}
+
+enum { FE = 0x00, FS8 = 0x01, FU8 = 0x02, FU16 = 0x84, FU32 = 0x86, FS32 = 0x85 };
+
+struct Buf {
+    std::vector<uint8_t> d;
+    void u8(uint32_t v)  { d.push_back((uint8_t)(v & 0xFF)); }
+    void u16(uint32_t v) { u8(v); u8(v >> 8); }
+    void u32(uint32_t v) { u8(v); u8(v >> 8); u8(v >> 16); u8(v >> 24); }
+    void s8(int v)       { if (v < -128) v = -128; if (v > 127) v = 127; u8((uint8_t)(int8_t)v); }
+    struct F { uint8_t num, size, base; };
+    void def(uint8_t local, uint16_t gnum, const std::vector<F> &fields) {
+        u8(0x40 | local); u8(0); u8(0); u16(gnum); u8((uint8_t)fields.size());
+        for (const F &f : fields) { u8(f.num); u8(f.size); u8(f.base); }
+    }
+};
+
+static const long ABSENT = LONG_MIN;
+struct Rec {
+    uint32_t t_g;
+    bool has_pos = false; double lat = 0, lon = 0, ele = 0;
+    long hr = ABSENT, cad = ABSENT, spd = ABSENT, pwr = ABSENT,
+         dist = ABSENT, alt = ABSENT, temp = ABSENT;
+};
+
+static long chan_val(const Rec &r, int idx) {
+    switch (idx) { case 0: return r.hr; case 1: return r.cad; case 2: return r.dist;
+                   case 3: return r.spd; case 4: return r.pwr; case 5: return r.alt;
+                   default: return r.temp; }
+}
+// FIT session/lap `sport` enum from the watch's activity NAME — twin of jni_bridge.cpp's
+// to_fit_sport() / the desktop _to_fit_sport(). Keep in sync.
+static uint8_t to_fit_sport(const char *name) {
+    if (!name) return 0;
+    std::string t;
+    for (const char *p = name; *p; p++) {
+        char c = *p; if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a'); t += c;
+    }
+    auto has = [&](const char *k) { return t.find(k) != std::string::npos; };
+    if (has("run") || has("course") || has("jogging")) return 1;
+    if (has("cycl") || has("vtt") || has("vélo") || has("velo") || has("bike")) return 2;
+    if (has("alpin")) return 13;
+    if (has("fond") || has("nordic") || has("cross")) return 12;
+    if (has("randon") || has("hik")) return 17;
+    if (has("walk") || has("march")) return 11;
+    return 0;
+}
+
+static void chan_write(Buf &b, int idx, long v) {
+    switch (idx) {
+        case 0: b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
+        case 1: b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
+        case 2: b.u32(v == ABSENT ? 0xFFFFFFFFu : (uint32_t)(v < 0 ? 0 : v * 100)); break;
+        case 3: { if (v == ABSENT) { b.u16(0xFFFF); break; }
+                  long o = v * 10; if (o < 0) o = 0; if (o > 0xFFFE) o = 0xFFFE; b.u16(o); break; }
+        case 4: b.u16(v == ABSENT ? 0xFFFF : (v < 0 ? 0 : (v > 0xFFFE ? 0xFFFE : v))); break;
+        case 5: { if (v == ABSENT) { b.u16(0xFFFF); break; }
+                  long o = (v + 500) * 5; if (o < 0) o = 0; if (o > 0xFFFE) o = 0xFFFE; b.u16(o); break; }
+        default: b.s8(v == ABSENT ? 0x7F : (int)((v < 0 ? v - 5 : v + 5) / 10)); break;
+    }
+}
+
+static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
+    const ambit_log_header_t &h = entry->header;
+
+    struct tm start_tm = {};
+    start_tm.tm_year = h.date_time.year  - 1900;
+    start_tm.tm_mon  = h.date_time.month - 1;
+    start_tm.tm_mday = h.date_time.day;
+    start_tm.tm_hour = h.date_time.hour;
+    start_tm.tm_min  = h.date_time.minute;
+    start_tm.tm_sec  = (int)(h.date_time.msec / 1000);
+    time_t start_epoch = mktime(&start_tm);
+
+    bool has_gps = false;
+    for (uint32_t i = 0; i < entry->samples_count && !has_gps; i++) {
+        const ambit_log_sample_t &s = entry->samples[i];
+        if (s.type == ambit_log_sample_type_gps_base ||
+            s.type == ambit_log_sample_type_gps_small ||
+            s.type == ambit_log_sample_type_gps_tiny) { has_gps = true; break; }
+        if (s.type == ambit_log_sample_type_periodic) {
+            bool lat_ok = false, lon_ok = false;
+            for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
+                uint32_t t = s.u.periodic.values[v].type;
+                if (t == ambit_log_sample_periodic_type_latitude)  lat_ok = true;
+                if (t == ambit_log_sample_periodic_type_longitude) lon_ok = true;
+            }
+            if (lat_ok && lon_ok) has_gps = true;
+        }
+    }
+
+    std::vector<Rec> recs;
+    double cur_lat = 0, cur_lon = 0, cur_ele = 0; bool has_pos = false;
+    long cur_hr = ABSENT, cur_cad = ABSENT, cur_spd = ABSENT, cur_pwr = ABSENT,
+         cur_dist = ABSENT, cur_alt = ABSENT, cur_temp = ABSENT;
+    bool saw_pod_cadence = false;
+
+    for (uint32_t i = 0; i < entry->samples_count; i++) {
+        const ambit_log_sample_t &s = entry->samples[i];
+        bool emit = false;
+
+        if (s.type == ambit_log_sample_type_periodic) {
+            double lat = cur_lat, lon = cur_lon; bool lat_ok = false, lon_ok = false;
+            for (uint8_t v = 0; v < s.u.periodic.value_count; v++) {
+                const ambit_log_sample_periodic_value_t &pv = s.u.periodic.values[v];
+                switch (pv.type) {
+                    case ambit_log_sample_periodic_type_latitude:  lat = pv.u.latitude  / 1e7; lat_ok = true; break;
+                    case ambit_log_sample_periodic_type_longitude: lon = pv.u.longitude / 1e7; lon_ok = true; break;
+                    case ambit_log_sample_periodic_type_hr:
+                        if (pv.u.hr != 0xFF) cur_hr = pv.u.hr; break;
+                    case ambit_log_sample_periodic_type_cadence:
+                        if (pv.u.cadence != 0xFF) { cur_cad = pv.u.cadence; saw_pod_cadence = true; } break;
+                    case ambit_log_sample_periodic_type_wristcadence:
+                        if (pv.u.wristcadence != 0xFFFF && !saw_pod_cadence) cur_cad = pv.u.wristcadence; break;
+                    case ambit_log_sample_periodic_type_speed:
+                        if (pv.u.speed != 0xFFFF) cur_spd = pv.u.speed; break;
+                    case ambit_log_sample_periodic_type_bikepower:
+                        if (pv.u.bikepower != 0xFFFF) cur_pwr = pv.u.bikepower; break;
+                    case ambit_log_sample_periodic_type_distance:
+                        cur_dist = pv.u.distance; break;
+                    case ambit_log_sample_periodic_type_altitude:
+                        cur_alt = pv.u.altitude; break;
+                    case ambit_log_sample_periodic_type_temperature:
+                        cur_temp = pv.u.temperature; break;
+                    default: break;
+                }
+            }
+            if (lat_ok && lon_ok) { cur_lat = lat; cur_lon = lon; has_pos = true; }
+            if (has_gps) emit = (lat_ok && lon_ok && (cur_lat != 0.0 || cur_lon != 0.0));
+            else         emit = true;
+        }
+        else if (s.type == ambit_log_sample_type_gps_base) {
+            cur_lat = s.u.gps_base.latitude / 1e7; cur_lon = s.u.gps_base.longitude / 1e7;
+            cur_ele = s.u.gps_base.altitude / 100.0; has_pos = true;
+            emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+        else if (s.type == ambit_log_sample_type_gps_small) {
+            cur_lat = s.u.gps_small.latitude / 1e7; cur_lon = s.u.gps_small.longitude / 1e7;
+            has_pos = true; emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+        else if (s.type == ambit_log_sample_type_gps_tiny) {
+            cur_lat = s.u.gps_tiny.latitude / 1e7; cur_lon = s.u.gps_tiny.longitude / 1e7;
+            has_pos = true; emit = (cur_lat != 0.0 || cur_lon != 0.0);
+        }
+
+        if (emit) {
+            Rec r;
+            r.t_g = (uint32_t)((long)start_epoch + (long)(s.time / 1000) - (long)GARMIN_EPOCH);
+            if (has_gps) { r.has_pos = has_pos; r.lat = cur_lat; r.lon = cur_lon; r.ele = cur_ele; }
+            r.hr = cur_hr; r.cad = cur_cad; r.spd = cur_spd; r.pwr = cur_pwr;
+            r.dist = cur_dist; r.alt = cur_alt; r.temp = cur_temp;
+            recs.push_back(r);
+        }
+    }
+    if (recs.empty()) return {};
+
+    struct Chan { int idx; uint8_t num, size, base; };
+    static const Chan CH[] = {
+        {0, 3,  1, FU8 }, {1, 4,  1, FU8 }, {2, 5,  4, FU32}, {3, 6,  2, FU16},
+        {4, 7,  2, FU16}, {5, 2,  2, FU16}, {6, 13, 1, FS8 },
+    };
+    const int GPS_ORDER[]    = {0, 1, 3, 4, 6};
+    const int INDOOR_ORDER[] = {0, 1, 2, 3, 4, 5, 6};
+    std::vector<Chan> present;
+    const int *order = has_gps ? GPS_ORDER : INDOOR_ORDER;
+    size_t order_n   = has_gps ? 5 : 7;
+    for (size_t k = 0; k < order_n; k++) {
+        const Chan &c = CH[order[k]];
+        for (const Rec &r : recs) { if (chan_val(r, c.idx) != ABSENT) { present.push_back(c); break; } }
+    }
+
+    uint32_t start_g = recs.front().t_g;
+    uint32_t end_g   = recs.back().t_g;
+    uint32_t dur_ms  = h.duration;
+    uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
+    uint8_t  sport   = to_fit_sport(h.activity_name);
+
+    Buf b;
+    b.def(0, 0, {{0,1,FE},{1,2,FU16},{2,2,FU16},{4,4,FU32}});
+    b.u8(0); b.u8(4); b.u16(255); b.u16(0); b.u32(start_g);
+    b.def(1, 34, {{253,4,FU32},{1,2,FU16},{2,1,FE},{3,1,FE},{4,1,FE}});
+    b.u8(1); b.u32(end_g); b.u16(1); b.u8(0); b.u8(26); b.u8(1);
+    b.def(2, 18, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
+                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{0,1,FE},{1,1,FE}});
+    b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
+    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(8); b.u8(1);
+    b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
+    b.u8(3); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dist_cm); b.u8(9); b.u8(1);
+
+    std::vector<Buf::F> rfields;
+    rfields.push_back({253,4,FU32});
+    if (has_gps) { rfields.push_back({0,4,FS32}); rfields.push_back({1,4,FS32});
+                   rfields.push_back({2,2,FU16}); rfields.push_back({5,4,FU32}); }
+    for (const Chan &c : present) rfields.push_back({c.num, c.size, c.base});
+    b.def(4, 20, rfields);
+
+    const double SEMI = 2147483648.0 / 180.0;
+    double cum_dist = 0.0;
+    for (size_t i = 0; i < recs.size(); i++) {
+        const Rec &r = recs[i];
+        b.u8(4);
+        b.u32(r.t_g);
+        if (has_gps) {
+            long lat = (long)llround(r.lat * SEMI);
+            long lon = (long)llround(r.lon * SEMI);
+            long alt = (long)llround((r.ele + 500) * 5); if (alt < 0) alt = 0;
+            b.u32((uint32_t)(int32_t)lat);
+            b.u32((uint32_t)(int32_t)lon);
+            b.u16(alt);
+            if (i > 0) {
+                const Rec &q = recs[i - 1];
+                double dy = (r.lat - q.lat) * 111320.0;
+                double dx = (r.lon - q.lon) * 111320.0 * cos(r.lat * M_PI / 180.0);
+                cum_dist += sqrt(dy * dy + dx * dx);
+            }
+            b.u32((uint32_t)llround(cum_dist * 100.0));
+        }
+        for (const Chan &c : present) chan_write(b, c.idx, chan_val(r, c.idx));
+    }
+
+    std::vector<uint8_t> out;
+    out.push_back(14); out.push_back(0x10);
+    out.push_back(0x34); out.push_back(0x08);
+    uint32_t dl = (uint32_t)b.d.size();
+    out.push_back(dl & 0xFF); out.push_back((dl >> 8) & 0xFF);
+    out.push_back((dl >> 16) & 0xFF); out.push_back((dl >> 24) & 0xFF);
+    out.push_back('.'); out.push_back('F'); out.push_back('I'); out.push_back('T');
+    uint16_t hcrc = crc16(out.data(), out.size());
+    out.push_back(hcrc & 0xFF); out.push_back((hcrc >> 8) & 0xFF);
+    out.insert(out.end(), b.d.begin(), b.d.end());
+    uint16_t fcrc = crc16(b.d.data(), b.d.size());
+    out.push_back(fcrc & 0xFF); out.push_back((fcrc >> 8) & 0xFF);
+    return out;
+}
+
+}  // namespace fitexport
+
 static void log_push_callback(void *ud, ambit_log_entry_t *entry) {
     (void)ud;
     g_log_cache.push_back(convertEntryToGpx(entry));
     g_log_dates.push_back(entry->header.date_time);
+    std::vector<uint8_t> fit = fitexport::build(entry);
+    std::string fb = fit.empty() ? std::string()
+        : std::string([b64(fit.data(), fit.size()) UTF8String]);
+    g_log_fit_b64.push_back(fb);
 }
 
 static int log_skip_callback(void *ud, ambit_log_header_t *header) {
@@ -324,6 +590,7 @@ RCT_EXPORT_METHOD(getLogs:(NSArray *)knownIds resolver:(RCTPromiseResolveBlock)r
     g_known_dates.clear();
     for (id v in knownIds) if ([v isKindOfClass:NSString.class]) g_known_dates.insert(std::string([v UTF8String]));
     g_log_cache.clear();
+    g_log_fit_b64.clear();
     g_log_dates.clear();
 
     CORE_LOG("getLogs: calling libambit_log_read ...");
@@ -336,6 +603,17 @@ RCT_EXPORT_METHOD(getLogs:(NSArray *)knownIds resolver:(RCTPromiseResolveBlock)r
     for (NSUInteger i = 0; i < total; i++) {
         [results addObject:[NSString stringWithUTF8String:g_log_cache[i].c_str()]];
         if (_hasListeners) [self sendEventWithName:@"AmbitSyncProgress" body:@{@"current": @(i + 1), @"total": @(total)}];
+    }
+    resolve(results);
+}
+
+// Native FIT of each log from the most recent getLogs(), base64-encoded, aligned index-for-index
+// with that GPX array ("" for a move with no FIT). Reads the cache getLogs() filled; does NOT
+// re-read the watch, so call it right after getLogs(). Twin of the Android getLogFits().
+RCT_EXPORT_METHOD(getLogFits:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    NSMutableArray<NSString *> *results = [NSMutableArray arrayWithCapacity:g_log_fit_b64.size()];
+    for (size_t i = 0; i < g_log_fit_b64.size(); i++) {
+        [results addObject:[NSString stringWithUTF8String:g_log_fit_b64[i].c_str()]];
     }
     resolve(results);
 }

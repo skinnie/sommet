@@ -37,6 +37,7 @@ export async function uploadFitToIntervalsIcu(
   fitPath: string,
   athleteId: string,
   apiKey: string,
+  name?: string,
 ): Promise<IntervalsIcuUploadResult> {
   const fileName = fitPath.split('/').pop() ?? 'activity.fit';
   const formData = new FormData();
@@ -45,6 +46,12 @@ export async function uploadFitToIntervalsIcu(
     name: fileName,
     type: 'application/fit',
   } as any);
+  // Set the activity TITLE from the watch's real activity name (e.g. "Running", or a custom
+  // mode name like "Breathing") - this is the intervals.icu upload's own `name` field, separate
+  // from the FIT. The FIT itself can only categorise the sport as a fixed enum, so a custom name
+  // has no home inside the file; passing it here is what makes the activity show its real name
+  // instead of the filename. Empty/whitespace names are skipped (intervals then titles it itself).
+  if (name && name.trim()) formData.append('name', name.trim());
 
   // Basic Auth : username="API_KEY", password=<clé API perso>
   const authHeader = 'Basic ' + btoa(`API_KEY:${apiKey}`);

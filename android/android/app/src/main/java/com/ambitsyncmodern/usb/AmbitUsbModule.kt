@@ -83,6 +83,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitGetDeviceInfo(): String
     private external fun nativeAmbitGetLogCount(knownDates: Array<String>): Int
     private external fun nativeAmbitGetLogAsGpx(index: Int): String?
+    private external fun nativeAmbitGetLogAsFit(index: Int): String?
     private external fun nativeAmbitMarkReadLogsSynced(): Int
     private external fun nativeAmbitSendSgee(data: ByteArray): Boolean
     private external fun nativeAmbitWriteRoute(
@@ -426,6 +427,30 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 val gpx = nativeAmbitGetLogAsGpx(i)
                 if (gpx != null) results.pushString(gpx)
                 emitProgress(i + 1, count)
+            }
+            promise.resolve(results)
+        }
+    }
+
+    // ─── getLogFits() ─────────────────────────────────────────────────────────
+    // Returns the native FIT of each log read by the most recent getLogs(), base64-encoded,
+    // aligned index-for-index with that GPX array ("" for a move that produced no FIT). Reads
+    // the cache getLogs() already filled — it does NOT re-read the watch — so it must be called
+    // after getLogs() and before any reconnect. Outdoor moves carry track + sensor channels,
+    // indoor moves carry the sensor channels; see fitexport::build in jni_bridge.cpp.
+    @ReactMethod
+    fun getLogFits(promise: Promise) {
+        if (!jniLoaded) {
+            promise.reject("JNI_NOT_LOADED", "Native library unavailable")
+            return
+        }
+        executor.execute {
+            val results = Arguments.createArray()
+            var i = 0
+            while (true) {
+                val fit = nativeAmbitGetLogAsFit(i) ?: break   // null = past the end of the cache
+                results.pushString(fit)
+                i++
             }
             promise.resolve(results)
         }

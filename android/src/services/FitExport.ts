@@ -1,5 +1,5 @@
 import RNFS from 'react-native-fs';
-import { readGpxFile } from './GpxService';
+import { readGpxFile, fitPathForGpx } from './GpxService';
 import { parseTrackPoints, computeElevationStats } from './GpxParser';
 import type { ActivityRecord } from '../database/db';
 
@@ -228,6 +228,20 @@ export async function generateFitFile(
   const fitPath = gpxPath.replace(/\.gpx$/, '.fit');
   await RNFS.writeFile(fitPath, uint8ToBase64(all), 'base64');
   return fitPath;
+}
+
+/**
+ * The FIT file to export/upload for an activity. Prefers the native <id>.fit written at sync time
+ * (it carries every sensor channel - HR/cadence/speed/power/temperature - and exists for indoor
+ * moves that have no GPS track), and only falls back to converting the GPX when that file isn't
+ * present (older syncs, imported GPX, or a build that didn't produce one). This is what makes
+ * indoor activities exportable: generateFitFile() throws "No GPS points" on a track-less GPX,
+ * whereas the native FIT is already on disk.
+ */
+export async function getFitFile(gpxPath: string, activity: ActivityRecord): Promise<string> {
+  const native = await fitPathForGpx(gpxPath);
+  if (native) return native;
+  return generateFitFile(gpxPath, activity);
 }
 
 // ─── Helper base64 ────────────────────────────────────────────────────────────

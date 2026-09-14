@@ -24,6 +24,12 @@ export interface DeviceProvider {
    *  knownIds : IDs déjà en DB (format YYYYMMDDTHHMMSS) — les logs correspondants sont skippés côté montre. */
   getLogs(knownIds?: string[]): Promise<string[]>;
 
+  /** Native FIT (base64) of each move from the most recent getLogs(), aligned index-for-index
+   *  with the GPX array it returned ("" for a move with no FIT). Optional — a provider that can't
+   *  build FIT natively omits it and the caller falls back to a GPX→FIT conversion. Must be called
+   *  right after getLogs() (reads the same native cache; does not re-read the watch). */
+  getLogFits?(): Promise<string[]>;
+
   /** S'abonne aux événements de progression pendant getLogs(). Retourne une fonction de désinscription. */
   onSyncProgress(callback: (event: SyncProgressEvent) => void): () => void;
 

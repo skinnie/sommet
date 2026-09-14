@@ -1,6 +1,6 @@
 import { DeviceProvider } from './devices/DeviceProvider';
 import { ambitDeviceProvider } from './devices/AmbitDeviceProvider';
-import { writeGpxFile } from './GpxService';
+import { writeGpxFile, writeFitFile } from './GpxService';
 import { extractGpxMetadata } from './GpxParser';
 import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, clearDeletedActivities } from '../database/db';
 import { isMarkSyncedEnabled } from './MarkSynced';
@@ -84,6 +84,21 @@ export async function runSync(
   }
   unsubscribe();
 
+  // Native FIT of each move (same order/indices as gpxLogs), built at sync time from the raw
+  // samples: outdoor = GPS track + HR/cadence/speed/power/temperature, indoor = those sensor
+  // channels with no track (so indoor/home-trainer moves export to FIT too - they have no GPX
+  // track for the on-export GPX->FIT path to use). "" for a move with no FIT. Best-effort: if
+  // the provider can't build FIT natively, or the call fails, we just skip writing .fit files
+  // and the export screen falls back to converting the GPX.
+  let fitLogs: string[] = [];
+  if (provider.getLogFits) {
+    try {
+      fitLogs = await provider.getLogFits();
+    } catch (e: any) {
+      console.log('[sync] native FIT fetch failed, will fall back to GPX->FIT on export:', e?.message ?? e);
+    }
+  }
+
   // ── 2b. Mark-synced write-back (experimental Settings toggle, OFF by default) ──
   // The moves in gpxLogs are exactly the ones read this session (the watch skipped the
   // already-known ones), so their indices match the native cache 0..gpxLogs.length-1. Tell
@@ -120,6 +135,16 @@ export async function runSync(
 
     const gpxPath = await writeGpxFile(id, gpxXml, refresh);
     if (!gpxPath) continue;
+
+    // Persist the native FIT next to the GPX (best-effort; index-aligned with gpxLogs). Written
+    // whenever we're writing this move's GPX, so the two never drift.
+    if (fitLogs[i]) {
+      try {
+        await writeFitFile(id, fitLogs[i], refresh);
+      } catch (e: any) {
+        console.log(`[sync] .fit write failed for ${id}, GPX still saved:`, e?.message ?? e);
+      }
+    }
 
     await markActivitySynced({
       id,

@@ -45,6 +45,14 @@ export interface DeviceConnector {
   getLogs(knownIds?: string[]): Promise<string[]>;
 
   /**
+   * Native FIT (base64) of each move from the most recent getLogs(), aligned index-for-index
+   * with the GPX array it returned ("" for a move that produced no FIT). Optional: a connector
+   * that can't build FIT natively omits it, and the caller falls back to a GPX→FIT conversion.
+   * Must be called right after getLogs() (reads the same native cache; does not re-read).
+   */
+  getLogFits?(): Promise<string[]>;
+
+  /**
    * Met à jour les éphémérides GPS sur l'appareil (si supporté).
    * @param path  Chemin absolu du fichier SGEE
    * @returns     true si réussi, false si non supporté

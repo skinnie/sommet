@@ -596,6 +596,44 @@ def walk_entries(data, mem_start=EXERCISE_LOG_BASE, mem_size=EXERCISE_LOG_SIZE, 
         nxt = next_addr
 
 
+# Per-value sentinel meaning "no reading this sample" for the sensor channels we carry into
+# FIT, from libambit.h's ambit_log_sample_periodic_value_s "ignore if ..." comments. A sentinel
+# is dropped (not carried forward) so a dead/absent sensor never poisons the series. bikepower
+# has no documented sentinel, but 0xffff is treated as absent defensively.
+_CHANNEL_SENTINELS = {"hr": 0xFF, "cadence": 0xFF, "wristcadence": 0xFFFF,
+                      "speed": 0xFFFF, "bikepower": 0xFFFF}
+
+
+def _apply_periodic_channels(cur, state, sample):
+    """Update the carry-forward sensor channels from one periodic sample. `cur` maps
+    hr/cadence/speed/power/distance/alt/temperature -> latest real value (raw libambit units);
+    `state["saw_pod_cadence"]` records whether foot/bike-pod cadence (0x1a) has been seen, so
+    wrist cadence (0x15) is only used as a fallback. Sentinel readings are skipped. Shared by
+    extract_track_points (outdoor) and extract_indoor_records (indoor) so both platforms and
+    both cases capture channels identically. Ruleoutputs are handled by the caller."""
+    for v in sample["values"]:
+        name, val = v["name"], v["value"]
+        if val == _CHANNEL_SENTINELS.get(name):
+            continue
+        if name == "hr":
+            cur["hr"] = val
+        elif name == "cadence":
+            cur["cadence"] = val
+            state["saw_pod_cadence"] = True
+        elif name == "wristcadence" and not state["saw_pod_cadence"]:
+            cur["cadence"] = val
+        elif name == "speed":
+            cur["speed"] = val
+        elif name == "bikepower":
+            cur["power"] = val
+        elif name == "distance":
+            cur["distance"] = val
+        elif name == "altitude":
+            cur["alt"] = val
+        elif name == "temperature":
+            cur["temperature"] = val
+
+
 def extract_track_points(header, samples):
     """The GPS-position-tracking walk shared by to_gpx() and to_fit() - factored out of
     convertEntryToGpx()'s logic (both consumers need the same lat/lon/ele/time sequence;
@@ -619,6 +657,13 @@ def extract_track_points(header, samples):
     points = []
     cur_lat = cur_lon = cur_ele = 0.0
     cur_rules = {}                    # latest logged Suunto App outputs seen so far
+    # Carry-forward sensor channels, so every emitted GPS point also carries the hr/cadence/
+    # speed/power/temperature in effect at its time - these ride into the FIT alongside the
+    # track (to_gpx ignores them; it only reads lat/lon/ele/time). Additive: the positions
+    # below are untouched.
+    cur_ch = {"hr": None, "cadence": None, "speed": None, "power": None,
+              "distance": None, "alt": None, "temperature": None}
+    ch_state = {"saw_pod_cadence": False}
     has_pos = False
 
     for s in samples:
@@ -630,6 +675,7 @@ def extract_track_points(header, samples):
             for v in s["values"]:
                 if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
                     cur_rules[v["name"]] = v["value"]
+            _apply_periodic_channels(cur_ch, ch_state, s)
         if s["type"] == "gps_base":
             cur_lat = s["latitude"] / 1e7
             cur_lon = s["longitude"] / 1e7
@@ -667,7 +713,10 @@ def extract_track_points(header, samples):
         if emit and has_pos and (cur_lat != 0.0 or cur_lon != 0.0):
             time = s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))
             points.append({"lat": cur_lat, "lon": cur_lon, "ele": cur_ele, "time": time,
-                           "rules": dict(cur_rules)})
+                           "rules": dict(cur_rules),
+                           "hr": cur_ch["hr"], "cadence": cur_ch["cadence"],
+                           "speed": cur_ch["speed"], "power": cur_ch["power"],
+                           "temperature": cur_ch["temperature"]})
 
     return points
 
@@ -799,9 +848,11 @@ def _u8(b, v): b.append(v & 0xFF)
 def _u16(b, v): b.extend(struct.pack("<H", v & 0xFFFF))
 def _u32(b, v): b.extend(struct.pack("<I", v & 0xFFFFFFFF))
 def _s32(b, v): b.extend(struct.pack("<i", v))
+def _s8(b, v): b.extend(struct.pack("<b", max(-128, min(127, v))))
 
 
 _E, _U8, _U16, _U32, _S32 = 0x00, 0x02, 0x84, 0x86, 0x85  # FIT base-type codes
+_S8 = 0x01                                                # FIT sint8
 _STR, _BYTE = 0x07, 0x0D  # FIT string and byte(array) base-type codes
 # A stable 16-byte application UUID identifying this project's developer-data producer, so
 # intervals.icu / any FIT reader groups our logged-app fields under one known app. Arbitrary
@@ -850,6 +901,40 @@ FIT_STREAM_TARGETS = {
 }
 
 
+# The watch sensor channels carried into a FIT `record` message, keyed by the record-dict name
+# extract_track_points()/extract_indoor_records() store them under. Each value is the standard
+# FIT record profile field:  (field_num, size, base_type, invalid, to_fit) where to_fit maps a
+# raw libambit value (ambit_log_sample_periodic_value_s units) to the field's stored integer:
+#   3 heart_rate bpm   4 cadence rpm   5 distance (m->cm, scale 100)   6 speed (m/s*100 raw
+#   -> mm/s, so x10)   7 power watts   2 altitude ((m+500)*5)   13 temperature (C*10 raw -> C).
+# Outdoor moves take altitude/distance from the GPS track instead, so the GPS path uses only the
+# non-positional subset (hr/cadence/speed/power/temperature); the indoor path uses all of them.
+_FIT_SENSOR_FIELDS = {
+    "hr":          (3,  1, _U8,  0xFF,       lambda v: max(0, min(int(v), 0xFE))),
+    "cadence":     (4,  1, _U8,  0xFF,       lambda v: max(0, min(int(v), 0xFE))),
+    "distance":    (5,  4, _U32, 0xFFFFFFFF, lambda v: max(0, round(v * 100))),
+    "speed":       (6,  2, _U16, 0xFFFF,     lambda v: max(0, min(round(v * 10), 0xFFFE))),
+    "power":       (7,  2, _U16, 0xFFFF,     lambda v: max(0, min(int(v), 0xFFFE))),
+    "alt":         (2,  2, _U16, 0xFFFF,     lambda v: max(0, min(round((v + 500) * 5), 0xFFFE))),
+    "temperature": (13, 1, _S8,  0x7F,       lambda v: max(-128, min(round(v / 10), 127))),
+}
+# Fixed field order for a move's record layout (definition + data must agree).
+_GPS_SENSOR_ORDER = ("hr", "cadence", "speed", "power", "temperature")
+_INDOOR_SENSOR_ORDER = ("hr", "cadence", "distance", "speed", "power", "alt", "temperature")
+
+
+def _fit_write_value(data, size, base, out):
+    """Append one FIT field value of the given size/base type."""
+    if base == _S8:
+        _s8(data, out)
+    elif size == 1:
+        _u8(data, out)
+    elif size == 2:
+        _u16(data, out)
+    else:
+        _u32(data, out)
+
+
 def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     """Port of generateFitFile() - takes this project's own already-decoded header/samples
     (the equivalent of what the TS version gets after parseTrackPoints() re-reads a GPX) and
@@ -864,19 +949,33 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     and app_logging.py for the mechanism these values come from."""
     points = extract_track_points(header, samples)
     if not points:
-        raise ValueError("no GPS points in this entry")
+        # No GPS track. Indoor moves (treadmill, indoor bike, gym, pool) never get a position
+        # fix but DO record hr/cadence/power/distance/etc per sample - build a position-less FIT
+        # from those so they export just like outdoor ones (feedback 2026-09-14: "indoor
+        # activities can't be exported to fit given no gps"). Only a genuinely empty move (no
+        # track AND no sensor samples) still raises.
+        return _to_fit_no_gps(header, samples, rule_labels, rule_stream_map)
 
     # Which logged-app slots this move actually carries (sentinel-filtered), in slot order.
     rule_labels = rule_labels or {}
     present = ruleoutput_series(samples)
     rule_slots = [n for n in ("ruleoutput1", "ruleoutput2", "ruleoutput3",
                               "ruleoutput4", "ruleoutput5") if n in present]
+
+    # Sensor channels this move recorded, carried into each record ALONGSIDE the GPS track (the
+    # track itself - position/altitude/distance - is unchanged; this is purely additive, so an
+    # outdoor ride's FIT now also carries HR/cadence/speed/power/temperature). Altitude/distance
+    # stay GPS-derived here, so only the non-positional subset is taken from the sensors.
+    present_sensors = [(name, *_FIT_SENSOR_FIELDS[name]) for name in _GPS_SENSOR_ORDER
+                       if any(p.get(name) is not None for p in points)]
+
+    # Field numbers already claimed by the GPS record layout + the sensor channels, so a
+    # ruleoutput->native-stream mapping (below) can't collide with them (real sensor data wins).
+    used_fields = {253, 0, 1, 2, 5} | {spec[1] for spec in present_sensors}
     # Optional per-slot mapping onto a native stream (see FIT_STREAM_TARGETS). Keyed by slot
-    # name ("ruleoutput1"); only present, recognised targets are kept. Two slots can't share a
-    # native field, so first-wins on a collision.
+    # name ("ruleoutput1"); only present, recognised targets not already used are kept.
     rule_stream_map = rule_stream_map or {}
     mapped = []                      # [(slot_name, field_num, size, base, invalid)]
-    used_fields = set()
     for name in rule_slots:
         target = FIT_STREAM_TARGETS.get((rule_stream_map.get(name) or "").lower())
         if target and target[0] not in used_fields:
@@ -976,7 +1075,9 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, 0)                              # architecture: little-endian
     _u16(data, 20)                            # global message number: record
     native_fields = [(253, 4, _U32), (0, 4, _S32), (1, 4, _S32), (2, 2, _U16), (5, 4, _U32)]
-    # Append any app-outputs the user opted to map onto a native stream (power/cadence/hr).
+    # The sensor channels this move carries (HR/cadence/speed/power/temperature), then any
+    # app-outputs the user opted to map onto a native stream (power/cadence/hr).
+    native_fields += [(fnum, size, base) for _, fnum, size, base, _, _ in present_sensors]
     native_fields += [(fnum, size, base) for _, fnum, size, base, _ in mapped]
     _u8(data, len(native_fields))
     for num, size, base_type in native_fields:
@@ -1006,6 +1107,11 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
         _s32(data, lng)
         _u16(data, alt)
         _u32(data, round(cum_dist * 100))
+        # Sensor channels (carried-forward value at this point; each field's FIT "invalid" fill
+        # until its first real reading), in the same order as the definition above.
+        for name, _fnum, size, base, invalid, to_fit in present_sensors:
+            v = p.get(name)
+            _fit_write_value(data, size, base, invalid if v is None else to_fit(v))
         rules_here = p.get("rules") or {}
         # Mapped native-stream values (clamped to each field's range; the field's own FIT
         # "invalid" fill until the app's first value). Written before the dev fields, matching
@@ -1021,6 +1127,196 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
         # or before this point (0x7FFFFFFF = FIT sint32 "invalid" until the first real value).
         for name in rule_slots:
             _s32(data, rules_here.get(name, 0x7FFFFFFF))
+
+    hdr = bytearray()
+    _u8(hdr, 14)                    # header size
+    _u8(hdr, 0x10)                  # protocol version 1.0
+    _u16(hdr, 0x0834)               # profile version 2100
+    _u32(hdr, len(data))            # data size
+    hdr.extend(b".FIT")
+    _u16(hdr, _fit_crc(hdr))        # header CRC
+
+    file_crc = bytearray()
+    _u16(file_crc, _fit_crc(data))  # file CRC, over the data section only
+
+    return bytes(hdr) + bytes(data) + bytes(file_crc)
+
+
+def extract_indoor_records(header, samples):
+    """Time-ordered per-sample records for a GPS-less (indoor / home-trainer) move: every sensor
+    channel the watch actually recorded - heart rate, cadence, speed, power, distance, altitude,
+    temperature - carried forward from the periodic samples, plus any logged Suunto App outputs
+    (ruleoutput1..5). This is the FIT counterpart of extract_track_points() for entries that
+    never got a position fix (treadmill, indoor bike/home trainer, gym, pool); the sensor
+    channels are recorded exactly the same indoors as out, only the GPS positions are missing.
+    One record per periodic sample (the watch's regular time series); a channel the move never
+    carried simply stays None and is omitted from the FIT. Times use each sample's real utc_time
+    when present, else header-local + relative offset (the same fallback the GPS/GPX path uses).
+
+    Values are kept in their raw libambit units (see ambit_log_sample_periodic_value_s); the FIT
+    encoder does the per-field scaling. `cadence` prefers the foot/bike-pod cadence (0x1a) and
+    only falls back to wrist cadence (0x15) when there's no pod cadence at all."""
+    start = datetime.datetime(
+        header["year"], header["month"], header["day"],
+        header["hour"], header["minute"], header["msec"] // 1000,
+        tzinfo=datetime.timezone.utc)
+    records = []
+    cur = {"hr": None, "cadence": None, "speed": None, "power": None,
+           "distance": None, "alt": None, "temperature": None}
+    state = {"saw_pod_cadence": False}
+    cur_rules = {}                    # latest logged Suunto App outputs seen so far
+    for s in samples:
+        if s["type"] != "periodic":
+            continue
+        for v in s["values"]:
+            if v["type"] in RULEOUTPUT_TYPES and v["value"] != RULEOUTPUT_ABSENT:
+                cur_rules[v["name"]] = v["value"]
+        _apply_periodic_channels(cur, state, s)
+        time = s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))
+        records.append({"time": time, "rules": dict(cur_rules), **cur})
+    return records
+
+
+def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
+    """FIT for a move with no GPS track (see to_fit()'s no-points branch). Same file_id /
+    activity / session / lap prologue and the same logged-app developer-field mechanism as the
+    GPS path - only the `record` messages differ: no position, instead every per-sample sensor
+    channel this move carried (hr / cadence / distance / speed / power / altitude / temperature -
+    see _FIT_SENSOR_FIELDS). The prologue is duplicated from to_fit() deliberately rather than
+    shared, so refactoring there can never alter this path; keep the two in step if either
+    changes."""
+    records = extract_indoor_records(header, samples)
+    if not records:
+        raise ValueError("no GPS points or sensor samples in this entry")
+
+    rule_labels = rule_labels or {}
+    present = ruleoutput_series(samples)
+    rule_slots = [n for n in ("ruleoutput1", "ruleoutput2", "ruleoutput3",
+                              "ruleoutput4", "ruleoutput5") if n in present]
+
+    # Every sensor channel this move actually carried (present in >=1 record), each invalid-
+    # filled until its first real value - so an indoor/home-trainer move exports the full set the
+    # watch recorded (power meter, cadence/speed pod, HR strap, baro altitude, temp), not just a
+    # couple. Same _FIT_SENSOR_FIELDS spec as the GPS path, but here the positional channels
+    # (distance/altitude) come from the sensors too since there's no track.
+    present_native = [(name, *_FIT_SENSOR_FIELDS[name]) for name in _INDOOR_SENSOR_ORDER
+                      if any(r[name] is not None for r in records)]
+    used_fields = {spec[1] for spec in present_native}
+
+    # Optional logged-app -> native-stream mapping (same feature/behaviour as the GPS path),
+    # skipping any field we already emit as a real sensor channel (first-wins, no collision).
+    rule_stream_map = rule_stream_map or {}
+    mapped = []                       # [(slot_name, field_num, size, base, invalid)]
+    for name in rule_slots:
+        target = FIT_STREAM_TARGETS.get((rule_stream_map.get(name) or "").lower())
+        if target and target[0] not in used_fields:
+            mapped.append((name, *target))
+            used_fields.add(target[0])
+
+    start_g = int(records[0]["time"].timestamp()) - GARMIN_EPOCH
+    end_g = int(records[-1]["time"].timestamp()) - GARMIN_EPOCH
+    duration_s = header["duration_ms"] / 1000
+    dist_m = header["distance"]
+    d_plus = round(header["ascent"])
+    d_minus = round(header["descent"])
+    sport = _to_fit_sport(header["activity_name"])
+
+    data = bytearray()
+
+    # file_id (local 0, global 0)
+    _write_def(data, 0, 0, [(0, 1, _E), (1, 2, _U16), (2, 2, _U16), (4, 4, _U32)])
+    _u8(data, 0)
+    _u8(data, 4)          # type = 4 (activity)
+    _u16(data, 255)       # manufacturer = 255 (development)
+    _u16(data, 0)         # product
+    _u32(data, start_g)   # time_created
+
+    # activity (local 1, global 34)
+    _write_def(data, 1, 34,
+                [(253, 4, _U32), (1, 2, _U16), (2, 1, _E), (3, 1, _E), (4, 1, _E)])
+    _u8(data, 1)
+    _u32(data, end_g)
+    _u16(data, 1)         # num_sessions
+    _u8(data, 0)          # type = 0 (manual)
+    _u8(data, 26)         # event = 26 (activity)
+    _u8(data, 1)          # event_type = 1 (stop)
+
+    # session (local 2, global 18)
+    _write_def(data, 2, 18, [
+        (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
+        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (0, 1, _E), (1, 1, _E),
+    ])
+    _u8(data, 2)
+    _u16(data, 0)                             # message_index
+    _u32(data, end_g)                         # timestamp
+    _u32(data, start_g)                       # start_time
+    _u32(data, round(duration_s * 1000))      # total_elapsed_time (scale=1000)
+    _u32(data, round(duration_s * 1000))      # total_timer_time
+    _u32(data, round(dist_m * 100))           # total_distance (scale=100, cm)
+    _u16(data, d_plus)
+    _u16(data, d_minus)
+    _u8(data, sport)
+    _u8(data, 8)          # event = 8 (session)
+    _u8(data, 1)          # event_type = 1 (stop)
+
+    # lap (local 3, global 19)
+    _write_def(data, 3, 19,
+                [(254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32),
+                 (9, 4, _U32), (0, 1, _E), (1, 1, _E)])
+    _u8(data, 3)
+    _u16(data, 0)
+    _u32(data, end_g)
+    _u32(data, start_g)
+    _u32(data, round(duration_s * 1000))
+    _u32(data, round(dist_m * 100))
+    _u8(data, 9)          # event = 9 (lap)
+    _u8(data, 1)
+
+    # Developer-data declarations for logged Suunto App outputs - identical to the GPS path.
+    if rule_slots:
+        _write_def(data, 5, 207, [(1, 16, _BYTE), (3, 1, _U8)])
+        _u8(data, 5)
+        data.extend(_DEV_APP_ID)
+        _u8(data, 0)                          # developer_data_index = 0
+        for slot_no, name in enumerate(rule_slots):
+            label = (rule_labels.get(name) or name).encode("utf-8", "replace") + b"\x00"
+            _write_def(data, 6, 206, [
+                (0, 1, _U8), (1, 1, _U8), (2, 1, _U8), (3, len(label), _STR)])
+            _u8(data, 6)
+            _u8(data, 0)                      # developer_data_index
+            _u8(data, slot_no)                # field_definition_number (our dev field id)
+            _u8(data, _S32)                   # fit_base_type_id = sint32 (raw i32, 1:1)
+            data.extend(label)                # field_name
+
+    # record (local 4, global 20) - definition, then one data record per periodic sample.
+    _u8(data, 0x40 | (0x20 if rule_slots else 0) | 4)
+    _u8(data, 0)                              # reserved
+    _u8(data, 0)                              # architecture: little-endian
+    _u16(data, 20)                            # global message number: record
+    native_fields = [(253, 4, _U32)]          # timestamp (always)
+    native_fields += [(fnum, size, base) for _, fnum, size, base, _, _ in present_native]
+    native_fields += [(fnum, size, base) for _, fnum, size, base, _ in mapped]
+    _u8(data, len(native_fields))
+    for num, size, base_type in native_fields:
+        _u8(data, num); _u8(data, size); _u8(data, base_type)
+    if rule_slots:
+        _u8(data, len(rule_slots))            # number of developer fields
+        for slot_no, _ in enumerate(rule_slots):
+            _u8(data, slot_no); _u8(data, 4); _u8(data, 0)  # (dev field num, size=4, dev idx)
+
+    for r in records:
+        _u8(data, 4)
+        _u32(data, int(r["time"].timestamp()) - GARMIN_EPOCH)
+        for name, _fnum, size, base, invalid, to_fit in present_native:
+            v = r[name]
+            _fit_write_value(data, size, base, invalid if v is None else to_fit(v))
+        # Mapped logged-app native-stream values (clamped), then the developer fields.
+        for name, _fnum, size, _base, invalid in mapped:
+            v = (r["rules"] or {}).get(name)
+            out = invalid if v is None else max(0, min(v, 0xFFFE if size == 2 else 0xFE))
+            (_u16 if size == 2 else _u8)(data, out)
+        for name in rule_slots:
+            _s32(data, (r["rules"] or {}).get(name, 0x7FFFFFFF))
 
     hdr = bytearray()
     _u8(hdr, 14)                    # header size
@@ -1225,13 +1521,13 @@ def main():
                 fit_bytes = to_fit(header, samples, rule_labels=rule_labels,
                                    rule_stream_map=per_move_map)
             except ValueError as exc:
-                # to_fit() deliberately requires at least one GPS point (real, not a bug -
-                # a GPS-less entry has no track to build FIT records from). A genuine,
-                # unremarkable case (e.g. an accidental few-second start/stop indoors) used
-                # to crash the whole run here, discarding every already-processed entry
-                # along with it - found 2026-08-07 via the real backend/GUI, where this
-                # took down the entire Activities list over one 7-second, 0-GPS-point
-                # entry. One bad entry should never cost every good one.
+                # to_fit() now falls back to a position-less FIT for GPS-less (indoor) moves,
+                # so this only raises for a genuinely empty entry - no track AND no sensor
+                # samples (e.g. an accidental few-second start/stop that recorded nothing). Such
+                # an entry used to crash the whole run here, discarding every already-processed
+                # entry along with it - found 2026-08-07 via the real backend/GUI, where this
+                # took down the entire Activities list over one 7-second, empty entry. One bad
+                # entry should never cost every good one.
                 print(f"  skipped FIT ({exc}), GPX above still has the metadata")
                 continue
             with open(path, "wb") as f:

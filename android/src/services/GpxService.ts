@@ -22,6 +22,28 @@ export async function writeGpxFile(id: string, gpxXml: string, overwrite = false
   return path;
 }
 
+/**
+ * Writes the native FIT for a move next to its GPX (<id>.fit), decoding the base64 the native
+ * layer produced. The device builds a richer FIT than the GPX→FIT fallback (it has every sensor
+ * channel, and it works for indoor moves with no track), so MapScreen prefers this file when it
+ * exists. `base64` empty → nothing written (the move had no native FIT). Returns the path written,
+ * or null.
+ */
+export async function writeFitFile(id: string, base64: string, overwrite = false): Promise<string | null> {
+  if (!base64) return null;
+  await ensureDir();
+  const path = `${ACTIVITIES_DIR}/${id}.fit`;
+  if (!overwrite && await RNFS.exists(path)) return null;
+  await RNFS.writeFile(path, base64, 'base64');
+  return path;
+}
+
+/** The <id>.fit path for an activity's <id>.gpx path, if that FIT file exists on disk. */
+export async function fitPathForGpx(gpxPath: string): Promise<string | null> {
+  const path = gpxPath.replace(/\.gpx$/, '.fit');
+  return (await RNFS.exists(path)) ? path : null;
+}
+
 /** Lit un fichier GPX depuis le stockage local. */
 export async function readGpxFile(path: string): Promise<string> {
   return RNFS.readFile(path, 'utf8');

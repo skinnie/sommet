@@ -21,6 +21,10 @@ export class AmbitDeviceProvider implements DeviceProvider {
     return AmbitUsbModule.getLogs(knownIds);
   }
 
+  getLogFits(): Promise<string[]> {
+    return AmbitUsbModule.getLogFits();
+  }
+
   onSyncProgress(callback: (event: SyncProgressEvent) => void): () => void {
     return AmbitUsbModule.onSyncProgress(callback);
   }
