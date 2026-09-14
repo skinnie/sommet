@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, RefreshControl, Alert, ScrollView,
+  StyleSheet, RefreshControl, Alert, ScrollView, ActivityIndicator,
 } from 'react-native';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -73,8 +73,13 @@ export default function LogListScreen() {
   // Configurable metric columns (persisted) + sort. Sorting is by whichever column, chosen
   // from that column's dropdown, or the default newest-first by upload date.
   const [columns, setColumns] = useState<string[]>(['distance', 'duration', 'ascent', 'calories']);
-  const [sortKey, setSortKey] = useState<string>('uploaded');
+  // Default: newest FIRST by the activity's own date (what the user recorded), not by upload time.
+  // Sorting by upload time buried genuinely-recent moves under whatever was re-imported last, so a
+  // move from today could sit far down the list (André, 2026-09-14). A chosen metric column still
+  // overrides this.
+  const [sortKey, setSortKey] = useState<string>('date');
   const [sortDesc, setSortDesc] = useState(true);
+  const [loading, setLoading] = useState(true);   // first load in progress (vs genuinely empty)
   const [menuCol, setMenuCol] = useState<number | null>(null);   // which column's dropdown is open
   useFocusEffect(useCallback(() => {
     getViewMode('activities').then(setViewMode);
@@ -175,6 +180,8 @@ export default function LogListScreen() {
       setActivities(enriched);
     } catch (e) {
       Alert.alert(t.loadError, String(e));
+    } finally {
+      setLoading(false);   // first load done - the empty state below now means "genuinely none"
     }
   }, []);
 
@@ -229,14 +236,19 @@ export default function LogListScreen() {
     const base = (activeFilter === ALL
       ? activities
       : activities.filter(a => a.activity_type === activeFilter)).slice();
-    // Sort by the chosen column (any metric), or newest-first by upload date (default).
+    // Sort by the chosen metric column, else by the activity's own date (default), else upload
+    // time. Dates are stored ISO (GpxParser metadata/time) so Date.parse orders them
+    // chronologically; a move with an unparseable date falls back to its upload time.
     base.sort((a, b) => {
       let c: number;
-      if (sortKey === 'uploaded') {
+      if (sortKey === 'date') {
+        c = (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0);
+        if (c === 0) c = (a.synced_at || 0) - (b.synced_at || 0);
+      } else if (sortKey === 'uploaded') {
         c = (a.synced_at || 0) - (b.synced_at || 0);
         // Tie-break by the activity's own date, so a bulk re-import (every move stamped with the
         // same synced_at) still lists newest-activity-first instead of arbitrary order.
-        if (c === 0) c = String(a.date || '').localeCompare(String(b.date || ''));
+        if (c === 0) c = (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0);
       } else {
         c = metricRaw(a.metrics, sortKey) - metricRaw(b.metrics, sortKey);
       }
@@ -246,6 +258,17 @@ export default function LogListScreen() {
   }, [activities, activeFilter, sortKey, sortDesc]);
 
   // ─── Rendu ──────────────────────────────────────────────────────────────────
+
+  // While the first load is still running, show a spinner - not the "Nothing to sync" empty state,
+  // which wrongly implied there was no data when the DB query simply hadn't returned yet.
+  if (loading && activities.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={styles.emptyHint}>{t.loadingActivities}</Text>
+      </View>
+    );
+  }
 
   if (activities.length === 0) {
     return (
