@@ -7,7 +7,7 @@ import Icon from '../components/ui/Icon';
 import { useV3Theme } from '../theme/v3';
 import { t } from '../i18n';
 import {
-  LocalGear, LocalReminder, getAllGear, getReminders, upsertGear, softDeleteGear,
+  LocalGear, LocalReminder, getAllGear, getReminders, upsertGear, softDeleteGear, setGearBaseline,
   getAssignments, setAssignment, newLocalId, getGearLedger,
 } from '../database/gearDb';
 import { computeGearTotals, reminderPercentUsed, GearTotal } from '../services/GearTotals';
@@ -43,9 +43,13 @@ export default function GearScreen() {
     for (const g of all) withRem.push({ ...g, reminders: await getReminders(g.id) });
     setGear(withRem);
     setAssignments(await getAssignments());
-    // Locally-tallied distance = imported baseline + moves attributed here since import.
+    // Tallied distance = baseline + moves attributed here since the baseline moment. When you've
+    // typed a starting number (baselineAt > 0) that is the baseline; otherwise the intervals total
+    // at last import (lastSyncedAt) is, exactly as before.
     const ledger = await getGearLedger();
-    const baselines = all.map(g => ({ id: g.id, distanceM: g.distanceM, timeS: g.timeS, baselineAt: g.lastSyncedAt }));
+    const baselines = all.map(g => (g.baselineAt && g.baselineAt > 0)
+      ? { id: g.id, distanceM: g.startingDistanceM ?? 0, timeS: g.startingTimeS ?? 0, baselineAt: g.baselineAt }
+      : { id: g.id, distanceM: g.distanceM, timeS: g.timeS, baselineAt: g.lastSyncedAt });
     setTotals(computeGearTotals(baselines, ledger));
   }, []);
 
@@ -105,6 +109,16 @@ export default function GearScreen() {
   async function toggleRetired(g: LocalGear) {
     await upsertGear({ ...g, retired: !g.retired, updatedAt: Date.now() });
     await reload();
+  }
+
+  async function setBaseline(g: LocalGear) {
+    const curKm = Math.round(((g.baselineAt && g.baselineAt > 0 ? (g.startingDistanceM ?? 0) : g.distanceM)) / 1000);
+    askText('Starting mileage (km)', String(curKm), async v => {
+      const km = parseFloat(v);
+      if (isNaN(km)) return;
+      await setGearBaseline(g.id, km, 0);   // rides count on top from now on; syncs across devices
+      await reload();
+    });
   }
 
   async function setPrimary(g: LocalGear) {
@@ -225,6 +239,7 @@ export default function GearScreen() {
                 })}
 
               <View style={s.gearActions}>
+                <TouchableOpacity onPress={() => setBaseline(g)}><Text style={s.smallLink}>Set km</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => addPart(g)}><Text style={s.smallLink}>＋ {t.gearAddPart}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => openReminder(g)}><Text style={s.smallLink}>＋ {t.gearAddReminder}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => toggleRetired(g)}><Text style={s.smallLink}>{g.retired ? t.gearUnretire : t.gearRetire}</Text></TouchableOpacity>

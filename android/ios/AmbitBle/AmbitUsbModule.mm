@@ -259,6 +259,23 @@ static uint8_t to_fit_sport(const char *name) {
     return 0;
 }
 
+// Suunto sport_type byte -> FIT sport enum (fallback when the name is empty). Twin of
+// jni_bridge.cpp's suunto_byte_to_fit_sport / the desktop _SUUNTO_BYTE_TO_FIT_SPORT.
+static uint8_t suunto_byte_to_fit_sport(uint8_t b) {
+    switch (b) {
+        case 0x03: case 0x51: return 1;
+        case 0x04: case 0x05: return 2;
+        case 0x0a: return 17;
+        case 0x0b: return 11;
+        case 0x13: return 13;
+        case 0x14: return 14;
+        case 0x15: case 0x4d: return 12;
+        case 0x49: return 16;
+        case 0x52: return 5;
+        default:   return 0;
+    }
+}
+
 static void chan_write(Buf &b, int idx, long v) {
     switch (idx) {
         case 0: b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
@@ -387,6 +404,7 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     uint32_t dur_ms  = h.duration;
     uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
     uint8_t  sport   = to_fit_sport(h.activity_name);
+    if (sport == 0) sport = suunto_byte_to_fit_sport(h.activity_type);
 
     Buf b;
     b.def(0, 0, {{0,1,FE},{1,2,FU16},{2,2,FU16},{4,4,FU32}});

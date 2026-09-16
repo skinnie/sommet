@@ -1,0 +1,6 @@
+# Never commit the token or the live store
+sommet_sync.config.php
+sommet.db
+sommet.db-wal
+sommet.db-shm
+blobs/

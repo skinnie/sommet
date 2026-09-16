@@ -422,6 +422,24 @@ static uint8_t to_fit_sport(const char *name) {
     return 0;
 }
 
+// Suunto sport_type byte -> FIT sport enum. Most watch moves store an empty activity_name and
+// carry only this byte, so name matching alone leaves them generic. Byte values match the app's
+// SPORT_TYPE_MAP (GpxParser.ts) / openambit. Used as the fallback when the name gives nothing.
+static uint8_t suunto_byte_to_fit_sport(uint8_t b) {
+    switch (b) {
+        case 0x03: case 0x51: return 1;    // Running, Trail running
+        case 0x04: case 0x05: return 2;    // Cycling, Mountain biking
+        case 0x0a: return 17;              // Hiking
+        case 0x0b: return 11;              // Walking
+        case 0x13: return 13;              // Alpine skiing
+        case 0x14: return 14;              // Snowboarding
+        case 0x15: case 0x4d: return 12;   // Cross-country skiing, Ski touring
+        case 0x49: return 16;              // Mountaineering
+        case 0x52: return 5;               // Swimming
+        default:   return 0;               // generic
+    }
+}
+
 static void chan_write(Buf &b, int idx, long v) {
     switch (idx) {
         case 0: /* hr  bpm */ b.u8(v == ABSENT ? 0xFF : (v < 0 ? 0 : (v > 0xFE ? 0xFE : v))); break;
@@ -568,6 +586,7 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     uint32_t dur_ms  = h.duration;
     uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
     uint8_t  sport   = to_fit_sport(h.activity_name);   // categorise the uploaded FIT
+    if (sport == 0) sport = suunto_byte_to_fit_sport(h.activity_type);  // fall back to the byte
 
     Buf b;
     // file_id (local 0, global 0)

@@ -31,6 +31,9 @@ export interface ActivityRecord {
   // ("GARMIN FR965", "SUUNTO Suunto Race S"); moves read off the connected watch leave it empty,
   // because the watch is implied.
   device?: string;
+  // Sommet Sync (#SYNC-3): last-modified time (ms), drives last-writer-wins against the shared
+  // self-hosted store. Defaults to synced_at on a watch read; a pulled row carries the origin's.
+  updated_at?: number;
 }
 
 // ─── Singleton DB ─────────────────────────────────────────────────────────────
@@ -59,12 +62,24 @@ export async function getDb(): Promise<SQLiteDatabase> {
       deleted_at INTEGER NOT NULL
     )
   `);
+  // Sommet Sync (#SYNC-3): tombstones keyed by the cross-device uid (device|start-minute), the
+  // same identity the desktop uses. Separate from deleted_activities (keyed by the local id): the
+  // shared store identifies a record by uid, so a delete pushes/pulls by uid. Rows whose uid is
+  // here are never re-created by a pull, and are deleted locally when a remote tombstone arrives.
+  await _db.executeSql(`
+    CREATE TABLE IF NOT EXISTS sommet_deleted (
+      uid TEXT PRIMARY KEY
+    )
+  `);
   // Migrations
   await _db.executeSql(
     `ALTER TABLE activities ADD COLUMN activity_type TEXT NOT NULL DEFAULT ''`
   ).catch(() => {});
   await _db.executeSql(
     `ALTER TABLE activities ADD COLUMN device TEXT NOT NULL DEFAULT ''`
+  ).catch(() => {});
+  await _db.executeSql(
+    `ALTER TABLE activities ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`
   ).catch(() => {});
   // ── Gear tracker (v3) — see gearDb.ts. Local-first, mirrored to intervals.icu. ──
   // A component (part) is a gear row with parent_id set. remote_id is the intervals.icu id
@@ -128,6 +143,11 @@ export async function getDb(): Promise<SQLiteDatabase> {
   await _db.executeSql(`ALTER TABLE gear_reminder ADD COLUMN starting_time_s REAL NOT NULL DEFAULT 0`).catch(() => {});
   await _db.executeSql(`ALTER TABLE gear_reminder ADD COLUMN starting_activities INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   await _db.executeSql(`ALTER TABLE gear_reminder ADD COLUMN last_reset INTEGER`).catch(() => {});
+  // Sommet Sync (#SYNC-4): manually-entered mileage baseline on a gear + the moment it was set,
+  // parity with desktop so a baseline typed on the computer reaches the phone. Additive no-ops.
+  await _db.executeSql(`ALTER TABLE gear ADD COLUMN starting_distance_m REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await _db.executeSql(`ALTER TABLE gear ADD COLUMN starting_time_s REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await _db.executeSql(`ALTER TABLE gear ADD COLUMN baseline_at INTEGER NOT NULL DEFAULT 0`).catch(() => {});
   // Default gear per Ambit sport type (e.g. "Cycling" -> a bike's local id). Auto-assign source.
   await _db.executeSql(`
     CREATE TABLE IF NOT EXISTS gear_assignment (
@@ -182,8 +202,8 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
   const db = await getDb();
   await db.executeSql(
     `INSERT OR REPLACE INTO activities
-       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.synced_at,
@@ -194,8 +214,61 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
       record.d_plus,
       record.activity_type,
       record.device ?? '',
+      record.updated_at ?? record.synced_at,
     ]
   );
+}
+
+// ─── Sommet Sync (#SYNC-3) DB helpers ───────────────────────────────────────────
+
+/** The cross-device identity of a move: device|start-minute (matches desktop's sommetUid). */
+export function sommetUid(device: string, date: string): string {
+  return `${device ?? ''}|${(date ?? '').slice(0, 16)}`;
+}
+
+/** uid-tombstones (device|start-minute) held for Sommet Sync, mirroring desktop's sommet_deleted. */
+export async function getSommetTombstones(): Promise<string[]> {
+  const db = await getDb();
+  const [r] = await db.executeSql('SELECT uid FROM sommet_deleted');
+  const out: string[] = [];
+  for (let i = 0; i < r.rows.length; i++) out.push(r.rows.item(i).uid);
+  return out;
+}
+
+export async function addSommetTombstone(uid: string): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)', [uid]);
+}
+
+/** Delete every local row matching a uid (device|start-minute). Used when a remote tombstone
+ *  arrives. Compares the first 16 chars of `date` (tolerant of the …Z/ms vs no-Z formats). */
+export async function deleteActivitiesByUid(uid: string): Promise<void> {
+  const bar = uid.indexOf('|');
+  if (bar < 0) return;
+  const device = uid.slice(0, bar);
+  const minute = uid.slice(bar + 1);
+  const db = await getDb();
+  await db.executeSql(
+    'DELETE FROM activities WHERE device = ? AND substr(date,1,16) = ?', [device, minute]
+  );
+}
+
+/** The local row (updated_at + gpx_path) for a uid, or null if we don't have it. */
+export async function getActivityByUid(
+  uid: string
+): Promise<{ id: string; updated_at: number; gpx_path: string } | null> {
+  const bar = uid.indexOf('|');
+  if (bar < 0) return null;
+  const device = uid.slice(0, bar);
+  const minute = uid.slice(bar + 1);
+  const db = await getDb();
+  const [r] = await db.executeSql(
+    'SELECT id, updated_at, gpx_path FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
+    [device, minute]
+  );
+  if (r.rows.length === 0) return null;
+  const row = r.rows.item(0);
+  return { id: row.id, updated_at: Number(row.updated_at || 0), gpx_path: row.gpx_path };
 }
 
 /** Retourne toutes les activités triées par date décroissante. */
@@ -255,9 +328,21 @@ export async function updateActivityType(id: string, activityType: string): Prom
 /** Supprime une activité de la base et l'ajoute à la liste noire pour ne pas la re-importer. */
 export async function deleteActivity(id: string): Promise<void> {
   const db = await getDb();
+  // Sommet Sync (#SYNC-3): before removing the row, capture its uid (device|start-minute) so the
+  // delete can propagate to the shared store and stay gone across a watch re-read. Rows deleted
+  // before this feature (no device recorded) yield an empty-device uid, still fine locally.
+  let uid: string | null = null;
+  const [pre] = await db.executeSql(
+    'SELECT device, date FROM activities WHERE id = ? LIMIT 1', [id]
+  );
+  if (pre.rows.length > 0) {
+    const row = pre.rows.item(0);
+    uid = sommetUid(row.device ?? '', row.date ?? '');
+  }
   await db.executeSql('DELETE FROM activities WHERE id = ?', [id]);
   await db.executeSql(
     'INSERT OR IGNORE INTO deleted_activities (id, deleted_at) VALUES (?, ?)',
     [id, Date.now()]
   );
+  if (uid) await db.executeSql('INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)', [uid]);
 }

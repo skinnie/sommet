@@ -20,6 +20,13 @@ export interface LocalGear {
   lastSyncedAt: number;
   remoteSnapshot: string;
   deleted: boolean;
+  // Sommet Sync (#SYNC-4): manually-entered mileage baseline + the moment it was set. When
+  // baselineAt > 0, GearTotals uses startingDistanceM as the baseline (instead of the intervals
+  // total) and counts rides recorded after baselineAt. Synced across devices. Optional on
+  // construction (reads always populate them; upsertGear leaves them to the DB default / sync).
+  startingDistanceM?: number;
+  startingTimeS?: number;
+  baselineAt?: number;
 }
 
 export interface LocalReminder {
@@ -61,6 +68,9 @@ function rowToGear(r: any): LocalGear {
     lastSyncedAt: r.last_synced_at,
     remoteSnapshot: r.remote_snapshot ?? '',
     deleted: !!r.deleted,
+    startingDistanceM: r.starting_distance_m ?? 0,
+    startingTimeS: r.starting_time_s ?? 0,
+    baselineAt: r.baseline_at ?? 0,
   };
 }
 
@@ -105,14 +115,33 @@ export async function getGearById(id: string): Promise<LocalGear | null> {
 
 export async function upsertGear(g: LocalGear): Promise<void> {
   const db = await getDb();
+  // Upsert (not INSERT OR REPLACE) so an intervals re-import never wipes the local mileage
+  // baseline (starting_distance_m / baseline_at) - those are managed only by setGearBaseline and
+  // by the NAS sync, never reset here. On first insert they take the column defaults (0).
   await db.executeSql(
-    `INSERT OR REPLACE INTO gear
+    `INSERT INTO gear
        (id, remote_id, parent_id, name, type, distance_m, time_s, retired, is_primary,
         updated_at, last_synced_at, remote_snapshot, deleted)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET remote_id=excluded.remote_id, parent_id=excluded.parent_id,
+       name=excluded.name, type=excluded.type, distance_m=excluded.distance_m,
+       time_s=excluded.time_s, retired=excluded.retired, is_primary=excluded.is_primary,
+       updated_at=excluded.updated_at, last_synced_at=excluded.last_synced_at,
+       remote_snapshot=excluded.remote_snapshot, deleted=excluded.deleted`,
     [g.id, g.remoteId, g.parentId, g.name, g.type, g.distanceM, g.timeS,
      g.retired ? 1 : 0, g.isPrimary ? 1 : 0, g.updatedAt, g.lastSyncedAt,
      g.remoteSnapshot, g.deleted ? 1 : 0]
+  );
+}
+
+/** Set a gear's manually-entered mileage baseline (km + optional hours) as of NOW. From here,
+ *  rides count on top; the typed number is never lost. Local + synced (latest change wins). */
+export async function setGearBaseline(id: string, km: number, hours = 0): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.executeSql(
+    'UPDATE gear SET starting_distance_m = ?, starting_time_s = ?, baseline_at = ?, updated_at = ? WHERE id = ?',
+    [km * 1000, hours * 3600, now, now, id]
   );
 }
 

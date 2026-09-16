@@ -205,14 +205,16 @@ Item {
                 Layout.fillWidth: true
             }
             BusyIndicator { running: GearService.loading; visible: GearService.loading; implicitWidth: 22; implicitHeight: 22 }
+            // Adding gear no longer needs intervals.icu (#SYNC-4): without it, the bike/shoe is
+            // created locally and flows to your NAS sync; with it, intervals assigns the id.
             RoundedButton {
                 text: qsTr("Add bike")
-                enabled: GearService.connected && !GearService.loading
+                enabled: !GearService.loading
                 onClicked: root.askName(qsTr("Add bike"), "", function (n) { GearService.addGear(n, "Bike") })
             }
             RoundedButton {
                 text: qsTr("Add shoes")
-                enabled: GearService.connected && !GearService.loading
+                enabled: !GearService.loading
                 onClicked: root.askName(qsTr("Add shoes"), "", function (n) { GearService.addGear(n, "Shoes") })
             }
             // Import from Intervals.icu moved to Settings -> Intervals.icu connection
@@ -223,12 +225,12 @@ Item {
         // to go set it up instead of just saying "in Settings".
         ColumnLayout {
             Layout.fillWidth: true
-            visible: !GearService.connected
+            visible: !GearService.connected && GearService.gears.length === 0
             spacing: Theme.spacingSmall / 2
             Text {
                 Layout.fillWidth: true
-                text: qsTr("Connect Intervals.icu to see and import your gear.")
-                color: Theme.warning
+                text: qsTr("Add a bike or pair of shoes above — or connect Intervals.icu to import gear you already have there.")
+                color: Theme.mutedText
                 wrapMode: Text.WordWrap
             }
             RoundedButton {
@@ -350,6 +352,8 @@ Item {
                                     RowLayout {
                                         spacing: Theme.spacingSmall
                                         RoundedButton { text: qsTr("Rename"); onClicked: root.askName(qsTr("Rename"), modelData.name, function (n) { GearService.renameGear(modelData.id, n) }) }
+                                        // Set the manually-entered starting mileage; rides count on top from now on.
+                                        RoundedButton { text: qsTr("Set km"); onClicked: root.askName(qsTr("Starting mileage (km)"), String(modelData.baselineKm), function (n) { GearService.setGearBaseline(modelData.id, parseFloat(n) || 0, 0) }) }
                                         RoundedButton { text: modelData.retired ? qsTr("Un-retire") : qsTr("Retire"); onClicked: GearService.setRetired(modelData.id, !modelData.retired) }
                                         RoundedButton { text: qsTr("Add part"); onClicked: root.askName(qsTr("Add component"), "", function (n) { GearService.addComponent(modelData.id, n, "Other") }) }
                                         RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }

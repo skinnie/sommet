@@ -412,6 +412,10 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         const QString scope = intervalsExportScope();
         if (scope == QStringLiteral("suunto") || scope == QStringLiteral("all"))
             exportToIntervals();
+
+        // Sommet Sync (#SYNC-2): after a watch read, converge with the user's own shared store -
+        // push these moves and pull any logged on another device. No-op when unconfigured/busy.
+        sommetSyncNow();
     });
 }
 
@@ -484,12 +488,26 @@ void ActivityService::openDatabase()
             q.exec(QStringLiteral("COMMIT"));
         }
     }
+    // Sommet Sync (#SYNC-2): last-modified time (ms) driving last-writer-wins against the shared
+    // self-hosted store. Set on every dbInsert; a pulled row carries the origin's value. Added
+    // AFTER the re-key above, whose rebuild column list doesn't include it - adding it before would
+    // be silently dropped when the re-key rebuilds the table (the bug that made a fresh DB pull 0).
+    // No-op ("duplicate column") once present. Rows predating it read as 0 and push once (harmless).
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN updated_at INTEGER"));
     // Deleted-activity tombstones (André, 2026-08-25). One row per deleted activity, keyed by
     // start-time|name (the same identity dedupeActivities() collapses on), so a deleted move
     // stays gone across every future watch re-sync and intervals/Garmin re-import - the watch's
     // circular log has no delete of its own, so this is the only durable way to keep it gone.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS deleted_activities (key TEXT PRIMARY KEY)"));
+
+    // Sommet Sync (#SYNC-2): tombstones keyed by the cross-device sync uid (device|start-minute),
+    // separate from deleted_activities (start-time|name) because the shared store identifies a
+    // record by uid. A delete pushes its uid here + to the server's `deleted` set; a pulled delete
+    // lands here so a later watch re-read can't resurrect it. dbLoadAll skips rows whose uid is in
+    // here, same protection as the start|name tombstones.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_deleted (uid TEXT PRIMARY KEY)"));
 
     // One-time migration to serial-based watch identity (2026-09-04): watch activities used to
     // be tagged by product-id hex ("0x1b"); they are now tagged by the watch's USB serial so two
@@ -527,11 +545,15 @@ QString ActivityService::tombstoneKey(const QString &startTime, const QString &n
 void ActivityService::loadTombstones()
 {
     m_tombstones.clear();
+    m_sommetTombstones.clear();
     if (!m_db.isOpen())
         return;
     QSqlQuery q(QStringLiteral("SELECT key FROM deleted_activities"), m_db);
     while (q.next())
         m_tombstones.insert(q.value(0).toString());
+    QSqlQuery qs(QStringLiteral("SELECT uid FROM sommet_deleted"), m_db);
+    while (qs.next())
+        m_sommetTombstones.insert(qs.value(0).toString());
 }
 
 int ActivityService::dbKnownCount(const QString &device)
@@ -579,8 +601,8 @@ void ActivityService::dbInsert(int index, const QString &device, const QVariantM
     q.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO activities "
         "(idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-        " start_time, track_json, gpx_text, fit_base64, rule_outputs_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        " start_time, track_json, gpx_text, fit_base64, rule_outputs_json, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
     q.addBindValue(index);
     q.addBindValue(device);
     q.addBindValue(parsed.value(QStringLiteral("name")));
@@ -594,6 +616,7 @@ void ActivityService::dbInsert(int index, const QString &device, const QVariantM
     q.addBindValue(gpxText);
     q.addBindValue(fitBase64);
     q.addBindValue(ruleOutputsJson.isEmpty() ? QVariant() : ruleOutputsJson);
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
     q.exec();
 }
 
@@ -617,6 +640,11 @@ bool ActivityService::dbLoadAll()
         // never re-appears in the list. Keyed by start-time|name, matching dedupeActivities().
         if (!m_tombstones.isEmpty()
                 && m_tombstones.contains(tombstoneKey(q.value(7).toString(), q.value(1).toString())))
+            continue;
+        // Same for Sommet Sync uid-tombstones (device|start-minute): a move deleted on another
+        // device stays gone here even if a watch re-read re-inserted its row.
+        if (!m_sommetTombstones.isEmpty()
+                && m_sommetTombstones.contains(sommetUid(q.value(13).toString(), q.value(7).toString())))
             continue;
         QVariantMap parsed;
         parsed[QStringLiteral("index")] = q.value(0).toInt();
@@ -799,19 +827,22 @@ void ActivityService::deleteActivity(const QVariantMap &activity)
 
     // Resolve the row's real identity from the DB - the QML activity map carries `index` but not
     // external_id/source, and idx is the primary key, so this reads the one exact row.
-    QString source, extId, start, name;
+    QString source, extId, start, name, device;
     {
         QSqlQuery sel(m_db);
         sel.prepare(QStringLiteral(
-            "SELECT source, external_id, start_time, name FROM activities WHERE idx = ?"));
+            "SELECT source, external_id, start_time, name, device FROM activities WHERE idx = ?"));
         sel.addBindValue(idx);
         if (sel.exec() && sel.next()) {
             source = sel.value(0).toString();
             extId = sel.value(1).toString();
             start = sel.value(2).toString();
             name = sel.value(3).toString();
+            device = sel.value(4).toString();
         }
     }
+    if (device.isEmpty())
+        device = activity.value(QStringLiteral("device")).toString();
     // Fall back to the map's own fields if the row isn't in the DB (e.g. the shown copy was a
     // deduped winner from a source whose row is gone) - the tombstone still needs a real key.
     if (start.isEmpty())
@@ -828,6 +859,33 @@ void ActivityService::deleteActivity(const QVariantMap &activity)
     ins.prepare(QStringLiteral("INSERT OR IGNORE INTO deleted_activities (key) VALUES (?)"));
     ins.addBindValue(key);
     ins.exec();
+    // Sommet Sync (#SYNC-2): also tombstone by the cross-device uid and push it, so the delete
+    // propagates to the shared store and to the user's other devices. (Rows deleted before this
+    // feature existed have no device recorded, so their uid can't be formed - they stay deleted
+    // locally but don't back-propagate; only a real device+start yields a meaningful uid.)
+    if (!device.isEmpty() && !start.isEmpty()) {
+        const QString uid = sommetUid(device, start);
+        m_sommetTombstones.insert(uid);
+        QSqlQuery su(m_db);
+        su.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)"));
+        su.addBindValue(uid);
+        su.exec();
+        if (sommetSyncConfigured()) {
+            const QSettings s;
+            QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+            QUrlQuery cq;
+            cq.addQueryItem(QStringLiteral("c"), QStringLiteral("activities"));
+            u.setQuery(cq);
+            QNetworkRequest req(u);
+            req.setRawHeader("X-Sommet-Token",
+                s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+            req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+            QJsonObject body{{QStringLiteral("records"), QJsonArray()},
+                             {QStringLiteral("deleted"), QJsonArray{uid}}};
+            QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+            connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+        }
+    }
 
     // 2) Remove the local row(s) - by idx AND by the shared key, so a deduped duplicate from
     //    another source goes too (deleting the whole activity, not just the copy on screen).
@@ -1833,5 +1891,430 @@ void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
             setLoading(false);
             emit exportFinished(m_exportUploaded, m_exportFailed);
         }
+    });
+}
+
+// ============================================================================================
+// Sommet Sync (#SYNC-2): two-way sync of the local activities against the user's own self-hosted
+// endpoint (sync-server/sync.php), so the same history appears on every device they point at it.
+// Pull-then-push, last-writer-wins by updated_at, tombstones carried by uid. Metadata rides in the
+// JSON records; each GPS track rides as a per-uid GPX blob (fetched/pushed one at a time). Mirrors
+// the intervals.icu path (direct QNetworkAccessManager HTTP), but the store is the user's own.
+// ============================================================================================
+
+QString ActivityService::sommetUid(const QString &device, const QString &startTime)
+{
+    // device | start-time truncated to the minute ("YYYY-MM-DDTHH:MM"): stable for the same move
+    // on any device (same watch => same device+start; same import => same connector+start).
+    QString minute = startTime;
+    if (minute.size() > 16)
+        minute = minute.left(16);
+    return device + QLatin1Char('|') + minute;
+}
+
+bool ActivityService::sommetSyncConfigured() const
+{
+    const QSettings s;
+    return !s.value(QStringLiteral("connections/sommet_sync/url")).toString().isEmpty()
+        && !s.value(QStringLiteral("connections/sommet_sync/token")).toString().isEmpty();
+}
+
+QString ActivityService::sommetSyncUrl() const
+{
+    return QSettings().value(QStringLiteral("connections/sommet_sync/url")).toString();
+}
+
+void ActivityService::setSommetSync(const QString &url, const QString &token)
+{
+    QSettings s;
+    s.setValue(QStringLiteral("connections/sommet_sync/url"), url.trimmed());
+    s.setValue(QStringLiteral("connections/sommet_sync/token"), token.trimmed());
+    emit sommetSyncConfiguredChanged();
+}
+
+void ActivityService::sommetSyncTest(const QString &url, const QString &token)
+{
+    if (url.trimmed().isEmpty() || token.trimmed().isEmpty()) {
+        emit sommetSyncTestResult(false, tr("Enter both the server address and the token."));
+        return;
+    }
+    QUrl u(url.trimmed());
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("c"), QStringLiteral("activities"));
+    q.addQueryItem(QStringLiteral("since"), QStringLiteral("0"));
+    u.setQuery(q);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token", token.trimmed().toUtf8());
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() == QNetworkReply::NoError && status == 200)
+            emit sommetSyncTestResult(true, tr("Connected."));
+        else if (status == 401)
+            emit sommetSyncTestResult(false, tr("The token was rejected."));
+        else
+            emit sommetSyncTestResult(false, reply->errorString().isEmpty()
+                ? tr("Couldn't reach the server (HTTP %1).").arg(status)
+                : reply->errorString());
+    });
+}
+
+void ActivityService::sommetSyncNow()
+{
+    if (!sommetSyncConfigured() || m_sommetBusy)
+        return;
+    if (!m_db.isOpen())
+        openDatabase();
+    m_sommetBusy = true;
+    m_sommetPulled = 0;
+    m_sommetPushed = 0;
+    sommetPull();
+}
+
+void ActivityService::sommetPull()
+{
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    const QString token = s.value(QStringLiteral("connections/sommet_sync/token")).toString();
+    const qint64 since = s.value(QStringLiteral("connections/sommet_sync/lastPull")).toLongLong();
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("c"), QStringLiteral("activities"));
+    q.addQueryItem(QStringLiteral("since"), QString::number(since));
+    u.setQuery(q);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token", token.toUtf8());
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            m_sommetBusy = false;
+            emit sommetSyncError(reply->errorString());
+            return;
+        }
+        const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+
+        // 1) apply remote tombstones first, so an upsert can't resurrect a just-deleted move.
+        const QJsonArray deleted = root.value(QStringLiteral("deleted")).toArray();
+        for (const auto &d : deleted) {
+            const QString uid = d.toString();
+            if (uid.isEmpty() || m_sommetTombstones.contains(uid))
+                continue;
+            m_sommetTombstones.insert(uid);
+            QSqlQuery su(m_db);
+            su.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)"));
+            su.addBindValue(uid);
+            su.exec();
+            const int bar = uid.indexOf(QLatin1Char('|'));
+            if (bar > 0) {
+                QSqlQuery del(m_db);
+                del.prepare(QStringLiteral(
+                    "DELETE FROM activities WHERE device = ? AND substr(start_time,1,16) = ?"));
+                del.addBindValue(uid.left(bar));
+                del.addBindValue(uid.mid(bar + 1));
+                del.exec();
+            }
+        }
+
+        // 2) upsert remote records (LWW), queueing GPX blob fetches for tracks we don't have.
+        const QJsonArray records = root.value(QStringLiteral("records")).toArray();
+        for (const auto &r : records) {
+            if (sommetUpsertRecord(r.toObject()))
+                m_sommetPulled++;
+        }
+
+        // 3) advance the incremental cursor to the server's clock.
+        const qint64 now = root.value(QStringLiteral("now")).toInteger();
+        if (now > 0)
+            QSettings().setValue(QStringLiteral("connections/sommet_sync/lastPull"), now);
+
+        // 4) drain blob fetches, then push.
+        sommetFetchNextBlob();
+    });
+}
+
+bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
+{
+    const QString device = rec.value(QStringLiteral("device")).toString();
+    const QString start = rec.value(QStringLiteral("start_time")).toString();
+    if (start.isEmpty())
+        return false;
+    const QString wireUid = rec.value(QStringLiteral("uid")).toString();
+    const QString uid = wireUid.isEmpty() ? sommetUid(device, start) : wireUid;
+    if (m_sommetTombstones.contains(uid))
+        return false;
+    const qint64 remoteUpdated = rec.value(QStringLiteral("updated_at")).toInteger();
+    const QString minute = (start.size() > 16) ? start.left(16) : start;
+    const bool hasTrack = rec.value(QStringLiteral("has_track")).toBool();
+
+    bool have = false;
+    int existingIdx = 0;
+    qint64 localUpdated = 0;
+    QString localGpx;
+    {
+        QSqlQuery sel(m_db);
+        sel.prepare(QStringLiteral(
+            "SELECT idx, updated_at, gpx_text FROM activities "
+            "WHERE device = ? AND substr(start_time,1,16) = ?"));
+        sel.addBindValue(device);
+        sel.addBindValue(minute);
+        if (sel.exec() && sel.next()) {
+            have = true;
+            existingIdx = sel.value(0).toInt();
+            localUpdated = sel.value(1).toLongLong();
+            localGpx = sel.value(2).toString();
+        }
+    }
+
+    const QString src = rec.value(QStringLiteral("source")).toString();
+    const QVariant extId = rec.value(QStringLiteral("external_id")).toString().isEmpty()
+        ? QVariant() : rec.value(QStringLiteral("external_id")).toString();
+    const QVariant ruleJson = rec.value(QStringLiteral("rule_outputs_json")).toString().isEmpty()
+        ? QVariant() : rec.value(QStringLiteral("rule_outputs_json")).toString();
+
+    if (have && localUpdated >= remoteUpdated) {
+        // Nothing newer to write, but we might still be missing this move's track.
+        if (hasTrack && localGpx.isEmpty() && !m_sommetBlobQueue.contains(uid))
+            m_sommetBlobQueue.append(uid);
+        return false;
+    }
+
+    if (have) {
+        // Update metadata only - never clobber a track we already hold (activities are immutable;
+        // a newer track, if any, arrives via the blob fetch below).
+        QSqlQuery up(m_db);
+        up.prepare(QStringLiteral(
+            "UPDATE activities SET name=?, duration_s=?, distance_m=?, ascent_m=?, energy_kcal=?, "
+            "sport_type_raw=?, source=?, external_id=?, rule_outputs_json=?, updated_at=? WHERE idx=?"));
+        up.addBindValue(rec.value(QStringLiteral("name")).toString());
+        up.addBindValue(rec.value(QStringLiteral("duration_s")).toInteger());
+        up.addBindValue(rec.value(QStringLiteral("distance_m")).toDouble());
+        up.addBindValue(rec.value(QStringLiteral("ascent_m")).toDouble());
+        up.addBindValue(rec.value(QStringLiteral("energy_kcal")).toInteger());
+        up.addBindValue(rec.value(QStringLiteral("sport_type_raw")).toInteger());
+        up.addBindValue(src.isEmpty() ? QVariant() : src);
+        up.addBindValue(extId);
+        up.addBindValue(ruleJson);
+        up.addBindValue(remoteUpdated);
+        up.addBindValue(existingIdx);
+        up.exec();
+    } else {
+        // New row. Preserve a watch move's real (idx, device) so a later local read of the same
+        // watch merges onto it; give a foreign move a fresh negative idx.
+        int useIdx;
+        if ((src.isEmpty() || src == QStringLiteral("watch"))
+                && rec.value(QStringLiteral("idx")).toInt() > 0) {
+            useIdx = rec.value(QStringLiteral("idx")).toInt();
+        } else {
+            QSqlQuery mn(QStringLiteral("SELECT MIN(idx) FROM activities"), m_db);
+            int mi = 0;
+            if (mn.next())
+                mi = mn.value(0).toInt();
+            useIdx = (mi < 0 ? mi : 0) - 1;
+        }
+        QSqlQuery up(m_db);
+        up.prepare(QStringLiteral(
+            "INSERT OR REPLACE INTO activities "
+            "(idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
+            " start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source, external_id, "
+            " updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        up.addBindValue(useIdx);
+        up.addBindValue(device);
+        up.addBindValue(rec.value(QStringLiteral("name")).toString());
+        up.addBindValue(rec.value(QStringLiteral("duration_s")).toInteger());
+        up.addBindValue(rec.value(QStringLiteral("distance_m")).toDouble());
+        up.addBindValue(rec.value(QStringLiteral("ascent_m")).toDouble());
+        up.addBindValue(rec.value(QStringLiteral("energy_kcal")).toInteger());
+        up.addBindValue(rec.value(QStringLiteral("sport_type_raw")).toInteger());
+        up.addBindValue(start);
+        up.addBindValue(QString());   // track_json - filled by the blob fetch
+        up.addBindValue(QString());   // gpx_text
+        up.addBindValue(QString());   // fit_base64
+        up.addBindValue(ruleJson);
+        up.addBindValue(src.isEmpty() ? QVariant() : src);
+        up.addBindValue(extId);
+        up.addBindValue(remoteUpdated);
+        up.exec();
+    }
+
+    if (hasTrack && localGpx.isEmpty() && !m_sommetBlobQueue.contains(uid))
+        m_sommetBlobQueue.append(uid);
+    return true;
+}
+
+void ActivityService::sommetFetchNextBlob()
+{
+    if (m_sommetBlobQueue.isEmpty()) {
+        if (m_sommetPulled > 0) {
+            dbLoadAll();
+            emit activitiesChanged();
+        }
+        sommetPushAll();
+        return;
+    }
+    const QString uid = m_sommetBlobQueue.takeFirst();
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), uid);
+    qq.addQueryItem(QStringLiteral("fmt"), QStringLiteral("gpx"));
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, uid]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            const QString gpx = QString::fromUtf8(reply->readAll());
+            const int bar = uid.indexOf(QLatin1Char('|'));
+            if (!gpx.isEmpty() && bar > 0) {
+                const QVariantMap parsed = parseGpx(gpx);
+                const QJsonDocument trackDoc(QJsonArray::fromVariantList(
+                    parsed.value(QStringLiteral("track")).toList()));
+                QSqlQuery up(m_db);
+                up.prepare(QStringLiteral(
+                    "UPDATE activities SET gpx_text=?, track_json=? "
+                    "WHERE device=? AND substr(start_time,1,16)=?"));
+                up.addBindValue(gpx);
+                up.addBindValue(QString::fromUtf8(trackDoc.toJson(QJsonDocument::Compact)));
+                up.addBindValue(uid.left(bar));
+                up.addBindValue(uid.mid(bar + 1));
+                up.exec();
+            }
+        }
+        sommetFetchNextBlob();
+    });
+}
+
+void ActivityService::sommetPushAll()
+{
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery cq;
+    cq.addQueryItem(QStringLiteral("c"), QStringLiteral("activities"));
+    u.setQuery(cq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    const QStringList pushedList = s.value(QStringLiteral("connections/sommet_sync/blobsPushed"))
+                                      .toStringList();
+    const QSet<QString> pushedSet(pushedList.begin(), pushedList.end());
+
+    QJsonArray records;
+    m_sommetPushQueue.clear();
+    QSqlQuery q(QStringLiteral(
+        "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
+        "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text FROM activities"),
+        m_db);
+    while (q.next()) {
+        const QString device = q.value(1).toString();
+        const QString start = q.value(8).toString();
+        if (start.isEmpty())
+            continue;
+        const QString uid = sommetUid(device, start);
+        if (m_sommetTombstones.contains(uid))
+            continue;
+        QJsonObject rec;
+        rec.insert(QStringLiteral("uid"), uid);
+        rec.insert(QStringLiteral("idx"), q.value(0).toInt());
+        rec.insert(QStringLiteral("device"), device);
+        rec.insert(QStringLiteral("name"), q.value(2).toString());
+        rec.insert(QStringLiteral("duration_s"), q.value(3).toInt());
+        rec.insert(QStringLiteral("distance_m"), q.value(4).toDouble());
+        rec.insert(QStringLiteral("ascent_m"), q.value(5).toDouble());
+        rec.insert(QStringLiteral("energy_kcal"), q.value(6).toInt());
+        rec.insert(QStringLiteral("sport_type_raw"), q.value(7).toInt());
+        rec.insert(QStringLiteral("start_time"), start);
+        const QString src = q.value(9).toString();
+        rec.insert(QStringLiteral("source"), src.isEmpty() ? QStringLiteral("watch") : src);
+        if (!q.value(10).toString().isEmpty())
+            rec.insert(QStringLiteral("external_id"), q.value(10).toString());
+        if (!q.value(11).toString().isEmpty())
+            rec.insert(QStringLiteral("rule_outputs_json"), q.value(11).toString());
+        rec.insert(QStringLiteral("updated_at"), QJsonValue(q.value(12).toLongLong()));
+        const QString gpx = q.value(13).toString();
+        rec.insert(QStringLiteral("has_track"), !gpx.isEmpty());
+        rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));
+        records.append(rec);
+        if (!gpx.isEmpty() && !pushedSet.contains(uid))
+            m_sommetPushQueue.append(uid);
+    }
+    m_sommetPushed = records.size();
+
+    QJsonArray dels;
+    for (const QString &t : m_sommetTombstones)
+        dels.append(t);
+
+    QJsonObject body;
+    body.insert(QStringLiteral("records"), records);
+    body.insert(QStringLiteral("deleted"), dels);
+
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            m_sommetBusy = false;
+            emit sommetSyncError(reply->errorString());
+            return;
+        }
+        sommetPushNextBlob();
+    });
+}
+
+void ActivityService::sommetPushNextBlob()
+{
+    if (m_sommetPushQueue.isEmpty()) {
+        m_sommetBusy = false;
+        emit sommetSyncFinished(m_sommetPulled, m_sommetPushed);
+        return;
+    }
+    const QString uid = m_sommetPushQueue.takeFirst();
+    const int bar = uid.indexOf(QLatin1Char('|'));
+    if (bar <= 0) {
+        sommetPushNextBlob();
+        return;
+    }
+    QString gpx;
+    {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral(
+            "SELECT gpx_text FROM activities WHERE device=? AND substr(start_time,1,16)=?"));
+        q.addBindValue(uid.left(bar));
+        q.addBindValue(uid.mid(bar + 1));
+        if (q.exec() && q.next())
+            gpx = q.value(0).toString();
+    }
+    if (gpx.isEmpty()) {
+        sommetPushNextBlob();
+        return;
+    }
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), uid);
+    qq.addQueryItem(QStringLiteral("fmt"), QStringLiteral("gpx"));
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
+    QNetworkReply *reply = m_network.post(req, gpx.toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, uid]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            QSettings s;
+            QStringList pushed =
+                s.value(QStringLiteral("connections/sommet_sync/blobsPushed")).toStringList();
+            if (!pushed.contains(uid)) {
+                pushed.append(uid);
+                s.setValue(QStringLiteral("connections/sommet_sync/blobsPushed"), pushed);
+            }
+        }
+        sommetPushNextBlob();
     });
 }

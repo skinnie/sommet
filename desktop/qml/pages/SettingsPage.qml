@@ -297,6 +297,123 @@ PageFlickable {
             }
         }
 
+        // --- Sommet Sync (#SYNC-2): one shared activities database across the user's own devices.
+        // Distinct from Connections (external services): this is "own your shared database".
+        // intervals.icu deliberately stays a Connection, NOT a Sync provider (design doc §5b).
+        Card {
+            width: parent.width
+            Column {
+                id: syncCol
+                width: parent.width
+                spacing: Theme.spacingSmall
+                // "off" | "server" (cloud folder is a later provider). Starts from whether a
+                // server is already configured; the radios drive it, the config panel follows it.
+                property string provider: ActivityService.sommetSyncConfigured ? "server" : "off"
+
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.sync; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Sync"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Text {
+                    text: qsTr("Keep your activities on all your devices, in a place you own. Off by default.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+
+                RoundedRadioButton {
+                    text: qsTr("Not syncing yet")
+                    autoExclusive: false
+                    checked: syncCol.provider === "off"
+                    onClicked: { syncCol.provider = "off"; ActivityService.setSommetSync("", ""); syncStatus.text = "" }
+                }
+                RoundedRadioButton {
+                    text: qsTr("A cloud folder (Dropbox, Drive, iCloud…) — coming soon")
+                    autoExclusive: false
+                    enabled: false
+                }
+                RoundedRadioButton {
+                    text: qsTr("My own server / NAS")
+                    autoExclusive: false
+                    checked: syncCol.provider === "server"
+                    onClicked: syncCol.provider = "server"
+                }
+
+                // Server config, revealed only for "My own server / NAS".
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    visible: syncCol.provider === "server"
+                    RoundedTextField {
+                        id: syncUrlField
+                        width: parent.width
+                        text: ActivityService.sommetSyncUrl
+                        placeholderText: qsTr("https:// your server (…/sommet/sync.php)")
+                    }
+                    RoundedTextField {
+                        id: syncTokenField
+                        width: parent.width
+                        echoMode: TextInput.Password
+                        placeholderText: qsTr("Access token")
+                    }
+                    Row {
+                        spacing: Theme.spacingSmall
+                        RoundedButton {
+                            text: qsTr("Test")
+                            enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
+                            onClicked: {
+                                syncStatus.text = qsTr("Testing…"); syncStatus.color = Theme.mutedText
+                                ActivityService.sommetSyncTest(syncUrlField.text, syncTokenField.text)
+                            }
+                        }
+                        RoundedButton {
+                            text: qsTr("Save")
+                            enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
+                            onClicked: {
+                                ActivityService.setSommetSync(syncUrlField.text, syncTokenField.text)
+                                syncStatus.text = qsTr("Saved."); syncStatus.color = Theme.mutedText
+                            }
+                        }
+                        RoundedButton {
+                            text: qsTr("Sync now")
+                            enabled: ActivityService.sommetSyncConfigured
+                            onClicked: {
+                                syncStatus.text = qsTr("Syncing…"); syncStatus.color = Theme.mutedText
+                                ActivityService.sommetSyncNow()
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    id: syncStatus
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: Theme.mutedText
+                    visible: text.length > 0
+                }
+
+                Connections {
+                    target: ActivityService
+                    function onSommetSyncTestResult(ok, message) {
+                        syncStatus.text = message
+                        syncStatus.color = ok ? Theme.success : Theme.error
+                    }
+                    function onSommetSyncFinished(pulled, pushed) {
+                        syncStatus.text = qsTr("Synced ✓ — %1 received, %2 sent.").arg(pulled).arg(pushed)
+                        syncStatus.color = Theme.success
+                    }
+                    function onSommetSyncError(message) {
+                        syncStatus.text = qsTr("Sync problem: %1").arg(message)
+                        syncStatus.color = Theme.error
+                    }
+                }
+            }
+        }
+
         Card {
             width: parent.width
             visible: HomeViewModel.isGarmin

@@ -888,6 +888,31 @@ def _to_fit_sport(activity_type):
     return 0  # generic
 
 
+# Suunto sport_type byte -> FIT sport enum. Many watch moves store activity_name = "" and carry
+# only this byte, so name-based mapping alone leaves them "generic". Byte values from the same
+# table the app uses to label them (SPORT_TYPE_MAP in GpxParser.ts / openambit MoveInfoActivity).
+_SUUNTO_BYTE_TO_FIT_SPORT = {
+    0x03: 1, 0x51: 1,          # Running, Trail running
+    0x04: 2, 0x05: 2,          # Cycling, Mountain biking
+    0x0a: 17,                  # Hiking
+    0x0b: 11,                  # Walking
+    0x13: 13,                  # Alpine skiing
+    0x14: 14,                  # Snowboarding
+    0x15: 12, 0x4d: 12,        # Cross-country skiing, Ski touring
+    0x49: 16,                  # Mountaineering
+    0x52: 5,                   # Swimming
+}
+
+
+def _fit_sport(header):
+    """FIT sport for a move: prefer its name (catches custom mode names), fall back to the watch's
+    sport_type byte when the name gives nothing (most watch moves have an empty name)."""
+    sport = _to_fit_sport(header.get("activity_name") or "")
+    if sport == 0:
+        sport = _SUUNTO_BYTE_TO_FIT_SPORT.get(header.get("activity_type"), 0)
+    return sport
+
+
 # Optional native-stream targets a logged Suunto App output can be mapped onto, so it rides in
 # as a standard intervals.icu stream (getting that stream's native analytics) INSTEAD OF only
 # the custom developer field. The developer field is always emitted regardless; this is purely
@@ -991,7 +1016,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     dist_m = header["distance"]
     d_plus = round(header["ascent"])
     d_minus = round(header["descent"])
-    sport = _to_fit_sport(header["activity_name"])
+    sport = _fit_sport(header)
 
     data = bytearray()
 
@@ -1219,7 +1244,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     dist_m = header["distance"]
     d_plus = round(header["ascent"])
     d_minus = round(header["descent"])
-    sport = _to_fit_sport(header["activity_name"])
+    sport = _fit_sport(header)
 
     data = bytearray()
 

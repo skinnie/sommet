@@ -30,6 +30,7 @@ import {
 import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
+import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -104,6 +105,14 @@ export default function SettingsScreen() {
   const [emberSyncUrl, setEmberSyncUrl]             = useState('');
   const [emberSyncToken, setEmberSyncToken]         = useState('');
   const [savingEmberSync, setSavingEmberSync]       = useState(false);
+  // Sommet Sync (#SYNC-3): one shared activities database across the user's devices, in a place
+  // they own. provider 0 = not syncing, 1 = cloud folder (coming soon), 2 = my own server / NAS.
+  const [sommetProvider, setSommetProvider]         = useState(0);
+  const [sommetSyncUrl, setSommetSyncUrl]           = useState('');
+  const [sommetSyncToken, setSommetSyncToken]       = useState('');
+  const [savingSommet, setSavingSommet]             = useState(false);
+  const [syncingSommet, setSyncingSommet]           = useState(false);
+  const [sommetStatus, setSommetStatus]             = useState('');
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
   const [savingIntervals, setSavingIntervals]       = useState(false);
@@ -182,6 +191,9 @@ export default function SettingsScreen() {
     hasAnthropicKey().then(setAnthropicSaved);
     isEmberUnlocked().then(setEmberOn);
     getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
+    getSommetSyncCfg().then(c => {
+      if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); setSommetProvider(2); }
+    });
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
     isStrapHrvEnabled().then(setStrapHrvEnabledState);
@@ -234,6 +246,43 @@ export default function SettingsScreen() {
       Alert.alert('Error', e?.message ?? 'Failed to save');
     } finally {
       setSavingEmberSync(false);
+    }
+  }
+
+  async function handleSaveSommet() {
+    setSavingSommet(true);
+    try {
+      const url = sommetSyncUrl.trim();
+      await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
+      setSommetStatus(url ? 'Saved.' : 'Sync turned off.');
+    } catch (e: any) {
+      setSommetStatus(e?.message ?? 'Failed to save');
+    } finally {
+      setSavingSommet(false);
+    }
+  }
+
+  async function handleTestSommet() {
+    setSommetStatus('Testing…');
+    const r = await testSommetSync(sommetSyncUrl, sommetSyncToken);
+    setSommetStatus(r.message);
+  }
+
+  async function handleSyncNow() {
+    // Save first so the sync uses the fields as shown, then run and report the counts.
+    setSyncingSommet(true);
+    setSommetStatus('Syncing…');
+    try {
+      const url = sommetSyncUrl.trim();
+      await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
+      const r = await runSommetSync();
+      setSommetStatus(r.ok
+        ? `Synced — ${r.pulled} received, ${r.pushed} sent.`
+        : 'Couldn’t reach the server — will retry later.');
+    } catch (e: any) {
+      setSommetStatus(e?.message ?? 'Sync failed');
+    } finally {
+      setSyncingSommet(false);
     }
   }
 
@@ -781,6 +830,59 @@ export default function SettingsScreen() {
             </View>
           </View>
         )}
+      </View>
+
+      {/* ── Sommet Sync: one shared activities database across the user's own devices (#SYNC-3).
+          Distinct from Connections (external services): "own your shared database". intervals.icu
+          stays a connection, not a Sync provider (design doc §5b). ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="link" />
+          <Text style={styles.cardTitle}>Sync</Text>
+        </View>
+        <Text style={styles.sectionDesc}>
+          Keep your activities on all your devices, in a place you own. Off by default.
+        </Text>
+        <Dropdown
+          value={sommetProvider}
+          choices={[
+            { value: 0, label: 'Not syncing yet' },
+            { value: 1, label: 'A cloud folder (coming soon)' },
+            { value: 2, label: 'My own server / NAS' },
+          ]}
+          onSelect={(v: number) => {
+            if (v === 1) return; // coming soon — not selectable yet
+            setSommetProvider(v);
+            if (v === 0) { setSommetSyncCfg(null); setSommetStatus('Sync turned off.'); }
+          }}
+        />
+        {sommetProvider === 2 && (
+          <View style={{ marginTop: 12 }}>
+            <FieldRow
+              icon="link"
+              value={sommetSyncUrl}
+              onChangeText={setSommetSyncUrl}
+              placeholder="https://192.168.1.102/sommet/sync.php"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <FieldRow
+              icon="key"
+              value={sommetSyncToken}
+              onChangeText={setSommetSyncToken}
+              placeholder="token"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              <Button label="Test" variant="outline" onPress={handleTestSommet} />
+              <Button label={t.saveBtn} variant="filled" loading={savingSommet} onPress={handleSaveSommet} />
+              <Button label="Sync now" variant="outline" loading={syncingSommet} onPress={handleSyncNow} />
+            </View>
+          </View>
+        )}
+        {sommetStatus ? <StatusLine text={sommetStatus} /> : null}
       </View>
 
       {/* ── About / disclaimer ── */}

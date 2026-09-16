@@ -155,6 +155,20 @@ public:
     // dedup is by a stable per-activity key kept in QSettings, so re-running is a no-op.
     Q_INVOKABLE void exportActivitiesToIntervals(const QVariantList &activities);
 
+    // --- Sommet Sync: self-hosted shared activities DB across the user's devices (#SYNC-2) ---
+    // Two-way sync of the local activities against a self-hosted endpoint (sync-server/sync.php),
+    // so the same history appears on every Sommet install the user points at that server. Mirrors
+    // the intervals.icu path (direct QNetworkAccessManager HTTP, LWW + tombstones against m_db),
+    // but the endpoint is the user's own store, not a third party. Config in QSettings
+    // connections/sommet_sync/{url,token}; a lastPull cursor throttles the incremental pull.
+    Q_INVOKABLE bool sommetSyncConfigured() const;   // url+token both set
+    Q_INVOKABLE QString sommetSyncUrl() const;       // for the Settings field (token never exposed)
+    Q_INVOKABLE void setSommetSync(const QString &url, const QString &token);
+    // Probe the endpoint (a GET with the given creds) before saving; result via sommetSyncTestResult.
+    Q_INVOKABLE void sommetSyncTest(const QString &url, const QString &token);
+    // Pull-then-push. Safe no-op when unconfigured. Runs after a watch read and on demand.
+    Q_INVOKABLE void sommetSyncNow();
+
 signals:
     void loadingChanged();
     void activitiesChanged();
@@ -178,6 +192,11 @@ signals:
     void trackBackfillFinished(int filled, int remaining);
     void exportFinished(int uploaded, int failed);
     void exportError(const QString &message);
+    // Sommet Sync (#SYNC-2): test probe result, and a completion/error pair for a syncNow run.
+    void sommetSyncTestResult(bool ok, const QString &message);
+    void sommetSyncFinished(int pulled, int pushed);
+    void sommetSyncError(const QString &message);
+    void sommetSyncConfiguredChanged();
 
 private:
     QNetworkAccessManager m_network;
@@ -215,6 +234,9 @@ private:
     void fetchNextTrack();
 
     QSet<QString> m_tombstones;
+    // Sommet Sync uid-tombstones (device|start-minute); see the sommet_deleted table. Loaded with
+    // m_tombstones; dbLoadAll skips rows whose sommetUid is here so a deleted move stays gone.
+    QSet<QString> m_sommetTombstones;
     void loadTombstones();
     static QString tombstoneKey(const QString &startTime, const QString &name);
     void dbInsert(int index, const QString &device, const QVariantMap &parsed,
@@ -252,4 +274,22 @@ private:
     void readWatchActivities(int productId, const QString &serial, bool retriedFromZero = false);
     int m_pendingWatchReads = 0;
     QVariantMap intervalsStreamMap() const;
+
+    // --- Sommet Sync internals (#SYNC-2) ---
+    // The cross-device identity of an activity: device|start-time-truncated-to-the-minute. Stable
+    // for the same move read on any device (same watch => same device+start), and for the same
+    // imported move (same connector+start), so it de-dupes across the fleet. See design doc §3.
+    static QString sommetUid(const QString &device, const QString &startTime);
+    void sommetPull();                 // step 1: GET changes since lastPull, upsert, queue blobs
+    void sommetPushAll();              // step 2: POST all local rows + tombstones (LWW on server)
+    void sommetFetchNextBlob();        // drains m_sommetBlobQueue one GPX at a time
+    void sommetPushNextBlob();         // drains m_sommetPushQueue one GPX at a time
+    // Upsert one pulled wire-record into activities.db (LWW by updated_at; reuses an existing row's
+    // idx, else allocates a fresh negative idx for a foreign row). Returns true if it changed the DB.
+    bool sommetUpsertRecord(const QJsonObject &rec);
+    QStringList m_sommetBlobQueue;     // uids of just-pulled rows whose GPX still needs fetching
+    QStringList m_sommetPushQueue;     // uids of local rows whose GPX still needs pushing
+    bool m_sommetBusy = false;
+    int m_sommetPulled = 0;
+    int m_sommetPushed = 0;
 };

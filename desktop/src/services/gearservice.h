@@ -78,6 +78,14 @@ public:
     // Pull-only import from intervals.icu into the local store, then rebuild gears[].
     Q_INVOKABLE void importFromIntervals();
 
+    // Sommet Sync (#SYNC-4b): mirror gear to the user's OWN self-hosted store (sync-server/
+    // sync.php), so bikes/shoes/parts appear on every device and outlive intervals.icu. Two-way,
+    // last-writer-wins by updated_at, keyed by gear id (intervals-mirrored gear shares the same id
+    // across devices, so this merges onto the same rows instead of duplicating). Reuses the same
+    // QSettings config as the activity sync (connections/sommet_sync/{url,token}). No-op when
+    // unconfigured; runs on the same triggers as the activity sync.
+    Q_INVOKABLE void sommetGearSyncNow();
+
     // Editing (write-through: push to intervals.icu, then re-import to refresh). Parity with the
     // Android manager. `type` is a free-form gear type ("Bike"/"Shoes"/"Chain"/...).
     Q_INVOKABLE void addGear(const QString &name, const QString &type);
@@ -88,6 +96,12 @@ public:
     Q_INVOKABLE void addReminder(const QString &gearId, const QString &name,
                                  double km, double hours, int days, int activities);
     Q_INVOKABLE void removeReminder(const QString &gearId, const QString &reminderId);
+
+    // Set a gear's manually-entered mileage baseline (km + optional hours), as of NOW. From this
+    // moment, rides get added on top of the number you type - so it is never lost, and rides
+    // already inside it are not double-counted (see loadFromDb). Local + synced (latest wins);
+    // works with or without intervals.icu.
+    Q_INVOKABLE void setGearBaseline(const QString &id, double km, double hours);
 
 signals:
     void loadingChanged();
@@ -104,10 +118,20 @@ private:
     void send(const QByteArray &verb, const QString &path, const QJsonObject &body,
               std::function<void(const QJsonDocument &)> onOk);
     QString componentIdsJson(const QString &gearId) const; // parent's stored component_ids
+    // Local-first (#SYNC-4): update one gear column + bump updated_at, refresh, and push to the
+    // NAS - the local write that happens whether or not intervals.icu is connected.
+    void localGearField(const QString &id, const QString &column, const QVariant &value);
     void setLoading(bool v);
     void setLastError(const QString &e);
     QString apiKey() const;
     QString athleteId() const;
+
+    // Sommet gear sync internals (#SYNC-4b): pull-then-push against connections/sommet_sync.
+    void sommetGearPull();
+    void sommetGearPushAll();
+    void sommetReminderPull();      // chained after the gear push: same for the gear_reminder table
+    void sommetReminderPushAll();
+    bool m_sommetGearBusy = false;
 
     QNetworkAccessManager m_net;
     QSqlDatabase m_db;
