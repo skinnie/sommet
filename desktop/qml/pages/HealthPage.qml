@@ -123,6 +123,41 @@ Item {
                 }
             }
 
+            // --- Sleep & Recovery (Polar band, overnight HRV via PMD PPI over Bluetooth) ---
+            Card {
+                width: parent.width
+                Column {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text { text: qsTr("Sleep & Recovery (Polar band)"); color: Theme.text
+                           font.pixelSize: Theme.fontSizeLabel; font.bold: true }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeLabel
+                        text: qsTr("Wear a Polar Verity Sense and keep it near this computer. Tap " +
+                                   "Start at bedtime, Stop in the morning — it records your beat-to-" +
+                                   "beat intervals over Bluetooth and computes overnight HRV + " +
+                                   "resting HR here, on your machine.")
+                    }
+                    Row {
+                        spacing: Theme.spacingSmall
+                        RoundedButton {
+                            text: HealthService.sleepRecording ? qsTr("Stop (morning)")
+                                                               : qsTr("Start (bedtime)")
+                            onClicked: HealthService.sleepRecording
+                                       ? HealthService.stopSleepRecording()
+                                       : HealthService.startSleepRecording()
+                        }
+                    }
+                    Text {
+                        visible: HealthService.sleepMessage.length > 0
+                        width: parent.width; wrapMode: Text.WordWrap
+                        color: Theme.text; font.pixelSize: Theme.fontSizeLabel
+                        text: HealthService.sleepMessage
+                    }
+                }
+            }
+
             // --- Charts ---
             Card {
                 width: parent.width

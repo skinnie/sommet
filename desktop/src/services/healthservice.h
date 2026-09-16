@@ -56,6 +56,10 @@ class HealthService : public QObject
     // A successful reading lands on the same Morning-HRV line as the watch (health/watchHrv).
     Q_PROPERTY(bool strapMeasuring READ strapMeasuring NOTIFY changed)
     Q_PROPERTY(QString strapMessage READ strapMessage NOTIFY changed)
+    // Overnight sleep recording from a Polar band (PMD PPI over BLE) - the desktop twin of the
+    // phone's PolarSleep. sleepRecording = a night is in progress; sleepMessage = status/result.
+    Q_PROPERTY(bool sleepRecording READ sleepRecording NOTIFY changed)
+    Q_PROPERTY(QString sleepMessage READ sleepMessage NOTIFY changed)
 
 public:
     explicit HealthService(QObject *parent = nullptr);
@@ -88,6 +92,8 @@ public:
     QString hrvInstallMessage() const { return m_hrvInstallMessage; }
     bool strapMeasuring() const { return m_strapMeasuring; }
     QString strapMessage() const { return m_strapMessage; }
+    bool sleepRecording() const { return m_sleepRecording; }
+    QString sleepMessage() const { return m_sleepMessage; }
 
     Q_INVOKABLE void refresh(int days = 30);
     // Install the 5+5 HRV app onto an HRV sport mode (creating the mode if needed) via the backend.
@@ -95,6 +101,10 @@ public:
     // Read a morning-HRV spot reading from a BLE HR strap (default the COOSPO HW9) for `seconds`,
     // then store its RMSSD on the Morning-HRV line. Backend does the BLE read (tools/hrv_strap.py).
     Q_INVOKABLE void readStrapHrv(int seconds = 120);
+    // Start/stop an overnight PMD-PPI recording from a Polar band. start returns immediately (the
+    // band records while connected); stop analyses the night and stores overnight HRV + resting HR.
+    Q_INVOKABLE void startSleepRecording();
+    Q_INVOKABLE void stopSleepRecording();
     // Manual daily reading; pass <=0 for a metric you're not entering.
     Q_INVOKABLE void addManualHealth(const QString &date, double restingHr, double hrvMs);
 
@@ -113,6 +123,8 @@ private:
     QString m_hrvInstallMessage;
     bool m_strapMeasuring = false;
     QString m_strapMessage;
+    bool m_sleepRecording = false;
+    QString m_sleepMessage;
     // Per-source buffers.
     QVariantList m_iRhr, m_iSteps, m_iHrv, m_iSleep;         // intervals (sleep from sleepSecs)
     QVariantList m_gRhr, m_gSteps, m_gHrv, m_gBattery, m_gSleep;  // garmin

@@ -203,13 +203,46 @@ def analyse_night(rr_ms, beat_times_s, window_s=WINDOW_S):
 
 
 def process_recording(rec):
-    """Top level: a loaded recording dict -> the full result dict (what the backend returns)."""
+    """Top level: a loaded recording dict -> the full result dict (what the backend returns).
+
+    Two input shapes are accepted, so one analyzer serves every acquisition path:
+      * PPG (Verity offline recording): rec["ppg"] (+ optional "acc") -> ppg_to_rr -> analyse.
+      * R-R directly (Polar PMD PPI live stream, or any strap that reports R-R): rec["rr_ms"]
+        (a list of peak-to-peak intervals in ms), optional rec["rr_times_s"] (beat times, s;
+        default = cumulative sum of rr_ms). No PPG->peak step - the intervals are the beats.
+    The overnight windowing + HRV math (analyse_night) is identical for both."""
+    rr_direct = rec.get("rr_ms")
+    if rr_direct:
+        rr = [float(x) for x in rr_direct]
+        times = rec.get("rr_times_s")
+        if not times:
+            times, acc_t = [], 0.0
+            for x in rr:
+                acc_t += x / 1000.0
+                times.append(acc_t)
+        else:
+            times = [float(t) for t in times]
+        if len(rr) < 20:
+            return {"ok": False, "error": "too few R-R intervals (%d) - check the recording"
+                    % len(rr), "beats": len(rr)}
+        overnight, windows, overall = analyse_night(rr, times)
+        return {
+            "ok": True,
+            "start_time": rec.get("start_time"),
+            "source": rec.get("source", "polar_pmd_ppi"),
+            "beats_used": len(rr),
+            "beats_dropped_motion": 0,
+            "overnight": overnight,
+            "overall_hrv": overall,
+            "windows": windows,
+        }
+
     ppg = rec.get("ppg") or []
     ppg_hz = float(rec.get("ppg_hz") or 55.0)
     acc = rec.get("acc")
     acc_hz = float(rec.get("acc_hz") or 52.0)
     if not ppg:
-        return {"ok": False, "error": "recording has no PPG samples"}
+        return {"ok": False, "error": "recording has no PPG or R-R samples"}
     rr, times, dropped = ppg_to_rr(ppg, ppg_hz, acc, acc_hz)
     if len(rr) < 20:
         return {"ok": False, "error": "too few beats derived from PPG (%d) - check the recording"

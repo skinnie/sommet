@@ -145,6 +145,10 @@ LEGACYMERGE_DIR = Path.home() / "AmbitAppBackups" / "legacy-merged"
 # miss pays the full read. Survives restart AND replug, keeps full-track map previews.
 ROUTE_CACHE_DIR = Path.home() / "AmbitAppBackups" / "routecache"
 
+# Live sleep-recording (Polar PMD PPI) state: the detached tools/polar_sleep.py process + its
+# output file, so record/status and record/stop can find it. None = no recording in flight.
+_SLEEP_REC = None
+
 # Confirmed live and fully unauthenticated, 2026-08-05 (docs/sgee_andre.md) - no AppKey/account
 # needed, unlike the rest of that host's API surface.
 GPS_ORBIT_URL = "https://devices.suunto-operations.com/devices/gpsorbit/binary"
@@ -1333,6 +1337,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_hrv_strap(body)
         elif self.path == "/api/sleep/process":
             self._handle_sleep_process(body)
+        elif self.path == "/api/sleep/record/start":
+            self._handle_sleep_record_start(body)
+        elif self.path == "/api/sleep/record/stop":
+            self._handle_sleep_record_stop(body)
+        elif self.path == "/api/sleep/record/status":
+            self._handle_sleep_record_status(body)
         elif self.path == "/api/apps/import":
             self._handle_apps_import(body)
         elif self.path == "/api/workout/compile":
@@ -5617,8 +5627,8 @@ class Handler(BaseHTTPRequestHandler):
         The overnight recording is large, so it's written to a temp file and passed by path rather
         than through argv."""
         body = body or {}
-        if not body.get("ppg"):
-            self._send_json(400, {"ok": False, "error": "no PPG samples in recording"})
+        if not body.get("ppg") and not body.get("rr_ms"):
+            self._send_json(400, {"ok": False, "error": "no PPG or R-R samples in recording"})
             return
         tmp = None
         try:
@@ -5642,6 +5652,94 @@ class Handler(BaseHTTPRequestHandler):
                     os.unlink(tmp)
                 except OSError:
                     pass
+
+    # --- Sleep RECORDING (tools/polar_sleep.py): the desktop twin of the phone's PolarSleep.
+    # The band is optical, so HRV needs Polar PMD PPI (no R-R over 0x180D). record/start spawns a
+    # DETACHED recorder that streams PPI and flushes each interval to a JSON file (so stopping any
+    # time leaves a valid file); record/stop terminates it and analyses the file with sleep_stage;
+    # record/status reports whether it's running and the interval count so far. -----------------
+
+    def _handle_sleep_record_start(self, body):
+        """POST /api/sleep/record/start - begin a live PMD PPI recording from a Polar band. Body:
+        optional {"device": mac-or-name, "minutes": int}. Spawns tools/polar_sleep.py detached and
+        remembers the process + output path. Only one recording at a time."""
+        global _SLEEP_REC
+        if _SLEEP_REC and _SLEEP_REC["proc"].poll() is None:
+            self._send_json(409, {"ok": False, "error": "a sleep recording is already running",
+                                  "started": _SLEEP_REC["started"]})
+            return
+        body = body or {}
+        out_dir = Path.home() / "AmbitAppBackups" / "sleep"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"verity_ppi_{int(time.time())}.json"
+        args = [PYTHON, str(TOOLS_DIR / "polar_sleep.py"), "record", "--out", str(out_path),
+                "--minutes", str(int(body.get("minutes", 600)))]
+        dev = body.get("device")
+        if dev:
+            args += ["--device", str(dev)]
+        try:
+            proc = subprocess.Popen(args, cwd=str(TOOLS_DIR), stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception as e:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": f"could not start recorder: {e}"})
+            return
+        _SLEEP_REC = {"proc": proc, "out": str(out_path), "started": int(time.time())}
+        self._send_json(200, {"ok": True, "started": _SLEEP_REC["started"], "out": str(out_path)})
+
+    @staticmethod
+    def _sleep_rec_count(path):
+        try:
+            with open(path) as f:
+                return len(json.load(f).get("rr_ms", []))
+        except (OSError, json.JSONDecodeError):
+            return 0
+
+    def _handle_sleep_record_status(self, _body):
+        """POST /api/sleep/record/status - is a recording running, and how many intervals so far."""
+        rec = _SLEEP_REC
+        if not rec:
+            self._send_json(200, {"ok": True, "recording": False})
+            return
+        running = rec["proc"].poll() is None
+        self._send_json(200, {"ok": True, "recording": running, "started": rec["started"],
+                              "intervals": self._sleep_rec_count(rec["out"])})
+
+    def _handle_sleep_record_stop(self, _body):
+        """POST /api/sleep/record/stop - stop the recorder (SIGTERM -> the tool finalizes its file),
+        then analyse the recording with sleep_stage.py and return the night's HRV result."""
+        global _SLEEP_REC
+        rec = _SLEEP_REC
+        if not rec:
+            self._send_json(404, {"ok": False, "error": "no recording to stop"})
+            return
+        proc = rec["proc"]
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=15)
+            except Exception:  # noqa: BLE001
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        out_path = rec["out"]
+        _SLEEP_REC = None
+        if not os.path.exists(out_path) or self._sleep_rec_count(out_path) < 20:
+            self._send_json(422, {"ok": False, "error": "too few PPI intervals recorded - was the "
+                                  "band worn with good skin contact? (it warms up ~25 s)",
+                                  "intervals": self._sleep_rec_count(out_path)})
+            return
+        code, out, err = run_tool("sleep_stage.py", [out_path], timeout=600)
+        try:
+            info = json.loads(out.strip()) if out.strip() else None
+        except json.JSONDecodeError:
+            info = None
+        if info is None:
+            self._send_json(502, {"ok": False, "error": "sleep_stage.py produced no parseable JSON",
+                                  "raw_output": out[-2000:], "stderr": err[-2000:]})
+            return
+        info["recording_file"] = out_path
+        self._send_json(200 if info.get("ok") else 422, info)
 
     # --- Training Program (tools/training_plan.py - see its docstring for the whole
     # design: workouts scheduled on calendar dates as date-gated Suunto Apps, the

@@ -351,6 +351,77 @@ void HealthService::installHrvApp()
     });
 }
 
+void HealthService::startSleepRecording()
+{
+    if (m_sleepRecording)
+        return;
+    m_sleepRecording = true;
+    m_sleepMessage = tr("Recording… keep the Polar band worn and near this computer overnight.");
+    emit changed();
+
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/sleep/record/start")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(req, QByteArray("{}"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError || !obj.value(QStringLiteral("ok")).toBool()) {
+            m_sleepRecording = false;
+            const QString e = obj.value(QStringLiteral("error")).toString();
+            m_sleepMessage = e.isEmpty() ? tr("Couldn't start recording. Is the band on and in range?")
+                                         : tr("Couldn't start: %1").arg(e);
+            emit changed();
+        }
+    });
+}
+
+void HealthService::stopSleepRecording()
+{
+    if (!m_sleepRecording)
+        return;
+    m_sleepMessage = tr("Finishing and analysing the night…");
+    emit changed();
+
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/sleep/record/stop")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(req, QByteArray("{}"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        m_sleepRecording = false;
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const auto overnight = obj.value(QStringLiteral("overnight")).toObject();
+        if (obj.value(QStringLiteral("ok")).toBool() && !overnight.isEmpty()) {
+            const double rmssd = overnight.value(QStringLiteral("overnight_rmssd_ms")).toDouble();
+            const double rhr = overnight.value(QStringLiteral("resting_hr_bpm")).toDouble();
+            // Store on the overnight-HRV line, same store the intervals overnight series merges.
+            const QString date = QDate::currentDate().toString(Qt::ISODate);
+            const QString raw = QSettings().value(QStringLiteral("health/sleepHrv")).toString();
+            QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
+            bool replaced = false;
+            for (int i = 0; i < arr.size(); ++i)
+                if (arr.at(i).toObject().value(QStringLiteral("date")).toString() == date) {
+                    arr[i] = QJsonObject{{QStringLiteral("date"), date},
+                                         {QStringLiteral("value"), rmssd},
+                                         {QStringLiteral("rhr"), rhr}};
+                    replaced = true; break;
+                }
+            if (!replaced)
+                arr.append(QJsonObject{{QStringLiteral("date"), date},
+                                       {QStringLiteral("value"), rmssd},
+                                       {QStringLiteral("rhr"), rhr}});
+            QSettings().setValue(QStringLiteral("health/sleepHrv"),
+                QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+            m_sleepMessage = tr("Last night: overnight HRV %1 ms, resting HR %2 bpm.")
+                                 .arg(qRound(rmssd)).arg(qRound(rhr));
+        } else {
+            const QString e = obj.value(QStringLiteral("error")).toString();
+            m_sleepMessage = e.isEmpty() ? tr("No usable data - was the band worn all night?")
+                                         : tr("Couldn't analyse: %1").arg(e);
+        }
+        emit changed();
+    });
+}
+
 void HealthService::readStrapHrv(int seconds)
 {
     if (m_strapMeasuring)
