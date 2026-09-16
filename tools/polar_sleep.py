@@ -149,8 +149,10 @@ async def record(args):
                 got["n"] += len(iv)
                 rec.add(iv)
         await c.start_notify(PMD_DATA, on_data)
-        # start a live PPI stream: [REQUEST_MEASUREMENT_START, PPI type, 0 settings]
-        await c.write_gatt_char(PMD_CP, bytes([CP_REQUEST_MEASUREMENT_START, PMD_TYPE_PPI, 0x00]),
+        # start a live PPI stream: [REQUEST_MEASUREMENT_START, PPI type]. PPI takes NO settings
+        # payload - sending a trailing settings byte is rejected with ERROR_INVALID_PARAMETER
+        # (0x05); verified on the hardware 2026-09-16. Success reply on PMD_CP is f0 02 03 00 00.
+        await c.write_gatt_char(PMD_CP, bytes([CP_REQUEST_MEASUREMENT_START, PMD_TYPE_PPI]),
                                 response=True)
         _print(f"# recording PPI (Ctrl-C to stop). PPI needs the band WORN; it warms up ~25 s. "
                f"max {args.minutes} min.")
