@@ -145,6 +145,14 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
+                // Race Planner (foundation 2026-09-17): BRM/ultra planning. Not gated on a watch.
+                glyph: Icons.routes
+                label: qsTr("Race Plan")
+                selected: root.currentPage === "racePlan"
+                onClicked: root.pageSelected("racePlan")
+            }
+            NavItem {
+                width: parent.width
                 glyph: Icons.health
                 label: qsTr("Health")
                 selected: root.currentPage === "health"

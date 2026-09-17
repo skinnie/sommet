@@ -35,6 +35,7 @@ ApplicationWindow {
         activities: "pages/ActivitiesPage.qml",
         routes: "pages/RoutesPage.qml",
         planRoute: "pages/PlanRoutePage.qml",
+        racePlan: "pages/RacePlanPage.qml",
         pois: "pages/PoisPage.qml",
         offlineMaps: "pages/OfflineMapsPage.qml",
         backup: "pages/BackupPage.qml",

@@ -204,6 +204,7 @@ qt_add_qml_module(ambitapp
         qml/pages/ActivitiesPage.qml
         qml/pages/RoutesPage.qml
         qml/pages/PlanRoutePage.qml
+        qml/pages/RacePlanPage.qml
         qml/pages/PoisPage.qml
         qml/pages/OfflineMapsPage.qml
         qml/pages/BackupPage.qml
@@ -237,6 +238,8 @@ qt_add_qml_module(ambitapp
         src/services/activityservice.cpp
         src/services/gearservice.h
         src/services/gearservice.cpp
+        src/services/raceservice.h
+        src/services/raceservice.cpp
         src/services/coachservice.h
         src/services/coachservice.cpp
         src/services/routeservice.h

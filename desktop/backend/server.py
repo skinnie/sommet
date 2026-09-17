@@ -1269,6 +1269,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_route_slice(body)
         elif self.path == "/api/weather/route":
             self._handle_weather_route(body)
+        elif self.path == "/api/race/plan/create":
+            self._handle_race_plan_create(body)
+        elif self.path == "/api/race/plan/list":
+            self._handle_race_plan_list(body)
+        elif self.path == "/api/race/plan/get":
+            self._handle_race_plan_get(body)
         elif self.path == "/api/agps/update":
             self._handle_agps_update(body)
         elif self.path == "/api/firmware/download":
@@ -2282,6 +2288,40 @@ class Handler(BaseHTTPRequestHandler):
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "weather failed"}
         self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_plan_create(self, body):
+        """Body: {"event": {...}, "athlete": {...}, "bike": {...}}. Compute a baseline race plan
+        and persist it via RaceService. Mirrors _handle_weather_route's pattern: call run_tool for
+        baseline_plan logic, then delegate persistence to the QML-facing service."""
+        event = body.get("event")
+        if not event or not event.get("name"):
+            self._send_json(400, {"error": '"event" with "name" is required'})
+            return
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+
+        try:
+            code, out, err = run_tool("race_event.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "plan failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_plan_list(self, body):
+        """Stub: list all saved race plans. Currently returns empty; RaceService (QML-side)
+        owns the SQLite persistence (mirrors GearService pattern)."""
+        self._send_json(200, {"ok": True, "plans": []})
+
+    def _handle_race_plan_get(self, body):
+        """Stub: retrieve a specific race plan by ID. Currently returns 404; RaceService owns it."""
+        plan_id = body.get("id")
+        if not plan_id:
+            self._send_json(400, {"error": '"id" is required'})
+            return
+        self._send_json(404, {"error": "plan not found"})
 
     # --- writes: dry-run unless the caller explicitly confirms ---
 
