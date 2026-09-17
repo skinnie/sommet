@@ -14,13 +14,15 @@ No network, no geometry -- just JSON round-tripping + arithmetic on distances/ti
 Stdlib only. `--selftest` proves the maths on a synthetic event.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import math
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # Bike type -> default effective frontal area (m²) per BRouter Longdistance profile
 BIKE_TYPE_FRONTAL_AREA = {
@@ -217,39 +219,58 @@ def _cumulative_distances(points: List[Dict[str, Any]]) -> tuple[List[float], fl
     return cumul, cumul[-1] if cumul else 0.0
 
 
+def _ascent_descent_m(points: List[Dict[str, Any]]) -> tuple[float, float]:
+    """Sum positive/negative elevation deltas across points. Returns (ascent_m, descent_m).
+    Points without a usable 'ele' contribute nothing."""
+    ascent = descent = 0.0
+    prev = None
+    for p in points:
+        ele = p.get("ele")
+        if ele in (None, ""):
+            continue
+        ele = float(ele)
+        if prev is not None:
+            d = ele - prev
+            if d > 0:
+                ascent += d
+            else:
+                descent += -d
+        prev = ele
+    return ascent, descent
+
+
 def baseline_plan(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
-                  bike: Optional[BikeInputs] = None) -> RacePlan:
-    """Compute a baseline race plan: naive distance/time math (constant speed).
+                  bike: Optional[BikeInputs] = None,
+                  estimator: Optional[Callable[..., LegEstimate]] = None) -> RacePlan:
+    """Assemble a race plan. The PREDICTED moving time comes from the speed-model seam
+    (estimate_leg), NOT computed inline here - so when the engine replaces estimate_leg with
+    the real curve-first model, this plan improves with no change on the foundation side.
 
-    This is the provisional calculation for the foundation phase:
-    - Extract route distance from event.points or event.gpx.
-    - Derive required average speed from event.target_finish_dt or the tightest cutoff.
-    - Compute finish ETA at that speed.
-    - Mark as provisional=True so the UI knows a real performance model will replace this.
+    `estimator` is injectable purely so tests can pass a mocked LegEstimate; production always
+    uses estimate_leg. The route is treated as a single leg for now; control-segmented legs
+    come later with the Race Timeline layer (deliberately NOT built yet, per the PM).
 
-    athlete/bike default to sensible minimums if not provided.
+    The cutoff/target only yields required_avg_speed_kmh as an informational CONSTRAINT
+    ("you must average this to make it") - it is not the prediction. Cutoff-margin logic is
+    timeline intelligence and is intentionally deferred.
     """
     if athlete is None:
         athlete = AthleteInputs(weight_kg=75.0)  # sensible default
     if bike is None:
         bike = BikeInputs(bike_weight_kg=10.0, load_weight_kg=5.0)  # sensible touring defaults
+    if estimator is None:
+        estimator = estimate_leg
 
-    # Extract route distance.
-    distance_m = 0.0
-    if event.points:
-        cumul, total = _cumulative_distances(event.points)
-        distance_m = total
-    elif event.gpx:
-        # Parse GPX if provided (backend writes GPX to a temp file; this script reads it)
+    # Extract route points (from explicit points, else parse the GPX).
+    points = event.points
+    if not points and event.gpx:
         try:
             import geo_util
             points = geo_util.parse_gpx_points(event.gpx)
-            if points:
-                cumul, total = _cumulative_distances(points)
-                distance_m = total
         except Exception:
-            pass  # Fall through to error message below
+            points = []
 
+    _, distance_m = _cumulative_distances(points) if points else ([], 0.0)
     if distance_m == 0.0:
         return RacePlan(
             event=event, athlete=athlete, bike=bike,
@@ -257,40 +278,35 @@ def baseline_plan(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             summary={"error": "route has no distance (no GPX or points)"},
         )
 
-    # Derive required average speed from either target_finish_dt or the tightest cutoff.
-    required_avg_kmh = 0.0
-    finish_dt = None
+    distance_km = distance_m / 1000.0
+    ascent_m, descent_m = _ascent_descent_m(points)
 
-    if event.target_finish_dt:
-        elapsed = event.target_finish_dt - event.start_dt
-        elapsed_hours = elapsed.total_seconds() / 3600.0
-        if elapsed_hours > 0:
-            required_avg_kmh = (distance_m / 1000.0) / elapsed_hours
-            finish_dt = event.target_finish_dt
-    elif event.cutoffs:
-        # Use the tightest (earliest) cutoff as the required finish time.
-        # This is a simplification; a real implementation might offer multiple strategies.
-        tightest = min(event.cutoffs, key=lambda c: c.distance_km if c.distance_km == distance_m / 1000.0 else float("inf"))
-        if tightest.cutoff_dt:
-            elapsed = tightest.cutoff_dt - event.start_dt
-            elapsed_hours = elapsed.total_seconds() / 3600.0
-            if elapsed_hours > 0:
-                required_avg_kmh = (distance_m / 1000.0) / elapsed_hours
-                finish_dt = event.start_dt + timedelta(hours=elapsed_hours)
+    # PREDICTED moving time via the seam (single leg = whole route for now).
+    est = estimator(distance_km, ascent_m, descent_m, athlete, bike)
+    moving_time_s = est.moving_time_s
+    finish_dt = event.start_dt + timedelta(seconds=moving_time_s)
 
-    # If no target or cutoff, assume a conservative 15 km/h touring pace.
-    if required_avg_kmh == 0.0:
-        required_avg_kmh = 15.0
-
-    moving_time_s = (distance_m / 1000.0) / required_avg_kmh * 3600.0
-    if finish_dt is None:
-        finish_dt = event.start_dt + timedelta(seconds=moving_time_s)
+    # Informational cutoff/target CONSTRAINT (not the prediction): the average speed the rider
+    # would have to hold to arrive by their target or tightest cutoff.
+    required_avg_kmh = None
+    deadline_dt = event.target_finish_dt
+    if deadline_dt is None and event.cutoffs:
+        cutoff_dts = [c.cutoff_dt for c in event.cutoffs if c.cutoff_dt]
+        deadline_dt = min(cutoff_dts) if cutoff_dts else None
+    if deadline_dt:
+        hours = (deadline_dt - event.start_dt).total_seconds() / 3600.0
+        if hours > 0:
+            required_avg_kmh = round(distance_km / hours, 1)
 
     summary = {
-        "distance_km": round(distance_m / 1000.0, 2),
-        "required_avg_speed_kmh": round(required_avg_kmh, 1),
+        "distance_km": round(distance_km, 2),
+        "ascent_m": round(ascent_m),
+        "predicted_avg_speed_kmh": est.avg_speed_kmh,
         "moving_time_hours": round(moving_time_s / 3600.0, 1),
-        "finish_time": finish_dt.strftime("%H:%M") if finish_dt else None,
+        "finish_time": finish_dt.strftime("%H:%M"),
+        "confidence": est.confidence,
+        "model_source": est.model_source,
+        "required_avg_speed_kmh": required_avg_kmh,  # None when no target/cutoff set
     }
 
     return RacePlan(
@@ -301,48 +317,62 @@ def baseline_plan(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         distance_m=distance_m,
         finish_eta_dt=finish_dt,
         moving_time_s=moving_time_s,
-        required_avg_speed_kmh=required_avg_kmh,
+        required_avg_speed_kmh=required_avg_kmh or 0.0,
         summary=summary,
     )
 
 
-def estimate_leg(distance_m: float, elevation_gain_m: float, elevation_loss_m: float,
-                 surface: str, athlete: AthleteInputs, bike: BikeInputs,
-                 weather: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Estimate time/energy for a route leg using the performance model.
+@dataclass
+class LegEstimate:
+    """What the speed model returns for one route leg. This is the engine<->foundation seam:
+    the foundation asks for a leg's time and never has to know how the number was produced.
+    `model_source` lets the UI explain the ETA ("based on your recent riding" vs "generic
+    estimate; limited data") without exposing the underlying maths."""
+    moving_time_s: float
+    avg_speed_kmh: float
+    confidence: str = "low"          # "low" | "medium" | "high"
+    model_source: str = "placeholder"  # "personal" | "generic" | "physics" | "placeholder"
 
-    STUB (to be implemented with BRouter-physics later): currently just returns naive
-    distance/15kmh constant speed. The signature and return shape are fixed so the future
-    physics model can replace this without changing callers.
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def estimate_leg(distance_km: float, ascent_m: float, descent_m: float,
+                 athlete: AthleteInputs, bike: BikeInputs,
+                 conditions: Optional[Dict[str, Any]] = None) -> LegEstimate:
+    """Estimate moving time for one route leg. THE engine<->foundation seam.
+
+    PLACEHOLDER (foundation phase): returns a naive constant-speed guess. The engine
+    workstream replaces this body with the curve-first empirical model (calibrated per rider
+    from ride history) without changing this signature or the LegEstimate shape, so nothing
+    on the foundation side has to change when the real estimator lands.
+
+    Contract (agreed with the PM, 2026-09-18):
+      - per-leg is the primitive; a thin estimate_route() aggregator lives in the engine.
+      - v1 is road-only: NO surface parameter (gravel Crr unvalidated).
+      - NO CdA / Crr / RMR / drivetrain / FTP dependence in the v1 prediction path.
 
     Args:
-        distance_m: horizontal distance (metres)
-        elevation_gain_m: climbing (metres)
-        elevation_loss_m: descent (metres)
-        surface: "asphalt", "gravel", "dirt", etc. (for rolling resistance scaling)
-        athlete: AthleteInputs (weight, FTP, RMR)
-        bike: BikeInputs (weight, load, type, aero)
-        weather: optional {"wind_kmh", "wind_dir_deg", "temp_c", ...}
+        distance_km: leg horizontal distance (km)
+        ascent_m: leg climbing (m)
+        descent_m: leg descent (m)
+        athlete: AthleteInputs (weight required; FTP/RMR dormant, not used by v1 prediction)
+        bike: BikeInputs (weight/load/type; engineering coeffs dormant)
+        conditions: optional {"wind_kmh", "temp_c", ...} the real model may use later
 
     Returns:
-        {
-            "duration_s": float,
-            "energy_wh": float (optional, when FTP given),
-            "speed_kmh": float (average),
-            "notes": str (for "provisional"/interim status),
-        }
+        LegEstimate(moving_time_s, avg_speed_kmh, confidence, model_source)
     """
-    # Naive baseline: 15 km/h constant speed, ignore elevation/weather/physics.
-    # Mark as clearly provisional.
+    # Naive placeholder: 15 km/h constant, ignores climb/conditions/physics entirely.
     speed_kmh = 15.0
-    duration_s = (distance_m / 1000.0) / speed_kmh * 3600.0
+    moving_time_s = (distance_km / speed_kmh) * 3600.0 if speed_kmh > 0 else 0.0
 
-    return {
-        "duration_s": round(duration_s, 1),
-        "speed_kmh": round(speed_kmh, 1),
-        "energy_wh": None,  # Would compute from FTP if present, in the real model.
-        "notes": "PROVISIONAL: naive 15 km/h baseline, no physics/weather yet",
-    }
+    return LegEstimate(
+        moving_time_s=round(moving_time_s, 1),
+        avg_speed_kmh=round(speed_kmh, 1),
+        confidence="low",
+        model_source="placeholder",
+    )
 
 
 def _synthetic_event() -> RaceEvent:
@@ -364,28 +394,47 @@ def _synthetic_event() -> RaceEvent:
 
 
 def _selftest():
-    """Prove the baseline math on a synthetic 200k BRM."""
+    """Prove the baseline assembly + the engine<->foundation seam on a synthetic 200k BRM."""
     event = _synthetic_event()
     plan = baseline_plan(event)
 
     print("=== Synthetic 200k BRM ===")
     print(f"Distance: {plan.summary.get('distance_km')} km")
-    print(f"Required avg speed: {plan.summary.get('required_avg_speed_kmh')} km/h")
+    print(f"Ascent: {plan.summary.get('ascent_m')} m")
+    print(f"Predicted avg speed: {plan.summary.get('predicted_avg_speed_kmh')} km/h ({plan.summary.get('model_source')}, {plan.summary.get('confidence')})")
+    print(f"Required avg speed (cutoff constraint): {plan.summary.get('required_avg_speed_kmh')} km/h")
     print(f"Moving time: {plan.summary.get('moving_time_hours')} hours")
     print(f"Finish time: {plan.summary.get('finish_time')}")
-    print(f"Provisional: {plan.provisional}")
 
-    # Sanity checks:
+    # Baseline assembly sanity:
     assert plan.distance_m > 100_000, f"Expected >100km, got {plan.distance_m}m"
-    assert plan.required_avg_speed_kmh > 10, f"Expected >10 km/h, got {plan.required_avg_speed_kmh}"
+    assert plan.moving_time_s > 0
     assert plan.finish_eta_dt is not None
     assert plan.provisional is True
+    # Placeholder prediction goes through the seam (15 km/h) and is labelled as such:
+    assert plan.summary["model_source"] == "placeholder"
+    assert abs(plan.summary["predicted_avg_speed_kmh"] - 15.0) < 0.01
+    # The cutoff still surfaces as an informational required-speed constraint:
+    assert plan.summary["required_avg_speed_kmh"] and plan.summary["required_avg_speed_kmh"] > 10
 
-    # Test estimate_leg stub:
-    leg = estimate_leg(50_000, 500, 500, "asphalt", plan.athlete, plan.bike)
-    print(f"\nEstimate leg (50km, 500m gain): {leg}")
-    assert leg["duration_s"] > 0
-    assert "PROVISIONAL" in leg["notes"]
+    # estimate_leg seam returns a LegEstimate of the agreed shape:
+    leg = estimate_leg(50.0, 500.0, 500.0, plan.athlete, plan.bike)
+    print(f"\nestimate_leg(50km, 500m): {leg.to_dict()}")
+    assert isinstance(leg, LegEstimate)
+    assert leg.moving_time_s > 0 and leg.avg_speed_kmh > 0
+    assert leg.model_source == "placeholder"
+
+    # CONTRACT TEST: baseline_plan consumes an injected estimator without knowing its internals.
+    # This proves the engine's real curve-first model will drop in cleanly at this seam.
+    def mock_estimator(distance_km, ascent_m, descent_m, athlete, bike, conditions=None):
+        return LegEstimate(moving_time_s=7200.0, avg_speed_kmh=distance_km / 2.0,
+                           confidence="high", model_source="personal")
+    mocked = baseline_plan(event, estimator=mock_estimator)
+    assert mocked.moving_time_s == 7200.0, "baseline_plan must use the injected estimator's time"
+    assert mocked.summary["model_source"] == "personal", "seam metadata must propagate to the plan"
+    assert mocked.summary["confidence"] == "high"
+    print(f"Contract test (mocked estimator): moving_time={mocked.moving_time_s}s, "
+          f"source={mocked.summary['model_source']} → seam wired correctly")
 
     print("\n✓ All selftest checks passed")
 
