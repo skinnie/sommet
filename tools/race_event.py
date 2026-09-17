@@ -70,8 +70,16 @@ class Cutoff:
 class AthleteInputs:
     """User-provided athlete physical parameters."""
     weight_kg: float
-    ftp_w: Optional[float] = None  # threshold power; optional
-    rmr_kcal_day: Optional[float] = None  # resting metabolic rate; optional
+    ftp_w: Optional[float] = None  # threshold power; optional, dormant in the v1 prediction path
+    rmr_kcal_day: Optional[float] = None  # resting metabolic rate; optional, dormant in v1
+    # Resolved, calibrated riding profile — the carrier that reaches estimate_leg (agreed with the
+    # engine session, 2026-09-18). estimate_leg stays PURE: it READS this, it does not compute it.
+    # An upstream calibration component (engine's Task B, separate from this seam) fits it from a
+    # recent trailing window of filtered rides and populates it here. Shape:
+    #   {"base_speed_kmh": float, "confidence": "low"|"medium"|"high",
+    #    "model_source": "personal"|"generic"|"physics", "n_recent_rides": int}
+    # None until calibration has run (cold start) -> estimate_leg falls back to its placeholder.
+    speed_profile: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -363,15 +371,26 @@ def estimate_leg(distance_km: float, ascent_m: float, descent_m: float,
     Returns:
         LegEstimate(moving_time_s, avg_speed_kmh, confidence, model_source)
     """
-    # Naive placeholder: 15 km/h constant, ignores climb/conditions/physics entirely.
-    speed_kmh = 15.0
+    # Placeholder body. It READS the calibrated profile if present (proving the seam field flows),
+    # but stays FLAT - it does NOT apply the climb-density curve. The engine replaces this body
+    # with `moving_speed = max(base_speed - (climb_density/300)^1.2, 4)` when Task B is greenlit.
+    profile = athlete.speed_profile if athlete else None
+    if profile and profile.get("base_speed_kmh"):
+        speed_kmh = float(profile["base_speed_kmh"])
+        confidence = profile.get("confidence", "medium")
+        model_source = profile.get("model_source", "personal")
+    else:
+        speed_kmh = 15.0                # cold-start fallback until calibration has run
+        confidence = "low"
+        model_source = "placeholder"
+
     moving_time_s = (distance_km / speed_kmh) * 3600.0 if speed_kmh > 0 else 0.0
 
     return LegEstimate(
         moving_time_s=round(moving_time_s, 1),
         avg_speed_kmh=round(speed_kmh, 1),
-        confidence="low",
-        model_source="placeholder",
+        confidence=confidence,
+        model_source=model_source,
     )
 
 
@@ -423,6 +442,20 @@ def _selftest():
     assert isinstance(leg, LegEstimate)
     assert leg.moving_time_s > 0 and leg.avg_speed_kmh > 0
     assert leg.model_source == "placeholder"
+
+    # SEAM FIELD: a calibrated speed_profile on the athlete flows through estimate_leg and into
+    # the plan (proves the engine's calibration output has a defined home). Still flat here -
+    # the climb-density curve is the engine's to add in estimate_leg's body.
+    calibrated = AthleteInputs(weight_kg=86.0, speed_profile={
+        "base_speed_kmh": 24.0, "confidence": "high", "model_source": "personal",
+        "n_recent_rides": 40})
+    leg2 = estimate_leg(50.0, 500.0, 500.0, calibrated, plan.bike)
+    assert abs(leg2.avg_speed_kmh - 24.0) < 0.01, "profile base_speed must reach estimate_leg"
+    assert leg2.model_source == "personal" and leg2.confidence == "high"
+    plan3 = baseline_plan(event, athlete=calibrated)
+    assert plan3.summary["model_source"] == "personal", "profile metadata must reach the plan"
+    print(f"Profile flow: base 24.0 -> plan predicted {plan3.summary['predicted_avg_speed_kmh']} km/h, "
+          f"source={plan3.summary['model_source']}")
 
     # CONTRACT TEST: baseline_plan consumes an injected estimator without knowing its internals.
     # This proves the engine's real curve-first model will drop in cleanly at this seam.
