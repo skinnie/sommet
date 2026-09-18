@@ -229,6 +229,114 @@ def build_speed_profile(rides: Optional[List[Dict[str, Any]]] = None,
     return None
 
 
+# --- rolling-stop ratio (the "stops" model, 2026-09-18) -------------------------------------
+# Stops split into ROLLING stops (eat/pee/refill/checkpoint/short rest) - a near-constant
+# FRACTION of ride time - and SLEEP, a discrete block handled separately (never in the ratio).
+# André's rides: stop/moving ~16-24% (median ~19%); his ultra friend's Transiberica sheet used
+# 16.7%. So the rolling ratio is personal-but-stable, calibrated the same way as base_speed.
+DEFAULT_STOP_RATIO = 0.18   # Sommet COLD-START default (stop_time / moving_time). NOT a "population
+                            # average" - just a conservative default, replaced by the personal
+                            # ratio the moment the rider has history carrying both times.
+STOP_RATIO_MAX = 0.60       # sane clamp; above this the ride was mostly stopped (café/social/bad data)
+DEFAULT_CONTROL_BASE_S = 600.0  # ~10 min baseline faff at a genuine control
+
+
+def _stop_ratio_of(ride: Dict[str, Any]) -> Optional[float]:
+    """stop_time / moving_time for one ride. Needs BOTH elapsed and moving time - which the local
+    Sommet activities DB does NOT store (moving only), so this only works on FIT/intervals rides."""
+    el, mv = ride.get("elapsed_time_s"), ride.get("moving_time_s")
+    if not el or not mv or el <= 0 or mv <= 0 or el < mv:
+        return None
+    r = (el - mv) / mv
+    return r if 0.0 <= r <= STOP_RATIO_MAX else None
+
+
+def stop_ratio_from_rides(rides: List[Dict[str, Any]], now: Optional[datetime] = None,
+                          window_days: int = DEFAULT_WINDOW_DAYS) -> Dict[str, Any]:
+    """Personal rolling-stop ratio = median(stop/moving) over a CURATED, recent set of rides that
+    carry both elapsed and moving time. Same recency window + inclusion filter as base_speed.
+    Returns {ratio, source, confidence, n_recent_rides}; falls back to the Sommet default when no
+    ride carries the elapsed-vs-moving gap (e.g. the rider only has moving-only DB activities)."""
+    clean = [r for r in rides if is_calibration_ride(r)]
+    dated = [(_ride_date(r), r) for r in clean]
+    ref = now or max((d for d, _ in dated if d), default=None)
+    window = clean
+    if ref is not None:
+        days = window_days
+        window = [r for d, r in dated if d and d >= ref - timedelta(days=days)]
+        while len(window) < MIN_WINDOW_RIDES and days < 4000:
+            days *= 2
+            window = [r for d, r in dated if d and d >= ref - timedelta(days=days)]
+        if len(window) < MIN_WINDOW_RIDES:
+            window = clean
+    ratios = [x for x in (_stop_ratio_of(r) for r in window) if x is not None]
+    if not ratios:
+        return {"ratio": DEFAULT_STOP_RATIO, "source": "default", "confidence": "low", "n_recent_rides": 0}
+    n = len(ratios)
+    confidence = "high" if n >= TARGET_WINDOW_RIDES else ("medium" if n >= MIN_WINDOW_RIDES else "low")
+    return {"ratio": round(statistics.median(ratios), 3), "source": "personal",
+            "confidence": confidence, "n_recent_rides": n}
+
+
+def distribute_stops(control_idxs: List[int], leg_moving_s: List[float],
+                     stop_ratio: float = DEFAULT_STOP_RATIO,
+                     per_control_base_s: float = DEFAULT_CONTROL_BASE_S,
+                     overrides: Optional[Dict[int, float]] = None) -> Dict[int, float]:
+    """Allocate a rolling-stop budget across a route's genuine CONTROLS. Pure + unit-testable; the
+    timeline calls this to turn a stop_ratio into per-control stop seconds.
+
+    Args:
+        control_idxs: leg indices that END at a genuine control eligible for a stop (exclude the
+            finish leg). Legs not listed get nothing - we do NOT manufacture a stop just because a
+            route was segmented (PM rule). Empty -> {} (caller applies the aggregate to elapsed).
+        leg_moving_s: full per-leg moving-seconds list (all legs, incl. the finish leg).
+        stop_ratio: rolling budget = stop_ratio * sum(leg_moving_s)  (total moving time).
+        per_control_base_s: fixed base per eligible control (checkpoint faff).
+        overrides: {control_leg_index: seconds} manual values. They WIN, and the TOTAL budget is
+            preserved: the remainder is redistributed among non-overridden controls, so editing one
+            control never silently changes total race time (PM rule).
+
+    Returns:
+        {control_leg_index: stop_seconds} for the controls in control_idxs. Non-control legs are
+        absent (=> 0). sum(returned values) == stop_ratio * total_moving (the budget is preserved).
+    """
+    control_idxs = [i for i in control_idxs if 0 <= i < len(leg_moving_s)]
+    overrides = {int(i): max(0.0, float(v))
+                 for i, v in (overrides or {}).items() if int(i) in control_idxs}
+    out: Dict[int, float] = dict(overrides)  # overridden controls take their fixed value
+
+    eligible = [i for i in control_idxs if i not in overrides]
+    budget = max(0.0, stop_ratio) * sum(leg_moving_s)
+    remaining = max(0.0, budget - sum(overrides.values()))
+    if not eligible:
+        return out
+
+    base_total = per_control_base_s * len(eligible)
+    if base_total >= remaining:  # budget too small for full bases: split what's left equally
+        share = remaining / len(eligible)
+        for i in eligible:
+            out[i] = share
+        return out
+    leftover = remaining - base_total
+    moving_of_eligible = sum(leg_moving_s[i] for i in eligible) or 1.0
+    for i in eligible:
+        out[i] = per_control_base_s + leftover * (leg_moving_s[i] / moving_of_eligible)
+    return out
+
+
+# Sleep suggestion tiers (SUGGESTION only - the rider decides; never modelled/optimised).
+def suggest_sleep_s(predicted_elapsed_s: float) -> int:
+    """PM tiers: <20h none, 20-30h ~1h, 30-40h ~3h, >40h ~5h (midpoints of the suggested ranges)."""
+    h = predicted_elapsed_s / 3600.0
+    if h < 20:
+        return 0
+    if h < 30:
+        return 1 * 3600
+    if h < 40:
+        return 3 * 3600
+    return 5 * 3600
+
+
 def ride_summary_from_fit(path: str) -> Optional[Dict[str, Any]]:
     """Load the calibration-relevant summary from one FIT file (the one-FIT cold-start path and
     the --validate mode). Uses fit_decode's moving time (total_timer_time); falls back to elapsed
@@ -271,6 +379,27 @@ _ANDRE_RIDES_RAW = [
 def _andre_fixture() -> List[Dict[str, Any]]:
     return [{"date": d, "distance_km": km, "ascent_m": asc, "moving_time_s": int(h * 3600)}
             for d, km, asc, h in _ANDRE_RIDES_RAW]
+
+
+# Real (moving_h, elapsed_h) pairs for the rides that recorded auto-pause, for stop-ratio tests.
+# The five 2021 Alpine rides are omitted: their FITs have timer==elapsed (auto-pause was off), so
+# they carry no usable stop gap - exactly the kind of ride _stop_ratio_of() returns None for.
+_ANDRE_STOP_RAW = [
+    ("2026-04-04", 300.2, 2335, 14.21, 16.93),
+    ("2026-06-06", 311.8, 2700, 13.24, 16.90),
+    ("2026-06-07", 290.4, 2292, 12.53, 15.51),
+    ("2023-02-25", 202.7, 915, 8.07, 9.60),
+    ("2023-04-01", 313.0, 2152, 12.87, 14.97),
+    ("2024-02-17", 280.2, 1906, 11.51, 14.12),
+    ("2024-03-16", 203.2, 1240, 7.03, 8.35),
+    ("2022-03-19", 205.7, 1271, 8.44, 9.00),
+]
+
+
+def _andre_stop_fixture() -> List[Dict[str, Any]]:
+    return [{"date": d, "distance_km": km, "ascent_m": asc,
+             "moving_time_s": int(mv * 3600), "elapsed_time_s": int(el * 3600)}
+            for d, km, asc, mv, el in _ANDRE_STOP_RAW]
 
 
 def _selftest():
@@ -332,6 +461,35 @@ def _selftest():
                                     "sport": "gravel"})                                           # off-road (v1 road-only)
     assert is_calibration_ride({"distance_km": 120, "ascent_m": 800, "moving_time_s": int(5 * 3600)})  # good road ride
     print("Inclusion rules: short/corrupt/gravel rejected, clean road ride accepted ✓")
+
+    # --- rolling-stop ratio ---
+    sp = stop_ratio_from_rides(_andre_stop_fixture(), now=None, window_days=4000)
+    print(f"Stop ratio (curated fixture): {sp['ratio']} ({sp['source']}, {sp['confidence']}, n={sp['n_recent_rides']})")
+    assert sp["source"] == "personal" and 0.15 <= sp["ratio"] <= 0.24 and sp["n_recent_rides"] == 8
+    # Rides without elapsed (e.g. moving-only DB activities) -> Sommet default, not a crash.
+    assert stop_ratio_from_rides(_andre_fixture())["source"] == "default"
+    assert stop_ratio_from_rides(_andre_fixture())["ratio"] == DEFAULT_STOP_RATIO
+
+    # --- distribute_stops: budget preserved, overrides win + redistribute ---
+    legs = [3600.0, 3600.0, 3600.0, 3600.0]  # 4 legs; leg 3 is the finish (not a control)
+    controls = [0, 1, 2]
+    budget = 0.20 * sum(legs)
+    st = distribute_stops(controls, legs, stop_ratio=0.20, per_control_base_s=600.0)
+    assert 3 not in st, "finish leg is not a control -> absent"
+    assert abs(sum(st.values()) - budget) < 1e-6, "total rolling budget must equal ratio*moving"
+    st2 = distribute_stops(controls, legs, stop_ratio=0.20, per_control_base_s=600.0, overrides={1: 1800.0})
+    assert st2[1] == 1800.0, "override wins"
+    assert abs(sum(st2.values()) - budget) < 1e-6, "budget preserved after override (remainder redistributed)"
+    assert distribute_stops([], legs, stop_ratio=0.20) == {}, "no controls -> {} (caller aggregates)"
+    print(f"distribute_stops: budget {budget:.0f}s preserved (plain { {k: round(v) for k, v in st.items()} }, "
+          f"CP2 override 1800 -> { {k: round(v) for k, v in st2.items()} })")
+
+    # --- sleep suggestion tiers ---
+    assert suggest_sleep_s(15 * 3600) == 0
+    assert suggest_sleep_s(25 * 3600) == 3600
+    assert suggest_sleep_s(35 * 3600) == 3 * 3600
+    assert suggest_sleep_s(50 * 3600) == 5 * 3600
+    print("Sleep tiers: 15h->0, 25h->1h, 35h->3h, 50h->5h ✓")
 
     print("\n✓ All race_calibration selftest checks passed")
 
