@@ -290,6 +290,13 @@ Item {
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 
+                        Text {
+                            Layout.fillWidth: true
+                            visible: timeline && timeline.sleep_suggested_s > 0
+                            text: qsTr("Long ride — consider planning about %1 of sleep.").arg(timeline ? fmtDur(timeline.sleep_suggested_s) : "")
+                            color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+
                         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
                         // per-control table header

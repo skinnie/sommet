@@ -38,6 +38,34 @@ from race_event import AthleteInputs, BikeInputs, RaceEvent, estimate_route
 
 _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 
+# Default per-control base stop (s) before the proportional remainder is added (PM: ~10-15 min).
+_DEFAULT_CONTROL_BASE_S = 600.0
+
+
+def _suggest_sleep_s(elapsed_s_no_sleep: float) -> int:
+    """Suggested sleep (seconds) for a predicted sleepless elapsed time. Delegates to the engine's
+    race_calibration.suggest_sleep_s (tiers <20h:0, 20-30h:1h, 30-40h:3h, >40h:5h) so there's one
+    implementation; returns 0 if that module isn't importable. Suggestion only, never applied."""
+    try:
+        import race_calibration
+        return int(race_calibration.suggest_sleep_s(elapsed_s_no_sleep))
+    except (ImportError, AttributeError):
+        return 0
+
+
+def _default_distribute_stops(controls, leg_moving_s, stop_ratio, per_control_base_s, overrides):
+    """Production stop distributor: the engine's race_calibration.distribute_stops. Imported
+    lazily so this module loads even before that helper ships; raises a clear error if a caller
+    asks for ratio-based stops before the engine side has landed (tests inject a mock instead)."""
+    try:
+        import race_calibration
+        return race_calibration.distribute_stops(
+            controls, leg_moving_s, stop_ratio, per_control_base_s, overrides)
+    except (ImportError, AttributeError) as e:
+        raise RuntimeError(
+            "ratio-based stop distribution needs race_calibration.distribute_stops "
+            "(engine workstream); pass stops_s to override, or a stop_distributor for tests") from e
+
 
 def _route_points(event: RaceEvent) -> List[Dict[str, Any]]:
     """Route coordinates from explicit points, else parsed from the event's GPX."""
@@ -106,7 +134,11 @@ def _fmt(dt: Optional[datetime]) -> Optional[str]:
 def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    bike: Optional[BikeInputs] = None,
                    stops_s: Optional[List[float]] = None,
-                   route_estimator: Optional[Callable[..., Dict[str, Any]]] = None) -> Dict[str, Any]:
+                   stop_profile: Optional[Dict[str, Any]] = None,
+                   sleep: Optional[Dict[str, Any]] = None,
+                   control_overrides: Optional[Dict[int, float]] = None,
+                   route_estimator: Optional[Callable[..., Dict[str, Any]]] = None,
+                   stop_distributor: Optional[Callable[..., Dict[int, float]]] = None) -> Dict[str, Any]:
     """Assemble the full race timeline.
 
     - Segments the route at each control's distance (event.cutoffs) plus the finish.
@@ -116,11 +148,24 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     - Walks the clock from event.start_dt to give each control an arrival + departure time.
     - Computes cutoff margins (control.cutoff_dt - predicted arrival); negative = you miss it.
 
-    `route_estimator` is injectable only for tests; production uses estimate_route.
+    Stops (2026-09-18 increment):
+      - stops_s: raw per-leg seconds - the ESCAPE HATCH; if given, used verbatim (finish forced 0).
+      - stop_profile: {"ratio", "source", "confidence"} - a calibrated stop/moving ratio (from
+        race_calibration.stop_ratio_from_rides). The rolling budget (ratio x total moving) is
+        distributed ONLY across genuine controls via race_calibration.distribute_stops; a manual
+        control override wins while the total stays fixed. With NO controls, the budget is applied
+        as a single aggregate to elapsed (no manufactured per-leg stops), per the PM.
+      - control_overrides: {control_leg_index: seconds} manual per-control stops.
+      - sleep: {"enabled": bool, "duration_s": float} - added ON TOP of stops (never in the ratio),
+        as a lump on elapsed/finish for now. A suggestion is always computed by tier and returned.
+
+    `route_estimator` / `stop_distributor` are injectable only for tests; production uses
+    estimate_route / race_calibration.distribute_stops.
     """
     athlete = athlete or AthleteInputs(weight_kg=75.0)
     bike = bike or BikeInputs(bike_weight_kg=10.0, load_weight_kg=5.0)
     route_estimator = route_estimator or estimate_route
+    stop_distributor = stop_distributor or _default_distribute_stops
 
     points = _route_points(event)
     _, total_m = race_event._cumulative_distances(points) if points else ([], 0.0)
@@ -147,14 +192,36 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     leg_estimates = route_est.get("legs", [])
 
     n = len(legs_geo)
-    if stops_s is None:
-        stops_s = [0.0] * n
-    elif len(stops_s) < n:
-        stops_s = list(stops_s) + [0.0] * (n - len(stops_s))
+    leg_moving_s = [float(leg_estimates[i].get("moving_time_s", 0.0)) if i < len(leg_estimates)
+                    else 0.0 for i in range(n)]
+    total_moving_s = sum(leg_moving_s)
+
+    # Genuine stop-controls = legs that END at an interior control (the finish leg never gets a
+    # stop). end_controls == interior + [finish], so interior controls are leg indices 0..len-1.
+    genuine_idxs = list(range(len(interior)))
+
+    # Resolve the per-leg stop schedule from (priority) the raw escape hatch, else a calibrated
+    # stop_profile, else nothing. aggregate_stop_s is only used when there are no genuine controls.
+    leg_stops = [0.0] * n
+    aggregate_stop_s = 0.0
+    if stops_s is not None:                       # escape hatch: use verbatim
+        for i in range(min(n, len(stops_s))):
+            leg_stops[i] = float(stops_s[i])
+    elif stop_profile and float(stop_profile.get("ratio", 0.0)) > 0.0:
+        ratio = float(stop_profile["ratio"])
+        base_s = float(stop_profile.get("per_control_base_s", _DEFAULT_CONTROL_BASE_S))
+        if genuine_idxs:
+            dist = stop_distributor(genuine_idxs, leg_moving_s, ratio, base_s,
+                                    control_overrides or {})
+            for idx, secs in dist.items():
+                if 0 <= idx < n:
+                    leg_stops[idx] = float(secs)
+        else:
+            aggregate_stop_s = ratio * total_moving_s  # no controls -> one lump, per PM rule 1
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
-    total_moving_s = 0.0
+    running_moving_s = 0.0
     total_stop_s = 0.0
     worst_margin_s: Optional[float] = None
     worst_margin_label: Optional[str] = None
@@ -166,10 +233,10 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                                                               "confidence": "low", "model_source": "placeholder"}
         ctrl = end_controls[i] if i < len(end_controls) else None
         move_s = float(lt.get("moving_time_s", 0.0))
-        total_moving_s += move_s
+        running_moving_s += move_s
         arrival = clock + timedelta(seconds=move_s)
 
-        stop_s = float(stops_s[i]) if i < len(stops_s) else 0.0
+        stop_s = leg_stops[i]
         # No stop at the very finish.
         is_finish = (i == n - 1)
         if is_finish:
@@ -195,6 +262,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             "avg_speed_kmh": lt.get("avg_speed_kmh"),
             "arrival_dt": _fmt(arrival),
             "stop_s": round(stop_s, 1),
+            "stop_overridden": bool(control_overrides and i in control_overrides and not is_finish),
             "depart_dt": _fmt(depart),
             "cutoff_dt": _fmt(cutoff_dt),
             "margin_s": None if margin_s is None else round(margin_s, 1),
@@ -202,7 +270,22 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         })
         clock = depart
 
-    finish_eta = clock  # last depart == arrival at finish (no finish stop)
+    # No-controls case: the calibrated stop budget applies as a single aggregate on elapsed.
+    if aggregate_stop_s > 0:
+        total_stop_s += aggregate_stop_s
+        clock = clock + timedelta(seconds=aggregate_stop_s)
+
+    # Sleep sits ON TOP of stops (never in the ratio). A suggestion is always computed from the
+    # sleepless elapsed; an explicit enabled SleepPlan is added as a lump (not yet placed at a
+    # specific control - that's a later refinement).
+    elapsed_no_sleep_s = (clock - event.start_dt).total_seconds()
+    sleep_suggested_s = _suggest_sleep_s(elapsed_no_sleep_s)
+    sleep_s = 0.0
+    if sleep and sleep.get("enabled") and float(sleep.get("duration_s", 0.0)) > 0:
+        sleep_s = float(sleep["duration_s"])
+        clock = clock + timedelta(seconds=sleep_s)
+
+    finish_eta = clock
     elapsed_s = (finish_eta - event.start_dt).total_seconds()
 
     total_ascent_m = round(sum(l["ascent_m"] for l in legs_geo), 1)
@@ -215,9 +298,12 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         "finish_eta_dt": _fmt(finish_eta),
         "moving_time_s": round(total_moving_s, 1),
         "stop_time_s": round(total_stop_s, 1),
+        "sleep_time_s": round(sleep_s, 1),
         "elapsed_time_s": round(elapsed_s, 1),
         "confidence": route_est.get("confidence", "low"),
         "model_source": route_est.get("model_source", "placeholder"),
+        "stop_source": (stop_profile or {}).get("source") if stop_profile and stops_s is None else ("manual" if stops_s is not None else None),
+        "sleep_suggested_s": sleep_suggested_s,
         "worst_margin_s": None if worst_margin_s is None else round(worst_margin_s, 1),
         "worst_margin_control": worst_margin_label,
         "per_control_provisional": per_leg_provisional,
@@ -298,12 +384,50 @@ def _selftest():
     print(f"\nContract (mock 20km/h, no stops): elapsed {h(tl2['elapsed_time_s'])} "
           f"for {tl2['distance_km']} km -> seam wired correctly")
 
+    # --- stops increment (2026-09-18): calibrated ratio distributed across controls ---
+    tlr = build_timeline(event, athlete=athlete,
+                         stop_profile={"ratio": 0.2, "source": "personal", "confidence": "high"})
+    budget = 0.2 * tlr["moving_time_s"]
+    assert abs(tlr["stop_time_s"] - budget) < 1.0, (tlr["stop_time_s"], budget)  # total == ratio x moving
+    # stops land on the 3 genuine controls, not the finish.
+    assert tlr["controls"][3]["stop_s"] == 0.0
+    assert all(tlr["controls"][i]["stop_s"] > 0 for i in range(3))
+    assert tlr["stop_source"] == "personal"
+    print(f"Stop ratio 0.2: budget {h(budget)} across 3 controls "
+          f"({[int(tlr['controls'][i]['stop_s']) for i in range(3)]} s), finish 0")
+
+    # Override wins AND total budget stays fixed (redistributed among the others).
+    tlo = build_timeline(event, athlete=athlete,
+                         stop_profile={"ratio": 0.2}, control_overrides={1: 3600})
+    assert abs(tlo["stop_time_s"] - budget) < 1.0, "override must not change the total budget"
+    assert abs(tlo["controls"][1]["stop_s"] - 3600) < 1.0 and tlo["controls"][1]["stop_overridden"]
+    print(f"Override C2=1h: total still {h(tlo['stop_time_s'])} (redistributed), C2 fixed at 1h00")
+
+    # No controls -> budget applied as a single aggregate to elapsed, no manufactured per-leg stops.
+    from race_event import RaceEvent as _RE
+    ev_nc = _RE(name="No controls", event_type="ultra", start_dt=event.start_dt,
+                points=event.points, cutoffs=[])
+    tlnc = build_timeline(ev_nc, athlete=athlete, stop_profile={"ratio": 0.2})
+    assert len(tlnc["controls"]) == 1  # just the whole-route/finish leg
+    assert tlnc["controls"][0]["stop_s"] == 0.0
+    assert abs(tlnc["stop_time_s"] - 0.2 * tlnc["moving_time_s"]) < 1.0
+    print(f"No controls: aggregate stop {h(tlnc['stop_time_s'])} on elapsed (no per-leg stops)")
+
+    # Sleep: suggestion is computed from sleepless elapsed; an enabled plan adds a lump on top.
+    tls = build_timeline(event, athlete=athlete, stops_s=[0, 0, 0, 0],
+                         sleep={"enabled": True, "duration_s": 3600})
+    assert tls["sleep_time_s"] == 3600
+    assert abs(tls["elapsed_time_s"] - (tls["moving_time_s"] + tls["stop_time_s"] + 3600)) < 1.0
+    assert "sleep_suggested_s" in tls and isinstance(tls["sleep_suggested_s"], int)
+    print(f"Sleep +1h applied; suggestion for this ride: {h(tls['sleep_suggested_s'])}")
+
     print("\n✓ All race_timeline selftest checks passed")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Race timeline assembly")
-    parser.add_argument("input_file", nargs="?", help="JSON {event, athlete?, bike?, stops_s?}")
+    parser.add_argument("input_file", nargs="?",
+                        help="JSON {event, athlete?, bike?, stops_s?, stop_profile?, sleep?, control_overrides?}")
     parser.add_argument("--selftest", action="store_true", help="Run self-tests")
     args = parser.parse_args(argv)
 
@@ -320,8 +444,14 @@ def main(argv=None):
         event = RaceEvent.from_dict(body.get("event", {}))
         athlete = AthleteInputs.from_dict(body["athlete"]) if body.get("athlete") else None
         bike = BikeInputs.from_dict(body["bike"]) if body.get("bike") else None
-        stops_s = body.get("stops_s")
-        tl = build_timeline(event, athlete, bike, stops_s)
+        # JSON object keys are strings; control_overrides is keyed by control leg-index.
+        raw_ov = body.get("control_overrides") or {}
+        overrides = {int(k): float(v) for k, v in raw_ov.items()}
+        tl = build_timeline(event, athlete, bike,
+                            stops_s=body.get("stops_s"),
+                            stop_profile=body.get("stop_profile"),
+                            sleep=body.get("sleep"),
+                            control_overrides=overrides or None)
         print(json.dumps({"ok": tl.get("ok", False), "timeline": tl}))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}))
