@@ -179,6 +179,8 @@ def _read_data(r, definition, arch, records, session, comp_ts):
             session["start_time"] = vals[2]
         if vals.get(7) is not None:
             session["elapsed_s"] = vals[7] / 1000.0        # scale 1000
+        if vals.get(8) is not None:
+            session["timer_s"] = vals[8] / 1000.0          # total_timer_time (moving time), scale 1000
         if vals.get(9) is not None:
             session["distance_m"] = vals[9] / 100.0        # scale 100
         if vals.get(11) is not None:
@@ -206,6 +208,7 @@ def _summarize(session, records, path):
         "sportCode": sport,
         "startTime": _iso(start),
         "durationSeconds": int(session.get("elapsed_s") or 0),
+        "movingSeconds": int(session.get("timer_s") or 0),  # total_timer_time; 0 if the device didn't record it
         "distanceMeters": float(session.get("distance_m") or 0.0),
         "ascentMeters": float(session.get("ascent_m") or 0.0),
         "energyKcal": int(session.get("calories") or 0),

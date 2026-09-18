@@ -7,11 +7,13 @@ This is the foundation for the BRM/ultra-distance race planner. It defines:
   - AthleteInputs: weight, FTP, RMR (required, optional, optional)
   - BikeInputs: bike weight, load weight, type, aero category
 
-The baseline_plan() function does pure distance/time math (constant speed), with a stub
-estimate_leg() interface for the future performance model (BRouter-physics-based ETA).
+baseline_plan() assembles a plan; the PREDICTED moving time comes from the estimate_leg() seam,
+which now carries the curve-first empirical speed model (engine, 2026-09-18): a rider's moving
+speed as a function of how much a route climbs, calibrated per rider from ride history by
+tools/race_calibration.py. estimate_leg() stays PURE (reads athlete.speed_profile; never fetches).
 
 No network, no geometry -- just JSON round-tripping + arithmetic on distances/times.
-Stdlib only. `--selftest` proves the maths on a synthetic event.
+Stdlib only. `--selftest` proves the maths + the seam on a synthetic event.
 """
 
 from __future__ import annotations
@@ -345,42 +347,83 @@ class LegEstimate:
         return asdict(self)
 
 
+# --- Curve-first speed model (engine, 2026-09-18) -------------------------------------------
+# Empirical moving-speed-vs-climbing model. Validated against André's ride history AND his
+# experienced ultra friend's hardware-proven Transiberica planner (which predicted a real
+# 168 h / 2841 km / 40860 m finish within ~2 h). The model:
+#
+#     climb_density   = ascent_m / distance_km * 100          # metres climbed per 100 km
+#     moving_speed_kmh = max(base_speed_kmh - (climb_density / 300) ** 1.2, 4)
+#
+# base_speed_kmh is the ONLY rider-specific term (calibrated from history by race_calibration).
+# The SHAPE - the 300 divisor, the 1.2 exponent, the 4 km/h floor - is a fixed constant: it fit
+# two different riders with only `base` changing, so it is deliberately NOT per-rider in v1.
+#
+# NOTE 1 (UI): base is a flat-road (zero-climb) INTERCEPT the rider never actually rides - for
+# André it fits ~27 while his real rolling rides sit ~24 km/h. The UI must show the predicted
+# speed AT the route's real climb density, never this raw base.
+# NOTE 2 (granularity, important): v1 treats the whole route as ONE leg, so the curve sees the
+# route's AVERAGE climb density. The curve is convex, so calibration MUST fit base at the SAME
+# granularity it predicts at (whole-ride climb density vs whole-ride moving speed) or the bias
+# will not cancel. Per-control segmentation + matching calibration arrive with the Timeline layer.
+CURVE_DIVISOR = 300.0
+CURVE_EXPONENT = 1.2
+CURVE_FLOOR_KMH = 4.0
+
+
+def climb_density_m_per_100km(distance_km: float, ascent_m: float) -> float:
+    """Metres climbed per 100 km - the single input the speed curve is shaped on."""
+    if distance_km <= 0:
+        return 0.0
+    return (ascent_m or 0.0) / distance_km * 100.0
+
+
+def curve_speed_kmh(base_speed_kmh: float, climb_density: float) -> float:
+    """The curve: base speed minus a convex climbing penalty, floored so it never predicts a
+    stall. Shared with race_calibration (which inverts it to back-solve base from a ride)."""
+    return max(base_speed_kmh - (climb_density / CURVE_DIVISOR) ** CURVE_EXPONENT, CURVE_FLOOR_KMH)
+
+
 def estimate_leg(distance_km: float, ascent_m: float, descent_m: float,
                  athlete: AthleteInputs, bike: BikeInputs,
                  conditions: Optional[Dict[str, Any]] = None) -> LegEstimate:
     """Estimate moving time for one route leg. THE engine<->foundation seam.
 
-    PLACEHOLDER (foundation phase): returns a naive constant-speed guess. The engine
-    workstream replaces this body with the curve-first empirical model (calibrated per rider
-    from ride history) without changing this signature or the LegEstimate shape, so nothing
-    on the foundation side has to change when the real estimator lands.
+    Applies the curve-first speed model: reads the rider's calibrated base_speed from
+    athlete.speed_profile and shapes it by the leg's climb density
+    (moving_speed = max(base - (climb_density/300)^1.2, 4)). Stays PURE - it consumes the
+    profile that race_calibration produced upstream; it never loads ride history itself.
 
     Contract (agreed with the PM, 2026-09-18):
-      - per-leg is the primitive; a thin estimate_route() aggregator lives in the engine.
+      - per-leg is the primitive; the thin estimate_route() aggregator sits just below.
       - v1 is road-only: NO surface parameter (gravel Crr unvalidated).
-      - NO CdA / Crr / RMR / drivetrain / FTP dependence in the v1 prediction path.
+      - NO CdA / Crr / RMR / drivetrain / FTP dependence in the v1 prediction path
+        (athlete.weight & bike are accepted but the curve uses only distance + ascent).
 
     Args:
         distance_km: leg horizontal distance (km)
         ascent_m: leg climbing (m)
-        descent_m: leg descent (m)
-        athlete: AthleteInputs (weight required; FTP/RMR dormant, not used by v1 prediction)
+        descent_m: leg descent (m) - accepted for the seam; the v1 curve does not use it
+        athlete: AthleteInputs; athlete.speed_profile carries the calibrated base_speed
         bike: BikeInputs (weight/load/type; engineering coeffs dormant)
-        conditions: optional {"wind_kmh", "temp_c", ...} the real model may use later
+        conditions: optional {"wind_kmh", "temp_c", ...} a later model may use (unused in v1)
 
     Returns:
         LegEstimate(moving_time_s, avg_speed_kmh, confidence, model_source)
     """
-    # Placeholder body. It READS the calibrated profile if present (proving the seam field flows),
-    # but stays FLAT - it does NOT apply the climb-density curve. The engine replaces this body
-    # with `moving_speed = max(base_speed - (climb_density/300)^1.2, 4)` when Task B is greenlit.
     profile = athlete.speed_profile if athlete else None
     if profile and profile.get("base_speed_kmh"):
-        speed_kmh = float(profile["base_speed_kmh"])
+        base = float(profile["base_speed_kmh"])
+        climb_density = climb_density_m_per_100km(distance_km, ascent_m)
+        speed_kmh = curve_speed_kmh(base, climb_density)
         confidence = profile.get("confidence", "medium")
         model_source = profile.get("model_source", "personal")
     else:
-        speed_kmh = 15.0                # cold-start fallback until calibration has run
+        # Cold start: calibration has not run (no history / not yet fitted). Deliberately
+        # conservative flat guess, labelled so the UI says "generic estimate, limited data".
+        # race_calibration.build_speed_profile() is what fills speed_profile upstream (history
+        # fit -> one-FIT back-solve -> self-rating bucket -> weight-based physics prior).
+        speed_kmh = 15.0
         confidence = "low"
         model_source = "placeholder"
 
@@ -392,6 +435,42 @@ def estimate_leg(distance_km: float, ascent_m: float, descent_m: float,
         confidence=confidence,
         model_source=model_source,
     )
+
+
+def estimate_route(legs: List[tuple], athlete: AthleteInputs, bike: BikeInputs,
+                   conditions: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Thin aggregator ABOVE the per-leg primitive. `legs` is a list of
+    (distance_km, ascent_m, descent_m) tuples - e.g. control-to-control segments. Sums
+    estimate_leg over them. v1 callers pass a single whole-route leg; the Timeline layer will
+    pass control segments (which also makes the curve more accurate on very varied routes, since
+    each segment then sees its own climb density instead of the route average).
+
+    Returns totals + the per-leg breakdown. Confidence is the WORST leg's (a plan is only as
+    trustworthy as its least-known segment); model_source is the shared athlete profile's.
+    """
+    leg_estimates: List[LegEstimate] = []
+    total_time_s = 0.0
+    total_km = 0.0
+    for dist_km, ascent, descent in legs:
+        e = estimate_leg(dist_km, ascent, descent, athlete, bike, conditions)
+        leg_estimates.append(e)
+        total_time_s += e.moving_time_s
+        total_km += dist_km
+
+    rank = {"low": 0, "medium": 1, "high": 2}
+    confidence = min((e.confidence for e in leg_estimates),
+                     key=lambda c: rank.get(c, 0), default="low")
+    model_source = leg_estimates[0].model_source if leg_estimates else "placeholder"
+    avg_kmh = round(total_km / (total_time_s / 3600.0), 1) if total_time_s > 0 else 0.0
+
+    return {
+        "moving_time_s": round(total_time_s, 1),
+        "distance_km": round(total_km, 2),
+        "avg_speed_kmh": avg_kmh,
+        "confidence": confidence,
+        "model_source": model_source,
+        "legs": [e.to_dict() for e in leg_estimates],
+    }
 
 
 def _synthetic_event() -> RaceEvent:
@@ -449,13 +528,33 @@ def _selftest():
     calibrated = AthleteInputs(weight_kg=86.0, speed_profile={
         "base_speed_kmh": 24.0, "confidence": "high", "model_source": "personal",
         "n_recent_rides": 40})
+    # Flat leg (0 ascent): the curve returns base exactly.
+    leg_flat = estimate_leg(50.0, 0.0, 0.0, calibrated, plan.bike)
+    assert abs(leg_flat.avg_speed_kmh - 24.0) < 0.01, "flat leg must equal base_speed"
+    # Hilly leg (1000 m/100km): the CURVE bites - speed = 24 - (1000/300)^1.2 ~= 19.76.
     leg2 = estimate_leg(50.0, 500.0, 500.0, calibrated, plan.bike)
-    assert abs(leg2.avg_speed_kmh - 24.0) < 0.01, "profile base_speed must reach estimate_leg"
+    expected = curve_speed_kmh(24.0, climb_density_m_per_100km(50.0, 500.0))
+    assert abs(leg2.avg_speed_kmh - round(expected, 1)) < 0.05, "climb-density curve must apply"
+    assert leg2.avg_speed_kmh < 24.0, "a leg with ascent must be slower than the flat base"
     assert leg2.model_source == "personal" and leg2.confidence == "high"
+    print(f"Curve: base 24.0, flat leg -> {leg_flat.avg_speed_kmh} km/h, "
+          f"1000 m/100km leg -> {leg2.avg_speed_kmh} km/h")
+    # Synthetic route is flat (all ele 400) -> plan predicts base exactly.
     plan3 = baseline_plan(event, athlete=calibrated)
     assert plan3.summary["model_source"] == "personal", "profile metadata must reach the plan"
+    assert abs(plan3.summary["predicted_avg_speed_kmh"] - 24.0) < 0.01, "flat route -> base speed"
     print(f"Profile flow: base 24.0 -> plan predicted {plan3.summary['predicted_avg_speed_kmh']} km/h, "
           f"source={plan3.summary['model_source']}")
+
+    # estimate_route: aggregate over control-to-control legs; worst-leg confidence wins.
+    legs = [(100.0, 400.0, 400.0), (100.0, 2000.0, 1800.0)]  # rolling leg + a big-climb leg
+    route = estimate_route(legs, calibrated, plan.bike)
+    assert abs(route["distance_km"] - 200.0) < 0.01
+    per_leg = [e["avg_speed_kmh"] for e in route["legs"]]
+    assert per_leg[0] > per_leg[1], "the climbier leg must be the slower one"
+    assert route["moving_time_s"] > 0 and route["model_source"] == "personal"
+    print(f"estimate_route(200km, 2 legs): {route['moving_time_s']/3600:.1f} h total, "
+          f"per-leg {per_leg} km/h, confidence={route['confidence']}")
 
     # CONTRACT TEST: baseline_plan consumes an injected estimator without knowing its internals.
     # This proves the engine's real curve-first model will drop in cleanly at this seam.
