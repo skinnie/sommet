@@ -8,7 +8,8 @@ import AmbitApp
 // optionally give your typical rolling-road speed, and get a control-by-control timeline with
 // arrival times and cutoff margins. Speed comes from the engine's curve model via the backend
 // (/api/race/timeline -> race_timeline.py -> estimate_route); this page only collects inputs and
-// renders the result. Not here yet: POIs/water/sleep/what-if, and saving/loading plans.
+// renders the result, plus a What-if panel (re-runs the timeline with speed/stops/sleep tweaked
+// and shows the deltas). Not here yet: POIs/water gaps, and saving/loading plans.
 Item {
     id: root
 
@@ -22,6 +23,12 @@ Item {
     property bool busy: false
     property string statusMsg: ""
     property var timeline: null
+    // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
+    property var basePayload: null
+    property var scenario: null
+    property int whatifSpeed: 0      // km/h added to base speed
+    property int whatifStopMin: 0    // minutes added to each control stop
+    property real whatifSleepH: 0    // hours of sleep added on top
 
     // --- backend call (same XMLHttpRequest idiom as PlanRoutePage / RoutesPage) ---
     function api(method, path, body, cb) {
@@ -97,11 +104,48 @@ Item {
             if (status === 200 && res && res.ok && res.timeline) {
                 timeline = res.timeline
                 routeDistanceKm = timeline.distance_km
+                basePayload = payload            // baseline for what-if diffs
+                scenario = null                 // reset any prior scenario
+                whatifSpeed = 0; whatifStopMin = 0; whatifSleepH = 0
                 statusMsg = ""
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
             }
         })
+    }
+
+    // Re-run the timeline with the what-if knobs layered onto the baseline payload; the panel
+    // shows the scenario vs the baseline. No new backend logic - the same /api/race/timeline.
+    function applyWhatif() {
+        if (!basePayload || !timeline) return
+        var p = JSON.parse(JSON.stringify(basePayload))
+        if (whatifSpeed !== 0 && p.athlete && p.athlete.speed_profile)
+            p.athlete.speed_profile.base_speed_kmh += whatifSpeed
+        if (whatifStopMin !== 0 && p.stops_s)
+            for (var i = 0; i < p.stops_s.length; i++)
+                p.stops_s[i] = Math.max(0, p.stops_s[i] + whatifStopMin * 60)
+        if (whatifSleepH > 0) p.sleep = { enabled: true, duration_s: whatifSleepH * 3600 }
+        api("POST", "/api/race/timeline", p, function(status, res) {
+            if (status === 200 && res && res.ok && res.timeline) scenario = res.timeline
+        })
+    }
+
+    // signed duration delta, e.g. "+52 min" / "−1h10"
+    function deltaTxt(scenSec, baseSec) {
+        var d = Math.round(scenSec - baseSec)
+        if (Math.abs(d) < 30) return qsTr("no change")
+        var sign = d > 0 ? "+" : "−"
+        return sign + fmtDur(Math.abs(d))
+    }
+    // count controls that flip from making the cutoff (baseline) to missing it (scenario)
+    function newlyAtRisk() {
+        if (!scenario || !timeline) return 0
+        var n = 0
+        for (var i = 0; i < scenario.controls.length && i < timeline.controls.length; i++) {
+            var b = timeline.controls[i].margin_s, s = scenario.controls[i].margin_s
+            if (b !== null && s !== null && b >= 0 && s < 0) n++
+        }
+        return n
     }
 
     // duration seconds -> "13h42"
@@ -334,6 +378,94 @@ Item {
                             visible: timeline && timeline.per_control_provisional
                             text: qsTr("Per-control times are provisional (segment-level calibration pending).")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                // --- What if… ---
+                Rectangle {
+                    id: whatifCard
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    visible: timeline && timeline.ok
+                    color: Theme.card
+                    radius: Theme.radiusCard
+                    border.color: Theme.border
+                    border.width: 1
+                    implicitHeight: whatif.implicitHeight + Theme.spacingMedium * 2
+
+                    property bool hasBase: root.basePayload && root.basePayload.athlete && root.basePayload.athlete.speed_profile
+
+                    ColumnLayout {
+                        id: whatif
+                        anchors.fill: parent
+                        anchors.margins: Theme.spacingMedium
+                        spacing: Theme.spacingSmall
+
+                        Text { text: qsTr("What if…"); color: Theme.text; font.weight: Font.Bold }
+
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("Speed"); color: Theme.text; font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 70 }
+                            RoundedButton { text: "−"; Layout.preferredWidth: 34; enabled: whatifCard.hasBase
+                                onClicked: { root.whatifSpeed -= 1; root.applyWhatif() } }
+                            Text { text: (root.whatifSpeed > 0 ? "+" : "") + root.whatifSpeed + " km/h"; color: Theme.text
+                                   font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 74; horizontalAlignment: Text.AlignHCenter }
+                            RoundedButton { text: "+"; Layout.preferredWidth: 34; enabled: whatifCard.hasBase
+                                onClicked: { root.whatifSpeed += 1; root.applyWhatif() } }
+                            Text { visible: !whatifCard.hasBase; text: qsTr("(enter a typical speed above)")
+                                   color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true }
+                            Item { Layout.fillWidth: true; visible: whatifCard.hasBase }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("Stops"); color: Theme.text; font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 70 }
+                            RoundedButton { text: "−"; Layout.preferredWidth: 34; onClicked: { root.whatifStopMin -= 15; root.applyWhatif() } }
+                            Text { text: (root.whatifStopMin > 0 ? "+" : "") + root.whatifStopMin + " min/ctrl"; color: Theme.text
+                                   font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 96; horizontalAlignment: Text.AlignHCenter }
+                            RoundedButton { text: "+"; Layout.preferredWidth: 34; onClicked: { root.whatifStopMin += 15; root.applyWhatif() } }
+                            Item { Layout.fillWidth: true }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("Sleep"); color: Theme.text; font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 70 }
+                            RoundedButton { text: "−"; Layout.preferredWidth: 34; onClicked: { root.whatifSleepH = Math.max(0, root.whatifSleepH - 0.5); root.applyWhatif() } }
+                            Text { text: "+" + root.whatifSleepH + " h"; color: Theme.text
+                                   font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 74; horizontalAlignment: Text.AlignHCenter }
+                            RoundedButton { text: "+"; Layout.preferredWidth: 34; onClicked: { root.whatifSleepH += 0.5; root.applyWhatif() } }
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border; visible: root.scenario }
+
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingLarge; visible: root.scenario
+                            Column {
+                                Text { text: qsTr("NEW FINISH"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: root.scenario ? fmtClock(root.scenario.finish_eta_dt) : "—"; color: Theme.text
+                                       font.pixelSize: Theme.fontSizeSubtitle; font.weight: Font.Bold }
+                            }
+                            Column {
+                                Text { text: qsTr("Δ FINISH"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: root.scenario ? deltaTxt(root.scenario.elapsed_time_s, timeline.elapsed_time_s) : "—"
+                                       color: (root.scenario && root.scenario.elapsed_time_s > timeline.elapsed_time_s + 30) ? marginBad : marginGood
+                                       font.pixelSize: Theme.fontSizeSubtitle }
+                            }
+                            Column {
+                                Text { text: qsTr("Δ WORST MARGIN"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text {
+                                    text: (root.scenario && root.scenario.worst_margin_s !== null && timeline.worst_margin_s !== null)
+                                          ? deltaTxt(root.scenario.worst_margin_s, timeline.worst_margin_s) : "—"
+                                    color: (root.scenario && root.scenario.worst_margin_s !== null && root.scenario.worst_margin_s < 0) ? marginBad : Theme.text
+                                    font.pixelSize: Theme.fontSizeSubtitle
+                                }
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: root.scenario && newlyAtRisk() > 0
+                            text: qsTr("⚠ %1 control(s) would now miss the cutoff.").arg(newlyAtRisk())
+                            color: marginBad; font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }
