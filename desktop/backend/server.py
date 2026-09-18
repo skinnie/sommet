@@ -1281,6 +1281,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_pois(body)
         elif self.path == "/api/race/alerts":
             self._handle_race_alerts(body)
+        elif self.path == "/api/race/calibrate":
+            self._handle_race_calibrate(body)
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2415,6 +2417,23 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "alerts failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_calibrate(self, body):
+        """Body: {"fit_path": "/abs/path.fit"}. Back-solve the rider's base_speed from one ride
+        (race_calibrate.py -> race_calibration). Returns a speed_profile for athlete.speed_profile.
+        Offline (reads a local FIT)."""
+        if not body.get("fit_path"):
+            self._send_json(400, {"error": '"fit_path" is required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_calibrate.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "calibration failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

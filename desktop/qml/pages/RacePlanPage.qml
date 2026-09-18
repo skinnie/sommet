@@ -28,6 +28,7 @@ Item {
     property var pois: null          // race_pois result: POIs + resupply gaps
     property var alerts: null        // race_alerts result: ranked critical points
     property bool poiBusy: false
+    property string calibNote: ""    // feedback after calibrating base_speed from a ride
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -58,6 +59,22 @@ Item {
         timeline = null
         statusMsg = qsTr("Reading route…")
         computeTimeline()   // first pass with whatever controls exist -> reveals distance
+    }
+
+    // Calibrate base_speed from one ride (a FIT) instead of guessing a number.
+    function calibrateFromFit(fileUrl) {
+        var p = fileUrl.toString().replace("file://", "")
+        calibNote = qsTr("Calibrating from your ride…")
+        api("POST", "/api/race/calibrate", { fit_path: decodeURIComponent(p) }, function(status, res) {
+            if (status === 200 && res && res.ok && res.profile) {
+                baseSpeed.text = "" + res.profile.base_speed_kmh
+                calibNote = qsTr("Calibrated from your ride (%1 km / %2 m): base %3 km/h.")
+                    .arg(res.ride.distance_km).arg(res.ride.ascent_m).arg(res.profile.base_speed_kmh)
+                if (gpxText) computeTimeline()   // re-run with the calibrated speed
+            } else {
+                calibNote = qsTr("Couldn't calibrate: ") + ((res && res.error) ? res.error : status)
+            }
+        })
     }
 
     function startIso() {
@@ -308,9 +325,16 @@ Item {
                     RoundedTextField { id: baseSpeed; Layout.fillWidth: true
                                        placeholderText: qsTr("Typical flat-road avg km/h (optional)")
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                    RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
                     RoundedTextField { id: stopMinutes; Layout.preferredWidth: 150
                                        placeholderText: qsTr("Stop/control (min)")
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: calibNote.length > 0
+                    text: calibNote; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    wrapMode: Text.WordWrap
                 }
 
                 // --- Resupply & POIs ---
@@ -697,5 +721,12 @@ Item {
         title: qsTr("Choose a GPX route")
         nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
         onAccepted: root.loadGpx(selectedFile)
+    }
+
+    FileDialog {
+        id: fitDialog
+        title: qsTr("Choose a ride (FIT) to calibrate your speed")
+        nameFilters: [qsTr("FIT files (*.fit *.FIT)"), qsTr("All files (*)")]
+        onAccepted: root.calibrateFromFit(selectedFile)
     }
 }
