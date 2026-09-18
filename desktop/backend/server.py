@@ -1275,6 +1275,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_timeline(body)
         elif self.path == "/api/race/weather":
             self._handle_race_weather(body)
+        elif self.path == "/api/race/sleep":
+            self._handle_race_sleep(body)
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2354,6 +2356,27 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "weather failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_sleep(self, body):
+        """Body: {"gpx"|"points", "controls":[{distance_km,arrival_dt,margin_s}], "start_dt",
+        "tz"?, "suggested_total_s"?, "weather"?:[{km,temp_c}]}. Circadian sleep-window plan
+        (race_sleep.py): where/when to sleep by darkness + moonlight + body clock (+ cold),
+        cutoff-safe. Offline (astro is local)."""
+        if not (body.get("gpx") or body.get("points")) or not body.get("controls") or not body.get("start_dt"):
+            self._send_json(400, {"error": '"gpx"/"points", "controls" and "start_dt" are required'})
+            return
+        if body.get("tz") is None:
+            off = datetime.now().astimezone().utcoffset()
+            body["tz"] = (off.total_seconds() / 3600.0) if off else 0.0
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_sleep.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "sleep plan failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

@@ -24,6 +24,7 @@ Item {
     property string statusMsg: ""
     property var timeline: null
     property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
+    property var sleepPlan: null     // race_sleep result: circadian sleep windows
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -110,7 +111,8 @@ Item {
                 whatifSpeed = 0; whatifStopMin = 0; whatifSleepH = 0
                 statusMsg = ""
                 weather = null
-                fetchWeather()                  // weather + daylight at each control's ETA
+                sleepPlan = null
+                fetchWeather()                  // weather + daylight, then sleep plan (chained)
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
             }
@@ -127,6 +129,25 @@ Item {
                          arrival_dt: timeline.controls[i].arrival_dt })
         api("POST", "/api/race/weather", { gpx: gpxText, controls: ctrls }, function(status, res) {
             weather = (status === 200 && res && res.ok) ? res : null
+            fetchSleep()   // sleep plan can now fold in per-km temperature (cold)
+        })
+    }
+
+    // Circadian sleep windows: where/when to sleep (dark + moonlight + body clock + cold), safe
+    // against cutoffs. Offline via the backend. Uses the timeline's control ETAs + margins.
+    function fetchSleep() {
+        if (!timeline || !gpxText) { sleepPlan = null; return }
+        var ctrls = []
+        for (var i = 0; i < timeline.controls.length; i++)
+            ctrls.push({ label: timeline.controls[i].label,
+                         distance_km: timeline.controls[i].distance_km,
+                         arrival_dt: timeline.controls[i].arrival_dt,
+                         margin_s: timeline.controls[i].margin_s })
+        var payload = { gpx: gpxText, controls: ctrls, start_dt: startIso(),
+                        suggested_total_s: timeline.sleep_suggested_s || 0 }
+        if (weather && weather.controls) payload.weather = weather.controls
+        api("POST", "/api/race/sleep", payload, function(status, res) {
+            sleepPlan = (status === 200 && res && res.ok) ? res : null
         })
     }
     // weather row for control index i (weather.controls is index-aligned with timeline.controls)
@@ -436,6 +457,39 @@ Item {
                             visible: timeline && timeline.per_control_provisional
                             text: qsTr("Per-control times are provisional (segment-level calibration pending).")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+
+                        // --- Sleep plan (circadian: dark + moonlight + body clock + cold) ---
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Theme.spacingSmall
+                            spacing: 4
+                            visible: sleepPlan && sleepPlan.windows && sleepPlan.windows.length > 0
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                            Text { text: qsTr("Sleep plan"); color: Theme.text; font.weight: Font.Bold
+                                   font.pixelSize: Theme.fontSizeCaption }
+                            Repeater {
+                                model: sleepPlan ? sleepPlan.windows : []
+                                delegate: Text {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    color: modelData.cutoff_ok ? Theme.text : marginBad
+                                    text: qsTr("Night %1: sleep %2–%3 (~%4h) near km %5 (%6) — %7%8%9")
+                                        .arg(modelData.night)
+                                        .arg(modelData.start_local).arg(modelData.end_local)
+                                        .arg((modelData.duration_s / 3600).toFixed(1))
+                                        .arg(modelData.km).arg(modelData.near_control || "")
+                                        .arg(modelData.reason)
+                                        .arg(modelData.temp_c !== null ? (", " + Math.round(modelData.temp_c) + "°C") : "")
+                                        .arg(modelData.cutoff_ok ? "" : qsTr("  ⚠ tightens a cutoff"))
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                text: qsTr("Suggestion only — placed in the hours worst for riding (darkest, coldest, body-clock low).")
+                            }
                         }
                     }
                 }
