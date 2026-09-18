@@ -1271,6 +1271,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_weather_route(body)
         elif self.path == "/api/race/plan/create":
             self._handle_race_plan_create(body)
+        elif self.path == "/api/race/timeline":
+            self._handle_race_timeline(body)
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2308,6 +2310,28 @@ class Handler(BaseHTTPRequestHandler):
             Path(path).unlink(missing_ok=True)
 
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "plan failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_timeline(self, body):
+        """Body: {"event": {...} (with gpx or points, start_dt, cutoffs), "athlete"?, "bike"?,
+        "stops_s"?: [sec per leg]}. Assembles the full race timeline (race_timeline.py):
+        control segmentation -> per-leg moving times via the engine seam -> moving/elapsed split
+        with planned stops -> per-control arrival + cutoff margins. Offline (no network)."""
+        event = body.get("event")
+        if not event or not (event.get("gpx") or event.get("points")):
+            self._send_json(400, {"error": '"event" with "gpx" or "points" is required'})
+            return
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+
+        try:
+            code, out, err = run_tool("race_timeline.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "timeline failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

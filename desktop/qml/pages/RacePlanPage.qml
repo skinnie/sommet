@@ -1,14 +1,125 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import AmbitApp
 
-// Race planner foundation (2026-09-17): BRM/ultra planning. Foundation phase shows
-// a simple placeholder — the backend API (/api/race/plan/create) is fully working and
-// tested. This UI will evolve to a full form in follow-up phases. For now, it demonstrates
-// that the page is navigable and the infrastructure is in place.
+// Race planner (2026-09-18): import a GPX, set the start + controls (each with a BRM time limit),
+// optionally give your typical rolling-road speed, and get a control-by-control timeline with
+// arrival times and cutoff margins. Speed comes from the engine's curve model via the backend
+// (/api/race/timeline -> race_timeline.py -> estimate_route); this page only collects inputs and
+// renders the result. Not here yet: POIs/water/sleep/what-if, and saving/loading plans.
 Item {
     id: root
+
+    readonly property string backend: "http://127.0.0.1:8766"
+    readonly property color marginGood: "#2e9e6b"
+    readonly property color marginBad: "#d6453f"
+
+    property string gpxText: ""
+    property string gpxName: ""
+    property real routeDistanceKm: 0
+    property bool busy: false
+    property string statusMsg: ""
+    property var timeline: null
+
+    // --- backend call (same XMLHttpRequest idiom as PlanRoutePage / RoutesPage) ---
+    function api(method, path, body, cb) {
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            var res = null
+            try { res = JSON.parse(xhr.responseText) } catch (e) { res = null }
+            cb(xhr.status, res)
+        }
+        xhr.open(method, root.backend + path)
+        if (body) xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(body ? JSON.stringify(body) : undefined)
+    }
+
+    function loadGpx(fileUrl) {
+        var gpx = LocalFileService.readText(fileUrl)
+        if (!gpx || gpx.length === 0) { statusMsg = qsTr("Couldn't read that file"); return }
+        var s = fileUrl.toString()
+        gpxName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
+        gpxText = gpx
+        timeline = null
+        statusMsg = qsTr("Reading route…")
+        computeTimeline()   // first pass with whatever controls exist -> reveals distance
+    }
+
+    function startIso() {
+        var d = (startDate.text || "").trim()
+        var t = (startTime.text || "06:00").trim()
+        return d + "T" + (t.length === 5 ? t : "06:00") + ":00"
+    }
+
+    function computeTimeline() {
+        if (!gpxText) { statusMsg = qsTr("Load a GPX first"); return }
+        var startMs = Date.parse(startIso())
+        if (isNaN(startMs)) { statusMsg = qsTr("Check the start date/time"); return }
+
+        var cutoffs = []
+        for (var i = 0; i < controlsModel.count; i++) {
+            var c = controlsModel.get(i)
+            var km = parseFloat(c.km)
+            var h = parseFloat(c.hours)
+            if (isNaN(km)) continue
+            var co = { label: c.label || ("Control " + (i + 1)), distance_km: km }
+            if (!isNaN(h)) co.cutoff_dt = new Date(startMs + h * 3600 * 1000).toISOString()
+            cutoffs.push(co)
+        }
+
+        var athlete = { weight_kg: 75.0 }
+        var base = parseFloat(baseSpeed.text)
+        if (!isNaN(base) && base > 0)
+            athlete.speed_profile = { base_speed_kmh: base, confidence: "medium",
+                                      model_source: "personal", n_recent_rides: 0 }
+
+        var stopMin = parseFloat(stopMinutes.text)
+        var stopSec = (!isNaN(stopMin) && stopMin > 0) ? stopMin * 60 : 0
+        // per-leg stop schedule; build_timeline forces the finish leg to 0. Pad generously.
+        var stops = []
+        for (var k = 0; k < cutoffs.length + 2; k++) stops.push(stopSec)
+
+        var payload = {
+            event: { name: eventName.text || "Race", event_type: "BRM",
+                     start_dt: startIso(), gpx: gpxText, points: [], cutoffs: cutoffs },
+            athlete: athlete,
+            bike: { bike_weight_kg: 10.0, load_weight_kg: 5.0, bike_type: "road" },
+            stops_s: stops
+        }
+
+        busy = true
+        statusMsg = qsTr("Computing timeline…")
+        api("POST", "/api/race/timeline", payload, function(status, res) {
+            busy = false
+            if (status === 200 && res && res.ok && res.timeline) {
+                timeline = res.timeline
+                routeDistanceKm = timeline.distance_km
+                statusMsg = ""
+            } else {
+                statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
+            }
+        })
+    }
+
+    // duration seconds -> "13h42"
+    function fmtDur(sec) {
+        if (sec === null || sec === undefined) return "—"
+        var neg = sec < 0; sec = Math.abs(sec)
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+        return (neg ? "-" : "") + h + "h" + (m < 10 ? "0" + m : m)
+    }
+    // ISO -> "HH:MM" (and a day marker if not day 0)
+    function fmtClock(iso, startIsoStr) {
+        if (!iso) return "—"
+        var d = new Date(iso)
+        var hh = ("0" + d.getHours()).slice(-2), mm = ("0" + d.getMinutes()).slice(-2)
+        return hh + ":" + mm
+    }
+
+    ListModel { id: controlsModel }
 
     ColumnLayout {
         anchors.fill: parent
@@ -17,62 +128,216 @@ Item {
 
         Column {
             Layout.fillWidth: true
-            spacing: Theme.spacingSmall
-
-            Text {
-                text: qsTr("Race Planner")
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeTitle
-                font.weight: Font.Bold
-            }
-
-            Text {
-                text: qsTr("BRM/Ultra-distance race planning")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeBody
-                wrapMode: Text.WordWrap
-            }
+            spacing: 2
+            Text { text: qsTr("Race Planner"); color: Theme.text
+                   font.pixelSize: Theme.fontSizeTitle; font.weight: Font.Bold }
+            Text { text: qsTr("BRM / ultra timeline with cutoff margins"); color: Theme.mutedText
+                   font.pixelSize: Theme.fontSizeCaption }
         }
 
-        Rectangle {
+        Flickable {
             Layout.fillWidth: true
-            Layout.preferredHeight: 200
-            color: Theme.card
-            radius: Theme.radiusCard
-            border.color: Theme.border
-            border.width: 1
+            Layout.fillHeight: true
+            contentHeight: form.implicitHeight
+            clip: true
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Theme.spacingMedium
-                spacing: Theme.spacingMedium
+                id: form
+                width: parent.width
+                spacing: Theme.spacingSmall
 
-                Text {
-                    text: qsTr("Foundation Phase")
-                    color: Theme.text
-                    font.weight: Font.Bold
-                }
-
-                Text {
-                    text: qsTr("✓ Backend API fully functional\n✓ Data models (Event, Plan, Athlete, Bike)\n✓ Baseline ETA calculation (naive distance/speed)\n✓ GPX parsing and distance extraction\n✓ SQLite persistence layer ready\n\nUI form coming in next phase.")
-                    color: Theme.text
-                    font.pixelSize: Theme.fontSizeCaption
-                    wrapMode: Text.WordWrap
+                // --- Event basics ---
+                RowLayout {
                     Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    RoundedTextField { id: eventName; Layout.fillWidth: true
+                                       placeholderText: qsTr("Event name (e.g. BRM 300 Lille)") }
                 }
-
-                Text {
-                    text: qsTr("Test via API: POST /api/race/plan/create with {event, athlete, bike}")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    wrapMode: Text.WordWrap
+                RowLayout {
                     Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    RoundedTextField { id: startDate; Layout.preferredWidth: 140
+                                       placeholderText: qsTr("YYYY-MM-DD")
+                                       text: new Date().toISOString().split("T")[0] }
+                    RoundedTextField { id: startTime; Layout.preferredWidth: 90
+                                       placeholderText: qsTr("HH:MM"); text: "06:00" }
+                    Item { Layout.fillWidth: true }
+                    RoundedButton { text: qsTr("Load GPX"); onClicked: gpxDialog.open() }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: gpxName ? (gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
+                                  : qsTr("No route loaded")
+                    color: gpxName ? Theme.text : Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    elide: Text.ElideRight
                 }
 
-                Item { Layout.fillHeight: true }
+                // --- Rider + stops ---
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    Layout.topMargin: Theme.spacingSmall
+                    RoundedTextField { id: baseSpeed; Layout.fillWidth: true
+                                       placeholderText: qsTr("Typical flat-road avg km/h (optional)")
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                    RoundedTextField { id: stopMinutes; Layout.preferredWidth: 150
+                                       placeholderText: qsTr("Stop/control (min)")
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                }
+
+                // --- Controls ---
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    Text { text: qsTr("Controls & cutoffs"); color: Theme.text
+                           font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
+                    Item { Layout.fillWidth: true }
+                    RoundedButton { text: qsTr("+ Add control")
+                        onClicked: controlsModel.append({ label: "", km: "", hours: "" }) }
+                }
+                // header
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    visible: controlsModel.count > 0
+                    Text { text: qsTr("Label"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("km"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("limit h"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Item { Layout.preferredWidth: 32 }
+                }
+                Repeater {
+                    model: controlsModel
+                    delegate: RowLayout {
+                        width: form.width
+                        spacing: Theme.spacingSmall
+                        RoundedTextField {
+                            Layout.fillWidth: true
+                            text: model.label
+                            placeholderText: qsTr("Control %1").arg(index + 1)
+                            onTextChanged: controlsModel.setProperty(index, "label", text)
+                        }
+                        RoundedTextField {
+                            Layout.preferredWidth: 80
+                            text: model.km; placeholderText: qsTr("km")
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            onTextChanged: controlsModel.setProperty(index, "km", text)
+                        }
+                        RoundedTextField {
+                            Layout.preferredWidth: 80
+                            text: model.hours; placeholderText: qsTr("h")
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            onTextChanged: controlsModel.setProperty(index, "hours", text)
+                        }
+                        RoundedButton { text: "✕"; Layout.preferredWidth: 32
+                                        onClicked: controlsModel.remove(index) }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    RoundedButton {
+                        text: busy ? qsTr("Computing…") : qsTr("Compute timeline")
+                        enabled: !busy && gpxText.length > 0
+                        onClicked: computeTimeline()
+                    }
+                    Text { text: statusMsg; color: statusMsg.indexOf("Error") === 0 ? marginBad : Theme.mutedText
+                           font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                }
+
+                // --- Results ---
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    visible: timeline && timeline.ok
+                    color: Theme.card
+                    radius: Theme.radiusCard
+                    border.color: Theme.border
+                    border.width: 1
+                    implicitHeight: results.implicitHeight + Theme.spacingMedium * 2
+
+                    ColumnLayout {
+                        id: results
+                        anchors.fill: parent
+                        anchors.margins: Theme.spacingMedium
+                        spacing: Theme.spacingSmall
+
+                        // summary row
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacingLarge
+                            Column { Text { text: qsTr("FINISH"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: timeline ? fmtClock(timeline.finish_eta_dt) : "—"; color: Theme.text
+                                            font.pixelSize: Theme.fontSizeTitle; font.weight: Font.Bold } }
+                            Column { Text { text: qsTr("MOVING"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: timeline ? fmtDur(timeline.moving_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
+                            Column { Text { text: qsTr("STOPS"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: timeline ? fmtDur(timeline.stop_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
+                            Column { Text { text: qsTr("ELAPSED"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: timeline ? fmtDur(timeline.elapsed_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
+                            Column { Text { text: qsTr("WORST MARGIN"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: (timeline && timeline.worst_margin_s !== null) ? fmtDur(timeline.worst_margin_s) : "—"
+                                            color: (timeline && timeline.worst_margin_s !== null && timeline.worst_margin_s < 0) ? marginBad : marginGood
+                                            font.pixelSize: Theme.fontSizeSubtitle; font.weight: Font.Bold } }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: timeline && timeline.model_source === "placeholder"
+                            text: qsTr("Speed is a generic estimate — enter your typical average for a personal prediction.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
+                        // per-control table header
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("Control"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("km"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("leg"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("margin"); Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                        }
+                        Repeater {
+                            model: timeline ? timeline.controls : []
+                            delegate: RowLayout {
+                                width: results.width
+                                spacing: Theme.spacingSmall
+                                Text { text: modelData.label; Layout.fillWidth: true; color: Theme.text; font.pixelSize: Theme.fontSizeCaption; elide: Text.ElideRight }
+                                Text { text: modelData.distance_km; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: fmtClock(modelData.arrival_dt); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text {
+                                    Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight
+                                    text: modelData.margin_s === null ? "—" : fmtDur(modelData.margin_s)
+                                    color: modelData.margin_s === null ? Theme.mutedText
+                                          : (modelData.margin_s < 0 ? marginBad : marginGood)
+                                    font.pixelSize: Theme.fontSizeCaption; font.weight: Font.Medium
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: timeline && timeline.per_control_provisional
+                            text: qsTr("Per-control times are provisional (segment-level calibration pending).")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+                    }
+                }
             }
         }
+    }
 
-        Item { Layout.fillHeight: true }
+    FileDialog {
+        id: gpxDialog
+        title: qsTr("Choose a GPX route")
+        nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
+        onAccepted: root.loadGpx(selectedFile)
     }
 }
