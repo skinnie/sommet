@@ -132,7 +132,8 @@ def plan_sleep(controls: List[Dict[str, Any]], points: List[Dict[str, Any]],
                suggested_total_s: float = 0.0,
                weather_pts: Optional[List[Dict[str, Any]]] = None,
                min_window_s: float = 1800.0,
-               min_ride_before_sleep_s: float = 3 * 3600.0) -> Dict[str, Any]:
+               min_ride_before_sleep_s: float = 3 * 3600.0,
+               min_ride_after_sleep_s: float = 2.5 * 3600.0) -> Dict[str, Any]:
     """Recommend one sleep window per night. `controls` carry distance_km, arrival_dt and margin_s
     (from the timeline). `suggested_total_s` is split across the nights the ride spans."""
     if len(controls) < 1 or len(points) < 2:
@@ -201,12 +202,25 @@ def plan_sleep(controls: List[Dict[str, Any]], points: List[Dict[str, Any]],
         if w_end > night[-1]["t"]:
             w_end, w_start = night[-1]["t"], night[-1]["t"] - timedelta(seconds=per_night_s)
 
+        # Don't recommend sleeping right before the finish - you'd just push through. If less than
+        # min_ride_after_sleep remains after you'd wake, skip this night (the classic "1h nap 2h
+        # from the line" nonsense). This is why a ~24h ride that only meets darkness near the end
+        # gets NO sleep suggestion - you ride the one night out.
+        if (finish_dt - w_end).total_seconds() < min_ride_after_sleep_s:
+            continue
+
         km = _km_at_time(knots, w_start)
-        # nearest control at/after this km, and the tightest margin among controls AFTER the window
+        # tightest margin among controls AFTER the window
         after = [c for c in controls if float(c["distance_km"]) >= km and c.get("margin_s") is not None]
         tightest = min((float(c["margin_s"]) for c in after), default=None)
         cutoff_ok = tightest is None or tightest > per_night_s
-        near = min(controls, key=lambda c: abs(float(c["distance_km"]) - km))
+        # Location label: name an intermediate control only if one is genuinely near (<=20 km) and
+        # it isn't the finish; otherwise just give the km so we never imply "sleep at the finish".
+        finish_km = max((float(c["distance_km"]) for c in controls), default=km)
+        near_ctrl = None
+        cand = min(controls, key=lambda c: abs(float(c["distance_km"]) - km))
+        if abs(float(cand["distance_km"]) - km) <= 20.0 and float(cand["distance_km"]) < finish_km - 1.0:
+            near_ctrl = cand.get("label")
 
         temp = _temp_at(weather_pts, km)
         reasons = ["circadian low"]
@@ -224,7 +238,7 @@ def plan_sleep(controls: List[Dict[str, Any]], points: List[Dict[str, Any]],
             "start_dt": w_start.isoformat(),
             "duration_s": round((w_end - w_start).total_seconds()),
             "km": round(km, 1),
-            "near_control": near.get("label"),
+            "near_control": near_ctrl,
             "temp_c": None if temp is None else round(float(temp), 1),
             "moon_illumination": peak["moon"],
             "reason": ", ".join(reasons),
@@ -240,36 +254,44 @@ def plan_sleep(controls: List[Dict[str, Any]], points: List[Dict[str, Any]],
 # --- self test (offline) --------------------------------------------------------------------
 
 def _selftest():
-    # A ~600 km ride starting 05:00 that runs through two nights. Straight N->S line in France.
+    # An ~870 km ride starting 05:00 Fri that runs through two nights AND keeps going past the
+    # second dawn (finishes Sun afternoon), so both nights have real riding after them.
     start = datetime(2026, 9, 25, 5, 0)
-    pts = [{"lat": 48.0 - i * 0.02, "lon": 2.0, "ele": 100} for i in range(300)]  # ~660 km span
-    # controls roughly every ~150 km; slow enough (≈15 km/h) to span two nights, generous margins.
+    pts = [{"lat": 48.0 - i * 0.02, "lon": 2.0, "ele": 100} for i in range(440)]  # ~970 km span
     def at(hours):
         return (start + timedelta(hours=hours)).isoformat()
     controls = [
         {"label": "C1", "distance_km": 150.0, "arrival_dt": at(10), "margin_s": 6 * 3600},
-        {"label": "C2", "distance_km": 300.0, "arrival_dt": at(22), "margin_s": 6 * 3600},
-        {"label": "C3", "distance_km": 450.0, "arrival_dt": at(34), "margin_s": 6 * 3600},
-        {"label": "Finish", "distance_km": 600.0, "arrival_dt": at(46), "margin_s": 6 * 3600},
+        {"label": "C2", "distance_km": 350.0, "arrival_dt": at(24), "margin_s": 6 * 3600},
+        {"label": "C3", "distance_km": 550.0, "arrival_dt": at(40), "margin_s": 6 * 3600},
+        {"label": "Finish", "distance_km": 800.0, "arrival_dt": at(58), "margin_s": 6 * 3600},
     ]
     r = plan_sleep(controls, pts, start, tz_offset_h=2.0, suggested_total_s=4 * 3600)
     assert r["ok"], r
-    print("=== Circadian sleep plan (synthetic 600k, 2 nights) ===")
+    print("=== Circadian sleep plan (synthetic 800k, 2 nights, finishes Sun afternoon) ===")
     print(f"nights={r['n_nights']} total sleep={r['total_sleep_s']/3600:.1f}h")
     for w in r["windows"]:
         print(f"  Night {w['night']}: {w['start_local']}-{w['end_local']} "
-              f"(~{w['duration_s']/3600:.1f}h) near km {w['km']} ({w['near_control']}) "
+              f"(~{w['duration_s']/3600:.1f}h) km {w['km']}"
+              f"{' (' + w['near_control'] + ')' if w['near_control'] else ''} "
               f"moon {w['moon_illumination']} · {w['reason']} · cutoff_ok={w['cutoff_ok']}")
 
-    # two nights on a 46h ride, each window centred in darkness near the ~04:30 nadir.
+    # two nights, both with real riding after them -> both windows kept, in the night.
     assert r["n_nights"] == 2, r["n_nights"]
-    assert len(r["windows"]) == 2
+    assert len(r["windows"]) == 2, [w["start_local"] for w in r["windows"]]
     for w in r["windows"]:
         h = int(w["start_local"][:2])
         assert (h >= 22 or h <= 6), "sleep window should sit in the night, got %s" % w["start_local"]
         assert w["cutoff_ok"] is True
-    # total split across the two nights ≈ the 4h suggestion.
     assert abs(r["total_sleep_s"] - 4 * 3600) < 60, r["total_sleep_s"]
+
+    # near-finish suppression: a ride that only meets darkness near the end gets NO sleep window.
+    short_start = datetime(2026, 9, 25, 6, 0)
+    short_ctrls = [{"label": "Finish", "distance_km": 360.0,
+                    "arrival_dt": (short_start + timedelta(hours=24)).isoformat(), "margin_s": 6 * 3600}]
+    rs = plan_sleep(short_ctrls, pts, short_start, tz_offset_h=2.0, suggested_total_s=3600)
+    assert rs["windows"] == [], "a 24h dawn-finish ride should suggest no sleep, got %s" % rs["windows"]
+    print("Near-finish suppression: 24h dawn-finish ride -> no sleep window (push through). OK")
 
     # cutoff safety: a tight margin (< per-night sleep) must flag cutoff_ok False.
     tight = [dict(c) for c in controls]
