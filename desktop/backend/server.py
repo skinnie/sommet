@@ -1277,6 +1277,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_weather(body)
         elif self.path == "/api/race/sleep":
             self._handle_race_sleep(body)
+        elif self.path == "/api/race/pois":
+            self._handle_race_pois(body)
+        elif self.path == "/api/race/alerts":
+            self._handle_race_alerts(body)
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2377,6 +2381,40 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "sleep plan failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_pois(self, body):
+        """Body: {"gpx"|"points", "categories":[...], "radius_m"?, "water_l_per_100km"?, "carry_l"?}.
+        POIs in a corridor around the route + resupply gap analysis (race_pois.py). Talks to OSM
+        Overpass, so it needs network and can be slow (bumped run_tool timeout)."""
+        if not (body.get("gpx") or body.get("points")):
+            self._send_json(400, {"error": '"gpx" or "points" is required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_pois.py", [path], timeout=120)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "poi search failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_alerts(self, body):
+        """Body: {"gpx"|"points", "timeline"?, "weather"?, "pois"?}. Consolidated critical-points
+        list (race_alerts.py): climbs from the route + cutoff/water/food/darkness folded in and
+        severity-ranked. Offline (all inputs precomputed)."""
+        if not (body.get("gpx") or body.get("points")):
+            self._send_json(400, {"error": '"gpx" or "points" is required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_alerts.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "alerts failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

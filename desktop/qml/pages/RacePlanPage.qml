@@ -25,6 +25,9 @@ Item {
     property var timeline: null
     property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
     property var sleepPlan: null     // race_sleep result: circadian sleep windows
+    property var pois: null          // race_pois result: POIs + resupply gaps
+    property var alerts: null        // race_alerts result: ranked critical points
+    property bool poiBusy: false
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -112,7 +115,9 @@ Item {
                 statusMsg = ""
                 weather = null
                 sleepPlan = null
-                fetchWeather()                  // weather + daylight, then sleep plan (chained)
+                pois = null
+                alerts = null
+                fetchWeather()                  // weather + daylight, then sleep + alerts (chained)
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
             }
@@ -129,7 +134,8 @@ Item {
                          arrival_dt: timeline.controls[i].arrival_dt })
         api("POST", "/api/race/weather", { gpx: gpxText, controls: ctrls }, function(status, res) {
             weather = (status === 200 && res && res.ok) ? res : null
-            fetchSleep()   // sleep plan can now fold in per-km temperature (cold)
+            fetchSleep()    // sleep plan can now fold in per-km temperature (cold)
+            fetchAlerts()   // climbs + cutoff + darkness (water/food added later if POIs fetched)
         })
     }
 
@@ -148,6 +154,38 @@ Item {
         if (weather && weather.controls) payload.weather = weather.controls
         api("POST", "/api/race/sleep", payload, function(status, res) {
             sleepPlan = (status === 200 && res && res.ok) ? res : null
+        })
+    }
+
+    // Consolidated critical points: climbs (from the route) + cutoff/water/food/darkness folded in.
+    function fetchAlerts() {
+        if (!timeline || !gpxText) { alerts = null; return }
+        var body = { gpx: gpxText, timeline: timeline }
+        if (weather) body.weather = weather
+        if (pois) body.pois = pois
+        api("POST", "/api/race/alerts", body, function(status, res) {
+            alerts = (status === 200 && res && res.ok) ? res : null
+        })
+    }
+
+    // POIs + resupply gaps (online, Overpass — explicit button since it can be slow).
+    function findPois() {
+        if (!gpxText) return
+        var cats = []
+        if (catWater.checked) cats.push("water")
+        if (catFood.checked) cats.push("food")
+        if (catBike.checked) cats.push("bike")
+        if (catShelter.checked) cats.push("shelter")
+        if (catSafety.checked) cats.push("safety")
+        if (cats.length === 0) { statusMsg = qsTr("Pick at least one POI category"); return }
+        poiBusy = true
+        var body = { gpx: gpxText, categories: cats,
+                     water_l_per_100km: parseFloat(waterRate.text) || 2.0,
+                     carry_l: parseFloat(carryL.text) || 1.5 }
+        api("POST", "/api/race/pois", body, function(status, res) {
+            poiBusy = false
+            pois = (status === 200 && res && res.ok) ? res : null
+            fetchAlerts()   // fold water/food gaps into the critical points
         })
     }
     // weather row for control index i (weather.controls is index-aligned with timeline.controls)
@@ -273,6 +311,34 @@ Item {
                     RoundedTextField { id: stopMinutes; Layout.preferredWidth: 150
                                        placeholderText: qsTr("Stop/control (min)")
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                }
+
+                // --- Resupply & POIs ---
+                Text { text: qsTr("Resupply & POIs"); color: Theme.text
+                       font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium
+                       Layout.topMargin: Theme.spacingSmall }
+                Flow {
+                    Layout.fillWidth: true; spacing: Theme.spacingMedium
+                    RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }
+                    RoundedCheckBox { id: catFood; text: qsTr("Food"); checked: true }
+                    RoundedCheckBox { id: catBike; text: qsTr("Bike"); checked: false }
+                    RoundedCheckBox { id: catShelter; text: qsTr("Sleep"); checked: false }
+                    RoundedCheckBox { id: catSafety; text: qsTr("Safety"); checked: false }
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+                    RoundedTextField { id: waterRate; Layout.preferredWidth: 150
+                                       placeholderText: qsTr("Water L/100km"); text: "2.0"
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                    RoundedTextField { id: carryL; Layout.preferredWidth: 130
+                                       placeholderText: qsTr("Carry (L)"); text: "1.5"
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                    RoundedButton {
+                        text: poiBusy ? qsTr("Searching…") : qsTr("Find POIs")
+                        enabled: !poiBusy && gpxText.length > 0
+                        onClicked: findPois()
+                    }
+                    Item { Layout.fillWidth: true }
                 }
 
                 // --- Controls ---
@@ -489,6 +555,47 @@ Item {
                                 Layout.fillWidth: true; wrapMode: Text.WordWrap
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                                 text: qsTr("Suggestion only — placed in the hours worst for riding (darkest, coldest, body-clock low).")
+                            }
+                        }
+
+                        // --- Resupply gaps (from POIs) ---
+                        ColumnLayout {
+                            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; spacing: 2
+                            visible: pois && pois.summary && pois.summary.length > 0
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                            Text { text: qsTr("Resupply"); color: Theme.text; font.weight: Font.Bold
+                                   font.pixelSize: Theme.fontSizeCaption }
+                            Repeater {
+                                model: pois ? pois.summary : []
+                                delegate: Text {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    text: modelData
+                                    color: modelData.indexOf("⚠") >= 0 ? marginBad : Theme.text
+                                    font.pixelSize: Theme.fontSizeCaption
+                                }
+                            }
+                        }
+
+                        // --- Critical points (climbs + cutoff + water/food + darkness) ---
+                        ColumnLayout {
+                            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; spacing: 2
+                            visible: alerts && alerts.alerts && alerts.alerts.length > 0
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                            Text { text: qsTr("Critical points"); color: Theme.text; font.weight: Font.Bold
+                                   font.pixelSize: Theme.fontSizeCaption }
+                            Repeater {
+                                model: alerts ? alerts.alerts : []
+                                delegate: RowLayout {
+                                    width: results.width; spacing: Theme.spacingSmall
+                                    Text { text: "km " + Math.round(modelData.km); Layout.preferredWidth: 56
+                                           color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                    Text {
+                                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                        text: modelData.text; font.pixelSize: Theme.fontSizeCaption
+                                        color: modelData.severity === "critical" ? marginBad
+                                              : (modelData.severity === "warn" ? "#e0912f" : Theme.mutedText)
+                                    }
+                                }
                             }
                         }
                     }
