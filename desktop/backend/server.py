@@ -1273,6 +1273,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_plan_create(body)
         elif self.path == "/api/race/timeline":
             self._handle_race_timeline(body)
+        elif self.path == "/api/race/weather":
+            self._handle_race_weather(body)
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2332,6 +2334,26 @@ class Handler(BaseHTTPRequestHandler):
             Path(path).unlink(missing_ok=True)
 
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "timeline failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_weather(self, body):
+        """Body: {"gpx"|"points", "controls":[{label,distance_km,arrival_dt}], "tz"?}. Weather +
+        daylight at each control's real arrival time (race_weather.py). Talks to Open-Meteo, so
+        unlike the timeline it needs network."""
+        if not (body.get("gpx") or body.get("points")) or not body.get("controls"):
+            self._send_json(400, {"error": '"gpx"/"points" and "controls" are required'})
+            return
+        if body.get("tz") is None:
+            off = datetime.now().astimezone().utcoffset()
+            body["tz"] = (off.total_seconds() / 3600.0) if off else 0.0
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_weather.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "weather failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

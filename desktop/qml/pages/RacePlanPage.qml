@@ -23,6 +23,7 @@ Item {
     property bool busy: false
     property string statusMsg: ""
     property var timeline: null
+    property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -108,10 +109,32 @@ Item {
                 scenario = null                 // reset any prior scenario
                 whatifSpeed = 0; whatifStopMin = 0; whatifSleepH = 0
                 statusMsg = ""
+                weather = null
+                fetchWeather()                  // weather + daylight at each control's ETA
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
             }
         })
+    }
+
+    // Weather + daylight at each control's real arrival time (online; Open-Meteo via backend).
+    function fetchWeather() {
+        if (!timeline || !gpxText) return
+        var ctrls = []
+        for (var i = 0; i < timeline.controls.length; i++)
+            ctrls.push({ label: timeline.controls[i].label,
+                         distance_km: timeline.controls[i].distance_km,
+                         arrival_dt: timeline.controls[i].arrival_dt })
+        api("POST", "/api/race/weather", { gpx: gpxText, controls: ctrls }, function(status, res) {
+            weather = (status === 200 && res && res.ok) ? res : null
+        })
+    }
+    // weather row for control index i (weather.controls is index-aligned with timeline.controls)
+    function wxFor(i) {
+        return (weather && weather.controls && i < weather.controls.length) ? weather.controls[i] : null
+    }
+    function windColor(rel) {
+        return rel === "headwind" ? marginBad : (rel === "tailwind" ? marginGood : "#e0912f")
     }
 
     // Re-run the timeline with the what-if knobs layered onto the baseline payload; the panel
@@ -341,6 +364,20 @@ Item {
                             color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 
+                        // weather summary + daylight verdict (online; may lag the timeline by a moment)
+                        Text {
+                            Layout.fillWidth: true
+                            visible: weather && weather.summary
+                            text: weather && weather.summary
+                                  ? qsTr("Weather: %1–%2°C · wind ≤%3 km/h%4 · %5")
+                                    .arg(weather.summary.temp_min_c).arg(weather.summary.temp_max_c)
+                                    .arg(weather.summary.wind_max_kmh)
+                                    .arg(weather.summary.rain_max_mm > 0 ? qsTr(" · rain ≤%1 mm").arg(weather.summary.rain_max_mm) : "")
+                                    .arg(weather.verdict || "")
+                                  : ""
+                            color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+
                         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
                         // per-control table header
@@ -351,7 +388,9 @@ Item {
                             Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("leg"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            Text { text: qsTr("margin"); Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("margin"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("°C"); Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
+                            Text { text: qsTr("wind/sky"); Layout.preferredWidth: 84; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
                         }
                         Repeater {
                             model: timeline ? timeline.controls : []
@@ -364,11 +403,30 @@ Item {
                                 Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text {
-                                    Layout.preferredWidth: 70; horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight
                                     text: modelData.margin_s === null ? "—" : fmtDur(modelData.margin_s)
                                     color: modelData.margin_s === null ? Theme.mutedText
                                           : (modelData.margin_s < 0 ? marginBad : marginGood)
                                     font.pixelSize: Theme.fontSizeCaption; font.weight: Font.Medium
+                                }
+                                Text {
+                                    Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight
+                                    visible: weather
+                                    text: { var w = wxFor(index); return w ? Math.round(w.temp_c) + "°" : "" }
+                                    color: Theme.text; font.pixelSize: Theme.fontSizeCaption
+                                }
+                                RowLayout {
+                                    Layout.preferredWidth: 84; spacing: 4
+                                    visible: weather
+                                    Text {
+                                        text: { var w = wxFor(index); return w ? w.wind_rel.charAt(0).toUpperCase() + w.wind_rel.slice(1) : "" }
+                                        color: { var w = wxFor(index); return w ? windColor(w.wind_rel) : Theme.mutedText }
+                                        font.pixelSize: Theme.fontSizeCaption
+                                    }
+                                    Text {
+                                        text: { var w = wxFor(index); return (w && w.is_dark) ? qsTr("night") : "" }
+                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                    }
                                 }
                             }
                         }
