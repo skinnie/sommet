@@ -454,36 +454,42 @@ Item {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                // --- Event basics ---
+                // ① Route
+                Text { text: qsTr("① Route"); color: Theme.text; font.weight: Font.Bold
+                       font.pixelSize: Theme.fontSizeLabel }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
-                    RoundedTextField { id: eventName; Layout.fillWidth: true
-                                       placeholderText: qsTr("Event name (e.g. BRM 300 Lille)") }
+                    Text {
+                        Layout.fillWidth: true
+                        text: gpxName ? (gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
+                                      : qsTr("No route loaded — load a GPX (or one from the Route page)")
+                        color: gpxName ? Theme.text : Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        elide: Text.ElideRight
+                    }
+                    RoundedButton { text: gpxName ? qsTr("Change GPX") : qsTr("Load GPX")
+                                    onClicked: gpxDialog.open() }
                 }
+
+                // ② Start
+                Text { text: qsTr("② Start"); color: Theme.text; font.weight: Font.Bold
+                       font.pixelSize: Theme.fontSizeLabel; Layout.topMargin: Theme.spacingSmall }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
-                    Text { text: qsTr("Start"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                           Layout.preferredWidth: 40 }
                     RoundedTextField { id: startDate; Layout.preferredWidth: 140
                                        placeholderText: qsTr("YYYY-MM-DD")
                                        text: new Date().toISOString().split("T")[0] }
                     RoundedTextField { id: startTime; Layout.preferredWidth: 90
                                        placeholderText: qsTr("HH:MM"); text: "06:00" }
-                    Item { Layout.fillWidth: true }
-                    RoundedButton { text: qsTr("Load GPX"); onClicked: gpxDialog.open() }
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: gpxName ? (gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
-                                  : qsTr("No route loaded")
-                    color: gpxName ? Theme.text : Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    elide: Text.ElideRight
+                    RoundedTextField { id: eventName; Layout.fillWidth: true
+                                       placeholderText: qsTr("Event name (optional)") }
                 }
 
-                // --- Rider + stops ---
+                // ③ Your speed & stops
+                Text { text: qsTr("③ Your speed & time off the bike"); color: Theme.text; font.weight: Font.Bold
+                       font.pixelSize: Theme.fontSizeLabel; Layout.topMargin: Theme.spacingSmall }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
@@ -509,8 +515,8 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
-                    Text { text: qsTr("Checkpoints & time limits"); color: Theme.text
-                           font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
+                    Text { text: qsTr("④ Checkpoints & time limits"); color: Theme.text
+                           font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold }
                     Item { Layout.fillWidth: true }
                     RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
                     RoundedButton { text: qsTr("+ Add control")
