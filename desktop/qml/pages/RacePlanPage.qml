@@ -90,6 +90,19 @@ Item {
         })
     }
 
+    // "HH:MM" -> the first Date strictly after `afterMs` with that clock time (handles multi-day
+    // closing times monotonically). Returns null if the text isn't a valid HH:MM.
+    function clockToDt(afterMs, hhmm) {
+        var m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "")
+        if (!m) return null
+        var hh = parseInt(m[1]), mm = parseInt(m[2])
+        if (hh > 23 || mm > 59) return null
+        var b = new Date(afterMs)
+        var d = new Date(b.getFullYear(), b.getMonth(), b.getDate(), hh, mm, 0)
+        while (d.getTime() <= afterMs) d = new Date(d.getTime() + 86400000)
+        return d
+    }
+
     function startIso() {
         var d = (startDate.text || "").trim()
         var t = (startTime.text || "06:00").trim()
@@ -101,14 +114,18 @@ Item {
         var startMs = Date.parse(startIso())
         if (isNaN(startMs)) { statusMsg = qsTr("Check the start date/time"); return }
 
+        // Checkpoints: the rider types the CLOSING CLOCK TIME (HH:MM) from their brevet card.
+        // Resolve each to the first occurrence after the previous cutoff (so multi-day closing
+        // times land on the right day without any hours-from-start mental math).
         var cutoffs = []
+        var prevMs = startMs
         for (var i = 0; i < controlsModel.count; i++) {
             var c = controlsModel.get(i)
             var km = parseFloat(c.km)
-            var h = parseFloat(c.hours)
             if (isNaN(km)) continue
             var co = { label: c.label || ("Control " + (i + 1)), distance_km: km }
-            if (!isNaN(h)) co.cutoff_dt = new Date(startMs + h * 3600 * 1000).toISOString()
+            var dt = clockToDt(prevMs, (c.hours || "").trim())
+            if (dt) { co.cutoff_dt = dt.toISOString(); prevMs = dt.getTime() }
             cutoffs.push(co)
         }
 
@@ -466,14 +483,19 @@ Item {
                             onTextChanged: controlsModel.setProperty(index, "km", text)
                         }
                         RoundedTextField {
-                            Layout.preferredWidth: 80
-                            text: model.hours; placeholderText: qsTr("h")
-                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            Layout.preferredWidth: 90
+                            text: model.hours; placeholderText: qsTr("by HH:MM")
                             onTextChanged: controlsModel.setProperty(index, "hours", text)
                         }
                         RoundedButton { text: "✕"; Layout.preferredWidth: 32
                                         onClicked: controlsModel.remove(index) }
                     }
+                }
+                Text {
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    visible: controlsModel.count === 0
+                    text: qsTr("Add your checkpoints (km + the time they close, from your brevet card) to see cutoff margins — or just Compute for the finish time.")
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                 }
 
                 RowLayout {
