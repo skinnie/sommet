@@ -104,7 +104,7 @@ Item {
             if (isNaN(km)) continue
             var time = m.length > 1 ? m[1].trim() : ""
             var label = m.length > 2 ? m.slice(2).join(" ").trim() : ""
-            controlsModel.append({ label: label, km: "" + km, hours: time })
+            controlsModel.append({ label: label, km: "" + km, hours: time, opens: "" })
         }
     }
 
@@ -125,7 +125,8 @@ Item {
                 var name = cs[i].name ? (cs[i].label + " " + cs[i].name) : cs[i].label
                 // skip the start control (km 0) as a cutoff row; it's the start time, not a checkpoint
                 if ((cs[i].km || 0) <= 0.05) continue
-                controlsModel.append({ label: name, km: "" + cs[i].km, hours: cs[i].close || "" })
+                controlsModel.append({ label: name, km: "" + cs[i].km, hours: cs[i].close || "",
+                                       opens: cs[i].open || "" })
             }
             statusMsg = qsTr("Imported %1 controls from the roadbook.").arg(controlsModel.count)
             if (gpxText.length > 0) computeTimeline()
@@ -161,6 +162,7 @@ Item {
         // times land on the right day without any hours-from-start mental math).
         var cutoffs = []
         var prevMs = startMs
+        var prevOpenMs = startMs
         for (var i = 0; i < controlsModel.count; i++) {
             var c = controlsModel.get(i)
             var km = parseFloat(c.km)
@@ -168,6 +170,10 @@ Item {
             var co = { label: c.label || ("Control " + (i + 1)), distance_km: km }
             var dt = clockToDt(prevMs, (c.hours || "").trim())
             if (dt) { co.cutoff_dt = dt.toISOString(); prevMs = dt.getTime() }
+            // Opening time (ouverture): the "arrive not before" for a manned control. Resolved the
+            // same monotonic way as the closing time (opens increase control-to-control too).
+            var od = clockToDt(prevOpenMs, (c.opens || "").trim())
+            if (od) { co.open_dt = od.toISOString(); prevOpenMs = od.getTime() }
             cutoffs.push(co)
         }
 
@@ -459,7 +465,7 @@ Item {
         var ctrls = []
         for (var i = 0; i < controlsModel.count; i++) {
             var c = controlsModel.get(i)
-            ctrls.push({ label: c.label, km: c.km, hours: c.hours })
+            ctrls.push({ label: c.label, km: c.km, hours: c.hours, opens: c.opens })
         }
         return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
                  eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
@@ -495,7 +501,7 @@ Item {
             controlOverrides = u.controlOverrides || ({})
             controlsModel.clear()
             var cs = u.controls || []
-            for (var i = 0; i < cs.length; i++) controlsModel.append({ label: cs[i].label || "", km: cs[i].km || "", hours: cs[i].hours || "" })
+            for (var i = 0; i < cs.length; i++) controlsModel.append({ label: cs[i].label || "", km: cs[i].km || "", hours: cs[i].hours || "", opens: cs[i].opens || "" })
             stopUserSet = (stopTotalH.text.length > 0); autoStopDone = true
             if (gpxText) computeTimeline()
         })
@@ -606,7 +612,7 @@ Item {
                     RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
                     RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
                     RoundedButton { text: qsTr("+ Add control")
-                        onClicked: controlsModel.append({ label: "", km: "", hours: "" }) }
+                        onClicked: controlsModel.append({ label: "", km: "", hours: "", opens: "" }) }
                 }
                 // header
                 RowLayout {
@@ -614,8 +620,9 @@ Item {
                     spacing: Theme.spacingSmall
                     visible: controlsModel.count > 0
                     Text { text: qsTr("Label"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("km"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("must arrive by"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("km"); Layout.preferredWidth: 70; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("opens"); Layout.preferredWidth: 76; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("must arrive by"); Layout.preferredWidth: 90; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                     Item { Layout.preferredWidth: 32 }
                 }
                 Repeater {
@@ -630,10 +637,15 @@ Item {
                             onTextChanged: controlsModel.setProperty(index, "label", text)
                         }
                         RoundedTextField {
-                            Layout.preferredWidth: 80
+                            Layout.preferredWidth: 70
                             text: model.km; placeholderText: qsTr("km")
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
                             onTextChanged: controlsModel.setProperty(index, "km", text)
+                        }
+                        RoundedTextField {
+                            Layout.preferredWidth: 76
+                            text: model.opens; placeholderText: qsTr("opens")
+                            onTextChanged: controlsModel.setProperty(index, "opens", text)
                         }
                         RoundedTextField {
                             Layout.preferredWidth: 90
@@ -813,7 +825,18 @@ Item {
                                 spacing: Theme.spacingSmall
                                 Text { text: modelData.label; Layout.fillWidth: true; color: Theme.text; font.pixelSize: Theme.fontSizeCaption; elide: Text.ElideRight }
                                 Text { text: modelData.distance_km; Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
-                                Text { text: fmtClock(modelData.arrival_dt); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
+                                // arrival time; tinted amber when you'd reach the control before it OPENS (you'd wait).
+                                Text {
+                                    text: fmtClock(modelData.arrival_dt)
+                                    + ((modelData.early_s !== undefined && modelData.early_s !== null && modelData.early_s > 600) ? " ⏳" : "")
+                                    Layout.preferredWidth: 72; horizontalAlignment: Text.AlignRight
+                                    color: (modelData.early_s !== undefined && modelData.early_s !== null && modelData.early_s > 600) ? "#e0912f" : Theme.text
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    ToolTip.visible: earlyMA.containsMouse && modelData.early_s > 600
+                                    ToolTip.text: qsTr("Opens %1 — you'd arrive %2 early and wait")
+                                        .arg(fmtClock(modelData.opens_dt)).arg(fmtDur(modelData.early_s))
+                                    MouseArea { id: earlyMA; anchors.fill: parent; hoverEnabled: true }
+                                }
                                 Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 // editable per-control stop (minutes); blank = model's own split. Finish has no stop.
