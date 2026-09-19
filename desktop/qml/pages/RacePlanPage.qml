@@ -92,6 +92,21 @@ Item {
         })
     }
 
+    // Bulk-add checkpoints pasted as "km, HH:MM" (optionally ", label") per line.
+    function pasteControls(txt) {
+        var lines = (txt || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i].trim()
+            if (!ln) continue
+            var m = ln.split(/[,;\t]+/)
+            var km = parseFloat(m[0])
+            if (isNaN(km)) continue
+            var time = m.length > 1 ? m[1].trim() : ""
+            var label = m.length > 2 ? m.slice(2).join(" ").trim() : ""
+            controlsModel.append({ label: label, km: "" + km, hours: time })
+        }
+    }
+
     // "HH:MM" -> the first Date strictly after `afterMs` with that clock time (handles multi-day
     // closing times monotonically). Returns null if the text isn't a valid HH:MM.
     function clockToDt(afterMs, hhmm) {
@@ -497,6 +512,7 @@ Item {
                     Text { text: qsTr("Checkpoints & time limits"); color: Theme.text
                            font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
                     Item { Layout.fillWidth: true }
+                    RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
                     RoundedButton { text: qsTr("+ Add control")
                         onClicked: controlsModel.append({ label: "", km: "", hours: "" }) }
                 }
@@ -611,8 +627,18 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            visible: timeline && timeline.model_source === "placeholder"
-                            text: qsTr("Speed is a generic estimate — enter your typical average for a personal prediction.")
+                            visible: timeline
+                            text: {
+                                if (!timeline) return ""
+                                var src = timeline.model_source, conf = timeline.confidence
+                                if (src === "personal")
+                                    return qsTr("Speed: your calibrated pace (%1 confidence).").arg(conf)
+                                if (src === "generic")
+                                    return qsTr("Speed: a generic estimate — enter your typical average or calibrate from a ride for a personal prediction.")
+                                if (src === "physics")
+                                    return qsTr("Speed: a weight-based estimate (%1 confidence).").arg(conf)
+                                return qsTr("Speed is a placeholder — set your typical average for a real prediction.")
+                            }
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 
@@ -923,6 +949,26 @@ Item {
         title: qsTr("Choose a ride (FIT) to calibrate your speed")
         nameFilters: [qsTr("FIT files (*.fit *.FIT)"), qsTr("All files (*)")]
         onAccepted: root.calibrateFromFit(selectedFile)
+    }
+
+    Dialog {
+        id: pasteDialog
+        title: qsTr("Paste checkpoints")
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 440
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: { root.pasteControls(pasteArea.text); pasteArea.text = "" }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.spacingSmall
+            Text { text: qsTr("One checkpoint per line: km, closing time (HH:MM), optional name.\nExample:\n120, 14:30, Verdun\n250, 22:10")
+                   color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            ScrollView {
+                Layout.fillWidth: true; Layout.preferredHeight: 150
+                TextArea { id: pasteArea; placeholderText: qsTr("km, HH:MM per line") }
+            }
+        }
     }
 
     FileDialog {
