@@ -298,6 +298,14 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                 worst_margin_s = margin_s
                 worst_margin_label = (ctrl.label if ctrl else None)
 
+        # Opening time (ouverture): a manned control won't stamp your card before it opens, so
+        # arriving before open_dt means you'd have to WAIT. early_s = how long before opening you
+        # arrive (>0 = too early / wait time), None when the control has no opening time.
+        open_dt = ctrl.open_dt if ctrl else None
+        early_s = None
+        if isinstance(open_dt, datetime):
+            early_s = (open_dt - arrival).total_seconds()
+
         rows.append({
             "index": i,
             "label": (ctrl.label if ctrl else ("Finish" if is_finish else f"Control {i + 1}")),
@@ -313,6 +321,8 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             "depart_dt": _fmt(depart),
             "cutoff_dt": _fmt(cutoff_dt),
             "margin_s": None if margin_s is None else round(margin_s, 1),
+            "opens_dt": _fmt(open_dt),
+            "early_s": None if early_s is None else round(early_s, 1),
             "confidence": lt.get("confidence"),
         })
         clock = depart

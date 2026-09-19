@@ -126,6 +126,17 @@ def build_alerts(points, timeline=None, weather=None, pois=None) -> Dict[str, An
             alerts.append({"km": r["distance_km"], "kind": "cutoff", "severity": "warn",
                            "text": "%s: tight cutoff — only %s margin" % (r.get("label"), _hm(m))})
 
+    # too-early risk (from the timeline's per-control opening times): arriving before a manned
+    # control opens means waiting there. Ignored under 10 min (rounding); a big wait warns because
+    # it usually means you went out too hard and will lose that time standing still.
+    for r in (timeline or {}).get("controls", []):
+        e = r.get("early_s")
+        if e is None or e <= 600:
+            continue
+        sev = "warn" if e >= 3600 else "info"
+        alerts.append({"km": r["distance_km"], "kind": "early", "severity": sev,
+                       "text": "%s: arrive %s before it opens — you'd wait" % (r.get("label"), _hm(e))})
+
     # darkness (from weather per-control)
     for c in (weather or {}).get("controls", []):
         if c.get("is_dark"):

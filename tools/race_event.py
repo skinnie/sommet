@@ -47,13 +47,15 @@ class Cutoff:
     """A control/aid station along the route with a time limit."""
     label: str
     distance_km: float
-    cutoff_dt: Optional[datetime] = None  # ISO string or datetime; set by baseline_plan if not given
+    cutoff_dt: Optional[datetime] = None  # closing time (fermeture); set by baseline_plan if not given
+    open_dt: Optional[datetime] = None    # opening time (ouverture): arrival-not-before at a manned control
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "label": self.label,
             "distance_km": self.distance_km,
             "cutoff_dt": self.cutoff_dt.isoformat() if isinstance(self.cutoff_dt, datetime) else self.cutoff_dt,
+            "open_dt": self.open_dt.isoformat() if isinstance(self.open_dt, datetime) else self.open_dt,
         }
 
     @staticmethod
@@ -61,10 +63,14 @@ class Cutoff:
         cutoff_dt = d.get("cutoff_dt")
         if isinstance(cutoff_dt, str):
             cutoff_dt = datetime.fromisoformat(cutoff_dt)
+        open_dt = d.get("open_dt")
+        if isinstance(open_dt, str):
+            open_dt = datetime.fromisoformat(open_dt)
         return Cutoff(
             label=d["label"],
             distance_km=d["distance_km"],
             cutoff_dt=cutoff_dt,
+            open_dt=open_dt,
         )
 
 
