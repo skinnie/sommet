@@ -32,6 +32,7 @@ Item {
     property var calibratedProfile: null  // set when base_speed came from a ride (personal), else null
     property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
     property bool autoStopDone: false  // pre-filled the stop estimate from memory once this route
+    property var controlOverrides: ({})  // {controlIndex: seconds} manual per-control stop overrides
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -64,6 +65,7 @@ Item {
         PlanStore.plannedGpx = gpx
         PlanStore.routeName = gpxName
         PlanStore.pois = null            // new route -> stale services cleared (shared w/ Route page)
+        controlOverrides = ({})          // new route -> drop per-control stop overrides
         timeline = null
         // new route -> re-suggest the stop estimate for its distance from learned memory
         autoStopDone = false
@@ -159,6 +161,8 @@ Item {
         } else {
             payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
+        if (Object.keys(controlOverrides).length > 0)
+            payload.control_overrides = controlOverrides   // expert per-control stop overrides
 
         busy = true
         statusMsg = qsTr("Computing timeline…")
@@ -608,6 +612,7 @@ Item {
                             Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("ride"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("stop m"); Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("margin"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("°C"); Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
                             Text { text: qsTr("wind/sky"); Layout.preferredWidth: 84; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
@@ -622,6 +627,21 @@ Item {
                                 Text { text: fmtClock(modelData.arrival_dt); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                // editable per-control stop (minutes); blank = model's own split. Finish has no stop.
+                                RoundedTextField {
+                                    Layout.preferredWidth: 52
+                                    enabled: index < (timeline ? timeline.controls.length - 1 : 0)
+                                    text: enabled ? "" + Math.round(modelData.stop_s / 60) : "—"
+                                    horizontalAlignment: Text.AlignRight
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    onEditingFinished: {
+                                        var v = parseFloat(text)
+                                        if (!isNaN(v) && v >= 0) {
+                                            var o = root.controlOverrides; o[index] = v * 60
+                                            root.controlOverrides = o; computeTimeline()
+                                        }
+                                    }
+                                }
                                 Text {
                                     Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight
                                     text: modelData.margin_s === null ? "—" : fmtDur(modelData.margin_s)
