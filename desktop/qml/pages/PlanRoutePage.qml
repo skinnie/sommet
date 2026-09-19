@@ -225,6 +225,22 @@ Item {
     // POIs / resupply along the route (Overpass, online). Lives on the Route page (spatial data);
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
     property bool poiBusy: false
+    // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
+    readonly property var poiMarkers: {
+        var out = []
+        var p = PlanStore.pois
+        if (p && p.categories) {
+            for (var cat in p.categories) {
+                var list = p.categories[cat].pois || []
+                for (var i = 0; i < list.length; i++) {
+                    out.push({ lat: list[i].lat, lon: list[i].lon,
+                               label: (list[i].name || cat) })
+                    if (out.length >= 300) return out
+                }
+            }
+        }
+        return out
+    }
     function findPois() {
         if (!plannedGpx) return
         var cats = []
@@ -485,7 +501,7 @@ Item {
                 // the coloured route once one exists. WeatherService is the app's own IP position.
                 latitude: WeatherService.latitude
                 longitude: WeatherService.longitude
-                markers: root.startEndMarkers
+                markers: (root.startEndMarkers || []).concat(root.poiMarkers)
                 // The map fill is ALWAYS climb (André, 2026-08-31: "show only climb" / "show climb
                 // with weather"). The toggle just shows/hides the weather overlay - the wind arrows
                 // + rain icons - over that climb-coloured route.
