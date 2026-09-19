@@ -322,6 +322,40 @@ Item {
         var hh = ("0" + d.getHours()).slice(-2), mm = ("0" + d.getMinutes()).slice(-2)
         return hh + ":" + mm
     }
+    // ISO -> "Sun 03:30" (weekday helps on multi-day rides)
+    function fmtClockDay(iso) {
+        if (!iso) return "—"
+        var d = new Date(iso)
+        var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        return days[d.getDay()] + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2)
+    }
+    // the plain-language answer atop the result (audit's highest-value change)
+    function verdictText() {
+        if (!timeline) return ""
+        var s = qsTr("You'd finish ~%1").arg(fmtClockDay(timeline.finish_eta_dt))
+        var fin = null
+        for (var i = timeline.controls.length - 1; i >= 0; i--)
+            if (timeline.controls[i].margin_s !== null) { fin = timeline.controls[i]; break }
+        if (fin) {
+            var m = fin.margin_s
+            s += m >= 0 ? qsTr(" — about %1 inside the limit.").arg(fmtDur(m))
+                        : qsTr(" — about %1 OVER the limit.").arg(fmtDur(-m))
+        } else {
+            s += "."
+        }
+        if (timeline.worst_margin_s !== null && timeline.worst_margin_control) {
+            var w = timeline.worst_margin_s
+            s += qsTr(" Tightest: %1, %2.").arg(timeline.worst_margin_control)
+                  .arg(w >= 0 ? qsTr("%1 spare").arg(fmtDur(w)) : qsTr("%1 short").arg(fmtDur(-w)))
+        }
+        return s
+    }
+    function verdictIsBad() {
+        if (!timeline) return false
+        for (var i = timeline.controls.length - 1; i >= 0; i--)
+            if (timeline.controls[i].margin_s !== null) return timeline.controls[i].margin_s < 0
+        return false
+    }
 
     ListModel { id: controlsModel }
 
@@ -335,7 +369,7 @@ Item {
             spacing: 2
             Text { text: qsTr("Race Planner"); color: Theme.text
                    font.pixelSize: Theme.fontSizeTitle; font.weight: Font.Bold }
-            Text { text: qsTr("BRM / ultra timeline with cutoff margins"); color: Theme.mutedText
+            Text { text: qsTr("Plan when you'll reach each checkpoint — and whether you'll beat the time limits."); color: Theme.mutedText
                    font.pixelSize: Theme.fontSizeCaption }
         }
 
@@ -361,6 +395,8 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
+                    Text { text: qsTr("Start"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                           Layout.preferredWidth: 40 }
                     RoundedTextField { id: startDate; Layout.preferredWidth: 140
                                        placeholderText: qsTr("YYYY-MM-DD")
                                        text: new Date().toISOString().split("T")[0] }
@@ -384,7 +420,7 @@ Item {
                     spacing: Theme.spacingSmall
                     Layout.topMargin: Theme.spacingSmall
                     RoundedTextField { id: baseSpeed; Layout.fillWidth: true
-                                       placeholderText: qsTr("Your solo avg on flat/rolling roads, km/h (optional)")
+                                       placeholderText: qsTr("Your steady speed on a flat road, e.g. 25 km/h")
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly
                                        onTextEdited: { root.calibratedProfile = null; root.calibNote = "" } }
                     RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
@@ -432,7 +468,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
-                    Text { text: qsTr("Controls & cutoffs"); color: Theme.text
+                    Text { text: qsTr("Checkpoints & time limits"); color: Theme.text
                            font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
                     Item { Layout.fillWidth: true }
                     RoundedButton { text: qsTr("+ Add control")
@@ -445,7 +481,7 @@ Item {
                     visible: controlsModel.count > 0
                     Text { text: qsTr("Label"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                     Text { text: qsTr("km"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("limit h"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                    Text { text: qsTr("must arrive by"); Layout.preferredWidth: 80; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                     Item { Layout.preferredWidth: 32 }
                 }
                 Repeater {
@@ -505,6 +541,16 @@ Item {
                         anchors.margins: Theme.spacingMedium
                         spacing: Theme.spacingSmall
 
+                        // plain-language verdict — the answer, before the numbers
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: verdictText()
+                            color: verdictIsBad() ? marginBad : marginGood
+                            font.pixelSize: Theme.fontSizeSubtitle
+                            font.weight: Font.Bold
+                        }
+
                         // summary row
                         Flow {
                             Layout.fillWidth: true
@@ -521,7 +567,7 @@ Item {
                                      Text { text: timeline ? fmtDur(timeline.sleep_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
                             Column { Text { text: qsTr("ELAPSED"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                      Text { text: timeline ? fmtDur(timeline.elapsed_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
-                            Column { Text { text: qsTr("WORST MARGIN"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Column { Text { text: qsTr("TIGHTEST CUTOFF"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                      Text { text: (timeline && timeline.worst_margin_s !== null) ? fmtDur(timeline.worst_margin_s) : "—"
                                             color: (timeline && timeline.worst_margin_s !== null && timeline.worst_margin_s < 0) ? marginBad : marginGood
                                             font.pixelSize: Theme.fontSizeSubtitle; font.weight: Font.Bold } }
@@ -574,7 +620,7 @@ Item {
                             Text { text: qsTr("Control"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            Text { text: qsTr("leg"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("ride"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("margin"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("°C"); Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
@@ -766,13 +812,13 @@ Item {
                                        font.pixelSize: Theme.fontSizeSubtitle; font.weight: Font.Bold }
                             }
                             Column {
-                                Text { text: qsTr("Δ FINISH"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: qsTr("finish change"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: root.scenario ? deltaTxt(root.scenario.elapsed_time_s, timeline.elapsed_time_s) : "—"
                                        color: (root.scenario && root.scenario.elapsed_time_s > timeline.elapsed_time_s + 30) ? marginBad : marginGood
                                        font.pixelSize: Theme.fontSizeSubtitle }
                             }
                             Column {
-                                Text { text: qsTr("Δ WORST MARGIN"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: qsTr("cutoff change"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text {
                                     text: (root.scenario && root.scenario.worst_margin_s !== null && timeline.worst_margin_s !== null)
                                           ? deltaTxt(root.scenario.worst_margin_s, timeline.worst_margin_s) : "—"
