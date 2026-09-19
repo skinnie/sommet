@@ -33,6 +33,7 @@ Item {
     property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
     property bool autoStopDone: false  // pre-filled the stop estimate from memory once this route
     property var controlOverrides: ({})  // {controlIndex: seconds} manual per-control stop overrides
+    property bool windFold: false      // fold the prevailing wind into the ETA (off by default)
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -247,25 +248,31 @@ Item {
         if (weather && weather.controls) payload.weather = weather.controls
         api("POST", "/api/race/sleep", payload, function(status, res) {
             sleepPlan = (status === 200 && res && res.ok) ? res : null
-            foldSleepIntoEta()   // planned sleep must count toward the finish ETA
+            applyFolds()   // planned sleep (and prevailing wind, if toggled) must reach the ETA
         })
     }
 
-    // Re-run the timeline with the planned sleep windows folded in, so the finish ETA + elapsed +
-    // per-control margins all include sleep (the whole point: a realistic multi-day finish time).
-    // Does NOT re-fetch weather/sleep/pois — avoids a loop.
-    function foldSleepIntoEta() {
+    // Re-run the timeline with the second-order effects folded into the finish ETA + margins:
+    // (a) planned sleep windows (unless the rider's total-off-bike already includes sleep), and
+    // (b) an optional prevailing-wind uniform speed shift. Doesn't re-fetch weather/sleep/pois.
+    function applyFolds() {
         if (!basePayload) return
-        // If the rider gave a TOTAL off-bike time, sleep is already inside it — don't add it again;
-        // the sleep plan then only advises WHEN/WHERE to spend that sleep. Only fold sleep as extra
-        // time in the ratio-based path (no user total).
-        if (basePayload.stop_total_s) return
-        var windows = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
         var p = JSON.parse(JSON.stringify(basePayload))
-        p.sleep_windows = windows.map(function(w) { return { km: w.km, duration_s: w.duration_s } })
-        // keep basePayload in sync so what-if diffs are relative to the sleep-inclusive plan
+        // sleep: only fold as extra time when it isn't already inside a user total-off-bike budget
+        if (!p.stop_total_s) {
+            var windows = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
+            p.sleep_windows = windows.map(function(w) { return { km: w.km, duration_s: w.duration_s } })
+        }
+        // prevailing wind: net headwind slows (k 0.5), tailwind helps less (k 0.3) — off by default
+        p.wind_speed_delta_kmh = 0
+        if (windFold && weather && weather.summary && weather.summary.net_head_kmh !== undefined) {
+            var net = weather.summary.net_head_kmh
+            p.wind_speed_delta_kmh = -(net > 0 ? 0.5 : 0.3) * net
+        }
         basePayload = p
-        if (p.sleep_windows.length === 0) return   // nothing to fold; pass-1 timeline already shown
+        var need = (p.sleep_windows && p.sleep_windows.length > 0)
+                   || (p.wind_speed_delta_kmh && Math.abs(p.wind_speed_delta_kmh) > 0.05)
+        if (!need) return
         api("POST", "/api/race/timeline", p, function(status, res) {
             if (status === 200 && res && res.ok && res.timeline) timeline = res.timeline
         })
@@ -738,11 +745,25 @@ Item {
                                   : ""
                             color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
-                        Text {
-                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
                             visible: weather && weather.summary
-                            text: qsTr("Head/tailwind is shown per checkpoint but is not yet folded into the times.")
-                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            RoundedCheckBox {
+                                text: qsTr("Adjust finish for the prevailing wind")
+                                checked: windFold
+                                onToggled: { root.windFold = checked; root.applyFolds() }
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                text: (weather && weather.summary && weather.summary.net_head_kmh !== undefined)
+                                      ? (Math.abs(weather.summary.net_head_kmh) < 1
+                                         ? qsTr("net wind ≈ 0 on this route")
+                                         : (weather.summary.net_head_kmh > 0
+                                            ? qsTr("net headwind ~%1 km/h").arg(Math.round(weather.summary.net_head_kmh))
+                                            : qsTr("net tailwind ~%1 km/h").arg(Math.round(-weather.summary.net_head_kmh))))
+                                      : ""
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            }
                         }
 
                         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }

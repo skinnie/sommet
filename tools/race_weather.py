@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -74,9 +75,12 @@ def race_weather(controls: List[Dict[str, Any]], gpx: Optional[str] = None,
         return {"ok": False, "error": "forecast fetch failed"}
 
     out, dark = [], []
+    head_components = []  # signed headwind per control (+ = headwind), for the net prevailing wind
     for i, m in enumerate(meta):
         w = wx[i]
         rel = weather_route._wind_relation(w["wind_dir_deg"], m["heading"])
+        # signed headwind component: + when the wind comes from ahead of the travel heading
+        head_components.append(w["wind_kmh"] * math.cos(math.radians(w["wind_dir_deg"] - m["heading"])))
         ev = astro.events(m["arr_dt"].date(), m["lat"], m["lon"], tz_offset_h)
         srise = ev["sun_min"].get("sunrise")
         sset = ev["sun_min"].get("sunset")
@@ -93,10 +97,14 @@ def race_weather(controls: List[Dict[str, Any]], gpx: Optional[str] = None,
         })
 
     temps = [c["temp_c"] for c in out]
+    # Net prevailing wind: mean signed headwind over the sampled points. On a loop this nets to
+    # ~0; on a point-to-point it's the real head/tailwind the base speed doesn't already contain.
+    net_head = round(sum(head_components) / len(head_components), 1) if head_components else 0.0
     summary = {
         "temp_min_c": min(temps), "temp_max_c": max(temps),
         "wind_max_kmh": round(max(c["wind_kmh"] for c in out), 1),
         "rain_max_mm": round(max(c["rain_mm"] for c in out), 2),
+        "net_head_kmh": net_head,
         "dark_controls": dark,
     }
     if dark:

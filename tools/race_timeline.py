@@ -138,6 +138,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    stop_profile: Optional[Dict[str, Any]] = None,
                    sleep: Optional[Dict[str, Any]] = None,
                    sleep_windows: Optional[List[Dict[str, Any]]] = None,
+                   wind_speed_delta_kmh: float = 0.0,
                    control_overrides: Optional[Dict[int, float]] = None,
                    route_estimator: Optional[Callable[..., Dict[str, Any]]] = None,
                    stop_distributor: Optional[Callable[..., Dict[int, float]]] = None) -> Dict[str, Any]:
@@ -192,6 +193,20 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     route_est = route_estimator(
         [(l["distance_km"], l["ascent_m"], l["descent_m"]) for l in legs_geo], athlete, bike)
     leg_estimates = route_est.get("legs", [])
+
+    # Optional prevailing-wind fold: a single uniform speed shift on every leg (negative = the net
+    # headwind slows you, positive = tailwind), floored at the curve's 4 km/h and capped at 1.5x so
+    # a gale can't invent a fantasy speed. This is the route-mean effect not already in base_speed
+    # (loops net ~0); per-leg wind stays display-only to avoid the convexity double-count.
+    if wind_speed_delta_kmh and abs(wind_speed_delta_kmh) > 0.05:
+        for i in range(min(len(leg_estimates), len(legs_geo))):
+            e = leg_estimates[i]
+            sp = float(e.get("avg_speed_kmh") or 0.0)
+            dkm = float(legs_geo[i]["distance_km"])
+            if sp > 0 and dkm > 0:
+                nsp = max(4.0, min(sp + wind_speed_delta_kmh, sp * 1.5))
+                e["avg_speed_kmh"] = round(nsp, 1)
+                e["moving_time_s"] = round(dkm / nsp * 3600.0, 1)
 
     n = len(legs_geo)
     leg_moving_s = [float(leg_estimates[i].get("moving_time_s", 0.0)) if i < len(leg_estimates)
@@ -486,6 +501,7 @@ def main(argv=None):
                             stop_profile=body.get("stop_profile"),
                             sleep=body.get("sleep"),
                             sleep_windows=body.get("sleep_windows"),
+                            wind_speed_delta_kmh=float(body.get("wind_speed_delta_kmh") or 0.0),
                             control_overrides=overrides or None)
         print(json.dumps({"ok": tl.get("ok", False), "timeline": tl}))
     except Exception as e:
