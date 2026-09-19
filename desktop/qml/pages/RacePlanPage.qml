@@ -417,17 +417,21 @@ Item {
                + (timeline.sleep_time_s > 0 ? "  ·  sleep " + fmtDur(timeline.sleep_time_s) : "")
                + "  ·  elapsed " + fmtDur(timeline.elapsed_time_s))
         L.push("")
-        L.push("checkpoint            km    arrive   ride    km/h  stop   margin   temp  wind")
+        L.push("checkpoint            km   opens   arrive   ride    km/h  stop   margin   temp  wind")
         for (var i = 0; i < timeline.controls.length; i++) {
             var c = timeline.controls[i]
             var w = wxFor(i)
             function pad(s, n) { s = "" + s; while (s.length < n) s += " "; return s }
             function padL(s, n) { s = "" + s; while (s.length < n) s = " " + s; return s }
             var m = c.margin_s === null ? "—" : (c.margin_s < 0 ? "-" + fmtDur(-c.margin_s) : "+" + fmtDur(c.margin_s))
-            L.push(pad(c.label, 20) + " " + padL(c.distance_km, 5) + "  " + pad(fmtClock(c.arrival_dt), 7)
+            var opensTxt = c.opens_dt ? fmtClock(c.opens_dt) : "—"
+            var tooEarly = (c.early_s !== undefined && c.early_s !== null && c.early_s > 600)
+            L.push(pad(c.label, 20) + " " + padL(c.distance_km, 5) + "  " + padL(opensTxt, 5)
+                   + "  " + pad(fmtClock(c.arrival_dt), 7)
                    + " " + padL(fmtDur(c.moving_time_s), 6) + "  " + padL(c.avg_speed_kmh, 5)
                    + " " + padL(Math.round(c.stop_s / 60) + "m", 5) + " " + padL(m, 7)
-                   + (w ? "  " + padL(Math.round(w.temp_c) + "°", 4) + "  " + w.wind_rel + (w.is_dark ? " (dark)" : "") : ""))
+                   + (w ? "  " + padL(Math.round(w.temp_c) + "°", 4) + "  " + w.wind_rel + (w.is_dark ? " (dark)" : "") : "")
+                   + (tooEarly ? "  [too early: wait " + fmtDur(c.early_s) + "]" : ""))
         }
         if (PlanStore.pois && PlanStore.pois.summary && PlanStore.pois.summary.length) {
             L.push(""); L.push("Resupply:")
