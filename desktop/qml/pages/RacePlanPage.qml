@@ -599,6 +599,19 @@ Item {
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly
                                        onTextEdited: root.stopUserSet = true }
                 }
+                // Sleep reminder for long brevets: the finish time is only realistic if the
+                // off-bike total INCLUDES sleep. Fires from ~300 km where an overnight is likely.
+                Text {
+                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    visible: timeline && timeline.ok && timeline.distance_km >= 300
+                    text: {
+                        var sug = (timeline && timeline.sleep_suggested_s > 0)
+                                  ? qsTr(" Most riders sleep about %1 at this distance — include it in the total above (or the finish time will be too optimistic).").arg(fmtDur(timeline.sleep_suggested_s))
+                                  : qsTr(" Include any sleep in the total above, or the finish time will be too optimistic.")
+                        return "🌙" + sug
+                    }
+                    color: "#e0912f"; font.pixelSize: Theme.fontSizeCaption
+                }
                 Text {
                     Layout.fillWidth: true
                     visible: calibNote.length > 0
@@ -663,7 +676,7 @@ Item {
                 Text {
                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                     visible: controlsModel.count === 0
-                    text: qsTr("Add your checkpoints (km + the time they close, from your brevet card) to see cutoff margins — or just Compute for the finish time.")
+                    text: qsTr("Add your checkpoints (km + the time they close, from your brevet card) to see cutoff margins — or just Compute for the finish time. \"opens\" is optional: a control's opening time, or a shop/service opening hour — you'll be warned if you'd arrive before it and have to wait.")
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                 }
 
