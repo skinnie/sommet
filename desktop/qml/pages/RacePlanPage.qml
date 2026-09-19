@@ -108,6 +108,30 @@ Item {
         }
     }
 
+    // Import a whole brevet roadbook (the official control table, e.g. "C1 - FROIDCHAPELLE ...
+    // 112,5 ... 12:30") in one shot. `payload` is {text} (pasted table) or {pdf} (a local PDF,
+    // parsed with pdftotext by the backend). Replaces the control list with the parsed controls,
+    // using the roadbook's OFFICIAL closing time (fermeture) as each "must arrive by".
+    function importRoadbook(payload) {
+        statusMsg = qsTr("Reading roadbook…")
+        api("POST", "/api/race/roadbook", payload, function(status, res) {
+            if (status !== 200 || !res || !res.ok || !res.controls) {
+                statusMsg = qsTr("Couldn't read roadbook: ") + ((res && res.error) ? res.error : status)
+                return
+            }
+            controlsModel.clear()
+            var cs = res.controls
+            for (var i = 0; i < cs.length; i++) {
+                var name = cs[i].name ? (cs[i].label + " " + cs[i].name) : cs[i].label
+                // skip the start control (km 0) as a cutoff row; it's the start time, not a checkpoint
+                if ((cs[i].km || 0) <= 0.05) continue
+                controlsModel.append({ label: name, km: "" + cs[i].km, hours: cs[i].close || "" })
+            }
+            statusMsg = qsTr("Imported %1 controls from the roadbook.").arg(controlsModel.count)
+            if (gpxText.length > 0) computeTimeline()
+        })
+    }
+
     // "HH:MM" -> the first Date strictly after `afterMs` with that clock time (handles multi-day
     // closing times monotonically). Returns null if the text isn't a valid HH:MM.
     function clockToDt(afterMs, hhmm) {
@@ -579,6 +603,7 @@ Item {
                     Text { text: qsTr("④ Checkpoints & time limits"); color: Theme.text
                            font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold }
                     Item { Layout.fillWidth: true }
+                    RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
                     RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
                     RoundedButton { text: qsTr("+ Add control")
                         onClicked: controlsModel.append({ label: "", km: "", hours: "" }) }
@@ -1114,6 +1139,45 @@ Item {
                 Layout.fillWidth: true; Layout.preferredHeight: 150
                 TextArea { id: pasteArea; placeholderText: qsTr("km, HH:MM per line") }
             }
+        }
+    }
+
+    Dialog {
+        id: importRoadbookDialog
+        title: qsTr("Import roadbook")
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 480
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: { if (rbArea.text.trim().length) root.importRoadbook({ text: rbArea.text }); rbArea.text = "" }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.spacingSmall
+            Text {
+                text: qsTr("Paste the control table from your brevet roadbook (the whole page is fine — only the \"C1 …\" control lines with a closing time are used). Each control's official closing time becomes its \"must arrive by\".")
+                color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            ScrollView {
+                Layout.fillWidth: true; Layout.preferredHeight: 180
+                TextArea { id: rbArea; placeholderText: qsTr("C1 - FROIDCHAPELLE   …   112,5   9:19   12:30") }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: qsTr("…or load a PDF roadbook:"); color: Theme.mutedText
+                       font.pixelSize: Theme.fontSizeCaption }
+                Item { Layout.fillWidth: true }
+                RoundedButton { text: qsTr("From PDF…"); onClicked: rbPdfDialog.open() }
+            }
+        }
+    }
+
+    FileDialog {
+        id: rbPdfDialog
+        title: qsTr("Choose a roadbook PDF")
+        nameFilters: [qsTr("PDF files (*.pdf *.PDF)"), qsTr("All files (*)")]
+        onAccepted: {
+            importRoadbookDialog.close()
+            root.importRoadbook({ pdf: decodeURIComponent(selectedFile.toString().replace("file://", "")) })
         }
     }
 

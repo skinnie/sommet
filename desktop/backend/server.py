@@ -1283,6 +1283,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_alerts(body)
         elif self.path == "/api/race/calibrate":
             self._handle_race_calibrate(body)
+        elif self.path == "/api/race/roadbook":
+            self._handle_race_roadbook(body)
         elif self.path == "/api/race/stop-suggest":
             self._handle_race_stopmem(body, "suggest")
         elif self.path == "/api/race/stop-record":
@@ -2446,6 +2448,23 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "calibration failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_roadbook(self, body):
+        """Body: {"text": "<roadbook table>"} or {"pdf": "/abs/path.pdf"}. Parse a brevet roadbook
+        into controls with their official closing times (roadbook_import.py) -> [{label,name,km,
+        open,close}], ready to populate the control list. Offline (text) / poppler (pdf)."""
+        if not (body.get("text") or body.get("pdf")):
+            self._send_json(400, {"error": '"text" or "pdf" is required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("roadbook_import.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "roadbook import failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_stopmem(self, body, mode):
