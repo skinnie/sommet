@@ -36,4 +36,12 @@ QtObject {
     property string planDate: ""
 
     property bool hasRoute: plannedGpx.length > 0
+
+    // Shared POIs/resupply result (race_pois): found on the Route page, read by Race Plan's
+    // critical-points/water-gap analysis. Cleared when a new GPX is loaded.
+    property var pois: null
+    // Remembered POI query choices so a return trip keeps them.
+    property var poiCategories: ["water", "food"]
+    property string poiWaterRate: "2.0"
+    property string poiCarryL: "1.5"
 }

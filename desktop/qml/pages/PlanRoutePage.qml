@@ -216,9 +216,37 @@ Item {
         var s = fileUrl.toString()
         routeName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
         plannedGpx = gpx
+        PlanStore.pois = null            // new route -> stale services cleared (shared w/ Race Plan)
         clearResults()
         colorTrack()
         forecastWeather()
+    }
+
+    // POIs / resupply along the route (Overpass, online). Lives on the Route page (spatial data);
+    // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
+    property bool poiBusy: false
+    function findPois() {
+        if (!plannedGpx) return
+        var cats = []
+        if (catWater.checked) cats.push("water")
+        if (catFood.checked) cats.push("food")
+        if (catBike.checked) cats.push("bike")
+        if (catShelter.checked) cats.push("shelter")
+        if (catSafety.checked) cats.push("safety")
+        if (cats.length === 0) { statusMsg = qsTr("Pick at least one thing to find"); return }
+        poiBusy = true
+        PlanStore.poiCategories = cats
+        PlanStore.poiWaterRate = waterRate.text
+        PlanStore.poiCarryL = carryL.text
+        api("POST", "/api/race/pois",
+            { gpx: plannedGpx, categories: cats,
+              water_l_per_100km: parseFloat(waterRate.text) || 2.0,
+              carry_l: parseFloat(carryL.text) || 1.5 },
+            function(status, res) {
+                poiBusy = false
+                PlanStore.pois = (status === 200 && res && res.ok) ? res : null
+                if (!PlanStore.pois) statusMsg = qsTr("Couldn't fetch services (try again)")
+            })
     }
 
     function colorTrack() {
@@ -636,6 +664,53 @@ Item {
                                                 : qsTr("⇄ Reverse direction")
                             enabled: !root.busy && !root.weatherBusy
                             onClicked: root.toggleReverse()
+                        }
+                    }
+
+                    // Water, food & services (POIs) — spatial route data belongs on the Route page.
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        visible: root.plannedGpx.length > 0
+                        Rectangle { width: parent.width; height: 1; color: Theme.border }
+                        Text { text: qsTr("Water, food & services"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
+                        Flow {
+                            width: parent.width; spacing: Theme.spacingMedium
+                            RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }
+                            RoundedCheckBox { id: catFood; text: qsTr("Food"); checked: true }
+                            RoundedCheckBox { id: catBike; text: qsTr("Bike shops"); checked: false }
+                            RoundedCheckBox { id: catShelter; text: qsTr("Places to sleep"); checked: false }
+                            RoundedCheckBox { id: catSafety; text: qsTr("Emergency"); checked: false }
+                        }
+                        Row {
+                            width: parent.width; spacing: Theme.spacingSmall
+                            readonly property real cellW: (width - Theme.spacingSmall) / 2
+                            RoundedTextField { id: waterRate; width: parent.cellW
+                                               placeholderText: qsTr("Water L/100km"); text: PlanStore.poiWaterRate
+                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                            RoundedTextField { id: carryL; width: parent.cellW
+                                               placeholderText: qsTr("Carry (L)"); text: PlanStore.poiCarryL
+                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                        }
+                        RoundedButton {
+                            width: parent.width
+                            text: root.poiBusy ? qsTr("Searching…") : qsTr("Find water, food & services")
+                            enabled: !root.poiBusy && root.plannedGpx.length > 0
+                            onClicked: root.findPois()
+                        }
+                        Column {
+                            width: parent.width; spacing: 2
+                            visible: PlanStore.pois && PlanStore.pois.summary && PlanStore.pois.summary.length > 0
+                            Repeater {
+                                model: PlanStore.pois ? PlanStore.pois.summary : []
+                                delegate: Text {
+                                    width: parent.width; wrapMode: Text.WordWrap
+                                    text: modelData
+                                    color: modelData.indexOf("⚠") >= 0 ? "#d6453f" : Theme.text
+                                    font.pixelSize: Theme.fontSizeCaption
+                                }
+                            }
                         }
                     }
 

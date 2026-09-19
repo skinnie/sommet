@@ -9,7 +9,8 @@ import AmbitApp
 // arrival times and cutoff margins. Speed comes from the engine's curve model via the backend
 // (/api/race/timeline -> race_timeline.py -> estimate_route); this page only collects inputs and
 // renders the result, plus a What-if panel (re-runs the timeline with speed/stops/sleep tweaked
-// and shows the deltas). Not here yet: POIs/water gaps, and saving/loading plans.
+// and shows the deltas). Water/food/services (POIs) live on the Route page and are shared via
+// PlanStore.pois, which feeds the resupply summary + critical points here. Not here yet: save/load.
 Item {
     id: root
 
@@ -25,9 +26,8 @@ Item {
     property var timeline: null
     property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
     property var sleepPlan: null     // race_sleep result: circadian sleep windows
-    property var pois: null          // race_pois result: POIs + resupply gaps
     property var alerts: null        // race_alerts result: ranked critical points
-    property bool poiBusy: false
+    // POIs/resupply now live on the Route page and are shared via PlanStore.pois.
     property string calibNote: ""    // feedback after calibrating base_speed from a ride
     property var calibratedProfile: null  // set when base_speed came from a ride (personal), else null
     property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
@@ -63,6 +63,7 @@ Item {
         // survives navigation. PlanStore is a singleton that outlives this page's Loader.
         PlanStore.plannedGpx = gpx
         PlanStore.routeName = gpxName
+        PlanStore.pois = null            // new route -> stale services cleared (shared w/ Route page)
         timeline = null
         // new route -> re-suggest the stop estimate for its distance from learned memory
         autoStopDone = false
@@ -155,7 +156,6 @@ Item {
                 statusMsg = ""
                 weather = null
                 sleepPlan = null
-                pois = null
                 alerts = null
                 // First time on a fresh route with no stop estimate: pre-fill from the learned
                 // per-distance memory, then recompute once with it.
@@ -240,30 +240,9 @@ Item {
         if (!timeline || !gpxText) { alerts = null; return }
         var body = { gpx: gpxText, timeline: timeline }
         if (weather) body.weather = weather
-        if (pois) body.pois = pois
+        if (PlanStore.pois) body.pois = PlanStore.pois   // water/food gaps found on the Route page
         api("POST", "/api/race/alerts", body, function(status, res) {
             alerts = (status === 200 && res && res.ok) ? res : null
-        })
-    }
-
-    // POIs + resupply gaps (online, Overpass — explicit button since it can be slow).
-    function findPois() {
-        if (!gpxText) return
-        var cats = []
-        if (catWater.checked) cats.push("water")
-        if (catFood.checked) cats.push("food")
-        if (catBike.checked) cats.push("bike")
-        if (catShelter.checked) cats.push("shelter")
-        if (catSafety.checked) cats.push("safety")
-        if (cats.length === 0) { statusMsg = qsTr("Pick at least one POI category"); return }
-        poiBusy = true
-        var body = { gpx: gpxText, categories: cats,
-                     water_l_per_100km: parseFloat(waterRate.text) || 2.0,
-                     carry_l: parseFloat(carryL.text) || 1.5 }
-        api("POST", "/api/race/pois", body, function(status, res) {
-            poiBusy = false
-            pois = (status === 200 && res && res.ok) ? res : null
-            fetchAlerts()   // fold water/food gaps into the critical points
         })
     }
     // weather row for control index i (weather.controls is index-aligned with timeline.controls)
@@ -447,34 +426,6 @@ Item {
                     visible: calibNote.length > 0
                     text: calibNote; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                     wrapMode: Text.WordWrap
-                }
-
-                // --- Resupply & POIs ---
-                Text { text: qsTr("Resupply & POIs"); color: Theme.text
-                       font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium
-                       Layout.topMargin: Theme.spacingSmall }
-                Flow {
-                    Layout.fillWidth: true; spacing: Theme.spacingMedium
-                    RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }
-                    RoundedCheckBox { id: catFood; text: qsTr("Food"); checked: true }
-                    RoundedCheckBox { id: catBike; text: qsTr("Bike"); checked: false }
-                    RoundedCheckBox { id: catShelter; text: qsTr("Sleep"); checked: false }
-                    RoundedCheckBox { id: catSafety; text: qsTr("Safety"); checked: false }
-                }
-                RowLayout {
-                    Layout.fillWidth: true; spacing: Theme.spacingSmall
-                    RoundedTextField { id: waterRate; Layout.preferredWidth: 150
-                                       placeholderText: qsTr("Water L/100km"); text: "2.0"
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                    RoundedTextField { id: carryL; Layout.preferredWidth: 130
-                                       placeholderText: qsTr("Carry (L)"); text: "1.5"
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                    RoundedButton {
-                        text: poiBusy ? qsTr("Searching…") : qsTr("Find POIs")
-                        enabled: !poiBusy && gpxText.length > 0
-                        onClicked: findPois()
-                    }
-                    Item { Layout.fillWidth: true }
                 }
 
                 // --- Controls ---
@@ -718,15 +669,15 @@ Item {
                             }
                         }
 
-                        // --- Resupply gaps (from POIs) ---
+                        // --- Resupply gaps (found on the Route page, shared via PlanStore) ---
                         ColumnLayout {
                             Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; spacing: 2
-                            visible: pois && pois.summary && pois.summary.length > 0
+                            visible: PlanStore.pois && PlanStore.pois.summary && PlanStore.pois.summary.length > 0
                             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
                             Text { text: qsTr("Resupply"); color: Theme.text; font.weight: Font.Bold
                                    font.pixelSize: Theme.fontSizeCaption }
                             Repeater {
-                                model: pois ? pois.summary : []
+                                model: PlanStore.pois ? PlanStore.pois.summary : []
                                 delegate: Text {
                                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                                     text: modelData
@@ -734,6 +685,13 @@ Item {
                                     font.pixelSize: Theme.fontSizeCaption
                                 }
                             }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: timeline && !(PlanStore.pois && PlanStore.pois.summary && PlanStore.pois.summary.length > 0)
+                            text: qsTr("Tip: find water, food & services on the Route page — they'll appear here and in the critical points.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            Layout.topMargin: Theme.spacingSmall
                         }
 
                         // --- Critical points (climbs + cutoff + water/food + darkness) ---
