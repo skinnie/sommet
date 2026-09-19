@@ -30,6 +30,8 @@ Item {
     property bool poiBusy: false
     property string calibNote: ""    // feedback after calibrating base_speed from a ride
     property var calibratedProfile: null  // set when base_speed came from a ride (personal), else null
+    property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
+    property bool autoStopDone: false  // pre-filled the stop estimate from memory once this route
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -58,8 +60,12 @@ Item {
         gpxName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
         gpxText = gpx
         timeline = null
+        // new route -> re-suggest the stop estimate for its distance from learned memory
+        autoStopDone = false
+        stopUserSet = false
+        stopTotalH.text = ""
         statusMsg = qsTr("Reading route…")
-        computeTimeline()   // first pass with whatever controls exist -> reveals distance
+        computeTimeline()   // first pass -> reveals distance -> pre-fills stop estimate -> recompute
     }
 
     // Calibrate base_speed from one ride (a FIT) instead of guessing a number.
@@ -122,14 +128,12 @@ Item {
             athlete: athlete,
             bike: { bike_weight_kg: 10.0, load_weight_kg: 5.0, bike_type: "road" }
         }
-        // Stops (audit fix #2): a typed per-control minutes value is the manual override; with the
-        // field empty, DON'T send zero stops (over-optimistic green margins) — send a calibrated
-        // stop ratio so realistic control time is distributed and cutoffs are honest.
-        var stopMin = parseFloat(stopMinutes.text)
-        if (!isNaN(stopMin) && stopMinutes.text.length > 0) {
-            var stops = []
-            for (var k = 0; k < cutoffs.length + 2; k++) stops.push(Math.max(0, stopMin * 60))
-            payload.stops_s = stops
+        // Stops: the rider's own TOTAL off-bike estimate for this distance (food, rest, sleep) —
+        // that IS the budget, so sleep is inside it (we don't add circadian sleep on top). Empty
+        // field falls back to the learned/default ratio.
+        var T = parseFloat(stopTotalH.text)
+        if (!isNaN(T) && T >= 0 && stopTotalH.text.length > 0) {
+            payload.stop_total_s = T * 3600
         } else {
             payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
@@ -149,6 +153,23 @@ Item {
                 sleepPlan = null
                 pois = null
                 alerts = null
+                // First time on a fresh route with no stop estimate: pre-fill from the learned
+                // per-distance memory, then recompute once with it.
+                if (!stopTotalH.text.length && !autoStopDone) {
+                    autoStopDone = true
+                    api("POST", "/api/race/stop-suggest", { distance_km: timeline.distance_km },
+                        function(s, r) {
+                            if (s === 200 && r && r.ok) stopTotalH.text = "" + r.hours
+                            computeTimeline()
+                        })
+                    return
+                }
+                // Learn from the rider only when THEY set the estimate (not the auto-prefill).
+                if (stopUserSet && stopTotalH.text.length) {
+                    api("POST", "/api/race/stop-record",
+                        { distance_km: timeline.distance_km, hours: parseFloat(stopTotalH.text) },
+                        function() {})
+                }
                 fetchWeather()                  // weather + daylight, then sleep + alerts (chained)
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
@@ -195,6 +216,10 @@ Item {
     // Does NOT re-fetch weather/sleep/pois — avoids a loop.
     function foldSleepIntoEta() {
         if (!basePayload) return
+        // If the rider gave a TOTAL off-bike time, sleep is already inside it — don't add it again;
+        // the sleep plan then only advises WHEN/WHERE to spend that sleep. Only fold sleep as extra
+        // time in the ratio-based path (no user total).
+        if (basePayload.stop_total_s) return
         var windows = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
         var p = JSON.parse(JSON.stringify(basePayload))
         p.sleep_windows = windows.map(function(w) { return { km: w.km, duration_s: w.duration_s } })
@@ -252,9 +277,13 @@ Item {
         var p = JSON.parse(JSON.stringify(basePayload))
         if (whatifSpeed !== 0 && p.athlete && p.athlete.speed_profile)
             p.athlete.speed_profile.base_speed_kmh += whatifSpeed
-        if (whatifStopMin !== 0 && p.stops_s)
-            for (var i = 0; i < p.stops_s.length; i++)
-                p.stops_s[i] = Math.max(0, p.stops_s[i] + whatifStopMin * 60)
+        if (whatifStopMin !== 0) {
+            if (p.stop_total_s !== undefined)
+                p.stop_total_s = Math.max(0, p.stop_total_s + whatifStopMin * 60)
+            else if (p.stops_s)
+                for (var i = 0; i < p.stops_s.length; i++)
+                    p.stops_s[i] = Math.max(0, p.stops_s[i] + whatifStopMin * 60)
+        }
         if (whatifSleepH > 0) p.sleep = { enabled: true, duration_s: whatifSleepH * 3600 }
         api("POST", "/api/race/timeline", p, function(status, res) {
             if (status === 200 && res && res.ok && res.timeline) scenario = res.timeline
@@ -359,9 +388,10 @@ Item {
                                        inputMethodHints: Qt.ImhFormattedNumbersOnly
                                        onTextEdited: { root.calibratedProfile = null; root.calibNote = "" } }
                     RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
-                    RoundedTextField { id: stopMinutes; Layout.preferredWidth: 150
-                                       placeholderText: qsTr("Stop/control (min)")
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                    RoundedTextField { id: stopTotalH; Layout.preferredWidth: 200
+                                       placeholderText: qsTr("Total off bike, h (food/rest/sleep)")
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                       onTextEdited: root.stopUserSet = true }
                 }
                 Text {
                     Layout.fillWidth: true
@@ -711,7 +741,7 @@ Item {
                             Layout.fillWidth: true; spacing: Theme.spacingSmall
                             Text { text: qsTr("Stops"); color: Theme.text; font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 70 }
                             RoundedButton { text: "−"; Layout.preferredWidth: 34; onClicked: { root.whatifStopMin -= 15; root.applyWhatif() } }
-                            Text { text: (root.whatifStopMin > 0 ? "+" : "") + root.whatifStopMin + " min/ctrl"; color: Theme.text
+                            Text { text: (root.whatifStopMin > 0 ? "+" : "") + root.whatifStopMin + " min"; color: Theme.text
                                    font.pixelSize: Theme.fontSizeCaption; Layout.preferredWidth: 96; horizontalAlignment: Text.AlignHCenter }
                             RoundedButton { text: "+"; Layout.preferredWidth: 34; onClicked: { root.whatifStopMin += 15; root.applyWhatif() } }
                             Item { Layout.fillWidth: true }

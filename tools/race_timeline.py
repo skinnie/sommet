@@ -134,6 +134,7 @@ def _fmt(dt: Optional[datetime]) -> Optional[str]:
 def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    bike: Optional[BikeInputs] = None,
                    stops_s: Optional[List[float]] = None,
+                   stop_total_s: Optional[float] = None,
                    stop_profile: Optional[Dict[str, Any]] = None,
                    sleep: Optional[Dict[str, Any]] = None,
                    sleep_windows: Optional[List[Dict[str, Any]]] = None,
@@ -208,6 +209,18 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     if stops_s is not None:                       # escape hatch: use verbatim
         for i in range(min(n, len(stops_s))):
             leg_stops[i] = float(stops_s[i])
+    elif stop_total_s and stop_total_s > 0:
+        # The rider's own TOTAL off-bike estimate for this distance (incl. food/rest/sleep) -
+        # spread it across the genuine controls the same way a ratio is, so it's the exact budget.
+        if genuine_idxs and total_moving_s > 0:
+            ratio = float(stop_total_s) / total_moving_s
+            dist = stop_distributor(genuine_idxs, leg_moving_s, ratio,
+                                    _DEFAULT_CONTROL_BASE_S, control_overrides or {})
+            for idx, secs in dist.items():
+                if 0 <= idx < n:
+                    leg_stops[idx] = float(secs)
+        else:
+            aggregate_stop_s = float(stop_total_s)
     elif stop_profile and float(stop_profile.get("ratio", 0.0)) > 0.0:
         ratio = float(stop_profile["ratio"])
         base_s = float(stop_profile.get("per_control_base_s", _DEFAULT_CONTROL_BASE_S))
@@ -469,6 +482,7 @@ def main(argv=None):
         overrides = {int(k): float(v) for k, v in raw_ov.items()}
         tl = build_timeline(event, athlete, bike,
                             stops_s=body.get("stops_s"),
+                            stop_total_s=body.get("stop_total_s"),
                             stop_profile=body.get("stop_profile"),
                             sleep=body.get("sleep"),
                             sleep_windows=body.get("sleep_windows"),
