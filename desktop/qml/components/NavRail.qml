@@ -136,10 +136,10 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Plan = weather + climb for a GPX you bring (2026-08-31 reshape); not gated on a
-                // watch. Reuses the route glyph (fixed icon-font subset, Icons.qml).
+                // Route = the route workshop (map, GPX cut/edit, weather+climb, POIs). Renamed from
+                // "Plan" (2026-09-19) so the two race screens read by job: Route vs Race plan.
                 glyph: Icons.routes
-                label: qsTr("Plan")
+                label: qsTr("Route")
                 selected: root.currentPage === "planRoute"
                 onClicked: root.pageSelected("planRoute")
             }

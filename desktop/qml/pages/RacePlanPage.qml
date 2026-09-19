@@ -59,6 +59,10 @@ Item {
         var s = fileUrl.toString()
         gpxName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
         gpxText = gpx
+        // Shared sticky route: a GPX loaded here also becomes the Plan (Route) page's route, and
+        // survives navigation. PlanStore is a singleton that outlives this page's Loader.
+        PlanStore.plannedGpx = gpx
+        PlanStore.routeName = gpxName
         timeline = null
         // new route -> re-suggest the stop estimate for its distance from learned memory
         autoStopDone = false
@@ -355,6 +359,15 @@ Item {
         for (var i = timeline.controls.length - 1; i >= 0; i--)
             if (timeline.controls[i].margin_s !== null) return timeline.controls[i].margin_s < 0
         return false
+    }
+
+    // Adopt a route already loaded on the Plan (Route) page, so the GPX "sticks" across screens.
+    Component.onCompleted: {
+        if (!gpxText && PlanStore.hasRoute) {
+            gpxText = PlanStore.plannedGpx
+            gpxName = PlanStore.routeName
+            computeTimeline()
+        }
     }
 
     ListModel { id: controlsModel }
