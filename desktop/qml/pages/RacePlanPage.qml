@@ -186,6 +186,23 @@ Item {
         if (weather && weather.controls) payload.weather = weather.controls
         api("POST", "/api/race/sleep", payload, function(status, res) {
             sleepPlan = (status === 200 && res && res.ok) ? res : null
+            foldSleepIntoEta()   // planned sleep must count toward the finish ETA
+        })
+    }
+
+    // Re-run the timeline with the planned sleep windows folded in, so the finish ETA + elapsed +
+    // per-control margins all include sleep (the whole point: a realistic multi-day finish time).
+    // Does NOT re-fetch weather/sleep/pois — avoids a loop.
+    function foldSleepIntoEta() {
+        if (!basePayload) return
+        var windows = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
+        var p = JSON.parse(JSON.stringify(basePayload))
+        p.sleep_windows = windows.map(function(w) { return { km: w.km, duration_s: w.duration_s } })
+        // keep basePayload in sync so what-if diffs are relative to the sleep-inclusive plan
+        basePayload = p
+        if (p.sleep_windows.length === 0) return   // nothing to fold; pass-1 timeline already shown
+        api("POST", "/api/race/timeline", p, function(status, res) {
+            if (status === 200 && res && res.ok && res.timeline) timeline = res.timeline
         })
     }
 
@@ -469,6 +486,9 @@ Item {
                                      Text { text: timeline ? fmtDur(timeline.moving_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
                             Column { Text { text: qsTr("STOPS"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                      Text { text: timeline ? fmtDur(timeline.stop_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
+                            Column { visible: timeline && timeline.sleep_time_s > 0
+                                     Text { text: qsTr("SLEEP"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                     Text { text: timeline ? fmtDur(timeline.sleep_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
                             Column { Text { text: qsTr("ELAPSED"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                      Text { text: timeline ? fmtDur(timeline.elapsed_time_s) : "—"; color: Theme.text; font.pixelSize: Theme.fontSizeSubtitle } }
                             Column { Text { text: qsTr("WORST MARGIN"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }

@@ -136,6 +136,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    stops_s: Optional[List[float]] = None,
                    stop_profile: Optional[Dict[str, Any]] = None,
                    sleep: Optional[Dict[str, Any]] = None,
+                   sleep_windows: Optional[List[Dict[str, Any]]] = None,
                    control_overrides: Optional[Dict[int, float]] = None,
                    route_estimator: Optional[Callable[..., Dict[str, Any]]] = None,
                    stop_distributor: Optional[Callable[..., Dict[int, float]]] = None) -> Dict[str, Any]:
@@ -219,10 +220,25 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         else:
             aggregate_stop_s = ratio * total_moving_s  # no controls -> one lump, per PM rule 1
 
+    # Planned sleep windows (from the circadian sleep plan) folded into the walk so BOTH per-control
+    # arrivals after a sleep AND the finish ETA include it. Each window is assigned to the control
+    # at/after its km (you sleep there); never at the very finish.
+    leg_sleep = [0.0] * n
+    for w in (sleep_windows or []):
+        dur = float(w.get("duration_s", 0.0))
+        if dur <= 0:
+            continue
+        wkm = float(w.get("km", 0.0))
+        idx = next((i for i in range(n) if legs_geo[i]["end_km"] >= wkm - 0.01), n - 1)
+        if idx >= n - 1:
+            idx = max(0, n - 2)   # not at the finish leg
+        leg_sleep[idx] += dur
+
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
     running_moving_s = 0.0
     total_stop_s = 0.0
+    planned_sleep_s = 0.0
     worst_margin_s: Optional[float] = None
     worst_margin_label: Optional[str] = None
     per_leg_provisional = len(legs_geo) > 1  # per-control granularity bias (see module NOTE)
@@ -241,8 +257,10 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         is_finish = (i == n - 1)
         if is_finish:
             stop_s = 0.0
-        depart = arrival + timedelta(seconds=stop_s)
+        slp = leg_sleep[i]
+        depart = arrival + timedelta(seconds=stop_s + slp)
         total_stop_s += stop_s
+        planned_sleep_s += slp
 
         cutoff_dt = ctrl.cutoff_dt if ctrl else None
         margin_s = None
@@ -262,6 +280,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             "avg_speed_kmh": lt.get("avg_speed_kmh"),
             "arrival_dt": _fmt(arrival),
             "stop_s": round(stop_s, 1),
+            "sleep_s": round(slp, 1),
             "stop_overridden": bool(control_overrides and i in control_overrides and not is_finish),
             "depart_dt": _fmt(depart),
             "cutoff_dt": _fmt(cutoff_dt),
@@ -275,18 +294,19 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         total_stop_s += aggregate_stop_s
         clock = clock + timedelta(seconds=aggregate_stop_s)
 
-    # Sleep sits ON TOP of stops (never in the ratio). A suggestion is always computed from the
-    # sleepless elapsed; an explicit enabled SleepPlan is added as a lump (not yet placed at a
-    # specific control - that's a later refinement).
-    elapsed_no_sleep_s = (clock - event.start_dt).total_seconds()
+    # Sleep sits ON TOP of stops (never in the ratio). The tier suggestion is from the SLEEPLESS
+    # elapsed. Planned windows (sleep_windows) were already folded into the walk above; an explicit
+    # `sleep` lump (e.g. the what-if "extra sleep" knob) is added on top here.
+    elapsed_no_sleep_s = (clock - event.start_dt).total_seconds() - planned_sleep_s
     sleep_suggested_s = _suggest_sleep_s(elapsed_no_sleep_s)
-    sleep_s = 0.0
+    lump_sleep_s = 0.0
     if sleep and sleep.get("enabled") and float(sleep.get("duration_s", 0.0)) > 0:
-        sleep_s = float(sleep["duration_s"])
-        clock = clock + timedelta(seconds=sleep_s)
+        lump_sleep_s = float(sleep["duration_s"])
+        clock = clock + timedelta(seconds=lump_sleep_s)
 
     finish_eta = clock
     elapsed_s = (finish_eta - event.start_dt).total_seconds()
+    sleep_time_s = planned_sleep_s + lump_sleep_s
 
     total_ascent_m = round(sum(l["ascent_m"] for l in legs_geo), 1)
 
@@ -298,7 +318,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         "finish_eta_dt": _fmt(finish_eta),
         "moving_time_s": round(total_moving_s, 1),
         "stop_time_s": round(total_stop_s, 1),
-        "sleep_time_s": round(sleep_s, 1),
+        "sleep_time_s": round(sleep_time_s, 1),
         "elapsed_time_s": round(elapsed_s, 1),
         "confidence": route_est.get("confidence", "low"),
         "model_source": route_est.get("model_source", "placeholder"),
@@ -451,6 +471,7 @@ def main(argv=None):
                             stops_s=body.get("stops_s"),
                             stop_profile=body.get("stop_profile"),
                             sleep=body.get("sleep"),
+                            sleep_windows=body.get("sleep_windows"),
                             control_overrides=overrides or None)
         print(json.dumps({"ok": tl.get("ok", False), "timeline": tl}))
     except Exception as e:
