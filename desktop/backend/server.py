@@ -1287,6 +1287,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_stopmem(body, "suggest")
         elif self.path == "/api/race/stop-record":
             self._handle_race_stopmem(body, "record")
+        elif self.path == "/api/race/scenario-save":
+            self._handle_race_scenarios(body, "save")
+        elif self.path == "/api/race/scenario-list":
+            self._handle_race_scenarios(body, "list")
+        elif self.path == "/api/race/scenario-get":
+            self._handle_race_scenarios(body, "get")
+        elif self.path == "/api/race/scenario-delete":
+            self._handle_race_scenarios(body, "delete")
         elif self.path == "/api/race/plan/list":
             self._handle_race_plan_list(body)
         elif self.path == "/api/race/plan/get":
@@ -2453,6 +2461,20 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "stop memory failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_scenarios(self, body, mode):
+        """Save/list/get/delete named race scenarios (race_scenarios.py). Offline JSON store."""
+        payload = dict(body)
+        payload["mode"] = mode
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(payload, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_scenarios.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "scenarios failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_plan_list(self, body):

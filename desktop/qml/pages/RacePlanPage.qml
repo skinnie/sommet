@@ -417,8 +417,62 @@ Item {
         return false
     }
 
+    // --- Save & compare scenarios ---
+    property var scenarios: []       // saved-scenario summaries for the compare table
+    function refreshScenarios() {
+        api("POST", "/api/race/scenario-list", {}, function(s, r) {
+            scenarios = (s === 200 && r && r.ok) ? r.scenarios : []
+        })
+    }
+    function currentUiState() {
+        var ctrls = []
+        for (var i = 0; i < controlsModel.count; i++) {
+            var c = controlsModel.get(i)
+            ctrls.push({ label: c.label, km: c.km, hours: c.hours })
+        }
+        return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
+                 eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
+                 calibratedProfile: calibratedProfile, controls: ctrls, controlOverrides: controlOverrides }
+    }
+    function currentSummary() {
+        if (!timeline) return {}
+        return { distance_km: timeline.distance_km, finish: fmtClockDay(timeline.finish_eta_dt),
+                 moving_time_s: timeline.moving_time_s, stop_time_s: timeline.stop_time_s,
+                 sleep_time_s: timeline.sleep_time_s, elapsed_time_s: timeline.elapsed_time_s,
+                 worst_margin_s: timeline.worst_margin_s, worst_margin_control: timeline.worst_margin_control }
+    }
+    function saveScenario(name) {
+        api("POST", "/api/race/scenario-save",
+            { name: name, ui: currentUiState(), summary: currentSummary() },
+            function(s, r) { refreshScenarios(); statusMsg = (s === 200 && r && r.ok) ? qsTr("Scenario saved.") : qsTr("Save failed.") })
+    }
+    function deleteScenario(name) {
+        api("POST", "/api/race/scenario-delete", { name: name }, function() { refreshScenarios() })
+    }
+    function openScenario(name) {
+        api("POST", "/api/race/scenario-get", { name: name }, function(s, r) {
+            if (!(s === 200 && r && r.ok && r.scenario)) return
+            var u = r.scenario.ui || {}
+            gpxText = u.gpx || ""; gpxName = u.gpxName || ""
+            if (gpxText) { PlanStore.plannedGpx = gpxText; PlanStore.routeName = gpxName }
+            startDate.text = u.startDate || startDate.text
+            startTime.text = u.startTime || startTime.text
+            eventName.text = u.eventName || ""
+            baseSpeed.text = u.baseSpeed || ""
+            stopTotalH.text = u.stopTotal || ""
+            calibratedProfile = u.calibratedProfile || null
+            controlOverrides = u.controlOverrides || ({})
+            controlsModel.clear()
+            var cs = u.controls || []
+            for (var i = 0; i < cs.length; i++) controlsModel.append({ label: cs[i].label || "", km: cs[i].km || "", hours: cs[i].hours || "" })
+            stopUserSet = (stopTotalH.text.length > 0); autoStopDone = true
+            if (gpxText) computeTimeline()
+        })
+    }
+
     // Adopt a route already loaded on the Plan (Route) page, so the GPX "sticks" across screens.
     Component.onCompleted: {
+        refreshScenarios()
         if (!gpxText && PlanStore.hasRoute) {
             gpxText = PlanStore.plannedGpx
             gpxName = PlanStore.routeName
@@ -577,6 +631,11 @@ Item {
                         text: qsTr("Export roadbook")
                         visible: timeline && timeline.ok
                         onClicked: roadbookDialog.open()
+                    }
+                    RoundedButton {
+                        text: qsTr("Save scenario")
+                        visible: timeline && timeline.ok
+                        onClicked: { scenarioName.text = eventName.text || gpxName || "Scenario"; saveScenarioDialog.open() }
                     }
                     Text { text: statusMsg; color: statusMsg.indexOf("Error") === 0 ? marginBad : Theme.mutedText
                            font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
@@ -939,6 +998,50 @@ Item {
                         }
                     }
                 }
+
+                // --- Saved scenarios (compare) ---
+                Rectangle {
+                    Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
+                    visible: scenarios.length > 0
+                    color: Theme.card; radius: Theme.radiusCard
+                    border.color: Theme.border; border.width: 1
+                    implicitHeight: scCol.implicitHeight + Theme.spacingMedium * 2
+                    ColumnLayout {
+                        id: scCol
+                        anchors.fill: parent; anchors.margins: Theme.spacingMedium; spacing: 2
+                        Text { text: qsTr("Saved scenarios"); color: Theme.text; font.weight: Font.Bold }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("name"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("finish"); Layout.preferredWidth: 72; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("elapsed"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("tightest"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Item { Layout.preferredWidth: 84 }
+                        }
+                        Repeater {
+                            model: scenarios
+                            delegate: RowLayout {
+                                width: scCol.width; spacing: Theme.spacingSmall
+                                Text { text: modelData.name; Layout.fillWidth: true; color: Theme.text
+                                       font.pixelSize: Theme.fontSizeCaption; elide: Text.ElideRight }
+                                Text { text: (modelData.summary && modelData.summary.finish) || "—"; Layout.preferredWidth: 72
+                                       color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
+                                Text { text: (modelData.summary && modelData.summary.elapsed_time_s) ? fmtDur(modelData.summary.elapsed_time_s) : "—"
+                                       Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.text; font.pixelSize: Theme.fontSizeCaption }
+                                Text {
+                                    Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight
+                                    text: (modelData.summary && modelData.summary.worst_margin_s !== null && modelData.summary.worst_margin_s !== undefined)
+                                          ? (modelData.summary.worst_margin_s < 0 ? "-" + fmtDur(-modelData.summary.worst_margin_s) : "+" + fmtDur(modelData.summary.worst_margin_s))
+                                          : "—"
+                                    color: (modelData.summary && modelData.summary.worst_margin_s < 0) ? marginBad : marginGood
+                                    font.pixelSize: Theme.fontSizeCaption
+                                }
+                                RoundedButton { text: qsTr("Open"); Layout.preferredWidth: 52; onClicked: root.openScenario(modelData.name) }
+                                RoundedButton { text: "✕"; Layout.preferredWidth: 28; onClicked: root.deleteScenario(modelData.name) }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -955,6 +1058,22 @@ Item {
         title: qsTr("Choose a ride (FIT) to calibrate your speed")
         nameFilters: [qsTr("FIT files (*.fit *.FIT)"), qsTr("All files (*)")]
         onAccepted: root.calibrateFromFit(selectedFile)
+    }
+
+    Dialog {
+        id: saveScenarioDialog
+        title: qsTr("Save scenario")
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 380
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: if (scenarioName.text.trim().length) root.saveScenario(scenarioName.text.trim())
+        ColumnLayout {
+            anchors.fill: parent; spacing: Theme.spacingSmall
+            Text { text: qsTr("Name this scenario (e.g. \"start 04:00, 2h sleep\") to compare later.")
+                   color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            RoundedTextField { id: scenarioName; Layout.fillWidth: true; placeholderText: qsTr("Scenario name") }
+        }
     }
 
     Dialog {
