@@ -29,6 +29,7 @@ Item {
     property var alerts: null        // race_alerts result: ranked critical points
     property bool poiBusy: false
     property string calibNote: ""    // feedback after calibrating base_speed from a ride
+    property var calibratedProfile: null  // set when base_speed came from a ride (personal), else null
     // what-if: the payload that produced `timeline` (the baseline), the adjusted result, and knobs.
     property var basePayload: null
     property var scenario: null
@@ -67,6 +68,7 @@ Item {
         calibNote = qsTr("Calibrating from your ride…")
         api("POST", "/api/race/calibrate", { fit_path: decodeURIComponent(p) }, function(status, res) {
             if (status === 200 && res && res.ok && res.profile) {
+                calibratedProfile = res.profile
                 baseSpeed.text = "" + res.profile.base_speed_kmh
                 calibNote = qsTr("Calibrated from your ride (%1 km / %2 m): base %3 km/h.")
                     .arg(res.ride.distance_km).arg(res.ride.ascent_m).arg(res.profile.base_speed_kmh)
@@ -99,24 +101,37 @@ Item {
             cutoffs.push(co)
         }
 
+        // Speed profile (audit fix #1/#3): ALWAYS give one so cold-start isn't the flat 15 km/h
+        // placeholder. Calibrated-from-a-ride = personal; a typed number = a generic guess (not a
+        // "personal calibrated" prediction); nothing typed = a plausible generic default.
         var athlete = { weight_kg: 75.0 }
         var base = parseFloat(baseSpeed.text)
-        if (!isNaN(base) && base > 0)
-            athlete.speed_profile = { base_speed_kmh: base, confidence: "medium",
-                                      model_source: "personal", n_recent_rides: 0 }
-
-        var stopMin = parseFloat(stopMinutes.text)
-        var stopSec = (!isNaN(stopMin) && stopMin > 0) ? stopMin * 60 : 0
-        // per-leg stop schedule; build_timeline forces the finish leg to 0. Pad generously.
-        var stops = []
-        for (var k = 0; k < cutoffs.length + 2; k++) stops.push(stopSec)
+        if (calibratedProfile && !isNaN(base) && base > 0) {
+            athlete.speed_profile = calibratedProfile
+        } else if (!isNaN(base) && base > 0) {
+            athlete.speed_profile = { base_speed_kmh: base, confidence: "low",
+                                      model_source: "generic", n_recent_rides: 0 }
+        } else {
+            athlete.speed_profile = { base_speed_kmh: 22.0, confidence: "low",
+                                      model_source: "generic", n_recent_rides: 0 }
+        }
 
         var payload = {
             event: { name: eventName.text || "Race", event_type: "BRM",
                      start_dt: startIso(), gpx: gpxText, points: [], cutoffs: cutoffs },
             athlete: athlete,
-            bike: { bike_weight_kg: 10.0, load_weight_kg: 5.0, bike_type: "road" },
-            stops_s: stops
+            bike: { bike_weight_kg: 10.0, load_weight_kg: 5.0, bike_type: "road" }
+        }
+        // Stops (audit fix #2): a typed per-control minutes value is the manual override; with the
+        // field empty, DON'T send zero stops (over-optimistic green margins) — send a calibrated
+        // stop ratio so realistic control time is distributed and cutoffs are honest.
+        var stopMin = parseFloat(stopMinutes.text)
+        if (!isNaN(stopMin) && stopMinutes.text.length > 0) {
+            var stops = []
+            for (var k = 0; k < cutoffs.length + 2; k++) stops.push(Math.max(0, stopMin * 60))
+            payload.stops_s = stops
+        } else {
+            payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
 
         busy = true
@@ -323,8 +338,9 @@ Item {
                     spacing: Theme.spacingSmall
                     Layout.topMargin: Theme.spacingSmall
                     RoundedTextField { id: baseSpeed; Layout.fillWidth: true
-                                       placeholderText: qsTr("Typical flat-road avg km/h (optional)")
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                                       placeholderText: qsTr("Your solo avg on flat/rolling roads, km/h (optional)")
+                                       inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                       onTextEdited: { root.calibratedProfile = null; root.calibNote = "" } }
                     RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
                     RoundedTextField { id: stopMinutes; Layout.preferredWidth: 150
                                        placeholderText: qsTr("Stop/control (min)")
@@ -470,9 +486,20 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            visible: timeline && timeline.sleep_suggested_s > 0
-                            text: qsTr("Long ride — consider planning about %1 of sleep.").arg(timeline ? fmtDur(timeline.sleep_suggested_s) : "")
+                            // Only the generic tier hint until the circadian plan resolves; once it
+                            // returns windows the Sleep plan block below is authoritative, and if it
+                            // returns none (e.g. dawn finish) we say nothing here (audit fix #4).
+                            visible: timeline && timeline.sleep_suggested_s > 0 && !sleepPlan
+                            text: qsTr("Long ride — a sleep stop may be worth planning; checking the best window…")
                             color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            // circadian plan ran but found no worthwhile window (short enough / dawn finish)
+                            visible: timeline && timeline.sleep_suggested_s > 0 && sleepPlan
+                                     && (!sleepPlan.windows || sleepPlan.windows.length === 0)
+                            text: qsTr("You can ride this one through — no sleep stop needed.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 
                         // weather summary + daylight verdict (online; may lag the timeline by a moment)
@@ -545,7 +572,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             visible: timeline && timeline.per_control_provisional
-                            text: qsTr("Per-control times are provisional (segment-level calibration pending).")
+                            text: qsTr("Per-control times are approximate.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 

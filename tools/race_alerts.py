@@ -101,14 +101,17 @@ def build_alerts(points, timeline=None, weather=None, pois=None) -> Dict[str, An
     cumul_m = geo_util.cumulative_distances([(p["lat"], p["lon"]) for p in points])
     alerts: List[Dict[str, Any]] = []
 
-    # climbs
+    # climbs — severity leans on GRADIENT (a long shallow drag isn't a "major climb"); a steep
+    # pitch or a very big ascent warns, everything else is info.
     for c in find_climbs(points, cumul_m):
-        major = c["gain_m"] >= 350 or c["avg_grade"] >= 7.0
+        steep = c["avg_grade"] >= 6.0
+        warn = c["avg_grade"] >= 5.0 or c["gain_m"] >= 600
+        label = "Steep climb" if steep else ("Big climb" if c["gain_m"] >= 400 else "Climb")
         alerts.append({
             "km": round(c["start_km"], 1), "kind": "climb",
-            "severity": "warn" if major else "info",
-            "text": "%s climb from km %.0f: +%d m at %.1f%%"
-                    % ("Major" if major else "Notable", c["start_km"], c["gain_m"], c["avg_grade"]),
+            "severity": "warn" if warn else "info",
+            "text": "%s from km %.0f: +%d m at %.1f%%"
+                    % (label, c["start_km"], c["gain_m"], c["avg_grade"]),
         })
 
     # cutoff risk (from the timeline's per-control margins)

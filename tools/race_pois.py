@@ -155,9 +155,27 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
     total_km = cumul_m[-1] / 1000.0
 
     coords = _downsample(points, cumul_m)
-    query = build_query(coords, radius_m, categories)
-    doc = (fetch or _overpass_fetch)(query)
-    elements = doc.get("elements", []) if isinstance(doc, dict) else []
+    # Audit fix #5: a single Overpass query over a 300+ km corridor 504s. Split the corridor into
+    # overlapping chunks and union the results, so brevet-length routes work. A failed chunk is
+    # skipped (partial results still useful) rather than failing the whole search.
+    fetch = fetch or _overpass_fetch
+    CHUNK, OVERLAP = 40, 1
+    elements = []
+    i = 0
+    errors = 0
+    while i < len(coords):
+        chunk = coords[i:i + CHUNK]
+        if len(chunk) < 2 and elements:
+            break
+        try:
+            doc = fetch(build_query(chunk, radius_m, categories))
+            if isinstance(doc, dict):
+                elements.extend(doc.get("elements", []))
+        except Exception:
+            errors += 1
+        if i + CHUNK >= len(coords):
+            break
+        i += CHUNK - OVERLAP
 
     per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in categories}
     seen = set()
