@@ -354,6 +354,47 @@ Item {
         }
         return s
     }
+    // Plain-text roadbook / cue sheet of the whole plan, for printing or a bar bag.
+    function buildRoadbook() {
+        if (!timeline) return ""
+        var L = []
+        L.push((eventName.text || "Race") + " — " + timeline.distance_km + " km, " + timeline.total_ascent_m + " m climb")
+        L.push("Start: " + startIso().replace("T", " ").slice(0, 16))
+        L.push(verdictText())
+        L.push("Moving " + fmtDur(timeline.moving_time_s) + "  ·  stops " + fmtDur(timeline.stop_time_s)
+               + (timeline.sleep_time_s > 0 ? "  ·  sleep " + fmtDur(timeline.sleep_time_s) : "")
+               + "  ·  elapsed " + fmtDur(timeline.elapsed_time_s))
+        L.push("")
+        L.push("checkpoint            km    arrive   ride    km/h  stop   margin   temp  wind")
+        for (var i = 0; i < timeline.controls.length; i++) {
+            var c = timeline.controls[i]
+            var w = wxFor(i)
+            function pad(s, n) { s = "" + s; while (s.length < n) s += " "; return s }
+            function padL(s, n) { s = "" + s; while (s.length < n) s = " " + s; return s }
+            var m = c.margin_s === null ? "—" : (c.margin_s < 0 ? "-" + fmtDur(-c.margin_s) : "+" + fmtDur(c.margin_s))
+            L.push(pad(c.label, 20) + " " + padL(c.distance_km, 5) + "  " + pad(fmtClock(c.arrival_dt), 7)
+                   + " " + padL(fmtDur(c.moving_time_s), 6) + "  " + padL(c.avg_speed_kmh, 5)
+                   + " " + padL(Math.round(c.stop_s / 60) + "m", 5) + " " + padL(m, 7)
+                   + (w ? "  " + padL(Math.round(w.temp_c) + "°", 4) + "  " + w.wind_rel + (w.is_dark ? " (dark)" : "") : ""))
+        }
+        if (PlanStore.pois && PlanStore.pois.summary && PlanStore.pois.summary.length) {
+            L.push(""); L.push("Resupply:")
+            for (var j = 0; j < PlanStore.pois.summary.length; j++) L.push("  " + PlanStore.pois.summary[j])
+        }
+        if (sleepPlan && sleepPlan.windows && sleepPlan.windows.length) {
+            L.push(""); L.push("Sleep:")
+            for (var k = 0; k < sleepPlan.windows.length; k++) {
+                var s = sleepPlan.windows[k]
+                L.push("  " + s.start_local + "–" + s.end_local + " (~" + (s.duration_s / 3600).toFixed(1) + "h) near km " + s.km + " — " + s.reason)
+            }
+        }
+        if (alerts && alerts.alerts && alerts.alerts.length) {
+            L.push(""); L.push("Critical points:")
+            for (var a = 0; a < alerts.alerts.length; a++)
+                L.push("  [" + alerts.alerts[a].severity + "] km " + Math.round(alerts.alerts[a].km) + " — " + alerts.alerts[a].text)
+        }
+        return L.join("\n")
+    }
     function verdictIsBad() {
         if (!timeline) return false
         for (var i = timeline.controls.length - 1; i >= 0; i--)
@@ -510,6 +551,11 @@ Item {
                         enabled: !busy && gpxText.length > 0
                         onClicked: computeTimeline()
                     }
+                    RoundedButton {
+                        text: qsTr("Export roadbook")
+                        visible: timeline && timeline.ok
+                        onClicked: roadbookDialog.open()
+                    }
                     Text { text: statusMsg; color: statusMsg.indexOf("Error") === 0 ? marginBad : Theme.mutedText
                            font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
@@ -600,6 +646,12 @@ Item {
                                     .arg(weather.verdict || "")
                                   : ""
                             color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: weather && weather.summary
+                            text: qsTr("Head/tailwind is shown per checkpoint but is not yet folded into the times.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
 
                         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
@@ -741,12 +793,19 @@ Item {
                             Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; spacing: 2
                             visible: alerts && alerts.alerts && alerts.alerts.length > 0
                             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-                            Text { text: qsTr("Critical points"); color: Theme.text; font.weight: Font.Bold
-                                   font.pixelSize: Theme.fontSizeCaption }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: qsTr("Critical points"); color: Theme.text; font.weight: Font.Bold
+                                       font.pixelSize: Theme.fontSizeCaption }
+                                Item { Layout.fillWidth: true }
+                                RoundedCheckBox { id: alertsImportantOnly; text: qsTr("Only warnings")
+                                                  checked: false }
+                            }
                             Repeater {
                                 model: alerts ? alerts.alerts : []
                                 delegate: RowLayout {
                                     width: results.width; spacing: Theme.spacingSmall
+                                    visible: !alertsImportantOnly.checked || modelData.severity !== "info"
                                     Text { text: "km " + Math.round(modelData.km); Layout.preferredWidth: 56
                                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                     Text {
@@ -864,5 +923,17 @@ Item {
         title: qsTr("Choose a ride (FIT) to calibrate your speed")
         nameFilters: [qsTr("FIT files (*.fit *.FIT)"), qsTr("All files (*)")]
         onAccepted: root.calibrateFromFit(selectedFile)
+    }
+
+    FileDialog {
+        id: roadbookDialog
+        title: qsTr("Save roadbook")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("Text files (*.txt)"), qsTr("All files (*)")]
+        currentFile: "file://" + (eventName.text ? eventName.text.replace(/[^\w-]+/g, "_") : "roadbook") + ".txt"
+        onAccepted: {
+            var err = LocalFileService.saveText(selectedFile, buildRoadbook())
+            statusMsg = err && err.length ? (qsTr("Save failed: ") + err) : qsTr("Roadbook saved.")
+        }
     }
 }
