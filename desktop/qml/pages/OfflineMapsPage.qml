@@ -87,7 +87,7 @@ Item {
             id: map
             anchors.fill: parent
             scrollZoom: true
-            showZoomControls: true
+            showZoomControls: false  // page draws its own, clear of the selection box (below)
             latitude: 40; longitude: -3; zoomLevel: 4
 
             DragHandler {
@@ -116,12 +116,42 @@ Item {
 
         // The area that will be saved.
         Rectangle {
+            id: selectionBox
             anchors.fill: parent
             anchors.margins: Math.min(parent.width, parent.height) * 0.08
             color: "transparent"
             border.color: Theme.accent
             border.width: 2
             radius: Theme.radiusSmall
+        }
+
+        // Zoom controls, page-owned so they sit ON TOP of the selection overlay and just
+        // INSIDE its top-right corner — the built-in MapView ones (top-right, 8px) landed
+        // right on the accent border, so the box crossed them and they couldn't be clicked.
+        Column {
+            anchors.top: selectionBox.top
+            anchors.right: selectionBox.right
+            anchors.margins: Theme.spacingSmall + 2  // clear of the 2px border
+            spacing: 4
+
+            Repeater {
+                model: [{ t: "+", d: 1 }, { t: "−", d: -1 }]
+                delegate: Rectangle {
+                    required property var modelData
+                    width: 28; height: 28; radius: 4
+                    color: "#CCFFFFFF"
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData.t
+                        font.pixelSize: Theme.fontSizeHeading; font.bold: true
+                        color: "#333333"
+                    }
+                    TapHandler {
+                        // onCurrentZoomChanged (Connections above) refreshes the estimate.
+                        onTapped: map.currentZoom = Math.max(1, Math.min(19, map.currentZoom + modelData.d))
+                    }
+                }
+            }
         }
     }
 
