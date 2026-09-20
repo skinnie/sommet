@@ -41,6 +41,28 @@ Item {
     property int whatifStopMin: 0    // minutes added to each control stop
     property real whatifSleepH: 0    // hours of sleep added on top
 
+    // Guided setup (André, 2026-09-20: "show up kinda like questions, one by one"). One question
+    // per step with Back/Next; nothing is shown as "the plan" until the last step's "See my plan",
+    // so the confusing "fields visible while it's already computing" is gone. The background
+    // computeTimeline() that runs on GPX load only fills distance + the stop suggestion; the weather/
+    // sleep/alerts fetch and the results screen wait for showResults (set on See-my-plan).
+    readonly property int wizardStepCount: 5
+    property int wizardStep: 0
+    property bool showResults: false
+    readonly property var wizardTitles: [qsTr("Your route"), qsTr("When do you start?"),
+        qsTr("How fast do you ride?"), qsTr("Time off the bike"), qsTr("Checkpoints & time limits")]
+    function wizardCanAdvance() {
+        if (wizardStep === 0) return gpxText.length > 0   // must have a route to plan
+        return true
+    }
+    function wizardNext() {
+        if (wizardStep < wizardStepCount - 1) { wizardStep++; return }
+        showResults = true
+        computeTimeline()          // now fetches weather/sleep/alerts too (gated on showResults)
+    }
+    function wizardBack() { if (wizardStep > 0) wizardStep-- }
+    function editAnswers() { showResults = false }
+
     // --- backend call (same XMLHttpRequest idiom as PlanRoutePage / RoutesPage) ---
     function api(method, path, body, cb) {
         var xhr = new XMLHttpRequest()
@@ -241,7 +263,8 @@ Item {
                         { distance_km: timeline.distance_km, hours: parseFloat(stopTotalH.text) },
                         function() {})
                 }
-                fetchWeather()                  // weather + daylight, then sleep + alerts (chained)
+                if (showResults)
+                    fetchWeather()              // weather + daylight, then sleep + alerts (chained)
             } else {
                 statusMsg = qsTr("Error: ") + ((res && res.error) ? res.error : status)
             }
@@ -507,7 +530,7 @@ Item {
             var cs = u.controls || []
             for (var i = 0; i < cs.length; i++) controlsModel.append({ label: cs[i].label || "", km: cs[i].km || "", hours: cs[i].hours || "", opens: cs[i].opens || "" })
             stopUserSet = (stopTotalH.text.length > 0); autoStopDone = true
-            if (gpxText) computeTimeline()
+            if (gpxText) { root.showResults = true; computeTimeline() }   // a saved scenario opens straight to its plan
         })
     }
 
@@ -549,142 +572,173 @@ Item {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                // ① Route
-                Text { text: qsTr("① Route"); color: Theme.text; font.weight: Font.Bold
-                       font.pixelSize: Theme.fontSizeLabel }
-                RowLayout {
+                // ==== Guided setup — one question per step (visible until "See my plan") ====
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: Theme.spacingSmall
-                    Text {
+                    visible: !root.showResults
+                    spacing: Theme.spacingMedium
+
+                    // progress: "Step N of M" + dots
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: gpxName ? (gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
-                                      : qsTr("No route loaded — load a GPX (or one from the Route page)")
-                        color: gpxName ? Theme.text : Theme.mutedText
-                        font.pixelSize: Theme.fontSizeCaption
-                        elide: Text.ElideRight
+                        Text { text: qsTr("Step %1 of %2").arg(root.wizardStep + 1).arg(root.wizardStepCount)
+                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                        Item { Layout.fillWidth: true }
+                        Row {
+                            spacing: 6
+                            Repeater {
+                                model: root.wizardStepCount
+                                Rectangle {
+                                    width: 9; height: 9; radius: 4.5
+                                    color: index <= root.wizardStep ? Theme.primary : Theme.border
+                                    opacity: index === root.wizardStep ? 1.0 : (index < root.wizardStep ? 0.85 : 0.5)
+                                }
+                            }
+                        }
                     }
-                    RoundedButton { text: gpxName ? qsTr("Change GPX") : qsTr("Load GPX")
-                                    onClicked: gpxDialog.open() }
-                }
+                    Text { text: root.wizardTitles[root.wizardStep]; color: Theme.text
+                           font.pixelSize: Theme.fontSizeTitle; font.weight: Font.Bold }
 
-                // ② Start
-                Text { text: qsTr("② Start"); color: Theme.text; font.weight: Font.Bold
-                       font.pixelSize: Theme.fontSizeLabel; Layout.topMargin: Theme.spacingSmall }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSmall
-                    RoundedTextField { id: startDate; Layout.preferredWidth: 140
-                                       placeholderText: qsTr("YYYY-MM-DD")
-                                       text: new Date().toISOString().split("T")[0] }
-                    RoundedTextField { id: startTime; Layout.preferredWidth: 90
-                                       placeholderText: qsTr("HH:MM"); text: "06:00" }
-                    RoundedTextField { id: eventName; Layout.fillWidth: true
-                                       placeholderText: qsTr("Event name (optional)") }
-                }
-
-                // ③ Your speed & stops
-                Text { text: qsTr("③ Your speed & time off the bike"); color: Theme.text; font.weight: Font.Bold
-                       font.pixelSize: Theme.fontSizeLabel; Layout.topMargin: Theme.spacingSmall }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSmall
-                    Layout.topMargin: Theme.spacingSmall
-                    RoundedTextField { id: baseSpeed; Layout.fillWidth: true
-                                       placeholderText: qsTr("Your steady speed on a flat road, e.g. 25 km/h")
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                       onTextEdited: { root.calibratedProfile = null; root.calibNote = "" } }
-                    RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
-                    RoundedTextField { id: stopTotalH; Layout.preferredWidth: 200
-                                       placeholderText: qsTr("Total off bike, h (food/rest/sleep)")
-                                       inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                       onTextEdited: root.stopUserSet = true }
-                }
-                // Sleep reminder for long brevets: the finish time is only realistic if the
-                // off-bike total INCLUDES sleep. Fires from ~300 km where an overnight is likely.
-                Text {
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                    visible: timeline && timeline.ok && timeline.distance_km >= 300
-                    text: {
-                        var sug = (timeline && timeline.sleep_suggested_s > 0)
-                                  ? qsTr(" Most riders sleep about %1 at this distance — include it in the total above (or the finish time will be too optimistic).").arg(fmtDur(timeline.sleep_suggested_s))
-                                  : qsTr(" Include any sleep in the total above, or the finish time will be too optimistic.")
-                        return "🌙" + sug
-                    }
-                    color: "#e0912f"; font.pixelSize: Theme.fontSizeCaption
-                }
-                Text {
-                    Layout.fillWidth: true
-                    visible: calibNote.length > 0
-                    text: calibNote; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                    wrapMode: Text.WordWrap
-                }
-
-                // --- Controls ---
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.topMargin: Theme.spacingSmall
-                    Text { text: qsTr("④ Checkpoints & time limits"); color: Theme.text
-                           font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold }
-                    Item { Layout.fillWidth: true }
-                    RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
-                    RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
-                    RoundedButton { text: qsTr("+ Add control")
-                        onClicked: controlsModel.append({ label: "", km: "", hours: "", opens: "" }) }
-                }
-                // header
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSmall
-                    visible: controlsModel.count > 0
-                    Text { text: qsTr("Label"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("km"); Layout.preferredWidth: 70; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("opens"); Layout.preferredWidth: 76; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Text { text: qsTr("must arrive by"); Layout.preferredWidth: 90; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    Item { Layout.preferredWidth: 32 }
-                }
-                Repeater {
-                    model: controlsModel
-                    delegate: RowLayout {
-                        width: form.width
+                    // --- Step 0: Route ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 0
                         spacing: Theme.spacingSmall
-                        RoundedTextField {
-                            Layout.fillWidth: true
-                            text: model.label
-                            placeholderText: qsTr("Control %1").arg(index + 1)
-                            onTextChanged: controlsModel.setProperty(index, "label", text)
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            text: gpxName ? ("✓ " + gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
+                                          : qsTr("Load the route you're planning — a GPX file, or the one already on the Route page.")
+                            color: gpxName ? Theme.text : Theme.mutedText
+                            font.pixelSize: gpxName ? Theme.fontSizeSubtitle : Theme.fontSizeBody
                         }
-                        RoundedTextField {
-                            Layout.preferredWidth: 70
-                            text: model.km; placeholderText: qsTr("km")
-                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            onTextChanged: controlsModel.setProperty(index, "km", text)
-                        }
-                        RoundedTextField {
-                            Layout.preferredWidth: 76
-                            text: model.opens; placeholderText: qsTr("opens")
-                            onTextChanged: controlsModel.setProperty(index, "opens", text)
-                        }
-                        RoundedTextField {
-                            Layout.preferredWidth: 90
-                            text: model.hours; placeholderText: qsTr("by HH:MM")
-                            onTextChanged: controlsModel.setProperty(index, "hours", text)
-                        }
-                        RoundedButton { text: "✕"; Layout.preferredWidth: 32
-                                        onClicked: controlsModel.remove(index) }
+                        RoundedButton { text: gpxName ? qsTr("Change route") : qsTr("Load GPX")
+                                        onClicked: gpxDialog.open() }
                     }
-                }
-                Text {
-                    Layout.fillWidth: true; wrapMode: Text.WordWrap
-                    visible: controlsModel.count === 0
-                    text: qsTr("Add your checkpoints (km + the time they close, from your brevet card) to see cutoff margins — or just Compute for the finish time. \"opens\" is optional: a control's opening time, or a shop/service opening hour — you'll be warned if you'd arrive before it and have to wait.")
-                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+
+                    // --- Step 1: Start ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 1
+                        spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            RoundedTextField { id: startDate; Layout.preferredWidth: 150
+                                               placeholderText: qsTr("YYYY-MM-DD")
+                                               text: new Date().toISOString().split("T")[0] }
+                            RoundedTextField { id: startTime; Layout.preferredWidth: 100
+                                               placeholderText: qsTr("HH:MM"); text: "06:00" }
+                        }
+                        RoundedTextField { id: eventName; Layout.fillWidth: true
+                                           placeholderText: qsTr("Event name (optional)") }
+                    }
+
+                    // --- Step 2: Pace ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 2
+                        spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            RoundedTextField { id: baseSpeed; Layout.fillWidth: true
+                                               placeholderText: qsTr("Your steady speed on a flat road, e.g. 25 km/h")
+                                               inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                               onTextEdited: { root.calibratedProfile = null; root.calibNote = "" } }
+                            RoundedButton { text: qsTr("From a ride"); onClicked: fitDialog.open() }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            text: calibNote.length > 0 ? calibNote
+                                  : qsTr("Type your flat-road cruising speed, or pick a past ride (FIT) and we'll work it out. Leave blank for a generic estimate.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+
+                    // --- Step 3: Time off the bike ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 3
+                        spacing: Theme.spacingSmall
+                        RoundedTextField { id: stopTotalH; Layout.preferredWidth: 220
+                                           placeholderText: qsTr("Total off bike, hours (food/rest/sleep)")
+                                           inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                           onTextEdited: root.stopUserSet = true }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            text: (timeline && timeline.sleep_suggested_s > 0)
+                                  ? ("🌙 " + qsTr("On a ride this long most riders sleep about %1 — add that to your off-bike total, or the finish will read too optimistic. Leave blank for a typical estimate.").arg(fmtDur(timeline.sleep_suggested_s)))
+                                  : qsTr("All your stops added up — food, rest, and any sleep. Leave blank and we'll use a typical estimate for the distance.")
+                            color: (timeline && timeline.sleep_suggested_s > 0) ? "#e0912f" : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+
+                    // --- Step 4: Checkpoints ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 4
+                        spacing: Theme.spacingSmall
+                        Text { text: qsTr("From your brevet card — import the roadbook, or skip and just get a finish time.")
+                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                               Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
+                            RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
+                            RoundedButton { text: qsTr("+ Add"); onClicked: controlsModel.append({ label: "", km: "", hours: "", opens: "" }) }
+                            Item { Layout.fillWidth: true }
+                        }
+                        // header
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            visible: controlsModel.count > 0
+                            Text { text: qsTr("Label"); Layout.fillWidth: true; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("km"); Layout.preferredWidth: 70; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("opens"); Layout.preferredWidth: 76; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("must arrive by"); Layout.preferredWidth: 90; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Item { Layout.preferredWidth: 32 }
+                        }
+                        Repeater {
+                            model: controlsModel
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSmall
+                                RoundedTextField { Layout.fillWidth: true; text: model.label
+                                    placeholderText: qsTr("Control %1").arg(index + 1)
+                                    onTextChanged: controlsModel.setProperty(index, "label", text) }
+                                RoundedTextField { Layout.preferredWidth: 70; text: model.km; placeholderText: qsTr("km")
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    onTextChanged: controlsModel.setProperty(index, "km", text) }
+                                RoundedTextField { Layout.preferredWidth: 76; text: model.opens; placeholderText: qsTr("opens")
+                                    onTextChanged: controlsModel.setProperty(index, "opens", text) }
+                                RoundedTextField { Layout.preferredWidth: 90; text: model.hours; placeholderText: qsTr("by HH:MM")
+                                    onTextChanged: controlsModel.setProperty(index, "hours", text) }
+                                RoundedButton { text: "✕"; Layout.preferredWidth: 32; onClicked: controlsModel.remove(index) }
+                            }
+                        }
+                    }
+
+                    // nav row: Back / Next / See my plan
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Theme.spacingMedium
+                        RoundedButton { text: qsTr("◂ Back"); visible: root.wizardStep > 0; onClicked: root.wizardBack() }
+                        Item { Layout.fillWidth: true }
+                        Text { visible: !root.wizardCanAdvance(); text: qsTr("Load a route first")
+                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                        RoundedButton {
+                            text: root.wizardStep < root.wizardStepCount - 1 ? qsTr("Next ▸")
+                                  : (busy ? qsTr("Computing…") : qsTr("See my plan ▸"))
+                            enabled: root.wizardCanAdvance() && !busy
+                            onClicked: root.wizardNext()
+                        }
+                    }
+                    Text { visible: statusMsg.indexOf("Error") === 0; text: statusMsg; color: marginBad
+                           font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
+                // Results toolbar: shown with the plan, to tweak inputs or export/save.
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.topMargin: Theme.spacingSmall
+                    visible: root.showResults
+                    RoundedButton { text: qsTr("◂ Edit answers"); onClicked: root.editAnswers() }
+                    Item { Layout.fillWidth: true }
                     RoundedButton {
-                        text: busy ? qsTr("Computing…") : qsTr("Compute timeline")
+                        text: busy ? qsTr("Computing…") : qsTr("Recompute")
                         enabled: !busy && gpxText.length > 0
                         onClicked: computeTimeline()
                     }
@@ -698,15 +752,13 @@ Item {
                         visible: timeline && timeline.ok
                         onClicked: { scenarioName.text = eventName.text || gpxName || "Scenario"; saveScenarioDialog.open() }
                     }
-                    Text { text: statusMsg; color: statusMsg.indexOf("Error") === 0 ? marginBad : Theme.mutedText
-                           font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
                 // --- Results ---
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
-                    visible: timeline && timeline.ok
+                    visible: root.showResults && timeline && timeline.ok
                     color: Theme.card
                     radius: Theme.radiusCard
                     border.color: Theme.border
@@ -1002,7 +1054,7 @@ Item {
                     id: whatifCard
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
-                    visible: timeline && timeline.ok
+                    visible: root.showResults && timeline && timeline.ok
                     color: Theme.card
                     radius: Theme.radiusCard
                     border.color: Theme.border
@@ -1088,7 +1140,7 @@ Item {
                 // --- Saved scenarios (compare) ---
                 Rectangle {
                     Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
-                    visible: scenarios.length > 0
+                    visible: root.showResults && scenarios.length > 0
                     color: Theme.card; radius: Theme.radiusCard
                     border.color: Theme.border; border.width: 1
                     implicitHeight: scCol.implicitHeight + Theme.spacingMedium * 2
