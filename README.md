@@ -57,7 +57,7 @@ The app is free, no login/account and can be used almost fully offline (Orbital 
 - Can you implement X,Y,Z feature? Propose, beware that if I don't have the hardware if may be complicated to implement it
 - My watch bugged, what I do now?! Go to mac or windows, connect to suunto link and reset. Your settings will be lost but your watch will be alive.
 - Are you gonna implement translations to X,Y,Z language? For the moment no, but if anyone has envy to do it go ahead.
-- On macOS it asks to "allow receiving keystrokes" / **Input Monitoring** — is the app spying on me? **No.** See [macOS: the "Input Monitoring" permission](#macos-the-input-monitoring-permission) below.
+- On macOS it asks to "allow receiving keystrokes" / **Input Monitoring**, and is slow without it — why? See [macOS: the "Input Monitoring" permission](#macos-the-input-monitoring-permission).
 
 
 ## Why?
@@ -187,29 +187,20 @@ build is confirmed on real hardware so far.
 ### macOS: the "Input Monitoring" permission
 
 On recent macOS, the first time you sync a watch the system may ask you to **allow the app to
-receive keystrokes**, and until you do, some features may be missing or *very* slow. This looks
-alarming, so to be clear:
+receive keystrokes**, and until you do, some features may be missing or *very* slow.
 
-**The app is not, and cannot be, reading your keyboard or spying on you.**
+**Why macOS needs it:** the Ambit connects as a **USB HID device** — the same class of device a
+keyboard belongs to. macOS requires the **Input Monitoring** permission to read data from *any*
+HID device and can't tell watch reads apart from keyboard reads, so it asks for the same
+permission for both. There's no way around it — it's how macOS gates all HID access. To grant
+it: **System Settings → Privacy & Security → Input Monitoring** → enable the app (and its
+backend/`python3` if listed), then relaunch.
 
-Here's why the prompt appears. The Ambit talks to your Mac as a **USB HID device** (the same
-class of device a keyboard belongs to). On macOS, *any* app that reads data from a HID device
-must be granted the **Input Monitoring** permission (Apple internally calls it "listen to
-events") — macOS can't tell the difference between "reading watch data over USB" and "reading
-a keyboard", so it asks for the same permission for both. The app only ever talks to the Suunto
-watch; it does not observe your keyboard, and it never sends anything anywhere without you asking.
-
-You don't have to take my word for it — **this whole project is open source, so anyone can read
-exactly what it does.** The USB code lives in [`desktop/backend/server.py`](desktop/backend/server.py);
-it opens the watch by its Suunto USB vendor/product ID and does nothing with any other device.
-
-To grant it: **System Settings → Privacy & Security → Input Monitoring** → enable the app (and
-its backend/`python3` if listed), then relaunch. Without it, macOS throttles the USB reads,
-which is the "very slow / unavailable" behaviour some users see. Note that even *with* the
-permission granted, macOS is inherently slower than Linux for large reads — that's an Apple
-USB-stack limitation, not a bug in the app. There is unfortunately no way to avoid this
-permission: it's how macOS gates all HID access, and the alternatives (a kernel extension) would
-be far more invasive than the permission itself.
+**Why it's slow:** macOS hands over the watch's USB data one small 64-byte chunk at a time,
+roughly every 100 ms, versus about 1 ms on Linux. That pacing is built into Apple's USB stack,
+so large reads (e.g. flashing) are inherently slower on Mac — it's a platform limitation, not a
+bug in the app. Without the permission granted, the reads are throttled further, which is the
+"very slow / unavailable" behaviour some users see.
 
 ### Interval Workout Builder (optional companion)
 
