@@ -30,6 +30,12 @@ Item {
     // POIs/resupply now live on the Route page and are shared via PlanStore.pois.
     property string calibNote: ""    // feedback after calibrating base_speed from a ride
     property var calibratedProfile: null  // set when base_speed came from a ride (personal), else null
+    // True when the plan is running on the fallback generic pace (no calibration, no typed speed).
+    readonly property bool usingGenericPace: {
+        if (calibratedProfile) return false
+        var b = parseFloat(baseSpeed.text)
+        return isNaN(b) || b <= 0
+    }
     property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
     property bool autoStopDone: false  // pre-filled the stop estimate from memory once this route
     property var controlOverrides: ({})  // {controlIndex: seconds} manual per-control stop overrides
@@ -788,6 +794,16 @@ Item {
                             font.pixelSize: Theme.fontSizeSubtitle
                             font.weight: Font.Bold
                         }
+                        // Warn when this is running on the cautious generic pace, not the rider's:
+                        // otherwise a blank speed field silently makes a capable rider "miss" the
+                        // cutoff (André, 2026-09-21: "will finish off timing... average speed by
+                        // default is not mine?").
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: root.usingGenericPace
+                            text: qsTr("⚠ This uses a cautious generic 22 km/h, not your pace — go back and set your speed (or “From a ride”) for your real finish time.")
+                            color: "#e0912f"; font.pixelSize: Theme.fontSizeCaption
+                        }
 
                         // summary row
                         Flow {
@@ -890,7 +906,7 @@ Item {
                             Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("ride"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            Text { text: qsTr("stop m"); Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { text: qsTr("stop min"); Layout.preferredWidth: 56; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("margin"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("°C"); Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
                             Text { text: qsTr("wind/sky"); Layout.preferredWidth: 84; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
@@ -918,7 +934,7 @@ Item {
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 // editable per-control stop (minutes); blank = model's own split. Finish has no stop.
                                 RoundedTextField {
-                                    Layout.preferredWidth: 52
+                                    Layout.preferredWidth: 56
                                     enabled: index < (timeline ? timeline.controls.length - 1 : 0)
                                     text: enabled ? "" + Math.round(modelData.stop_s / 60) : "—"
                                     horizontalAlignment: Text.AlignRight
