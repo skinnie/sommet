@@ -146,6 +146,8 @@ Rectangle {
             NavItem {
                 width: parent.width
                 // Race Planner (foundation 2026-09-17): BRM/ultra planning. Not gated on a watch.
+                // Off in the sidebar by default; the toggle lives in Settings (like Ember).
+                visible: Theme.racePlanEnabled
                 glyph: Icons.routes
                 label: qsTr("Race Plan")
                 selected: root.currentPage === "racePlan"

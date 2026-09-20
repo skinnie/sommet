@@ -201,6 +201,49 @@ PageFlickable {
             }
         }
 
+        // Race Planner - BRM/ultra planning (2026-09-19). Experimental, ships OPT-IN like Ember:
+        // the switch shows/hides the Race Plan page in the sidebar; off by default.
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    spacing: Theme.spacingSmall
+                    Icon { glyph: Icons.routes; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Race Plan"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        radius: Theme.radiusSmall
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Theme.warning
+                        implicitWidth: expLabelRace.implicitWidth + Theme.spacingSmall
+                        implicitHeight: expLabelRace.implicitHeight + 4
+                        Text {
+                            id: expLabelRace
+                            anchors.centerIn: parent
+                            text: qsTr("experimental")
+                            color: Theme.warning
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+                }
+                Text {
+                    text: qsTr("BRM/ultra race planner: import a GPX + roadbook, then get realistic arrival times, cutoff margins, weather, sleep and resupply along the route. Still rough — turn it on to try it.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                RoundedSwitch {
+                    text: qsTr("Show Race Plan in the sidebar")
+                    checked: Theme.racePlanEnabled
+                    onToggled: Theme.racePlanEnabled = checked
+                }
+            }
+        }
+
         // Ember - fast & calorie tracking companion (André, 2026-08-25). The switch shows/hides
         // the Ember page in the sidebar; the link opens the phone app to Add to Home Screen.
         // 2026-08-28 (André): the card is now openly in Settings instead of hidden behind the
