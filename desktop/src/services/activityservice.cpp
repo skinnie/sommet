@@ -1446,14 +1446,45 @@ int ActivityService::unsyncedBikeCount(const QString &kind, const QStringList &f
 {
     if (!m_db.isOpen() || files.isEmpty())
         return files.size();
+    // Files already pulled from THIS device before (the FreeFileSync-style history) - never new.
     QSet<QString> seen;
-    QSqlQuery q(QStringLiteral("SELECT key FROM bike_seen"), m_db);
-    while (q.next())
-        seen.insert(q.value(0).toString());
+    { QSqlQuery q(QStringLiteral("SELECT key FROM bike_seen"), m_db);
+      while (q.next()) seen.insert(q.value(0).toString()); }
+    // Rides already in the library from ANY source (watch, intervals.icu, a previous sync) - so a
+    // ride you already have isn't counted as "new" just because its file also sits on the device
+    // (André, 2026-09-20: "66 new when all rides are on intervals"). Device files are timestamp-
+    // named (YYYY-MM-DD-HH-MM-SS.fit, see mtp_import.py), so we match by start time WITHOUT pulling
+    // or decoding them - the same window importBikeActivitiesInto() uses (±5 min, plus a tight
+    // whole-hour arm for tz/DST storage offsets).
+    QList<qint64> existing;
+    { QSqlQuery q(QStringLiteral("SELECT start_time FROM activities"), m_db);
+      while (q.next()) {
+          const QDateTime dt = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
+          if (dt.isValid()) existing.append(dt.toSecsSinceEpoch());
+      } }
+    auto fileEpoch = [](const QString &f) -> qint64 {
+        QString base = f;
+        const int slash = base.lastIndexOf(QLatin1Char('/'));
+        if (slash >= 0) base = base.mid(slash + 1);
+        if (base.endsWith(QStringLiteral(".fit"), Qt::CaseInsensitive)) base.chop(4);
+        const QDateTime dt = QDateTime::fromString(base, QStringLiteral("yyyy-MM-dd-HH-mm-ss"));
+        return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
+    };
+    auto alreadyHave = [&](qint64 epoch) -> bool {
+        if (epoch < 0) return false;                 // filename isn't a timestamp -> can't match
+        for (qint64 e : existing) {
+            const qint64 dd = qAbs(epoch - e);
+            if (dd <= 300) return true;                                  // same instant (±5 min)
+            if (qAbs(dd - 3600) <= 120 || qAbs(dd - 7200) <= 120) return true;  // tz/DST hour offset
+        }
+        return false;
+    };
     int n = 0;
-    for (const QString &f : files)
-        if (!seen.contains(kind + QLatin1Char('|') + f))
-            ++n;
+    for (const QString &f : files) {
+        if (seen.contains(kind + QLatin1Char('|') + f)) continue;   // already pulled from this device
+        if (alreadyHave(fileEpoch(f))) continue;                    // already in the library elsewhere
+        ++n;
+    }
     return n;
 }
 

@@ -174,6 +174,16 @@ Item {
         return d + "T" + (t.length === 5 ? t : "06:00") + ":00"
     }
 
+    // Local-NAIVE ISO ("YYYY-MM-DDTHH:MM:SS", no timezone) to match startIso(). Date.toISOString()
+    // returns UTC with a 'Z', which the backend then reads as tz-AWARE while start_dt is naive -
+    // subtracting the two threw "can't subtract offset-naive and offset-aware datetimes" (André,
+    // 2026-09-20, computing the BRM600 plan). Everything the planner sends must be naive local.
+    function toLocalIso(dt) {
+        function p(n) { return (n < 10 ? "0" : "") + n }
+        return dt.getFullYear() + "-" + p(dt.getMonth() + 1) + "-" + p(dt.getDate())
+             + "T" + p(dt.getHours()) + ":" + p(dt.getMinutes()) + ":" + p(dt.getSeconds())
+    }
+
     function computeTimeline() {
         if (!gpxText) { statusMsg = qsTr("Load a GPX first"); return }
         var startMs = Date.parse(startIso())
@@ -191,11 +201,11 @@ Item {
             if (isNaN(km)) continue
             var co = { label: c.label || ("Control " + (i + 1)), distance_km: km }
             var dt = clockToDt(prevMs, (c.hours || "").trim())
-            if (dt) { co.cutoff_dt = dt.toISOString(); prevMs = dt.getTime() }
+            if (dt) { co.cutoff_dt = toLocalIso(dt); prevMs = dt.getTime() }
             // Opening time (ouverture): the "arrive not before" for a manned control. Resolved the
             // same monotonic way as the closing time (opens increase control-to-control too).
             var od = clockToDt(prevOpenMs, (c.opens || "").trim())
-            if (od) { co.open_dt = od.toISOString(); prevOpenMs = od.getTime() }
+            if (od) { co.open_dt = toLocalIso(od); prevOpenMs = od.getTime() }
             cutoffs.push(co)
         }
 
@@ -677,8 +687,7 @@ Item {
                                Layout.fillWidth: true; wrapMode: Text.WordWrap }
                         RowLayout {
                             Layout.fillWidth: true; spacing: Theme.spacingSmall
-                            RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
-                            RoundedButton { text: qsTr("Paste"); onClicked: pasteDialog.open() }
+                            RoundedButton { text: qsTr("Import roadbook (PDF)"); onClicked: rbPdfDialog.open() }
                             RoundedButton { text: qsTr("+ Add"); onClicked: controlsModel.append({ label: "", km: "", hours: "", opens: "" }) }
                             Item { Layout.fillWidth: true }
                         }
@@ -1266,10 +1275,7 @@ Item {
         id: rbPdfDialog
         title: qsTr("Choose a roadbook PDF")
         nameFilters: [qsTr("PDF files (*.pdf *.PDF)"), qsTr("All files (*)")]
-        onAccepted: {
-            importRoadbookDialog.close()
-            root.importRoadbook({ pdf: decodeURIComponent(selectedFile.toString().replace("file://", "")) })
-        }
+        onAccepted: root.importRoadbook({ pdf: decodeURIComponent(selectedFile.toString().replace("file://", "")) })
     }
 
     FileDialog {

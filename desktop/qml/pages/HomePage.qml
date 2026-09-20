@@ -457,9 +457,13 @@ PageFlickable {
                                     if (!root.activeBike)
                                         return "";
                                     var total = root.activeBike.activityCount;
+                                    // "new" now means genuinely-new: unsyncedBikeCount matches each
+                                    // device file's timestamp against the whole library, so rides
+                                    // already imported (e.g. via intervals.icu) aren't counted
+                                    // (André, 2026-09-20: "66 new when all rides are on intervals").
                                     return root.activeBikeUnsynced > 0
-                                        ? qsTr("%1 rides, %2 new").arg(total).arg(root.activeBikeUnsynced)
-                                        : qsTr("%1 rides").arg(total);
+                                        ? qsTr("%1 rides · %2 new").arg(total).arg(root.activeBikeUnsynced)
+                                        : qsTr("%1 rides · all in your library").arg(total);
                                 }
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
                             }
