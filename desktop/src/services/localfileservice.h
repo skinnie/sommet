@@ -26,12 +26,24 @@ class LocalFileService : public QObject
     // the same "fixed convention, not configurable yet" pattern DeviceService's own comment
     // already documents for the backend's address.
     Q_PROPERTY(QUrl backupsLocation READ backupsLocation CONSTANT)
+    // Where the app currently keeps its database (activities.db + gear.db). Shown in Settings ->
+    // Database; changed by moveDatabaseTo(). A plain local path string for display.
+    Q_PROPERTY(QString databaseLocation READ databaseLocation NOTIFY databaseLocationChanged)
 
 public:
     explicit LocalFileService(QObject *parent = nullptr);
 
     QUrl downloadsLocation() const;
     QUrl backupsLocation() const;
+    QString databaseLocation() const;
+
+    // Move the app's database to a folder the user picks (a NAS mount, or a Dropbox/Mega folder).
+    // Copies activities.db + gear.db there (transactionally, via VACUUM INTO) and remembers the
+    // new location; it takes effect on the next launch (the app keeps the old copy as a safety
+    // net). Whatever folder they choose is their call - a cloud folder only shares between
+    // desktops one-at-a-time; the NAS/server sync is the real cross-device path. Returns "" on
+    // success, a friendly message otherwise.
+    Q_INVOKABLE QString moveDatabaseTo(const QUrl &folderUrl);
 
     // Both return "" on success, a friendly error message otherwise - callers show it
     // directly. A local file write failure (permissions, full disk, bad path) is already
@@ -65,4 +77,7 @@ public:
     // (a plain copy could tear mid-write). Returns "" on success, a friendly message otherwise,
     // the same convention as saveText().
     Q_INVOKABLE QString backupDatabase(const QUrl &destFolder);
+
+signals:
+    void databaseLocationChanged();
 };

@@ -1,4 +1,5 @@
 #include "activityservice.h"
+#include "apppaths.h"
 
 #include <QDebug>
 #include <QDir>
@@ -436,7 +437,7 @@ void ActivityService::openDatabase()
     // of this class ever exists, but naming it anyway avoids the classic Qt trap where a
     // second addDatabase() call with the default connection name silently steals the first.
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("activities"));
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dir = AppPaths::databaseDir();   // user-chosen data location (Settings -> Database)
     QDir().mkpath(dir);
     m_db.setDatabaseName(dir + QStringLiteral("/activities.db"));
     if (!m_db.open()) {

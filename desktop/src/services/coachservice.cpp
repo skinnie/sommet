@@ -1,4 +1,5 @@
 #include "coachservice.h"
+#include "apppaths.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -69,7 +70,7 @@ void CoachService::openActivitiesDb()
     // reused across classes (ActivityService.h's own header comment already documents this
     // exact trap).
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("coach_activities"));
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dir = AppPaths::databaseDir();   // same data location the user chose (Settings -> Database)
     m_db.setDatabaseName(dir + QStringLiteral("/activities.db"));
     // Deliberately NOT creating the table here - ActivityService owns that. If it hasn't
     // run yet (fresh install, no watch ever synced), the SELECT below just finds no table

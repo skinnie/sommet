@@ -1,4 +1,5 @@
 #include "gearservice.h"
+#include "apppaths.h"
 
 #include <cmath>
 #include <QtMath>
@@ -90,7 +91,7 @@ void GearService::setLastError(const QString &e)
 void GearService::openDatabase()
 {
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("gear"));
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dir = AppPaths::databaseDir();   // user-chosen data location (Settings -> Database)
     QDir().mkpath(dir);
     m_db.setDatabaseName(dir + QStringLiteral("/gear.db"));
     if (!m_db.open()) {

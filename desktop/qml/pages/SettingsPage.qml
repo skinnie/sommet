@@ -340,98 +340,124 @@ PageFlickable {
             }
         }
 
-        // --- Sommet Sync (#SYNC-2): one shared activities database across the user's own devices.
-        // Distinct from Connections (external services): this is "own your shared database".
-        // intervals.icu deliberately stays a Connection, NOT a Sync provider (design doc §5b).
+        // --- Database (André 2026-09-20): where the user's data is kept + how it syncs across
+        // devices. The user can point the database at any folder (their call); the server/NAS is
+        // the only real cross-device sync (phone included) and always keeps a local copy.
         Card {
             width: parent.width
             Column {
-                id: syncCol
+                id: dbCol
                 width: parent.width
                 spacing: Theme.spacingSmall
-                // "off" | "server" (cloud folder is a later provider). Starts from whether a
-                // server is already configured; the radios drive it, the config panel follows it.
-                property string provider: ActivityService.sommetSyncConfigured ? "server" : "off"
+
+                FolderDialog {
+                    id: dbMoveDialog
+                    title: qsTr("Choose where to keep your data")
+                    onAccepted: {
+                        var err = LocalFileService.moveDatabaseTo(selectedFolder)
+                        if (err) { dbStatus.text = err; dbStatus.color = Theme.error }
+                        else { dbStatus.text = qsTr("Moved. Restart Sommet to use the new location.")
+                               dbStatus.color = Theme.success }
+                    }
+                }
 
                 Row {
                     spacing: Theme.spacingSmall
                     Icon { glyph: Icons.sync; size: 20; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: qsTr("Sync"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: qsTr("Database"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text; anchors.verticalCenter: parent.verticalCenter }
+                }
+
+                // Where the data is kept
+                Text {
+                    text: qsTr("Where your data is kept")
+                    color: Theme.text; font.pixelSize: Theme.fontSizeLabel; font.bold: true
+                    topPadding: Theme.spacingSmall
                 }
                 Text {
-                    text: qsTr("Keep your activities on all your devices, in a place you own. Off by default.")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeBody
-                    width: parent.width
-                    wrapMode: Text.WordWrap
+                    text: LocalFileService.databaseLocation
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    width: parent.width; wrapMode: Text.WrapAnywhere
+                }
+                Text {
+                    text: qsTr("Keep it here, or point it at any folder — including a synced one (Dropbox, Mega, Drive). A synced folder shares between your computers one at a time; it can't merge two at once, and phones can't use it. That's your call.")
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    width: parent.width; wrapMode: Text.WordWrap
+                }
+                RoundedButton {
+                    text: qsTr("Move to a folder…")
+                    onClicked: dbMoveDialog.open()
                 }
 
-                RoundedRadioButton {
-                    text: qsTr("Not syncing yet")
-                    autoExclusive: false
-                    checked: syncCol.provider === "off"
-                    onClicked: { syncCol.provider = "off"; ActivityService.setSommetSync("", ""); sommetSyncStatus.text = "" }
+                // Sync across devices (server / NAS)
+                Text {
+                    text: qsTr("Sync across devices")
+                    color: Theme.text; font.pixelSize: Theme.fontSizeLabel; font.bold: true
+                    topPadding: Theme.spacingMedium
                 }
-                RoundedRadioButton {
-                    text: qsTr("A cloud folder (Dropbox, Drive, iCloud…) — coming soon")
-                    autoExclusive: false
-                    enabled: false
+                Text {
+                    text: qsTr("Your own server or NAS is the only way to sync your phone and computers together. A copy always stays on each device, so it keeps working offline.")
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                    width: parent.width; wrapMode: Text.WordWrap
                 }
-                RoundedRadioButton {
-                    text: qsTr("My own server / NAS")
-                    autoExclusive: false
-                    checked: syncCol.provider === "server"
-                    onClicked: syncCol.provider = "server"
-                }
-
-                // Server config, revealed only for "My own server / NAS".
-                Column {
+                RoundedTextField {
+                    id: syncUrlField
                     width: parent.width
+                    text: ActivityService.sommetSyncUrl
+                    placeholderText: qsTr("https:// your server (…/sommet/sync.php)")
+                }
+                RoundedTextField {
+                    id: syncTokenField
+                    width: parent.width
+                    echoMode: TextInput.Password
+                    placeholderText: qsTr("Access token")
+                }
+                Row {
                     spacing: Theme.spacingSmall
-                    visible: syncCol.provider === "server"
-                    RoundedTextField {
-                        id: syncUrlField
-                        width: parent.width
-                        text: ActivityService.sommetSyncUrl
-                        placeholderText: qsTr("https:// your server (…/sommet/sync.php)")
+                    RoundedButton {
+                        text: qsTr("Test")
+                        enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
+                        onClicked: {
+                            sommetSyncStatus.text = qsTr("Testing…"); sommetSyncStatus.color = Theme.mutedText
+                            ActivityService.sommetSyncTest(syncUrlField.text, syncTokenField.text)
+                        }
                     }
-                    RoundedTextField {
-                        id: syncTokenField
-                        width: parent.width
-                        echoMode: TextInput.Password
-                        placeholderText: qsTr("Access token")
+                    RoundedButton {
+                        text: qsTr("Save")
+                        enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
+                        onClicked: {
+                            ActivityService.setSommetSync(syncUrlField.text, syncTokenField.text)
+                            sommetSyncStatus.text = qsTr("Saved."); sommetSyncStatus.color = Theme.mutedText
+                        }
                     }
-                    Row {
-                        spacing: Theme.spacingSmall
-                        RoundedButton {
-                            text: qsTr("Test")
-                            enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
-                            onClicked: {
-                                sommetSyncStatus.text = qsTr("Testing…"); sommetSyncStatus.color = Theme.mutedText
-                                ActivityService.sommetSyncTest(syncUrlField.text, syncTokenField.text)
-                            }
+                    RoundedButton {
+                        text: qsTr("Sync now")
+                        enabled: ActivityService.sommetSyncConfigured
+                        onClicked: {
+                            sommetSyncStatus.text = qsTr("Syncing…"); sommetSyncStatus.color = Theme.mutedText
+                            ActivityService.sommetSyncNow()
                         }
-                        RoundedButton {
-                            text: qsTr("Save")
-                            enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
-                            onClicked: {
-                                ActivityService.setSommetSync(syncUrlField.text, syncTokenField.text)
-                                sommetSyncStatus.text = qsTr("Saved."); sommetSyncStatus.color = Theme.mutedText
-                            }
-                        }
-                        RoundedButton {
-                            text: qsTr("Sync now")
-                            enabled: ActivityService.sommetSyncConfigured
-                            onClicked: {
-                                sommetSyncStatus.text = qsTr("Syncing…"); sommetSyncStatus.color = Theme.mutedText
-                                ActivityService.sommetSyncNow()
-                            }
-                        }
+                    }
+                }
+                RoundedButton {
+                    visible: ActivityService.sommetSyncConfigured
+                    text: qsTr("Stop syncing")
+                    onClicked: {
+                        ActivityService.setSommetSync("", "")
+                        syncUrlField.text = ""; syncTokenField.text = ""
+                        sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.color = Theme.mutedText
                     }
                 }
 
                 Text {
                     id: sommetSyncStatus
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: Theme.mutedText
+                    visible: text.length > 0
+                }
+                Text {
+                    id: dbStatus
                     width: parent.width
                     wrapMode: Text.WordWrap
                     font.pixelSize: Theme.fontSizeCaption

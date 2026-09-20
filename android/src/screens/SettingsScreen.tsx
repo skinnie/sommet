@@ -48,7 +48,7 @@ import { getTileCacheSizeBytes, clearTileCache } from '../services/TileCache';
 import { t } from '../i18n';
 import { APP_VERSION } from '../config/version';
 import { useV3Theme } from '../theme/v3';
-import { Button, Chip, Dropdown, FieldRow, IconBadge, StatusLine, Toggle } from '../components/ui/primitives';
+import { Button, Chip, FieldRow, IconBadge, StatusLine, Toggle } from '../components/ui/primitives';
 
 // Real, 2026-08-09 ("no button to change provider, nor in the settings like the desktop
 // version") - same 3 real choices MapScreen.tsx/TrackMapScreen.tsx's own in-map layer
@@ -105,9 +105,7 @@ export default function SettingsScreen() {
   const [emberSyncUrl, setEmberSyncUrl]             = useState('');
   const [emberSyncToken, setEmberSyncToken]         = useState('');
   const [savingEmberSync, setSavingEmberSync]       = useState(false);
-  // Sommet Sync (#SYNC-3): one shared activities database across the user's devices, in a place
-  // they own. provider 0 = not syncing, 1 = cloud folder (coming soon), 2 = my own server / NAS.
-  const [sommetProvider, setSommetProvider]         = useState(0);
+  // Database (#SYNC): the user's own server/NAS is the only cross-device sync on the phone.
   const [sommetSyncUrl, setSommetSyncUrl]           = useState('');
   const [sommetSyncToken, setSommetSyncToken]       = useState('');
   const [savingSommet, setSavingSommet]             = useState(false);
@@ -192,7 +190,7 @@ export default function SettingsScreen() {
     isEmberUnlocked().then(setEmberOn);
     getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
     getSommetSyncCfg().then(c => {
-      if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); setSommetProvider(2); }
+      if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); }
     });
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
@@ -832,56 +830,41 @@ export default function SettingsScreen() {
         )}
       </View>
 
-      {/* ── Sommet Sync: one shared activities database across the user's own devices (#SYNC-3).
-          Distinct from Connections (external services): "own your shared database". intervals.icu
-          stays a connection, not a Sync provider (design doc §5b). ── */}
+      {/* ── Database (#SYNC / André 2026-09-20): sync this phone with the computers through the
+          user's own server/NAS — the only way to include the phone. A copy always stays on the
+          phone (offline-first). No folder option here: phones can't keep their DB in a synced
+          folder (OS sandbox) — that's desktop-only. ── */}
       <View style={styles.section}>
         <View style={styles.cardHead}>
           <IconBadge icon="link" />
-          <Text style={styles.cardTitle}>Sync</Text>
+          <Text style={styles.cardTitle}>Database</Text>
         </View>
         <Text style={styles.sectionDesc}>
-          Keep your activities on all your devices, in a place you own. Off by default.
+          Sync this phone with your computers through your own server or NAS — the only way to
+          include the phone. A copy always stays on this phone, so it works offline.
         </Text>
-        <Dropdown
-          value={sommetProvider}
-          choices={[
-            { value: 0, label: 'Not syncing yet' },
-            { value: 1, label: 'A cloud folder (coming soon)' },
-            { value: 2, label: 'My own server / NAS' },
-          ]}
-          onSelect={(v: number) => {
-            if (v === 1) return; // coming soon — not selectable yet
-            setSommetProvider(v);
-            if (v === 0) { setSommetSyncCfg(null); setSommetStatus('Sync turned off.'); }
-          }}
+        <FieldRow
+          icon="link"
+          value={sommetSyncUrl}
+          onChangeText={setSommetSyncUrl}
+          placeholder="https://…ts.net/sommet/sync.php"
+          autoCapitalize="none"
+          autoCorrect={false}
         />
-        {sommetProvider === 2 && (
-          <View style={{ marginTop: 12 }}>
-            <FieldRow
-              icon="link"
-              value={sommetSyncUrl}
-              onChangeText={setSommetSyncUrl}
-              placeholder="https://192.168.1.102/sommet/sync.php"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <FieldRow
-              icon="key"
-              value={sommetSyncToken}
-              onChangeText={setSommetSyncToken}
-              placeholder="token"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-            />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-              <Button label="Test" variant="outline" onPress={handleTestSommet} />
-              <Button label={t.saveBtn} variant="filled" loading={savingSommet} onPress={handleSaveSommet} />
-              <Button label="Sync now" variant="outline" loading={syncingSommet} onPress={handleSyncNow} />
-            </View>
-          </View>
-        )}
+        <FieldRow
+          icon="key"
+          value={sommetSyncToken}
+          onChangeText={setSommetSyncToken}
+          placeholder="token"
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+        />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+          <Button label="Test" variant="outline" onPress={handleTestSommet} />
+          <Button label={t.saveBtn} variant="filled" loading={savingSommet} onPress={handleSaveSommet} />
+          <Button label="Sync now" variant="outline" loading={syncingSommet} onPress={handleSyncNow} />
+        </View>
         {sommetStatus ? <StatusLine text={sommetStatus} /> : null}
       </View>
 
