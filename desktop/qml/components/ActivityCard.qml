@@ -13,7 +13,22 @@ Card {
     // Right-click → Delete (André, 2026-08-25) - the page owns the confirm + the delete.
     signal deleteRequested
 
-    readonly property var _center: ActivityViewModel.trackCenter(activity.track)
+    // Track is deferred by the DB layer for older rides (perf). Resolve it lazily per card - only
+    // the handful of cards actually on screen ever fetch, so a long history stays cheap to scroll.
+    property var _resolvedTrack: []
+    function _resolveTrack() {
+        if (activity && activity.track && activity.track.length > 0)
+            _resolvedTrack = activity.track
+        else if (activity && activity.hasGps && activity.index !== undefined) {
+            var r = ActivityService.trackFor(activity.index, activity.device || "")
+            _resolvedTrack = (r && r.track) ? r.track : []
+        } else {
+            _resolvedTrack = []
+        }
+    }
+    onActivityChanged: _resolveTrack()
+    Component.onCompleted: _resolveTrack()
+    readonly property var _center: ActivityViewModel.trackCenter(_resolvedTrack)
 
     // Real, 2026-08-09 ("general desktop polish pass") - a real, unmet AMBITAPP_SPEC.md
     // requirement ("Subtle animations"): this card had zero feedback that it was even
@@ -51,7 +66,7 @@ Card {
                 latitude: root._center ? root._center.lat : 0
                 longitude: root._center ? root._center.lon : 0
                 zoomLevel: 12
-                trackPoints: activity.track || []
+                trackPoints: root._resolvedTrack
             }
             // Previews are for identification, not interaction - the card itself opens the
             // real, large, interactive map (the spec's own "Selecting an activity opens:

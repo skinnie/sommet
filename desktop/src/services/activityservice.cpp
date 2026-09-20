@@ -1,6 +1,8 @@
 #include "activityservice.h"
 
+#include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -631,13 +633,25 @@ void ActivityService::dbInsert(int index, const QString &device, const QVariantM
 
 bool ActivityService::dbLoadAll()
 {
+    static int s_dbLoadAllCalls = 0;
+    QElapsedTimer _t; _t.start();
+    ++s_dbLoadAllCalls;
     m_activities.clear();
     if (!m_db.isOpen())
         return false;
 
+    // The GPS track (track_json, up to ~650 KB and 45k points) is BY FAR the most expensive column
+    // to parse - measured 3.2 s across a 4700-activity cache and the reason opening the app / the
+    // Activities page stalled. It is only ever needed to DRAW a map (the list's card thumbnails and
+    // the detail view), never for totals/calendar/sort/HRV, which use the summary numbers below. So
+    // we DON'T select or parse it here; instead we expose a cheap has_gps flag, eager-parse only the
+    // first screens' worth (kEagerTracks) right after this loop, and parse the rest on demand via
+    // trackFor() (André, 2026-09-20: "load 2-3 scrolls, not re-parse the 4722 rides"). fit_base64/
+    // gpx_text stay (gpx is empty on all but a handful of rows; fit is needed for export).
     QSqlQuery q(QStringLiteral(
         "SELECT idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-        "start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source, device "
+        "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
+        "gpx_text, fit_base64, rule_outputs_json, source, device "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -664,25 +678,11 @@ bool ActivityService::dbLoadAll()
         parsed[QStringLiteral("energyKcal")] = q.value(5).toInt();
         parsed[QStringLiteral("sportTypeRaw")] = q.value(6).toInt();
         parsed[QStringLiteral("startTime")] = q.value(7).toString();
-        // An ultra ride logs 40k+ GPS points. Nothing in the UI needs them all - the track is only
-        // ever DRAWN (MapView decimates to ~2000 anyway) or length-checked - and marshalling a
-        // 45k-element list to QML on every open cost 1-2 s. Decimate here to a display cap, keeping
-        // first & last, and expose the true count separately for the "N GPS points" label. (Perf,
-        // 2026-09-20.)
-        const QJsonArray trackArr = QJsonDocument::fromJson(q.value(8).toString().toUtf8()).array();
-        const int trackCount = trackArr.size();
-        parsed[QStringLiteral("trackPointCount")] = trackCount;
-        constexpr int kTrackDrawCap = 2000;
-        QVariantList track;
-        if (trackCount <= kTrackDrawCap) {
-            track = trackArr.toVariantList();
-        } else {
-            const int stride = (trackCount + kTrackDrawCap - 1) / kTrackDrawCap;
-            for (int k = 0; k < trackCount; k += stride)
-                track.append(trackArr.at(k).toVariant());
-            track.append(trackArr.at(trackCount - 1).toVariant());  // keep the real finish point
-        }
-        parsed[QStringLiteral("track")] = track;
+        // Track is DEFERRED (see the query comment): start empty, expose a cheap has_gps flag, and
+        // remember this row's position so eager-loading below / trackFor() can fill it in later.
+        parsed[QStringLiteral("track")] = QVariantList();
+        parsed[QStringLiteral("hasGps")] = q.value(8).toInt() != 0;
+        parsed[QStringLiteral("trackPointCount")] = 0;   // filled when the track is actually parsed
         parsed[QStringLiteral("gpxText")] = q.value(9).toString();
         parsed[QStringLiteral("fitBase64")] = q.value(10).toString();
         // "watch" (or NULL for pre-migration rows) vs "intervals" - QML shows a small marker on
@@ -721,9 +721,65 @@ bool ActivityService::dbLoadAll()
         m_activities.append(parsed);
     }
     dedupeActivities();
+    const qint64 _summaryMs = _t.elapsed();
+    // Eager-parse GPS tracks for the first screens' worth so the initial list shows map thumbnails
+    // immediately; every other row's track is parsed on demand by trackFor() when it's opened or
+    // scrolled into view. This is what keeps opening the app / the Activities page fast with a big
+    // history (was 3.2 s to parse all tracks up front).
+    constexpr int kEagerTracks = 60;
+    int eager = 0;
+    for (int i = 0; i < m_activities.size() && eager < kEagerTracks; ++i) {
+        QVariantMap a = m_activities.at(i).toMap();
+        if (!a.value(QStringLiteral("hasGps")).toBool())
+            continue;
+        const QVariantMap t = fetchTrack(a.value(QStringLiteral("index")).toInt(),
+                                         a.value(QStringLiteral("device")).toString());
+        a[QStringLiteral("track")] = t.value(QStringLiteral("track"));
+        a[QStringLiteral("trackPointCount")] = t.value(QStringLiteral("count"));
+        m_activities[i] = a;
+        ++eager;
+    }
+    const qint64 _afterLoad = _t.elapsed();
     updateWatchHrvStore();
     m_showingCachedData = !m_activities.isEmpty();
+    qWarning().noquote() << QStringLiteral("[PERF] dbLoadAll #%1: %2 rows, summary %3 ms, "
+        "+%4 eager tracks %5 ms, +hrv %6 ms")
+        .arg(s_dbLoadAllCalls).arg(m_activities.size()).arg(_summaryMs)
+        .arg(eager).arg(_afterLoad - _summaryMs).arg(_t.elapsed() - _afterLoad);
     return !m_activities.isEmpty();
+}
+
+QVariantMap ActivityService::fetchTrack(int idx, const QString &device)
+{
+    // Parse and decimate ONE activity's GPS track straight from the DB (track_json isn't kept in
+    // the in-memory rows any more - see dbLoadAll's query comment). Decimation matches MapView: a
+    // ~40k-point ultra ride is visually identical at 2000 points and draws instantly.
+    if (!m_db.isOpen())
+        return {};
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT track_json FROM activities WHERE idx = ? AND device = ?"));
+    q.addBindValue(idx);
+    q.addBindValue(device);
+    if (!q.exec() || !q.next())
+        return {};
+    const QJsonArray arr = QJsonDocument::fromJson(q.value(0).toString().toUtf8()).array();
+    const int count = arr.size();
+    constexpr int kTrackDrawCap = 2000;
+    QVariantList track;
+    if (count <= kTrackDrawCap) {
+        track = arr.toVariantList();
+    } else {
+        const int stride = (count + kTrackDrawCap - 1) / kTrackDrawCap;
+        for (int k = 0; k < count; k += stride)
+            track.append(arr.at(k).toVariant());
+        track.append(arr.at(count - 1).toVariant());
+    }
+    return QVariantMap{{QStringLiteral("track"), track}, {QStringLiteral("count"), count}};
+}
+
+QVariantMap ActivityService::trackFor(int idx, const QString &device)
+{
+    return fetchTrack(idx, device);
 }
 
 void ActivityService::updateWatchHrvStore()
