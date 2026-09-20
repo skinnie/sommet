@@ -11,6 +11,13 @@ import AmbitApp
 Button {
     id: root
 
+    // Primary/call-to-action style: a filled Theme.primary button with light text, so the main
+    // action on a screen (e.g. a wizard's Next / See my plan) clearly reads as clickable and isn't
+    // mistaken for disabled - the default flat grey tile was too close to the dimmed disabled look
+    // (André, 2026-09-20). Reuses the same fill the `checked` toggle state already uses.
+    property bool accent: false
+    readonly property bool _filled: root.checked || root.accent
+
     hoverEnabled: true
     implicitHeight: 36
     leftPadding: Theme.spacingMedium
@@ -33,16 +40,17 @@ Button {
     background: Rectangle {
         implicitHeight: 36
         radius: Theme.radiusSmall
-        color: root.checked ? Theme.primary
+        color: root._filled
+            ? ((root.pressed || root.hovered) && root.enabled ? Qt.darker(Theme.primary, 1.15) : Theme.primary)
             : ((root.pressed || root.hovered) ? Theme.borderStrong : Theme.cardNested)
-        border.width: root.checked ? 0 : 1
+        border.width: root._filled ? 0 : 1
         border.color: Theme.border
         Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     }
 
     contentItem: Text {
         text: root.text
-        color: root.checked ? Theme.card : (root.enabled ? Theme.text : Theme.mutedText)
+        color: root._filled ? Theme.card : (root.enabled ? Theme.text : Theme.mutedText)
         font.pixelSize: Theme.fontSizeBody
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
