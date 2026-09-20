@@ -36,6 +36,10 @@ Item {
         var b = parseFloat(baseSpeed.text)
         return isNaN(b) || b <= 0
     }
+    property bool fatigueOn: false     // model multi-day sleep-debt fatigue (for PBP-length rides)
+    // Named off-bike stops the rider plans (meals, a cafe, resupply) - each {label, km, min}. They're
+    // drawn from the food/rest budget; whatever's left is spread across the ride (2nd-half weighted).
+    property var plannedStops: []
     property bool stopUserSet: false   // the rider typed a stop-time estimate (learn from it)
     property bool autoStopDone: false  // pre-filled the stop estimate from memory once this route
     property var controlOverrides: ({})  // {controlIndex: seconds} manual per-control stop overrides
@@ -95,6 +99,7 @@ Item {
         PlanStore.routeName = gpxName
         PlanStore.pois = null            // new route -> stale services cleared (shared w/ Route page)
         controlOverrides = ({})          // new route -> drop per-control stop overrides
+        plannedStops = []                // new route -> drop planned meal/cafe stops
         timeline = null
         // new route -> re-suggest the stop estimate for its distance from learned memory
         autoStopDone = false
@@ -239,12 +244,25 @@ Item {
         // Stops: the rider's own TOTAL off-bike estimate for this distance (food, rest, sleep) —
         // that IS the budget, so sleep is inside it (we don't add circadian sleep on top). Empty
         // field falls back to the learned/default ratio.
+        // Named planned stops (meals/cafe) are drawn FROM the food/rest budget; the remainder is the
+        // "spread" pool distributed across the ride. Sleep is separate (folded in applyFolds).
+        var events = []
+        var namedSecs = 0
+        for (var si = 0; si < plannedStops.length; si++) {
+            var km = parseFloat(plannedStops[si].km)
+            var mins = parseFloat(plannedStops[si].min)
+            if (!isNaN(km) && !isNaN(mins) && mins > 0) {
+                events.push({ km: km, duration_s: mins * 60 }); namedSecs += mins * 60
+            }
+        }
+        if (events.length > 0) payload.stop_events = events
         var T = parseFloat(stopTotalH.text)
         if (!isNaN(T) && T >= 0 && stopTotalH.text.length > 0) {
-            payload.stop_total_s = T * 3600
+            payload.stop_total_s = Math.max(0, T * 3600 - namedSecs)   // leftover after named stops
         } else {
             payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
+        if (fatigueOn) payload.fatigue = { enabled: true }     // multi-day sleep-debt slowdown
         if (Object.keys(controlOverrides).length > 0)
             payload.control_overrides = controlOverrides   // expert per-control stop overrides
 
@@ -360,6 +378,45 @@ Item {
         api("POST", "/api/race/timeline", p, function(status, res) {
             if (status === 200 && res && res.ok && res.timeline) timeline = res.timeline
         })
+    }
+
+    // --- Planned stops (named meal/cafe stops at a km; the rest of the budget is spread) ---
+    function addPlannedStop() {
+        var a = plannedStops.slice()
+        a.push({ label: qsTr("Stop"), km: timeline ? Math.round(timeline.distance_km / 2) : "", min: "20" })
+        plannedStops = a
+        if (gpxText) computeTimeline()
+    }
+    function removePlannedStop(i) {
+        var a = plannedStops.slice(); a.splice(i, 1); plannedStops = a
+        if (gpxText) computeTimeline()
+    }
+    function setPlannedStop(i, field, val) {
+        var a = plannedStops.slice(); a[i] = Object.assign({}, a[i]); a[i][field] = val; plannedStops = a
+    }
+    // Seed sensible named stops from the current timeline: lunch (~13:00), dinner (~20:00), and a
+    // café mid-second-half — placed at whatever km you're near at that clock time. All editable.
+    function suggestStops() {
+        if (!timeline || !timeline.controls) return
+        function kmAtClock(hh) {
+            for (var i = 0; i < timeline.controls.length; i++) {
+                var d = new Date(timeline.controls[i].arrival_dt)
+                if (d.getHours() >= hh) return Math.round(timeline.controls[i].distance_km)
+            }
+            return null
+        }
+        var a = []
+        var lunch = kmAtClock(13); if (lunch) a.push({ label: qsTr("Lunch"), km: "" + lunch, min: "30" })
+        var dinner = kmAtClock(20); if (dinner && (!lunch || dinner > lunch)) a.push({ label: qsTr("Dinner"), km: "" + dinner, min: "40" })
+        plannedStops = a
+        if (gpxText) computeTimeline()
+    }
+    // Minutes left for short stops = your food/rest budget minus the named ones (sleep is separate).
+    function shortStopsLeftMin() {
+        var T = parseFloat(stopTotalH.text); if (isNaN(T)) return -1
+        var named = 0
+        for (var i = 0; i < plannedStops.length; i++) { var m = parseFloat(plannedStops[i].min); if (!isNaN(m)) named += m }
+        return Math.max(0, Math.round(T * 60 - named))
     }
 
     // Consolidated critical points: climbs (from the route) + cutoff/water/food/darkness folded in.
@@ -527,7 +584,7 @@ Item {
         }
         return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
                  eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
-                 sleep: sleepH.text,
+                 sleep: sleepH.text, fatigueOn: fatigueOn, plannedStops: plannedStops,
                  calibratedProfile: calibratedProfile, controls: ctrls, controlOverrides: controlOverrides }
     }
     function currentSummary() {
@@ -557,6 +614,8 @@ Item {
             baseSpeed.text = u.baseSpeed || ""
             stopTotalH.text = u.stopTotal || ""
             sleepH.text = u.sleep || ""
+            fatigueOn = u.fatigueOn || false
+            plannedStops = u.plannedStops || []
             calibratedProfile = u.calibratedProfile || null
             controlOverrides = u.controlOverrides || ({})
             controlsModel.clear()
@@ -714,6 +773,18 @@ Item {
                             color: (timeline && timeline.sleep_suggested_s > 0) ? "#e0912f" : Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
+                        RoundedCheckBox {
+                            Layout.topMargin: Theme.spacingSmall
+                            text: qsTr("Multi-day ride — model fatigue")
+                            checked: root.fatigueOn
+                            onToggled: root.fatigueOn = checked
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: root.fatigueOn
+                            text: qsTr("For rides crossing more than one night (PBP, TCR…): pace fades the longer you're awake and recovers after sleep — no magic \"day-3\" rebound. Leave off for a one-night brevet.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
                     }
 
                     // --- Step 4: Checkpoints ---
@@ -859,6 +930,42 @@ Item {
                                             font.pixelSize: Theme.fontSizeSubtitle; font.weight: Font.Bold } }
                         }
 
+                        // --- Planned stops (named meal/cafe stops; rest of the budget is spread) ---
+                        Rectangle { Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; height: 1; color: Theme.border }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Planned stops"); color: Theme.text; font.weight: Font.Bold
+                                   font.pixelSize: Theme.fontSizeLabel }
+                            Item { Layout.fillWidth: true }
+                            RoundedButton { text: qsTr("Suggest"); onClicked: root.suggestStops() }
+                            RoundedButton { text: qsTr("+ Add"); onClicked: root.addPlannedStop() }
+                        }
+                        Repeater {
+                            model: root.plannedStops
+                            delegate: RowLayout {
+                                Layout.fillWidth: true; spacing: Theme.spacingSmall
+                                RoundedTextField { Layout.fillWidth: true; text: modelData.label
+                                    placeholderText: qsTr("Stop name")
+                                    onEditingFinished: root.setPlannedStop(index, "label", text) }
+                                RoundedTextField { Layout.preferredWidth: 70; text: "" + modelData.km; placeholderText: qsTr("km")
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    onEditingFinished: { root.setPlannedStop(index, "km", text); if (gpxText) computeTimeline() } }
+                                RoundedTextField { Layout.preferredWidth: 60; text: "" + modelData.min; placeholderText: qsTr("min")
+                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                    onEditingFinished: { root.setPlannedStop(index, "min", text); if (gpxText) computeTimeline() } }
+                                RoundedButton { text: "✕"; Layout.preferredWidth: 32; onClicked: root.removePlannedStop(index) }
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            text: {
+                                var left = shortStopsLeftMin()
+                                if (left < 0) return qsTr("Set your food & rest time to split it into planned stops + short stops.")
+                                return "⏱ " + qsTr("Left for short stops: %1, spread through the ride (more in the 2nd half, when you're tired).").arg(fmtDur(left * 60))
+                            }
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+
                         Text {
                             Layout.fillWidth: true
                             visible: timeline
@@ -938,7 +1045,7 @@ Item {
                             Text { text: qsTr("arrive"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("ride"); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("km/h"); Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            Text { text: qsTr("stop min"); Layout.preferredWidth: 56; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            Text { visible: false; text: qsTr("stop min"); Layout.preferredWidth: 56; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("margin"); Layout.preferredWidth: 66; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Text { text: qsTr("°C"); Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
                             Text { text: qsTr("wind/sky"); Layout.preferredWidth: 84; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; visible: weather }
@@ -964,8 +1071,10 @@ Item {
                                 }
                                 Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                                // editable per-control stop (minutes); blank = model's own split. Finish has no stop.
+                                // per-control stop split — hidden now that Planned stops own this (was
+                                // misleading as a "dwell here" number); kept for a possible expert mode.
                                 RoundedTextField {
+                                    visible: false
                                     Layout.preferredWidth: 56
                                     enabled: index < (timeline ? timeline.controls.length - 1 : 0)
                                     text: enabled ? "" + Math.round(modelData.stop_s / 60) : "—"
