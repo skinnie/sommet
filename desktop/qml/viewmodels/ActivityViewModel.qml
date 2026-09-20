@@ -86,13 +86,29 @@ QtObject {
     // construction (dbLoadAll() has no device filter). Added on top are only the sessions
     // that live on the connected device and were never written to that database: Garmin's
     // on-device GPX files and Kailash's ephemeral DeviceHistory logbook.
+    // Memo cache (mutated in place, never reassigned, so touching it never re-triggers `feed`).
+    // Its point: `feed` reruns whenever ANY of its inputs merely SIGNAL a change - and with a
+    // watch connected + thousands of cached activities, the rebuild below (slice + dedupe + a
+    // sort that parses a Date string on every comparison) is heavy. Several of those signals fire
+    // with the list actually UNCHANGED (a 1 s device poll, a heartbeat), which pegged the CPU and
+    // made the whole app unresponsive. Rebuild only when a cheap signature (counts + the newest
+    // start time of each source) really changed; otherwise hand back the exact same array, so the
+    // Home totals/last-activity bindings that read `feed` don't re-loop either. (Perf, 2026-09-20.)
+    property var _feedMemo: ({ sig: "\u0000", result: [] })
     readonly property var feed: {
         const base = ActivityService.activities || []
         const extra = HomeViewModel.isGarmin ? (GarminService.activities || [])
                     : HomeViewModel.isKailash ? kailashSessions
                     : []
-        if (extra.length === 0)
+        const sig = base.length + "|" + (base.length ? (base[0].startTime || "") : "")
+                  + "#" + extra.length + "|" + (extra.length ? (extra[0].startTime || "") : "")
+        if (sig === _feedMemo.sig)
+            return _feedMemo.result
+        _feedMemo.sig = sig
+        if (extra.length === 0) {
+            _feedMemo.result = base
             return base
+        }
 
         // Deduped by start time to the minute: a Kailash walk that has since been exported
         // to intervals.icu is in the base too, and showing it twice was the other half of
@@ -112,9 +128,12 @@ QtObject {
         }
         // Newest first, the order dbLoadAll() already returns the base in - a merged-in
         // device session has to land in its real chronological place, not at the end.
-        out.sort(function(x, y) {
-            return new Date(y.startTime).getTime() - new Date(x.startTime).getTime()
-        })
+        // Sort by a timestamp parsed ONCE per row (not on every comparison, which for thousands of
+        // rows is tens of thousands of Date parses per rebuild).
+        for (let i = 0; i < out.length; i++)
+            out[i]._sortT = out[i].startTime ? new Date(out[i].startTime).getTime() : 0
+        out.sort(function(x, y) { return y._sortT - x._sortT })
+        _feedMemo.result = out
         return out
     }
 
