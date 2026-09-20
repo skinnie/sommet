@@ -655,8 +655,25 @@ bool ActivityService::dbLoadAll()
         parsed[QStringLiteral("energyKcal")] = q.value(5).toInt();
         parsed[QStringLiteral("sportTypeRaw")] = q.value(6).toInt();
         parsed[QStringLiteral("startTime")] = q.value(7).toString();
-        const auto trackDoc = QJsonDocument::fromJson(q.value(8).toString().toUtf8());
-        parsed[QStringLiteral("track")] = trackDoc.array().toVariantList();
+        // An ultra ride logs 40k+ GPS points. Nothing in the UI needs them all - the track is only
+        // ever DRAWN (MapView decimates to ~2000 anyway) or length-checked - and marshalling a
+        // 45k-element list to QML on every open cost 1-2 s. Decimate here to a display cap, keeping
+        // first & last, and expose the true count separately for the "N GPS points" label. (Perf,
+        // 2026-09-20.)
+        const QJsonArray trackArr = QJsonDocument::fromJson(q.value(8).toString().toUtf8()).array();
+        const int trackCount = trackArr.size();
+        parsed[QStringLiteral("trackPointCount")] = trackCount;
+        constexpr int kTrackDrawCap = 2000;
+        QVariantList track;
+        if (trackCount <= kTrackDrawCap) {
+            track = trackArr.toVariantList();
+        } else {
+            const int stride = (trackCount + kTrackDrawCap - 1) / kTrackDrawCap;
+            for (int k = 0; k < trackCount; k += stride)
+                track.append(trackArr.at(k).toVariant());
+            track.append(trackArr.at(trackCount - 1).toVariant());  // keep the real finish point
+        }
+        parsed[QStringLiteral("track")] = track;
         parsed[QStringLiteral("gpxText")] = q.value(9).toString();
         parsed[QStringLiteral("fitBase64")] = q.value(10).toString();
         // "watch" (or NULL for pre-migration rows) vs "intervals" - QML shows a small marker on

@@ -235,7 +235,9 @@ Item {
                     }
                 }
                 Text {
-                    text: activity ? qsTr("%1 GPS points recorded").arg(activity.track.length) : ""
+                    text: activity ? qsTr("%1 GPS points recorded")
+                              .arg(activity.trackPointCount !== undefined ? activity.trackPointCount
+                                   : (activity.track ? activity.track.length : 0)) : ""
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
                 }
