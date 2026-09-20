@@ -370,7 +370,7 @@ PageFlickable {
                     text: qsTr("Not syncing yet")
                     autoExclusive: false
                     checked: syncCol.provider === "off"
-                    onClicked: { syncCol.provider = "off"; ActivityService.setSommetSync("", ""); syncStatus.text = "" }
+                    onClicked: { syncCol.provider = "off"; ActivityService.setSommetSync("", ""); sommetSyncStatus.text = "" }
                 }
                 RoundedRadioButton {
                     text: qsTr("A cloud folder (Dropbox, Drive, iCloud…) — coming soon")
@@ -407,7 +407,7 @@ PageFlickable {
                             text: qsTr("Test")
                             enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
                             onClicked: {
-                                syncStatus.text = qsTr("Testing…"); syncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Testing…"); sommetSyncStatus.color = Theme.mutedText
                                 ActivityService.sommetSyncTest(syncUrlField.text, syncTokenField.text)
                             }
                         }
@@ -416,14 +416,14 @@ PageFlickable {
                             enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
                             onClicked: {
                                 ActivityService.setSommetSync(syncUrlField.text, syncTokenField.text)
-                                syncStatus.text = qsTr("Saved."); syncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Saved."); sommetSyncStatus.color = Theme.mutedText
                             }
                         }
                         RoundedButton {
                             text: qsTr("Sync now")
                             enabled: ActivityService.sommetSyncConfigured
                             onClicked: {
-                                syncStatus.text = qsTr("Syncing…"); syncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Syncing…"); sommetSyncStatus.color = Theme.mutedText
                                 ActivityService.sommetSyncNow()
                             }
                         }
@@ -431,7 +431,7 @@ PageFlickable {
                 }
 
                 Text {
-                    id: syncStatus
+                    id: sommetSyncStatus
                     width: parent.width
                     wrapMode: Text.WordWrap
                     font.pixelSize: Theme.fontSizeCaption
@@ -442,16 +442,16 @@ PageFlickable {
                 Connections {
                     target: ActivityService
                     function onSommetSyncTestResult(ok, message) {
-                        syncStatus.text = message
-                        syncStatus.color = ok ? Theme.success : Theme.error
+                        sommetSyncStatus.text = message
+                        sommetSyncStatus.color = ok ? Theme.success : Theme.error
                     }
                     function onSommetSyncFinished(pulled, pushed) {
-                        syncStatus.text = qsTr("Synced ✓ — %1 received, %2 sent.").arg(pulled).arg(pushed)
-                        syncStatus.color = Theme.success
+                        sommetSyncStatus.text = qsTr("Synced ✓ — %1 received, %2 sent.").arg(pulled).arg(pushed)
+                        sommetSyncStatus.color = Theme.success
                     }
                     function onSommetSyncError(message) {
-                        syncStatus.text = qsTr("Sync problem: %1").arg(message)
-                        syncStatus.color = Theme.error
+                        sommetSyncStatus.text = qsTr("Sync problem: %1").arg(message)
+                        sommetSyncStatus.color = Theme.error
                     }
                 }
             }
