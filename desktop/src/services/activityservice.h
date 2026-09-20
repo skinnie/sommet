@@ -70,6 +70,11 @@ public:
 
     Q_INVOKABLE void refresh();
 
+    // One activity's decimated GPS track ({track: [{lat,lon}...], count: int}), parsed on demand
+    // from the DB. Tracks are no longer loaded up front (that cost ~3 s for a big history); the
+    // list eager-loads the first screens and asks for the rest here as they're opened/shown.
+    Q_INVOKABLE QVariantMap trackFor(int idx, const QString &device);
+
     // Delete one activity (André, 2026-08-25). Removes it from the local database AND remembers
     // it (a tombstone keyed by start-time|name) so re-syncing the watch or re-importing from
     // intervals/Garmin never brings it back - the watch's own log is circular and cannot be
@@ -243,6 +248,7 @@ private:
                   const QString &gpxText, const QString &fitBase64,
                   const QString &ruleOutputsJson);
     bool dbLoadAll();
+    QVariantMap fetchTrack(int idx, const QString &device);
     // Extracts the resting-HRV readings (5+5 / lie-still tests, hrvResting == 1) from the
     // loaded activities and persists them to QSettings health/watchHrv as [{date,value}], where
     // HealthService merges them into the Health page's HRV series as the "watch" source. Kept

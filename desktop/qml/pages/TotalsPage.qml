@@ -78,7 +78,7 @@ Item {
             // never read off the watch), so counting only track activities dropped them entirely
             // - a year full of imported GPS rides read as 0 h (André, 2026-08-25). Pure indoor /
             // HRV / strength entries (no track, no distance) are still excluded.
-            if ((a.track && a.track.length > 0) || (a.distanceMeters || 0) > 0)
+            if ((a.hasGps || (a.distanceMeters || 0) > 0))
                 seconds += a.durationSeconds || 0
         }
         return seconds / 3600
@@ -192,7 +192,7 @@ Item {
                 headline: qsTr("%1 h").arg(root.hoursOutside.toFixed(0))
                 subtitle: qsTr("Across %1 GPS activities")
                           .arg(root.yearActivities.filter(function(a) {
-                              return (a.track && a.track.length > 0) || (a.distanceMeters || 0) > 0 }).length)
+                              return (a.hasGps || (a.distanceMeters || 0) > 0) }).length)
                 lines: TotalsFacts.hoursLines(root.hoursOutside)
             }
 

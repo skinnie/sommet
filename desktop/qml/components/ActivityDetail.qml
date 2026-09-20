@@ -51,7 +51,27 @@ Item {
         onAccepted: root.saveError = LocalFileService.saveBase64(selectedFile, activity.fitBase64)
     }
 
-    readonly property var _center: ActivityViewModel.trackCenter(activity ? activity.track : null)
+    // GPS track is loaded on demand: recent rides keep it inline, older ones are deferred by the
+    // DB layer for speed (ActivityService, 2026-09-20) and fetched here the instant the activity
+    // opens - one small query, so opening stays fast even with a huge history.
+    property var _resolvedTrack: []
+    property int _resolvedCount: 0
+    function _resolveTrack() {
+        if (activity && activity.track && activity.track.length > 0) {
+            _resolvedTrack = activity.track
+            _resolvedCount = activity.trackPointCount || activity.track.length
+        } else if (activity && activity.hasGps && activity.index !== undefined) {
+            var r = ActivityService.trackFor(activity.index, activity.device || "")
+            _resolvedTrack = (r && r.track) ? r.track : []
+            _resolvedCount = (r && r.count) ? r.count : 0
+        } else {
+            _resolvedTrack = []
+            _resolvedCount = 0
+        }
+    }
+    onActivityChanged: _resolveTrack()
+    Component.onCompleted: _resolveTrack()
+    readonly property var _center: ActivityViewModel.trackCenter(_resolvedTrack)
     readonly property var _tabs: [qsTr("Overview"), qsTr("Charts"), qsTr("Laps"),
                                     qsTr("Export"), qsTr("Upload"), qsTr("Notes")]
     property int currentTab: 0
@@ -166,7 +186,7 @@ Item {
                 longitude: root._center ? root._center.lon : 0
                 zoomLevel: 13
                 showZoomControls: true
-                trackPoints: (root.activity && root.activity.track) || []
+                trackPoints: root._resolvedTrack
             }
             Rectangle {
                 visible: root._center === null
@@ -235,9 +255,7 @@ Item {
                     }
                 }
                 Text {
-                    text: activity ? qsTr("%1 GPS points recorded")
-                              .arg(activity.trackPointCount !== undefined ? activity.trackPointCount
-                                   : (activity.track ? activity.track.length : 0)) : ""
+                    text: activity ? qsTr("%1 GPS points recorded").arg(root._resolvedCount) : ""
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
                 }
