@@ -645,7 +645,7 @@ Item {
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap
                             text: calibNote.length > 0 ? calibNote
-                                  : qsTr("Type your flat-road cruising speed, or pick a past ride (FIT) and we'll work it out. Leave blank for a generic estimate.")
+                                  : qsTr("Type your flat-road cruising speed, or pick a past ride (FIT) and we'll work it out. Leave it blank and we'll assume a typical ~22 km/h — you can always come back and refine it.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                     }
@@ -718,9 +718,8 @@ Item {
                         Layout.topMargin: Theme.spacingMedium
                         RoundedButton { text: qsTr("◂ Back"); visible: root.wizardStep > 0; onClicked: root.wizardBack() }
                         Item { Layout.fillWidth: true }
-                        Text { visible: !root.wizardCanAdvance(); text: qsTr("Load a route first")
-                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                         RoundedButton {
+                            accent: true      // primary action — clearly clickable, not greyed
                             text: root.wizardStep < root.wizardStepCount - 1 ? qsTr("Next ▸")
                                   : (busy ? qsTr("Computing…") : qsTr("See my plan ▸"))
                             enabled: root.wizardCanAdvance() && !busy
