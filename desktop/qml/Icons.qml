@@ -21,6 +21,7 @@ QtObject {
     readonly property string trainingProgram: "\ue8df" // today (a dated calendar page)
     readonly property string gear: "\ue52f"            // directions_bike
     readonly property string coach: "\ue0bf"           // forum (chat bubble)
+    readonly property string journal: "\ue745"         // edit_note (a notebook with a pen)
     readonly property string weight: "\uf039"          // monitor_weight (scale)
     readonly property string health: "\ueaa2"          // monitor_heart
     readonly property string ember: "\uef55"           // local_fire_department (Ember fasting app)

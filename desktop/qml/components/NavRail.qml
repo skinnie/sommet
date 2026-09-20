@@ -185,6 +185,15 @@ Rectangle {
                 selected: root.currentPage === "coach"
                 onClicked: root.pageSelected("coach")
             }
+            // Journal - free-form daily entry -> extracted events -> context -> reflection.
+            // The "personal connection" MVP (2026-09-21); local-only, no scores, no streaks.
+            NavItem {
+                width: parent.width
+                glyph: Icons.journal
+                label: qsTr("Journal")
+                selected: root.currentPage === "journal"
+                onClicked: root.pageSelected("journal")
+            }
             // Training Program - ON HOLD behind FeatureFlags.trainingProgram.
             NavItem {
                 width: parent.width

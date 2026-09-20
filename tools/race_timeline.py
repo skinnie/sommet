@@ -41,6 +41,30 @@ _CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 # Default per-control base stop (s) before the proportional remainder is added (PM: ~10-15 min).
 _DEFAULT_CONTROL_BASE_S = 600.0
 
+# --- Fatigue model (multi-day ultras) -------------------------------------------------------
+# ONE driver: hours awake since the last real sleep (= sleep debt). Riders hold pace for the first
+# night, then slow as awake-time climbs; a sleep block resets it, a micro-nap trims it. This is the
+# evidence-based shape (Race Across France / TCR studies: more sleep -> faster; cognition/pace decline
+# with awake-time and DON'T truly recover across days - only the *feeling* does, the "second wind").
+# So there is NO day-3 speed rebound here on purpose. Effect is negligible on a one-night 600 (you
+# reset before ~16 h awake) and grows on PBP-length rides. Conservative + calibratable.
+_FATIGUE_ONSET_H = 16.0          # fresh until ~16 h continuously awake
+_FATIGUE_RATE_PER_H = 0.010      # then ~1% slower per extra hour awake
+_FATIGUE_FLOOR = 0.80            # never worse than 20% slower (riders nap rather than crawl)
+_SLEEP_RESET_K = 8.0             # 1 s of sleep pays down ~8 s of awake-time (3 h block -> full reset;
+                                 # a 20 min nap -> ~2.7 h off the clock)
+
+
+def _fatigue_factor(awake_s: float, enabled: bool,
+                    onset_h: float = _FATIGUE_ONSET_H, rate: float = _FATIGUE_RATE_PER_H,
+                    floor: float = _FATIGUE_FLOOR) -> float:
+    """Speed multiplier (<=1) for how long you've been awake. 1.0 until `onset_h`, then linear
+    decay at `rate`/h, floored. Returns 1.0 when fatigue is off."""
+    if not enabled:
+        return 1.0
+    over = max(0.0, awake_s / 3600.0 - onset_h)
+    return max(floor, 1.0 - rate * over)
+
 
 def _suggest_sleep_s(elapsed_s_no_sleep: float) -> int:
     """Suggested sleep (seconds) for a predicted sleepless elapsed time. Delegates to the engine's
@@ -138,8 +162,10 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    stop_profile: Optional[Dict[str, Any]] = None,
                    sleep: Optional[Dict[str, Any]] = None,
                    sleep_windows: Optional[List[Dict[str, Any]]] = None,
+                   stop_events: Optional[List[Dict[str, Any]]] = None,
                    wind_speed_delta_kmh: float = 0.0,
                    control_overrides: Optional[Dict[int, float]] = None,
+                   fatigue: Optional[Dict[str, Any]] = None,
                    route_estimator: Optional[Callable[..., Dict[str, Any]]] = None,
                    stop_distributor: Optional[Callable[..., Dict[int, float]]] = None) -> Dict[str, Any]:
     """Assemble the full race timeline.
@@ -251,16 +277,34 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     # Planned sleep windows (from the circadian sleep plan) folded into the walk so BOTH per-control
     # arrivals after a sleep AND the finish ETA include it. Each window is assigned to the control
     # at/after its km (you sleep there); never at the very finish.
+    def _assign_to_leg(km: float) -> int:
+        idx = next((i for i in range(n) if legs_geo[i]["end_km"] >= km - 0.01), n - 1)
+        return max(0, n - 2) if idx >= n - 1 else idx   # never the finish leg
+
     leg_sleep = [0.0] * n
+    # A sleep window can be a full block or a micro-nap; is_nap trims awake-time less than a block.
+    leg_nap = [False] * n
     for w in (sleep_windows or []):
         dur = float(w.get("duration_s", 0.0))
         if dur <= 0:
             continue
-        wkm = float(w.get("km", 0.0))
-        idx = next((i for i in range(n) if legs_geo[i]["end_km"] >= wkm - 0.01), n - 1)
-        if idx >= n - 1:
-            idx = max(0, n - 2)   # not at the finish leg
+        idx = _assign_to_leg(float(w.get("km", 0.0)))
         leg_sleep[idx] += dur
+        if w.get("nap"):
+            leg_nap[idx] = True
+
+    # Named off-bike stops placed at an arbitrary km (lunch, dinner, a cafe/resupply) - folded into
+    # whichever leg contains that km, counted as STOP time (not sleep). Lets the plan put real stops
+    # BETWEEN controls, where riders actually stop, instead of only at checkpoints.
+    leg_event_stop = [0.0] * n
+    for e in (stop_events or []):
+        dur = float(e.get("duration_s", 0.0))
+        if dur <= 0:
+            continue
+        leg_event_stop[_assign_to_leg(float(e.get("km", 0.0)))] += dur
+
+    fatigue_on = bool(fatigue and fatigue.get("enabled"))
+    awake_s = float((fatigue or {}).get("awake_at_start_s", 0.0))   # already-awake at the start line
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
@@ -276,11 +320,15 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         lt = leg_estimates[i] if i < len(leg_estimates) else {"moving_time_s": 0.0, "avg_speed_kmh": 0.0,
                                                               "confidence": "low", "model_source": "placeholder"}
         ctrl = end_controls[i] if i < len(end_controls) else None
-        move_s = float(lt.get("moving_time_s", 0.0))
+        base_move_s = float(lt.get("moving_time_s", 0.0))
+        # Fatigue: how tired at the MIDDLE of this leg (awake-time so far + half the leg), turned into
+        # a speed multiplier; slower when awake > onset. A sleep block later in this leg resets it.
+        fac = _fatigue_factor(awake_s + 0.5 * base_move_s, fatigue_on)
+        move_s = base_move_s / fac if fac > 0 else base_move_s
         running_moving_s += move_s
         arrival = clock + timedelta(seconds=move_s)
 
-        stop_s = leg_stops[i]
+        stop_s = leg_stops[i] + leg_event_stop[i]   # spread pool + any named stop on this leg
         # No stop at the very finish.
         is_finish = (i == n - 1)
         if is_finish:
@@ -289,6 +337,11 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         depart = arrival + timedelta(seconds=stop_s + slp)
         total_stop_s += stop_s
         planned_sleep_s += slp
+
+        # Advance the awake clock through this leg + its stop, then pay it down with any sleep here.
+        awake_s += move_s + stop_s
+        if slp > 0:
+            awake_s = max(0.0, awake_s - slp * _SLEEP_RESET_K)
 
         cutoff_dt = ctrl.cutoff_dt if ctrl else None
         margin_s = None
@@ -313,7 +366,8 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             "leg_distance_km": geo["distance_km"],
             "leg_ascent_m": geo["ascent_m"],
             "moving_time_s": round(move_s, 1),
-            "avg_speed_kmh": lt.get("avg_speed_kmh"),
+            "avg_speed_kmh": round(float(lt.get("avg_speed_kmh") or 0.0) * fac, 1),
+            "fatigue_factor": round(fac, 3),
             "arrival_dt": _fmt(arrival),
             "stop_s": round(stop_s, 1),
             "sleep_s": round(slp, 1),
@@ -511,8 +565,10 @@ def main(argv=None):
                             stop_profile=body.get("stop_profile"),
                             sleep=body.get("sleep"),
                             sleep_windows=body.get("sleep_windows"),
+                            stop_events=body.get("stop_events"),
                             wind_speed_delta_kmh=float(body.get("wind_speed_delta_kmh") or 0.0),
-                            control_overrides=overrides or None)
+                            control_overrides=overrides or None,
+                            fatigue=body.get("fatigue"))
         print(json.dumps({"ok": tl.get("ok", False), "timeline": tl}))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}))
