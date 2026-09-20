@@ -327,10 +327,25 @@ Item {
     function applyFolds() {
         if (!basePayload) return
         var p = JSON.parse(JSON.stringify(basePayload))
-        // sleep: only fold as extra time when it isn't already inside a user total-off-bike budget
-        if (!p.stop_total_s) {
-            var windows = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
-            p.sleep_windows = windows.map(function(w) { return { km: w.km, duration_s: w.duration_s } })
+        // Sleep is a BLOCK, separate from the rolling food/rest stops (stop_total_s). The rider sets
+        // HOW LONG (sleepH); the circadian planner sets WHERE (windows[].km — dark + body-clock +
+        // cutoff-safe). Place the rider's hours at the planner's night control(s), scaled to total
+        // sleepH so checkpoints before the block are unaffected and later ones shift by the sleep
+        // (André, 2026-09-21: "sleep should appear between the cps, not spread across all").
+        var sleepSecs = (parseFloat(sleepH.text) > 0) ? parseFloat(sleepH.text) * 3600 : 0
+        p.sleep_windows = []
+        if (sleepSecs > 0) {
+            var ws = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
+            if (ws.length > 0) {
+                var planned = 0
+                for (var wi = 0; wi < ws.length; wi++) planned += ws[wi].duration_s
+                var scale = planned > 0 ? sleepSecs / planned : 1
+                p.sleep_windows = ws.map(function(w) { return { km: w.km, duration_s: Math.round(w.duration_s * scale) } })
+            } else if (timeline && timeline.distance_km > 0) {
+                // No circadian window (e.g. weather/sleep not available): drop the block at ~60%
+                // of the route as a reasonable overnight fallback.
+                p.sleep_windows = [{ km: timeline.distance_km * 0.6, duration_s: sleepSecs }]
+            }
         }
         // prevailing wind: net headwind slows (k 0.5), tailwind helps less (k 0.3) — off by default
         p.wind_speed_delta_kmh = 0
@@ -512,6 +527,7 @@ Item {
         }
         return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
                  eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
+                 sleep: sleepH.text,
                  calibratedProfile: calibratedProfile, controls: ctrls, controlOverrides: controlOverrides }
     }
     function currentSummary() {
@@ -540,6 +556,7 @@ Item {
             eventName.text = u.eventName || ""
             baseSpeed.text = u.baseSpeed || ""
             stopTotalH.text = u.stopTotal || ""
+            sleepH.text = u.sleep || ""
             calibratedProfile = u.calibratedProfile || null
             controlOverrides = u.controlOverrides || ({})
             controlsModel.clear()
@@ -666,19 +683,34 @@ Item {
                         }
                     }
 
-                    // --- Step 3: Time off the bike ---
+                    // --- Step 3: Time off the bike (rolling stops + sleep, kept separate) ---
                     ColumnLayout {
                         Layout.fillWidth: true; visible: root.wizardStep === 3
                         spacing: Theme.spacingSmall
+
+                        Text { text: qsTr("Food & rest stops"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold }
                         RoundedTextField { id: stopTotalH; Layout.preferredWidth: 220
-                                           placeholderText: qsTr("Total off bike, hours (food/rest/sleep)")
+                                           placeholderText: qsTr("Hours, all short stops added up")
                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
                                            onTextEdited: root.stopUserSet = true }
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            text: qsTr("Your control/food/rest stops, added up — spread across the checkpoints. NOT sleep (that's below). Leave blank for a typical estimate.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+
+                        Text { text: qsTr("Sleep"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold
+                               Layout.topMargin: Theme.spacingSmall }
+                        RoundedTextField { id: sleepH; Layout.preferredWidth: 220
+                                           placeholderText: qsTr("Hours of sleep (0 if none)")
+                                           inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
                             text: (timeline && timeline.sleep_suggested_s > 0)
-                                  ? ("🌙 " + qsTr("On a ride this long most riders sleep about %1 — add that to your off-bike total, or the finish will read too optimistic. Leave blank for a typical estimate.").arg(fmtDur(timeline.sleep_suggested_s)))
-                                  : qsTr("All your stops added up — food, rest, and any sleep. Leave blank and we'll use a typical estimate for the distance.")
+                                  ? ("🌙 " + qsTr("Placed as ONE block at night, at the best control — so checkpoints before it are unaffected and later ones shift by your sleep. Typical for this distance: about %1.").arg(fmtDur(timeline.sleep_suggested_s)))
+                                  : qsTr("Placed as one block at night, at the best control. Enter 0 for a ride you'll do without sleeping.")
                             color: (timeline && timeline.sleep_suggested_s > 0) ? "#e0912f" : Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
