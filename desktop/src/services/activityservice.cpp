@@ -334,7 +334,9 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
 
         if (reply->error() != QNetworkReply::NoError) {
             setLoading(false);
-            m_ok = dbLoadAll();
+            // Show whatever cache we have; only re-parse if it isn't loaded yet (avoids a full
+            // re-parse on a revisit while the watch is unreachable - André, 2026-09-20).
+            m_ok = m_activities.isEmpty() ? dbLoadAll() : true;
             if (!m_ok)
                 setLastError(reply->errorString());
             emit activitiesChanged();
@@ -346,7 +348,7 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         const bool liveOk = root.value(QStringLiteral("ok")).toBool();
         if (!liveOk) {
             setLoading(false);
-            m_ok = dbLoadAll();
+            m_ok = m_activities.isEmpty() ? dbLoadAll() : true;
             if (!m_ok)
                 setLastError(root.value(QStringLiteral("stderr")).toString());
             emit activitiesChanged();
@@ -401,7 +403,14 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         // whose ExerciseLog region is absent) came back with 0 activities, and because
         // dbLoadAll() returns false for an empty database, ok flipped to false and the page
         // showed the error banner. Load the (possibly empty) rows, but don't let that decide ok.
-        dbLoadAll();
+        //
+        // Only re-parse the whole cache when the watch actually returned rows (dbInsert above
+        // wrote them) or nothing is loaded yet. ActivitiesPage.onCompleted re-runs refresh() on
+        // every visit, and re-parsing the entire history each time - even with 0 new rows - is
+        // what made opening the page slow with a large cache (André, 2026-09-20). Other sources
+        // (intervals/Garmin imports) rebuild via their own dbLoadAll + activitiesChanged.
+        if (!rawList.isEmpty() || m_activities.isEmpty())
+            dbLoadAll();
         m_ok = true;
         m_showingCachedData = false;
         emit activitiesChanged();
