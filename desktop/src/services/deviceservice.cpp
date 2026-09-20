@@ -195,6 +195,16 @@ void DeviceService::fetchDeviceInfo()
         reply->deleteLater();
         setLoading(false);
 
+        // Snapshot for change detection: this runs on every poll (1 s while searching, 10 s
+        // heartbeat while connected), and emitting deviceInfoChanged() unconditionally re-ran every
+        // binding that reads a device property - including the Home page's whole-history feed/last-
+        // activity views - on each tick, burning CPU while a watch is connected (André, 2026-09-20:
+        // "isn't this also related to the devices refresh?"). Emit only when something real changed.
+        const bool oldOk = m_deviceInfoOk;
+        const QString oldModel = m_model, oldSerial = m_serial, oldFw = m_firmwareVersion,
+                      oldHw = m_hardwareVersion;
+        const int oldBatt = m_batteryPercent;
+
         const auto doc = QJsonDocument::fromJson(reply->readAll());
         const auto obj = doc.object();
         m_deviceInfoOk = (reply->error() == QNetworkReply::NoError)
@@ -245,7 +255,10 @@ void DeviceService::fetchDeviceInfo()
             // second interval"): keep polling, uncapped, until it connects.
             m_pollTimer.start(kPollIntervalMs);
         }
-        emit deviceInfoChanged();
+        if (oldOk != m_deviceInfoOk || oldModel != m_model || oldSerial != m_serial
+                || oldFw != m_firmwareVersion || oldHw != m_hardwareVersion
+                || oldBatt != m_batteryPercent)
+            emit deviceInfoChanged();
     });
 }
 
