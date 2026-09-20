@@ -1180,14 +1180,35 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     // One transaction around the whole refresh - without it each of the (often thousands of)
     // inserts is its own fsync, which took tens of seconds and held the DB lock the whole time.
     m_db.transaction();
-    QSqlQuery del(m_db);
-    del.exec(QStringLiteral("DELETE FROM activities WHERE source = 'intervals'"));
 
-    int idx = -1;  // imported rows use negative idx so they never collide with watch log indexes
+    // Incremental import (was: DELETE every intervals row + re-insert the whole history on every
+    // sync, which re-imported thousands each time, reported them all as "imported", and on the
+    // 15-min auto-sync re-parsed the entire cache repeatedly - André, 2026-09-20: "it said it
+    // imported 4722 activities... most were already here"). Now we only insert activities we don't
+    // already have (keyed by the intervals id), so a routine sync with nothing new inserts 0 and
+    // reports 0, and the periodic churn is gone.
+    QSet<QString> existing;
+    QSqlQuery ex(m_db);
+    if (ex.exec(QStringLiteral("SELECT external_id FROM activities WHERE source = 'intervals' "
+                               "AND COALESCE(external_id,'') <> ''")))
+        while (ex.next())
+            existing.insert(ex.value(0).toString());
+
+    // New rows use negative idx, below the lowest existing imported idx, so (idx, device) never
+    // collides with an intervals row already stored.
+    int idx = -1;
+    QSqlQuery mn(m_db);
+    if (mn.exec(QStringLiteral("SELECT MIN(idx) FROM activities WHERE source = 'intervals'"))
+            && mn.next() && !mn.value(0).isNull())
+        idx = mn.value(0).toInt() - 1;
+
     int count = 0;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const QString extId = o.value(QStringLiteral("id")).toVariant().toString();
+        // Already have this one (or saw it earlier in this same batch) - skip, don't re-insert.
+        if (!extId.isEmpty() && existing.contains(extId))
+            continue;
         // Store the mapped SPORT as the name so the badge shows the right icon and it reads
         // like a watch move. (The intervals.icu free-text title isn't kept - the sport is what
         // every other activity in the app shows.)
@@ -1227,6 +1248,8 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(extId);
         ins.addBindValue(device);
         ins.exec();
+        if (!extId.isEmpty())
+            existing.insert(extId);
         ++count;
     }
     m_db.commit();
