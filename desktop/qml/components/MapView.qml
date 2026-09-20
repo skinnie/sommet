@@ -35,6 +35,20 @@ Item {
                                     // activity) each caller actually has to show
     property real zoomLevel: 12    // only used when there's no track to fit to
     property var trackPoints: []   // [{lat, lon}, ...] - draws a line if 2+ points given
+    // An ultra ride can log 40k+ GPS points; drawing every one on each pan/zoom pins the CPU and
+    // hangs the detail view (and every card thumbnail). The track is visually identical at ~2000
+    // points, so decimate to a cap for DRAWING only (first & last always kept). Bounds/centering
+    // still use the full trackPoints so the fit is exact. Computed once when trackPoints changes.
+    readonly property int _maxDrawPts: 2000
+    readonly property var _drawTrack: {
+        var t = trackPoints || []
+        if (t.length <= _maxDrawPts) return t
+        var stride = Math.ceil(t.length / _maxDrawPts)
+        var out = []
+        for (var i = 0; i < t.length; i += stride) out.push(t[i])
+        if (out.length === 0 || out[out.length - 1] !== t[t.length - 1]) out.push(t[t.length - 1])
+        return out
+    }
     property bool showMarker: false  // draws a single pin at (latitude, longitude)
     property bool showZoomControls: false
     // Real, 2026-08-09 ("Add a world map with the points were kailash has been") - discrete
@@ -409,12 +423,13 @@ Item {
         onPaint: {
             const ctx = getContext("2d")
             ctx.reset()
-            if (root.trackPoints.length < 2) return
+            const track = root._drawTrack
+            if (track.length < 2) return
             ctx.lineJoin = "round"
             ctx.lineCap = "round"
             ctx.beginPath()
-            for (let i = 0; i < root.trackPoints.length; i++) {
-                const p = root.trackPoints[i]
+            for (let i = 0; i < track.length; i++) {
+                const p = track[i]
                 const px = root.lonToWorldX(p.lon) - root.originX
                 const py = root.latToWorldY(p.lat) - root.originY
                 if (i === 0) ctx.moveTo(px, py)
