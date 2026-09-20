@@ -1,14 +1,19 @@
 #include "localfileservice.h"
+#include "apppaths.h"
 
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
+
+// Defined further down; forward-declared so moveDatabaseTo() (above it) can use it.
+static QString snapshotSqlite(const QString &srcPath, const QString &dstPath);
 
 LocalFileService::LocalFileService(QObject *parent) : QObject(parent) {}
 
@@ -26,6 +31,43 @@ QUrl LocalFileService::backupsLocation() const
 bool LocalFileService::openFolder(const QUrl &folderUrl)
 {
     return QDesktopServices::openUrl(folderUrl);
+}
+
+QString LocalFileService::databaseLocation() const
+{
+    return AppPaths::databaseDir();
+}
+
+QString LocalFileService::moveDatabaseTo(const QUrl &folderUrl)
+{
+    const QString target = folderUrl.toLocalFile();
+    if (target.isEmpty())
+        return tr("Pick a folder first.");
+    const QString src = AppPaths::databaseDir();
+    if (QDir(target).absolutePath() == QDir(src).absolutePath())
+        return tr("The database is already kept there.");
+    if (!QDir().mkpath(target))
+        return tr("Couldn't use that folder (%1).").arg(target);
+
+    // Copy the databases into the chosen folder, transactionally (VACUUM INTO), same as a backup.
+    const QStringList names{QStringLiteral("activities.db"), QStringLiteral("gear.db")};
+    QStringList failed;
+    for (const QString &name : names) {
+        const QString from = src + QLatin1Char('/') + name;
+        if (!QFileInfo::exists(from))
+            continue;   // nothing of this DB yet - fine
+        const QString err = snapshotSqlite(from, QDir(target).filePath(name));
+        if (!err.isEmpty())
+            failed.append(QStringLiteral("%1 (%2)").arg(name, err));
+    }
+    if (!failed.isEmpty())
+        return tr("Couldn't move the database: %1").arg(failed.join(QStringLiteral("; ")));
+
+    // Remember the new location; it takes effect on the next launch (the old copy stays as a
+    // safety net until the user removes it).
+    QSettings().setValue(QStringLiteral("database/dir"), target);
+    emit databaseLocationChanged();
+    return QString();
 }
 
 // A transactionally-consistent snapshot of one SQLite file at srcPath into dstPath, taken
@@ -63,7 +105,7 @@ static QString snapshotSqlite(const QString &srcPath, const QString &dstPath)
 
 QString LocalFileService::backupDatabase(const QUrl &destFolder)
 {
-    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString appData = AppPaths::databaseDir();   // back up from wherever the user keeps the data
 
     QString destRoot = destFolder.toLocalFile();
     if (destRoot.isEmpty())
