@@ -39,7 +39,7 @@ CATEGORIES: Dict[str, List[str]] = {
     ],
     "food": [
         "[shop=supermarket]", "[shop=convenience]", "[shop=bakery]",
-        "[amenity=cafe]", "[amenity=restaurant]", "[amenity=fast_food]",
+        "[amenity=cafe]", "[amenity=restaurant]", "[amenity=fast_food]", "[amenity=fuel]",
     ],
     # Cemeteries almost always have a water tap - a randonneur staple for refills (André, 2026-09-21).
     "cemetery": ["[landuse=cemetery]", "[amenity=grave_yard]"],
@@ -118,7 +118,7 @@ def _categorize(tags: Dict[str, str]) -> Optional[str]:
     if a == "drinking_water" or tags.get("man_made") == "water_tap" or a == "water_point" \
             or (a == "fountain" and tags.get("drinking_water") == "yes"):
         return "water"
-    if s in ("supermarket", "convenience", "bakery") or a in ("cafe", "restaurant", "fast_food"):
+    if s in ("supermarket", "convenience", "bakery") or a in ("cafe", "restaurant", "fast_food", "fuel"):
         return "food"
     if tags.get("landuse") == "cemetery" or a == "grave_yard":
         return "cemetery"
@@ -240,7 +240,16 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
         pois = sorted(per_cat[cat], key=lambda p: p["km"])
         info: Dict[str, Any] = {"pois": pois}
         if cat in RESUPPLY:
-            g = _gaps([p["km"] for p in pois], total_km)
+            # Realistic refill: a rider gets WATER not only at tagged fountains but at cafes/shops/
+            # fuel and cemeteries too. So the "water" gap credits every refill source that was found,
+            # not just water nodes (André, 2026-09-21: reliability comes from realistic assumptions,
+            # not tag purity). Food credits food + fuel. (Opening-hours / night-safe split: later.)
+            gap_kms = [p["km"] for p in pois]
+            if cat == "water":
+                for extra in ("cemetery", "food"):
+                    if extra in per_cat:
+                        gap_kms += [p["km"] for p in per_cat[extra]]
+            g = _gaps(gap_kms, total_km)
             info.update(g)
             if cat == "water":
                 # distance-based budget: litres for the longest gap, and gaps over carry capacity.
@@ -248,14 +257,15 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
                 info["longest_gap_litres"] = need_longest
                 info["carry_l"] = carry_l
                 info["longest_gap_over_carry"] = need_longest > carry_l
-            label = {"water": "water", "food": "food"}[cat]
+            label = {"water": "refill (water/café/shop)", "food": "food"}[cat]
+            short = {"water": "refill", "food": "food"}[cat]
             if g["count"] == 0:
                 summary.append("No %s found on this route." % label)
             else:
-                summary.append("Next %s: %.0f km · longest %s gap: %.0f km (after km %.0f)"
-                               % (label, g["first_km"], label, g["longest_gap_km"], g["longest_gap_after_km"]))
+                summary.append("Next %s: %.0f km · longest stretch with no %s: %.0f km (after km %.0f)"
+                               % (short, g["first_km"], short, g["longest_gap_km"], g["longest_gap_after_km"]))
                 if cat == "water" and info["longest_gap_over_carry"]:
-                    summary.append("  ⚠ that %.0f km water gap needs ~%.1f L (> %.1f L carried) — refill early."
+                    summary.append("  ⚠ that %.0f km dry stretch needs ~%.1f L (> %.1f L carried) — top up early."
                                    % (g["longest_gap_km"], info["longest_gap_litres"], carry_l))
         else:
             info["count"] = len(pois)
@@ -303,10 +313,12 @@ def _selftest():
     print("water longest gap:", w["longest_gap_km"], "km after km", w["longest_gap_after_km"],
           "→ needs", w["longest_gap_litres"], "L over-carry:", w["longest_gap_over_carry"])
 
-    # 3 water points, biggest gap ~82 km (km10 -> km92) needing >1.5 L.
-    assert w["count"] == 3, w
-    assert 78 <= w["longest_gap_km"] <= 86, w["longest_gap_km"]
-    assert w["longest_gap_over_carry"] is True
+    # 3 water fountains are still listed as water pins...
+    assert len(w["pois"]) == 3, w["pois"]
+    # ...but the REFILL gap now credits food too (water 0/10/92 + food 5/50), so the biggest gap is
+    # km50 -> km92 = ~42 km, and 42 km * 2 L/100 = 0.84 L < 1.5 carried -> no longer over-carry.
+    assert 38 <= w["longest_gap_km"] <= 46, w["longest_gap_km"]
+    assert w["longest_gap_over_carry"] is False
     assert r["categories"]["food"]["count"] == 2
     assert r["categories"]["bike"]["count"] == 1
     assert abs(r["categories"]["bike"]["pois"][0]["km"] - 60) < 3
