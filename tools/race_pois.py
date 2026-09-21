@@ -168,6 +168,22 @@ _PS_SYM = {"Drinking Water": "water", "Restaurant": "food", "Gas Station": "food
            "Restroom": "safety", "Car Repair": "bike"}
 
 
+_SUPERMARKET_WORDS = ("supermarket", "supermarch", "supermerc", "supermarkt", "supermärkt", "grocer")
+
+
+def _generic_category(kind: str) -> str:
+    k = kind.lower()
+    if k.startswith(("alpine hut", "wilderness hut")):
+        return "shelter"                      # somewhere to sleep
+    if k.startswith("motorway service"):
+        return "food"                         # fuel + food + toilets
+    if "repair station" in k or k.startswith("compressed air"):
+        return "bike"
+    if k.startswith(("first aid", "emergency phone", "emergency ward", "lifeguard", "mountain rescue")):
+        return "safety"
+    return "other"
+
+
 def _is_placeholder_name(name: str, kind: str) -> bool:
     """PitStopper names an UNNAMED place after its type, cut to 10 chars for bike computers:
     "drinking_w", "guest_hou", "bicycle_pa", "toilets", "Spring1". Real names never look like a
@@ -240,7 +256,9 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
         full, kind = full.strip(), kind.strip()
 
         if key == "shopping":
-            cat = "food" if kind.lower().startswith("supermarket") else "other"
+            # The type name follows PitStopper's interface language, so accept the main spellings:
+            # supermarket / supermarché(s) / supermercado(s) / supermercato-i / Supermarkt.
+            cat = "food" if kind.lower().startswith(_SUPERMARKET_WORDS) else "other"
         elif key == "generic":
             # "generic" is shared by the rider's CUSTOM TAGS and PitStopper's own catch-all types (post
             # office, castle, monument, EV charging...). A custom tag's description is just "POI"; the
@@ -249,9 +267,18 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
             if kind == "POI":
                 cat, kind = "cemetery", "Cemetery"
             else:
-                cat = "other"
+                # 18 of PitStopper's ~87 types have no export label of their own and arrive as
+                # "generic" (beer gardens, rest areas, motorway services, ferry terminals, toll booths,
+                # bike repair stations, compressed air, motorcycle types, mountain passes, peaks,
+                # huts, and four emergency types). They are named in the description, so the few that
+                # matter to a rider are recognised by that name (English); the rest stay "other".
+                cat = _generic_category(kind)
         else:
             cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym) or "other"
+            # PitStopper files "non-potable water" under the same "water" label as drinking water; it
+            # must NOT count as a refill (it would wrongly shorten the dry stretches).
+            if key == "water" and "non" in kind.lower() and "potable" in kind.lower():
+                cat = "other"
         if full:
             name = full
         elif key == "generic" and (not name or re.match(r"^POI\d*$", name)):   # unnamed ("POI1 R139m")
@@ -419,6 +446,19 @@ def _selftest():
     fb = next(p for p in rev["categories"]["water"]["pois"] if p["name"] == "Fountain B")["km"]
     assert abs((total - fa) - fb) < 0.5, (fa, fb, total)
     assert abs(rev["categories"]["water"]["longest_gap_km"] - r["categories"]["water"]["longest_gap_km"]) < 1.0
+
+    # Supermarkets are recognised in the main PitStopper interface languages (they count as a refill)
+    for word in ("Supermarkets", "Supermarchés", "Supermercados", "Supermercati", "Supermärkte"):
+        gx = ('<gpx xmlns="http://www.topografix.com/GPX/1/1"><wpt lat="45.1" lon="3.0"><name>Shop</name>'
+              '<cmt>shopping</cmt><desc>%s</desc></wpt></gpx>' % word)
+        assert parse_pitstopper_gpx(gx)[0]["cat"] == "food", word
+
+    # Non-potable water is not a refill; grocery stores are.
+    nx = ('<gpx xmlns="http://www.topografix.com/GPX/1/1">'
+          '<wpt lat="45.1" lon="3.0"><name>a</name><cmt>water</cmt><desc>Non-potable Water</desc></wpt>'
+          '<wpt lat="45.2" lon="3.0"><name>b</name><cmt>shopping</cmt><desc>Grocery Stores</desc></wpt></gpx>')
+    nxp = parse_pitstopper_gpx(nx)
+    assert nxp[0]["cat"] == "other" and nxp[1]["cat"] == "food", nxp
 
     # The human type is kept (singularised) for the map label.
     kinds = {p["name"]: p.get("kind") for cat in r["categories"].values() for p in cat["pois"]}
