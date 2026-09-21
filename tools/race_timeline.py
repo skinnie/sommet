@@ -31,7 +31,7 @@ import argparse
 import json
 import sys
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import race_event
 from race_event import AthleteInputs, BikeInputs, RaceEvent, estimate_route
@@ -166,6 +166,57 @@ def _fmt(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if isinstance(dt, datetime) else dt
 
 
+# --- No-ride hours (a personal rule: "I never ride 00:00-03:00", or a curfew 21:00-06:00) ------------
+# Riding is never scheduled inside the window: reaching it, the rider rests until it ends. That rest is
+# real sleep (it resets the awake-clock and, if >= 2 h, counts as a night for wear). Clock times are the
+# event's own local wall-clock (start_dt is naive local).
+
+def _hour_of(dt: datetime) -> float:
+    return dt.hour + dt.minute / 60.0 + dt.second / 3600.0
+
+
+def _in_no_ride(dt: datetime, nr: Tuple[float, float]) -> bool:
+    s_, e_ = nr
+    h = _hour_of(dt)
+    return (s_ <= h < e_) if s_ < e_ else (h >= s_ or h < e_)
+
+
+def _at_hour(dt: datetime, hour: float, forward: bool = True) -> datetime:
+    """Next wall-clock `hour` (float hours) strictly after dt."""
+    hh = int(hour) % 24
+    mm = int(round((hour - int(hour)) * 60))
+    cand = dt.replace(hour=hh, minute=mm % 60, second=0, microsecond=0)
+    if mm >= 60:
+        cand += timedelta(hours=1)
+    if cand <= dt:
+        cand += timedelta(days=1)
+    return cand
+
+
+def _walk_riding(clock: datetime, move_s: float, nr: Tuple[float, float], rest_at_start: bool = True):
+    """Ride `move_s` seconds of moving time without ever riding inside the no-ride window. Returns
+    (arrival, rests) where rests = [(start_dt, end_dt, riding_seconds_done_before_the_rest)]."""
+    rests: List[Tuple[datetime, datetime, float]] = []
+    done, remaining = 0.0, float(move_s)
+    first = True
+    while True:
+        if (rest_at_start or not first) and _in_no_ride(clock, nr):
+            end = _at_hour(clock, nr[1])
+            rests.append((clock, end, done))
+            clock = end
+        first = False
+        if remaining <= 0:
+            break
+        until = (_at_hour(clock, nr[0]) - clock).total_seconds()
+        if remaining <= until:
+            clock += timedelta(seconds=remaining)
+            break
+        clock += timedelta(seconds=until)
+        remaining -= until
+        done += until
+    return clock, rests
+
+
 def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    bike: Optional[BikeInputs] = None,
                    stops_s: Optional[List[float]] = None,
@@ -177,6 +228,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                    wind_speed_delta_kmh: float = 0.0,
                    control_overrides: Optional[Dict[int, float]] = None,
                    fatigue: Optional[Dict[str, Any]] = None,
+                   no_ride: Optional[Dict[str, Any]] = None,
                    route_estimator: Optional[Callable[..., Dict[str, Any]]] = None,
                    stop_distributor: Optional[Callable[..., Dict[int, float]]] = None) -> Dict[str, Any]:
     """Assemble the full race timeline.
@@ -318,6 +370,12 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     margin = _PLANNING_MARGIN if route_estimator is None else 1.0     # only the real engine is padded
     awake_s = float((fatigue or {}).get("awake_at_start_s", 0.0))   # already-awake at the start line
     wear = 0.0                        # accumulated multi-day wear (fraction of speed lost)
+    nr: Optional[Tuple[float, float]] = None
+    if no_ride and no_ride.get("start_h") is not None and no_ride.get("end_h") is not None:
+        a_, b_ = float(no_ride["start_h"]) % 24.0, float(no_ride["end_h"]) % 24.0
+        if a_ != b_:
+            nr = (a_, b_)
+    forced_rest_total_s = 0.0
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
@@ -341,7 +399,14 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             fac = max(_FATIGUE_FLOOR, fac * (1.0 - wear))
         move_s = base_move_s / fac if fac > 0 else base_move_s
         running_moving_s += move_s
-        arrival = clock + timedelta(seconds=move_s)
+        leg_rests: List[Dict[str, Any]] = []
+        if nr:
+            arrival, raw_rests = _walk_riding(clock, move_s, nr, rest_at_start=(i > 0))
+            for (r0, r1, done) in raw_rests:
+                km_r = geo["start_km"] + geo["distance_km"] * (done / move_s if move_s > 0 else 0.0)
+                leg_rests.append({"start": r0, "end": r1, "km": km_r})
+        else:
+            arrival = clock + timedelta(seconds=move_s)
 
         stop_s = leg_stops[i] + leg_event_stop[i]   # spread pool + any named stop on this leg
         # No stop at the very finish.
@@ -350,6 +415,12 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             stop_s = 0.0
         slp = leg_sleep[i]
         depart = arrival + timedelta(seconds=stop_s + slp)
+        if nr and not is_finish and _in_no_ride(depart, nr):       # stop ran into the window: rest through it
+            r_end = _at_hour(depart, nr[1])
+            leg_rests.append({"start": depart, "end": r_end, "km": geo["end_km"]})
+            depart = r_end
+        leg_rest_s = sum((r["end"] - r["start"]).total_seconds() for r in leg_rests)
+        forced_rest_total_s += leg_rest_s
         total_stop_s += stop_s
         planned_sleep_s += slp
 
@@ -359,6 +430,11 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             awake_s = max(0.0, awake_s - slp * _SLEEP_RESET_K)
             if slp >= _WEAR_MIN_SLEEP_S:
                 wear += _WEAR_PER_NIGHT * max(0.0, 1.0 - slp / _WEAR_FULL_NIGHT_S)
+        for r in leg_rests:                       # a forced rest is sleep: same reset + wear rules
+            d_s = (r["end"] - r["start"]).total_seconds()
+            awake_s = max(0.0, awake_s - d_s * _SLEEP_RESET_K)
+            if d_s >= _WEAR_MIN_SLEEP_S:
+                wear += _WEAR_PER_NIGHT * max(0.0, 1.0 - d_s / _WEAR_FULL_NIGHT_S)
 
         cutoff_dt = ctrl.cutoff_dt if ctrl else None
         margin_s = None
@@ -388,6 +464,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             "arrival_dt": _fmt(arrival),
             "stop_s": round(stop_s, 1),
             "sleep_s": round(slp, 1),
+            "rests": [{"start": _fmt(r["start"]), "end": _fmt(r["end"]), "km": round(r["km"], 1)} for r in leg_rests],
             "stop_overridden": bool(control_overrides and i in control_overrides and not is_finish),
             "depart_dt": _fmt(depart),
             "cutoff_dt": _fmt(cutoff_dt),
@@ -406,7 +483,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     # Sleep sits ON TOP of stops (never in the ratio). The tier suggestion is from the SLEEPLESS
     # elapsed. Planned windows (sleep_windows) were already folded into the walk above; an explicit
     # `sleep` lump (e.g. the what-if "extra sleep" knob) is added on top here.
-    elapsed_no_sleep_s = (clock - event.start_dt).total_seconds() - planned_sleep_s
+    elapsed_no_sleep_s = (clock - event.start_dt).total_seconds() - planned_sleep_s - forced_rest_total_s
     sleep_suggested_s = _suggest_sleep_s(elapsed_no_sleep_s)
     lump_sleep_s = 0.0
     if sleep and sleep.get("enabled") and float(sleep.get("duration_s", 0.0)) > 0:
@@ -415,7 +492,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
 
     finish_eta = clock
     elapsed_s = (finish_eta - event.start_dt).total_seconds()
-    sleep_time_s = planned_sleep_s + lump_sleep_s
+    sleep_time_s = planned_sleep_s + lump_sleep_s + forced_rest_total_s
 
     total_ascent_m = round(sum(l["ascent_m"] for l in legs_geo), 1)
 
@@ -428,6 +505,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         "moving_time_s": round(running_moving_s, 1),
         "stop_time_s": round(total_stop_s, 1),
         "sleep_time_s": round(sleep_time_s, 1),
+        "no_ride": None if not nr else {"start_h": nr[0], "end_h": nr[1], "rest_s": round(forced_rest_total_s, 1)},
         "elapsed_time_s": round(elapsed_s, 1),
         "confidence": route_est.get("confidence", "low"),
         "model_source": route_est.get("model_source", "placeholder"),
@@ -550,6 +628,25 @@ def _selftest():
     assert "sleep_suggested_s" in tls and isinstance(tls["sleep_suggested_s"], int)
     print(f"Sleep +1h applied; suggestion for this ride: {h(tls['sleep_suggested_s'])}")
 
+    # No-ride hours: start 20:00 with 00:00-03:00 off-limits -> a 3 h rest, and NO arrival/stop inside it
+    ev = _synthetic_event_with_controls()
+    ev.start_dt = datetime(2026, 9, 25, 20, 0)
+    for c in ev.cutoffs:
+        c.cutoff_dt = ev.start_dt + timedelta(hours=60)
+    base = build_timeline(ev, stop_total_s=0.0)
+    nrt = build_timeline(ev, stop_total_s=0.0, no_ride={"start_h": 0.0, "end_h": 3.0})
+    assert nrt["ok"] and nrt["no_ride"]["rest_s"] >= 3 * 3600 - 1, nrt["no_ride"]
+    assert abs(nrt["elapsed_time_s"] - base["elapsed_time_s"] - nrt["no_ride"]["rest_s"]) < 5.0, (nrt["elapsed_time_s"], base["elapsed_time_s"])
+    for r in nrt["controls"]:
+        h = int(r["arrival_dt"][11:13])
+        assert not (0 <= h < 3), "arrived inside the no-ride window: " + r["arrival_dt"]
+    rests = [x for r in nrt["controls"] for x in r["rests"]]
+    assert rests and rests[0]["start"][11:16] == "00:00" and rests[0]["end"][11:16] == "03:00", rests
+    # overnight window (curfew 21:00-06:00) wraps midnight
+    cf = build_timeline(ev, stop_total_s=0.0, no_ride={"start_h": 21.0, "end_h": 6.0})
+    assert cf["no_ride"]["rest_s"] >= 9 * 3600 - 1, cf["no_ride"]
+    print("No-ride hours: 00:00-03:00 -> rest %.1f h, curfew 21-06 -> rest %.1f h. OK"
+          % (nrt["no_ride"]["rest_s"] / 3600, cf["no_ride"]["rest_s"] / 3600))
     print("\n✓ All race_timeline selftest checks passed")
 
 
@@ -585,7 +682,8 @@ def main(argv=None):
                             stop_events=body.get("stop_events"),
                             wind_speed_delta_kmh=float(body.get("wind_speed_delta_kmh") or 0.0),
                             control_overrides=overrides or None,
-                            fatigue=body.get("fatigue"))
+                            fatigue=body.get("fatigue"),
+                            no_ride=body.get("no_ride"))
         print(json.dumps({"ok": tl.get("ok", False), "timeline": tl}))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}))

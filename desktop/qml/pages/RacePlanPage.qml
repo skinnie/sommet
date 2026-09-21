@@ -26,7 +26,7 @@ Item {
     property var timeline: null
     // Refill/food gaps counting only places open at the planned ETAs (race_pois.open_refill_analysis).
     property var openGaps: null
-    onTimelineChanged: fetchOpenGaps()
+    onTimelineChanged: { fetchOpenGaps(); fetchDays() }
     Connections { target: PlanStore; function onPoisChanged() { root.fetchOpenGaps() } }
     function fetchOpenGaps() {
         if (!timeline || !PlanStore.pois || !timeline.controls) { openGaps = null; return }
@@ -36,6 +36,26 @@ Item {
         api("POST", "/api/race/pois", { pois: PlanStore.pois, eta: eta }, function(status, res) {
             openGaps = (status === 200 && res && res.ok) ? res : null
         })
+    }
+    property var daysPlan: null      // race_days result: nights, days, comparison with an equal split
+    Connections { target: PlanStore; function onPoisChanged() { root.fetchDays() } }
+    function fetchDays() {
+        if (!timeline || !showResults) { daysPlan = null; return }
+        var body = { timeline: timeline }
+        if (PlanStore.pois) body.pois = PlanStore.pois
+        api("POST", "/api/race/days", body, function(status, res) {
+            daysPlan = (status === 200 && res && res.ok && res.nights && res.nights.length > 0) ? res : null
+        })
+    }
+    // Hand the plan's days to the Route page (its "Split into days" then follows where you sleep
+    // instead of equal distances). The Route page reads these when it opens.
+    function useDaysOnRoute() {
+        if (!daysPlan) return
+        var b = []
+        for (var i = 0; i < daysPlan.days.length - 1; i++) b.push(daysPlan.days[i].to_km * 1000)
+        PlanStore.numDays = daysPlan.days.length
+        PlanStore.dayBounds = b
+        statusMsg = qsTr("Done — open the Route page: its days now end where you sleep.")
     }
     property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
     property var sleepPlan: null     // race_sleep result: circadian sleep windows
@@ -48,6 +68,16 @@ Item {
         if (calibratedProfile) return false
         var b = parseFloat(baseSpeed.text)
         return isNaN(b) || b <= 0
+    }
+    // Hours the rider never rides (a personal rule, or a curfew): riding stops, the rest is sleep.
+    property bool noRideOn: false
+    property real noRideStartH: 0
+    property real noRideEndH: 3
+    function hhmmToHours(t, dflt) {
+        var m = /^\s*(\d{1,2})(?::(\d{2}))?\s*$/.exec(t || "")
+        if (!m) return dflt
+        var h = parseInt(m[1]), mi = m[2] ? parseInt(m[2]) : 0
+        return (h < 24 && mi < 60) ? h + mi / 60 : dflt
     }
     property bool fatigueOn: false     // model multi-day sleep-debt fatigue (for PBP-length rides)
     // Named off-bike stops the rider plans (meals, a cafe, resupply) - each {label, km, min}. They're
@@ -69,11 +99,13 @@ Item {
     // so the confusing "fields visible while it's already computing" is gone. The background
     // computeTimeline() that runs on GPX load only fills distance + the stop suggestion; the weather/
     // sleep/alerts fetch and the results screen wait for showResults (set on See-my-plan).
-    readonly property int wizardStepCount: 5
+    readonly property int wizardStepCount: 6
     property int wizardStep: 0
     property bool showResults: false
+    onShowResultsChanged: fetchDays()
     readonly property var wizardTitles: [qsTr("Your route"), qsTr("When do you start?"),
-        qsTr("How fast do you ride?"), qsTr("Time off the bike"), qsTr("Checkpoints & time limits")]
+        qsTr("How fast do you ride?"), qsTr("Time off the bike"), qsTr("Hours you never ride"),
+        qsTr("Checkpoints & time limits")]
     function wizardCanAdvance() {
         if (wizardStep === 0) return gpxText.length > 0   // must have a route to plan
         return true
@@ -279,6 +311,11 @@ Item {
             payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
         if (fatigueOn) payload.fatigue = { enabled: true }     // multi-day sleep-debt slowdown
+        if (noRideOn) {
+            noRideStartH = hhmmToHours(noRideFrom.text, noRideStartH)
+            noRideEndH = hhmmToHours(noRideTo.text, noRideEndH)
+            payload.no_ride = { start_h: noRideStartH, end_h: noRideEndH }
+        }
         if (Object.keys(controlOverrides).length > 0)
             payload.control_overrides = controlOverrides   // expert per-control stop overrides
 
@@ -366,7 +403,7 @@ Item {
         // cutoff-safe). Place the rider's hours at the planner's night control(s), scaled to total
         // sleepH so checkpoints before the block are unaffected and later ones shift by the sleep
         // (André, 2026-09-21: "sleep should appear between the cps, not spread across all").
-        var sleepSecs = (parseFloat(sleepH.text) > 0) ? parseFloat(sleepH.text) * 3600 : 0
+        var sleepSecs = (parseFloat(sleepH.text) > 0 && !noRideOn) ? parseFloat(sleepH.text) * 3600 : 0
         p.sleep_windows = []
         if (sleepSecs > 0) {
             var ws = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
@@ -601,6 +638,7 @@ Item {
         return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
                  eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
                  sleep: sleepH.text, fatigueOn: fatigueOn, plannedStops: plannedStops,
+                 noRideOn: noRideOn, noRideFrom: noRideFrom.text, noRideTo: noRideTo.text,
                  calibratedProfile: calibratedProfile, controls: ctrls, controlOverrides: controlOverrides }
     }
     function currentSummary() {
@@ -631,6 +669,9 @@ Item {
             stopTotalH.text = u.stopTotal || ""
             sleepH.text = u.sleep || ""
             fatigueOn = u.fatigueOn || false
+            noRideOn = u.noRideOn || false
+            noRideFrom.text = u.noRideFrom || "00:00"; noRideTo.text = u.noRideTo || "03:00"
+            noRideStartH = hhmmToHours(noRideFrom.text, 0); noRideEndH = hhmmToHours(noRideTo.text, 3)
             plannedStops = u.plannedStops || []
             calibratedProfile = u.calibratedProfile || null
             controlOverrides = u.controlOverrides || ({})
@@ -814,9 +855,39 @@ Item {
                         }
                     }
 
-                    // --- Step 4: Checkpoints ---
+                    // --- Step 4: Hours you never ride ---
                     ColumnLayout {
                         Layout.fillWidth: true; visible: root.wizardStep === 4
+                        spacing: Theme.spacingSmall
+                        RoundedCheckBox {
+                            text: qsTr("There are hours I never ride (night, curfew…)")
+                            checked: root.noRideOn
+                            onToggled: root.noRideOn = checked
+                        }
+                        RowLayout {
+                            visible: root.noRideOn
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("From"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            RoundedTextField { id: noRideFrom; Layout.preferredWidth: 90; text: "00:00"
+                                               placeholderText: "HH:MM"
+                                               onEditingFinished: root.noRideStartH = root.hhmmToHours(text, 0) }
+                            Text { text: qsTr("to"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            RoundedTextField { id: noRideTo; Layout.preferredWidth: 90; text: "03:00"
+                                               placeholderText: "HH:MM"
+                                               onEditingFinished: root.noRideEndH = root.hhmmToHours(text, 3) }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            text: root.noRideOn
+                                  ? qsTr("The plan never has you riding in these hours: you stop and rest until they end. That rest IS your sleep, so the sleep field above is ignored. Examples: 00:00 to 03:00 (your own rule), or 21:00 to 06:00 (a curfew like Bikingman Corsica 2021). Your plan then shows the days and nights this creates — and how they compare with cutting the route into equal days.")
+                                  : qsTr("Optional. Tick it if you refuse to ride at certain hours, or the event forbids it. Leave it off and sleep is placed where the body clock says it is worst to ride.")
+                        }
+                    }
+
+                    // --- Step 4: Checkpoints ---
+                    ColumnLayout {
+                        Layout.fillWidth: true; visible: root.wizardStep === 5
                         spacing: Theme.spacingSmall
                         Text { text: qsTr("From your brevet card — import the roadbook, or skip and just get a finish time.")
                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
@@ -1159,6 +1230,43 @@ Item {
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
                         }
 
+                        // --- Days & nights: where each night falls vs cutting the GPX into equal days ---
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Theme.spacingSmall
+                            spacing: 4
+                            visible: !!daysPlan
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                            Text { text: qsTr("Days & nights"); color: Theme.text; font.weight: Font.Bold
+                                   font.pixelSize: Theme.fontSizeCaption }
+                            Repeater {
+                                model: daysPlan ? daysPlan.days : []
+                                delegate: Text {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    font.pixelSize: Theme.fontSizeCaption; color: Theme.text
+                                    text: qsTr("Day %1: km %2 → %3 (%4 km), %5 → %6")
+                                        .arg(modelData.day).arg(Math.round(modelData.from_km)).arg(Math.round(modelData.to_km))
+                                        .arg(Math.round(modelData.km))
+                                        .arg(root.fmtClockDay(modelData.start)).arg(root.fmtClockDay(modelData.end))
+                                }
+                            }
+                            Repeater {
+                                model: daysPlan ? daysPlan.lines : []
+                                delegate: Text {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    color: (modelData.indexOf("No accommodation") >= 0 || modelData.indexOf("shorter") >= 0)
+                                           ? marginBad : Theme.mutedText
+                                    text: modelData
+                                }
+                            }
+                            RoundedButton {
+                                text: qsTr("Use these days on the Route page")
+                                onClicked: root.useDaysOnRoute()
+                            }
+                        }
+
                         // --- Sleep plan (circadian: dark + moonlight + body clock + cold) ---
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -1167,7 +1275,9 @@ Item {
                             visible: sleepPlan && sleepPlan.windows && sleepPlan.windows.length > 0
 
                             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-                            Text { text: qsTr("Sleep plan"); color: Theme.text; font.weight: Font.Bold
+                            Text { text: root.noRideOn ? qsTr("What the body clock would suggest (you set your own hours)")
+                                                       : qsTr("Sleep plan")
+                                   color: Theme.text; font.weight: Font.Bold
                                    font.pixelSize: Theme.fontSizeCaption }
                             Repeater {
                                 model: sleepPlan ? sleepPlan.windows : []
