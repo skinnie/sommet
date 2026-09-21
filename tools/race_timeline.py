@@ -193,27 +193,35 @@ def _at_hour(dt: datetime, hour: float, forward: bool = True) -> datetime:
     return cand
 
 
-def _walk_riding(clock: datetime, move_s: float, nr: Tuple[float, float], rest_at_start: bool = True):
-    """Ride `move_s` seconds of moving time without ever riding inside the no-ride window. Returns
-    (arrival, rests) where rests = [(start_dt, end_dt, riding_seconds_done_before_the_rest)]."""
+def _walk_riding(clock: datetime, move_s: float, nr: Optional[Tuple[float, float]],
+                 rest_at_start: bool = True, stops: Optional[List[Tuple[float, float]]] = None):
+    """Ride `move_s` seconds of moving time, optionally never riding inside the no-ride window `nr`, and
+    optionally pausing for `stops` = [(moving-seconds offset, stop seconds)] on the way. Returns
+    (arrival, rests) where rests = [(start_dt, end_dt, moving_seconds_done_before_the_rest)]."""
+    todo = sorted(stops or [])
+    si = 0
     rests: List[Tuple[datetime, datetime, float]] = []
-    done, remaining = 0.0, float(move_s)
-    first = True
+    done, first = 0.0, True
     while True:
-        if (rest_at_start or not first) and _in_no_ride(clock, nr):
+        if nr and (rest_at_start or not first) and _in_no_ride(clock, nr):
             end = _at_hour(clock, nr[1])
             rests.append((clock, end, done))
             clock = end
         first = False
-        if remaining <= 0:
+        if si < len(todo) and todo[si][0] <= done + 1e-6:
+            clock += timedelta(seconds=todo[si][1])
+            si += 1
+            continue
+        remaining = move_s - done
+        if remaining <= 1e-6 and si >= len(todo):
             break
-        until = (_at_hour(clock, nr[0]) - clock).total_seconds()
-        if remaining <= until:
-            clock += timedelta(seconds=remaining)
+        until_stop = (todo[si][0] - done) if si < len(todo) else float("inf")
+        until_win = (_at_hour(clock, nr[0]) - clock).total_seconds() if nr else float("inf")
+        step = min(max(remaining, 0.0), until_stop, until_win)
+        clock += timedelta(seconds=step)
+        done += step
+        if done >= move_s - 1e-6 and si >= len(todo):
             break
-        clock += timedelta(seconds=until)
-        remaining -= until
-        done += until
     return clock, rests
 
 
@@ -399,12 +407,23 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             fac = max(_FATIGUE_FLOOR, fac * (1.0 - wear))
         move_s = base_move_s / fac if fac > 0 else base_move_s
         running_moving_s += move_s
+        inline_stop_s = 0.0
         leg_rests: List[Dict[str, Any]] = []
-        if nr:
-            arrival, raw_rests = _walk_riding(clock, move_s, nr, rest_at_start=(i > 0))
+        # No controls: the whole stop budget used to be ONE lump at the finish, which puts every
+        # rider miles too far along when the night comes (a 600 with no roadbook "reached" km 433 by
+        # midnight). Spread it over the ride instead, as evenly spaced stops.
+        inline: List[Tuple[float, float]] = []
+        if n == 1 and aggregate_stop_s > 0:
+            k_ = max(1, int(round(aggregate_stop_s / 1500.0)))
+            inline = [((j + 1) * move_s / (k_ + 1), aggregate_stop_s / k_) for j in range(k_)]
+        if nr or inline:
+            arrival, raw_rests = _walk_riding(clock, move_s, nr, rest_at_start=(i > 0), stops=inline)
             for (r0, r1, done) in raw_rests:
                 km_r = geo["start_km"] + geo["distance_km"] * (done / move_s if move_s > 0 else 0.0)
                 leg_rests.append({"start": r0, "end": r1, "km": km_r})
+            if inline:
+                total_stop_s += aggregate_stop_s
+                inline_stop_s = aggregate_stop_s
         else:
             arrival = clock + timedelta(seconds=move_s)
 
@@ -425,7 +444,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         planned_sleep_s += slp
 
         # Advance the awake clock through this leg + its stop, then pay it down with any sleep here.
-        awake_s += move_s + stop_s
+        awake_s += move_s + stop_s + inline_stop_s
         if slp > 0:
             awake_s = max(0.0, awake_s - slp * _SLEEP_RESET_K)
             if slp >= _WEAR_MIN_SLEEP_S:
@@ -476,7 +495,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         clock = depart
 
     # No-controls case: the calibrated stop budget applies as a single aggregate on elapsed.
-    if aggregate_stop_s > 0:
+    if aggregate_stop_s > 0 and n != 1:
         total_stop_s += aggregate_stop_s
         clock = clock + timedelta(seconds=aggregate_stop_s)
 
