@@ -2401,9 +2401,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_race_pois(self, body):
         """Body: {"gpx"|"points" (the route), "poi_gpx" (a PitStopper GPX export), "water_l_per_100km"?,
-        "carry_l"?}. Reads the exported POI waypoints and returns the resupply-gap analysis
-        (race_pois.py). Offline and instant - the old live Overpass search was removed."""
-        if not (body.get("gpx") or body.get("points")):
+        "carry_l"?, "custom_tag"? (what the rider's PitStopper custom tag means: cemetery|water|food|other)}.
+        Reads the exported POI waypoints and returns the resupply-gap analysis (race_pois.py). Offline
+        and instant - the old live Overpass search was removed. With {"pois": <that result>, "eta":
+        [{km, dt}]} instead, returns the gaps counting only places open at the planned ETAs."""
+        if not (body.get("gpx") or body.get("points") or (body.get("pois") and body.get("eta"))):
             self._send_json(400, {"error": '"gpx" or "points" is required'})
             return
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:

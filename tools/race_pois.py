@@ -15,8 +15,8 @@ compute per-category resupply gaps.
 
 Realistic refill: a rider gets WATER not only at tagged fountains but at cafes, shops, fuel and
 cemeteries too, so the "refill" gap credits every such source (reliability comes from realistic
-assumptions, not OSM tag purity). Opening-hours / night-safe split: later (the <desc> often carries
-"Hours: ...", which is kept on each POI for that).
+assumptions, not OSM tag purity). Opening hours: `open_refill_analysis` re-reads a result against
+the rider's planned ETAs (the <desc> "Hours: ..." kept on each POI, else an assumption per type).
 
 Input (JSON, file or stdin):
   {"gpx"|"points": <the route>, "poi_gpx": <PitStopper GPX text>, "water_l_per_100km"?, "carry_l"?}
@@ -144,7 +144,7 @@ def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], tot
 _PS_CATEGORY = {
     "water": "water",
     # a place to refill/eat: cafe, restaurant, convenience store, fuel ("shopping" -> see supermarket rule)
-    "food": "food", "coffee": "food", "gas": "food", "convenience_store": "food",
+    "food": "food", "coffee": "food", "bar": "food", "gas": "food", "convenience_store": "food",
     "lodging": "shelter", "camping": "shelter",
     "bike_shop": "bike",
     "restroom": "safety", "shower": "safety", "hospital": "safety", "first_aid": "safety", "atm": "safety",
@@ -219,7 +219,14 @@ def _clean_name(name: str) -> str:
     return n
 
 
-def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
+# What the rider's PitStopper CUSTOM TAG means. PitStopper does not export the tag's name (every custom
+# place arrives as <cmt>generic</cmt> + description "POI"), so it is a setting: {value: (our category,
+# the type shown to the rider)}. André's tag is cemetery (a likely water tap), hence the default.
+CUSTOM_TAGS = {"cemetery": ("cemetery", "Cemetery"), "water": ("water", "Water"),
+               "food": ("food", "Food or drink"), "other": ("other", "Custom place")}
+
+
+def parse_pitstopper_gpx(gpx_text: str, custom_tag: str = "cemetery") -> List[Dict[str, Any]]:
     """Read <wpt> elements -> [{lat, lon, name, cat, kms:[route km, ...], sub, hours}]. Unknown
     categories are skipped. `kms` is filled from PitStopper's own "at X.XXkm" notes when present
     (a loop passes the same POI more than once), else left empty and computed from the nearest route
@@ -255,6 +262,7 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
                 full, kind = rest, ""
         full, kind = full.strip(), kind.strip()
 
+        is_custom = False
         if key == "shopping":
             # The type name follows PitStopper's interface language, so accept the main spellings:
             # supermarket / supermarché(s) / supermercado(s) / supermercato-i / Supermarkt.
@@ -265,7 +273,8 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
             # built-in ones carry their type name. André's custom tag is cemetery/graveyard (a likely
             # water tap), so custom tags are read as cemeteries - and a castle is NOT a cemetery.
             if kind == "POI":
-                cat, kind = "cemetery", "Cemetery"
+                cat, kind = CUSTOM_TAGS.get(custom_tag, CUSTOM_TAGS["cemetery"])
+                is_custom = True
             else:
                 # 18 of PitStopper's ~87 types have no export label of their own and arrive as
                 # "generic" (beer gardens, rest areas, motorway services, ferry terminals, toll booths,
@@ -281,8 +290,8 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
                 cat = "other"
         if full:
             name = full
-        elif key == "generic" and (not name or re.match(r"^POI\d*$", name)):   # unnamed ("POI1 R139m")
-            name = "Cemetery"
+        elif is_custom and (not name or re.match(r"^POI\d*$", name)):   # unnamed ("POI1 R139m")
+            name = CUSTOM_TAGS.get(custom_tag, CUSTOM_TAGS["cemetery"])[1]
         use_kind_as_name = (not full) and key != "generic" and _is_placeholder_name(name, kind)
         kind = re.split(r"\s+-\s+(?:Outbound|Return|Pass)\b", kind)[0].strip()   # loop-pass note
         if kind.endswith("s") and not kind.endswith("ss") and len(kind) > 3:
@@ -291,7 +300,7 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
             name = kind                          # unnamed place: show its type, not "drinking_w"
         kms = [float(x) for x in re.findall(r"at\s+([0-9]+(?:\.[0-9]+)?)\s*km", cmt)]
         hm = re.search(r"Hours:\s*(.+?)(?:\.\s+(?:Website|Phone)|$)", desc)
-        group = "Custom tag" if (key == "generic" and cat == "cemetery") else _PS_GROUP.get(key, "Other")
+        group = "Custom tag" if is_custom else _PS_GROUP.get(key, "Other")
         out.append({"lat": float(w.get("lat")), "lon": float(w.get("lon")),
                     "name": name or key.title(), "cat": cat, "kms": kms, "sub": key,
                     "kind": kind, "group": group, "cyclist": _is_cyclist(key, kind),
@@ -359,6 +368,137 @@ def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
                         total_km, water_l_per_100km, carry_l)
     out["groups"] = groups          # what the file holds, by PitStopper group (all kept)
     return out
+
+
+# --- opening hours: which refill points are actually open when you get there ---------------------
+# André, 2026-09-21: a shop that is shut at 03:00 is not a refill. The rider's planned ETA at each
+# POI is interpolated between the timeline's controls, and each refill source is checked against its
+# OSM "Hours:" text (kept on the POI). NO GUESSING (André): a place without published hours is "unknown",
+# never assumed open or shut - the result shows both the confirmed-open and the maybe-open picture.
+# The only exception is outdoor water (a fountain/tap has no opening hours). Checked 2026-09-21: the
+# export already carries every opening_hours OSM has (re-querying 150 no-hours shops on Overpass by id
+# found none), so there is no better free source. Public holidays are NOT considered.
+
+_DAYS = ["mo", "tu", "we", "th", "fr", "sa", "su"]
+def parse_hours(text: str):
+    """OSM opening_hours (common subset) -> f(weekday 0=Mon, minute-of-day) -> True/False, or None if
+    the text is not understood. Handles "24/7", "Mo-Sa 08:30-19:30; Su off", "Mo-Fr 07:00-12:00,14:00-19:00",
+    overnight ranges and "off". Later rules override earlier ones for the days they name."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t.lower() in ("24/7", "24h"):
+        return lambda wd, m: True
+    week: List[Optional[List[Tuple[int, int]]]] = [None] * 7      # None = no rule mentions this day
+    for rule in re.split(r"\s*;\s*", t):
+        rule = rule.strip()
+        if not rule:
+            continue
+        d_ = "(?:Mo|Tu|We|Th|Fr|Sa|Su)"
+        mm = re.match(r"^((?:%s(?:\s*-\s*%s)?\s*,?\s*)*)(.*)$" % (d_, d_), rule, re.I)
+        dayspec, rest = mm.group(1).strip(), mm.group(2).strip()
+        days: List[int] = []
+        if dayspec:
+            for part in re.split(r"\s*,\s*", dayspec.strip(", ")):
+                ab = [x.strip().lower()[:2] for x in part.split("-")]
+                if not all(x in _DAYS for x in ab):
+                    return None
+                a = _DAYS.index(ab[0]); b = _DAYS.index(ab[-1])
+                days += list(range(a, b + 1)) if a <= b else list(range(a, 7)) + list(range(0, b + 1))
+        else:
+            days = list(range(7))
+        if re.fullmatch(r"(?i)off|closed", rest):
+            spans: List[Tuple[int, int]] = []
+        else:
+            spans = []
+            for a, b in re.findall(r"(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})", rest):
+                h1, m1 = a.split(":"); h2, m2 = b.split(":")
+                spans.append((int(h1) * 60 + int(m1), int(h2) * 60 + int(m2)))
+            if not spans:
+                return None
+        for d in days:
+            week[d] = spans
+
+    def is_open(wd: int, minute: int) -> bool:
+        for back, day in ((0, wd), (1, (wd - 1) % 7)):
+            for a, b in (week[day] or []):
+                if b > a:
+                    if back == 0 and a <= minute < b:
+                        return True
+                else:                                   # overnight (22:00-02:00): spills into the next day
+                    if back == 0 and minute >= a:
+                        return True
+                    if back == 1 and minute < b:
+                        return True
+        return False
+    return is_open
+
+
+def _eta_at(km: float, anchors: List[Tuple[float, Any]]):
+    """Planned clock time at route km: linear between the timeline's (km, datetime) anchors."""
+    if km <= anchors[0][0]:
+        return anchors[0][1]
+    for (k0, t0), (k1, t1) in zip(anchors, anchors[1:]):
+        if km <= k1:
+            f = 0.0 if k1 == k0 else (km - k0) / (k1 - k0)
+            return t0 + (t1 - t0) * f
+    return anchors[-1][1]
+
+
+def refill_open_status(poi: Dict[str, Any], cat: str, when) -> str:
+    """"open" | "closed" | "unknown" for a refill source at `when`. Only published hours decide; outdoor
+    water (fountains, taps, springs) has no hours and counts as open."""
+    fn = parse_hours(poi.get("hours", ""))
+    if fn is not None:
+        return "open" if fn(when.weekday(), when.hour * 60 + when.minute) else "closed"
+    return "open" if cat == "water" else "unknown"
+
+
+def open_refill_analysis(result: Dict[str, Any], eta: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Refill / food gaps counting only the places that are open at the rider's ETA.
+    `result` = an analyze_waypoints output; `eta` = [{km, dt}] (local naive ISO), e.g. start + each
+    control. Returns {ok, lines, refill:{...}, food:{...}, closed, total}."""
+    from datetime import datetime
+    anchors = sorted(((float(a["km"]), datetime.fromisoformat(str(a["dt"])[:19])) for a in eta if a.get("dt")),
+                     key=lambda x: x[0])
+    if len(anchors) < 2:
+        return {"ok": False, "error": "need at least two ETA points (start + a control)"}
+    total_km = float(result.get("total_km") or anchors[-1][0])
+    cats = result.get("categories") or {}
+
+    def collect(cat_names: List[str]):
+        confirmed, maybe, n = [], [], {"open": 0, "closed": 0, "unknown": 0}
+        for c in cat_names:
+            for p in (cats.get(c) or {}).get("pois", []):
+                st = refill_open_status(p, c, _eta_at(p["km"], anchors))
+                n[st] += 1
+                if st == "open":
+                    confirmed.append(p["km"])
+                if st != "closed":
+                    maybe.append(p["km"])
+        return confirmed, maybe, n
+
+    c_ref, m_ref, n_ref = collect(["water", "cemetery", "food"])
+    c_food, m_food, n_food = collect(["food"])
+    g_ref, gm_ref = _gaps(c_ref, total_km), _gaps(m_ref, total_km)
+    g_food, gm_food = _gaps(c_food, total_km), _gaps(m_food, total_km)
+    lines = []
+
+    def at(km):
+        return _eta_at(km, anchors).strftime("%a %H:%M")
+    tot = sum(n_ref.values())
+    if tot:
+        lines.append("At your planned times: longest stretch with no CONFIRMED-open refill %.0f km (after km %.0f, ~%s); "
+                     "if places with unknown hours are open, %.0f km. Of %d refill points: %d open, %d closed, %d unknown hours."
+                     % (g_ref["longest_gap_km"], g_ref["longest_gap_after_km"], at(g_ref["longest_gap_after_km"]),
+                        gm_ref["longest_gap_km"], tot, n_ref["open"], n_ref["closed"], n_ref["unknown"]))
+    if sum(n_food.values()):
+        lines.append("Food: %.0f km with none confirmed open (after km %.0f, ~%s); %.0f km if unknown-hours places are open."
+                     % (g_food["longest_gap_km"], g_food["longest_gap_after_km"], at(g_food["longest_gap_after_km"]),
+                        gm_food["longest_gap_km"]))
+    return {"ok": True, "lines": lines, "refill": g_ref, "refill_if_unknown_open": gm_ref,
+            "food": g_food, "food_if_unknown_open": gm_food, "counts": n_ref,
+            "note": "Opening hours are OpenStreetMap's, where published (none are guessed); public holidays are not considered."}
 
 
 # --- self test (offline) --------------------------------------------------------------------
@@ -484,6 +624,32 @@ def _selftest():
           '<desc>POI</desc></wpt></gpx>')
     g = parse_pitstopper_gpx(gx)
     assert g and g[0]["name"] == "Cimetière de Foo" and g[0]["cat"] == "cemetery", g
+    # custom tag is a setting; pubs are a refill
+    gw = parse_pitstopper_gpx(gx, custom_tag="water")
+    assert gw[0]["cat"] == "water" and gw[0]["group"] == "Custom tag", gw
+    assert parse_pitstopper_gpx(gx, custom_tag="other")[0]["cat"] == "other"
+    pub = parse_pitstopper_gpx('<gpx><wpt lat="1" lon="1"><name>Le Pub</name><cmt>bar</cmt><desc>Pub</desc></wpt></gpx>')
+    assert pub[0]["cat"] == "food", pub
+    # opening hours
+    from datetime import datetime
+    h = parse_hours("Mo-Sa 08:30-19:30; Su off")
+    assert h(0, 9 * 60) and not h(0, 20 * 60) and not h(6, 12 * 60)      # Mon 09:00 open, Mon 20:00 shut, Sun shut
+    assert parse_hours("24/7")(3, 3 * 60)
+    n = parse_hours("Mo-Su 22:00-02:00")
+    assert n(2, 23 * 60) and n(3, 60) and not n(3, 3 * 60)               # overnight spills into next day
+    assert parse_hours("Mo-Fr 07:00-12:00,14:00-19:00")(1, 15 * 60) and not parse_hours("Mo-Fr 07:00-12:00,14:00-19:00")(1, 13 * 60)
+    assert parse_hours("sunrise-sunset") is None
+    # night: outdoor water stays a refill; a shop with NO hours is "unknown" (never guessed); a shop
+    # whose hours say shut is "closed"
+    fake = {"total_km": 100.0, "categories": {
+        "water": {"pois": [{"km": 10.0, "subtype": "water"}]},
+        "food": {"pois": [{"km": 50.0, "subtype": "food"}, {"km": 60.0, "subtype": "food", "hours": "Mo-Su 08:00-20:00"},
+                          {"km": 90.0, "subtype": "food", "hours": "24/7"}]}}}
+    eta = [{"km": 0, "dt": "2026-09-19T20:00:00"}, {"km": 100, "dt": "2026-09-20T06:00:00"}]
+    r = open_refill_analysis(fake, eta)
+    assert r["counts"] == {"open": 2, "closed": 1, "unknown": 1}, r["counts"]
+    assert abs(r["refill"]["longest_gap_km"] - 80.0) < 0.1, r                 # confirmed: fountain km10 -> shop km90
+    assert abs(r["refill_if_unknown_open"]["longest_gap_km"] - 40.0) < 0.1, r  # if the unknown km50 shop is open
     print("\n✓ All race_pois selftest checks passed")
 
 
@@ -499,13 +665,16 @@ def main(argv=None):
 
     try:
         body = json.load(open(args.input_file)) if args.input_file else json.load(sys.stdin)
+        if body.get("pois") and body.get("eta"):         # re-read of a finished result against the ETAs
+            print(json.dumps(open_refill_analysis(body["pois"], body["eta"])))
+            return
         points = body.get("points")
         if not points and body.get("gpx"):
             points = geo_util.parse_gpx_points(body["gpx"])
         if not body.get("poi_gpx"):
             print(json.dumps({"ok": False, "error": "poi_gpx (a PitStopper GPX export) is required"}))
             return
-        wpts = parse_pitstopper_gpx(body["poi_gpx"])
+        wpts = parse_pitstopper_gpx(body["poi_gpx"], custom_tag=str(body.get("custom_tag") or "cemetery"))
         rev = bool(body.get("reverse"))
         if rev:
             points = list(reversed(points or []))     # plan the route the other way round

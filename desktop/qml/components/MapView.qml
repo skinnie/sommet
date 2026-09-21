@@ -856,6 +856,21 @@ Item {
                             color: pin.modelData.color || Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
+                        // No published opening hours (OpenStreetMap has none): don't guess, hand the
+                        // exact spot to Google Maps, which often knows them (André, 2026-09-21).
+                        Text {
+                            visible: !!pin.modelData.checkHours
+                            text: qsTr("🕒 Hours unknown — check on Google Maps ↗")
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.underline: true
+                            TapHandler {
+                                cursorShape: Qt.PointingHandCursor
+                                onTapped: Qt.openUrlExternally("https://www.google.com/maps/search/?api=1&query="
+                                                               + pin.modelData.lat + "," + pin.modelData.lon)
+                            }
+                            HoverHandler { cursorShape: Qt.PointingHandCursor }
+                        }
                         Text {
                             visible: !!pin.modelData.hours
                             text: "🕒 " + pin.modelData.hours

@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import Qt.labs.settings
 
 // Persists the Plan page's loaded route + weather across navigation. The nav shell loads pages
 // through a Loader (Main.qml), which DESTROYS a page when you switch away and rebuilds it fresh
@@ -49,6 +50,15 @@ QtObject {
 
     property bool poiBusy: false
 
+    // What the rider's PitStopper CUSTOM TAG means. PitStopper does not export the tag's name, so it is
+    // a setting (cemetery | water | food | other), remembered between runs. André's tag is cemetery.
+    property Settings poiSettings: Settings {
+        id: poiSettingsId
+        category: "racepois"
+        property string customTag: "cemetery"
+    }
+    property alias customTag: poiSettingsId.customTag
+
     // Map layers for the loaded POIs (André, 2026-09-21: weather + POIs crowd each other, so let the
     // rider choose). "Places" = the useful ones (water, food, cemeteries, sleep, bike shops, services);
     // "More" = everything else in the export (bike parking, bike-share, historic sites...), off by default.
@@ -76,6 +86,7 @@ QtObject {
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.send(JSON.stringify({ gpx: routeGpx, poi_gpx: poiGpxText,
                                   reverse: !!reverse,     // km measured along the reversed route
+                                  custom_tag: customTag,
                                   water_l_per_100km: parseFloat(poiWaterRate) || 2.0,
                                   carry_l: parseFloat(poiCarryL) || 1.5 }))
     }
