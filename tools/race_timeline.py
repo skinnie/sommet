@@ -194,35 +194,47 @@ def _at_hour(dt: datetime, hour: float, forward: bool = True) -> datetime:
 
 
 def _walk_riding(clock: datetime, move_s: float, nr: Optional[Tuple[float, float]],
-                 rest_at_start: bool = True, stops: Optional[List[Tuple[float, float]]] = None):
-    """Ride `move_s` seconds of moving time, optionally never riding inside the no-ride window `nr`, and
-    optionally pausing for `stops` = [(moving-seconds offset, stop seconds)] on the way. Returns
-    (arrival, rests) where rests = [(start_dt, end_dt, moving_seconds_done_before_the_rest)]."""
+                 rest_at_start: bool = True, stops: Optional[List[Tuple[float, float]]] = None,
+                 alert: Any = None):
+    """Ride `move_s` seconds of BASE moving time, optionally never riding inside the no-ride window `nr`,
+    optionally pausing for `stops` = [(base-seconds offset, stop seconds)] on the way. With `alert` (a
+    race_alertness.Alertness) the rider slows when sleepy: base progress per real second is the speed
+    factor at that moment, and the model's sleep pressure is advanced through riding, stops and rests.
+    Returns (arrival, rests, riding_s) - rests = [(start_dt, end_dt, base_seconds_done_before)]."""
     todo = sorted(stops or [])
     si = 0
     rests: List[Tuple[datetime, datetime, float]] = []
-    done, first = 0.0, True
+    done, first, riding_s = 0.0, True, 0.0
     while True:
         if nr and (rest_at_start or not first) and _in_no_ride(clock, nr):
             end = _at_hour(clock, nr[1])
             rests.append((clock, end, done))
+            if alert:
+                alert.sleep((end - clock).total_seconds())
             clock = end
         first = False
         if si < len(todo) and todo[si][0] <= done + 1e-6:
+            if alert:
+                alert.awake(todo[si][1])
             clock += timedelta(seconds=todo[si][1])
             si += 1
             continue
         remaining = move_s - done
         if remaining <= 1e-6 and si >= len(todo):
             break
-        until_stop = (todo[si][0] - done) if si < len(todo) else float("inf")
+        f = alert.speed_factor(clock) if alert else 1.0
+        until_stop = ((todo[si][0] - done) / f) if si < len(todo) else float("inf")
         until_win = (_at_hour(clock, nr[0]) - clock).total_seconds() if nr else float("inf")
-        step = min(max(remaining, 0.0), until_stop, until_win)
+        step = min(max(remaining, 0.0) / f, until_stop, until_win, 600.0 if alert else float("inf"))
+        if alert:
+            alert.record(clock)
+            alert.awake(step)
         clock += timedelta(seconds=step)
-        done += step
+        done += step * f
+        riding_s += step
         if done >= move_s - 1e-6 and si >= len(todo):
             break
-    return clock, rests
+    return clock, rests, riding_s
 
 
 def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
@@ -384,6 +396,12 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         if a_ != b_:
             nr = (a_, b_)
     forced_rest_total_s = 0.0
+    alert = None
+    if fatigue_on and (fatigue or {}).get("model") == "twoprocess":
+        import race_alertness
+        f_ = fatigue or {}
+        alert = race_alertness.Alertness(float(f_.get("bed_h", 22.0)), float(f_.get("wake_h", 6.0)),
+                                         f_.get("awake_h_at_start"), start=event.start_dt)
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
@@ -403,10 +421,11 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         # Fatigue: how tired at the MIDDLE of this leg (awake-time so far + half the leg), turned into
         # a speed multiplier; slower when awake > onset. A sleep block later in this leg resets it.
         fac = _fatigue_factor(awake_s + 0.5 * base_move_s, fatigue_on)
-        if fatigue_on:
+        if alert:
+            fac = 1.0                        # the two-process model slows the rider inside the walk
+        elif fatigue_on:
             fac = max(_FATIGUE_FLOOR, fac * (1.0 - wear))
         move_s = base_move_s / fac if fac > 0 else base_move_s
-        running_moving_s += move_s
         inline_stop_s = 0.0
         leg_rests: List[Dict[str, Any]] = []
         # No controls: the whole stop budget used to be ONE lump at the finish, which puts every
@@ -416,8 +435,10 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         if n == 1 and aggregate_stop_s > 0:
             k_ = max(1, int(round(aggregate_stop_s / 1500.0)))
             inline = [((j + 1) * move_s / (k_ + 1), aggregate_stop_s / k_) for j in range(k_)]
-        if nr or inline:
-            arrival, raw_rests = _walk_riding(clock, move_s, nr, rest_at_start=(i > 0), stops=inline)
+        riding_s = move_s
+        if nr or inline or alert:
+            arrival, raw_rests, riding_s = _walk_riding(clock, move_s, nr, rest_at_start=(i > 0),
+                                                        stops=inline, alert=alert)
             for (r0, r1, done) in raw_rests:
                 km_r = geo["start_km"] + geo["distance_km"] * (done / move_s if move_s > 0 else 0.0)
                 leg_rests.append({"start": r0, "end": r1, "km": km_r})
@@ -426,6 +447,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
                 inline_stop_s = aggregate_stop_s
         else:
             arrival = clock + timedelta(seconds=move_s)
+        running_moving_s += riding_s if alert else move_s
 
         stop_s = leg_stops[i] + leg_event_stop[i]   # spread pool + any named stop on this leg
         # No stop at the very finish.
@@ -434,9 +456,14 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
             stop_s = 0.0
         slp = leg_sleep[i]
         depart = arrival + timedelta(seconds=stop_s + slp)
+        if alert:                                   # control stop = awake, planned sleep block = asleep
+            alert.awake(stop_s)
+            alert.sleep(slp)
         if nr and not is_finish and _in_no_ride(depart, nr):       # stop ran into the window: rest through it
             r_end = _at_hour(depart, nr[1])
             leg_rests.append({"start": depart, "end": r_end, "km": geo["end_km"]})
+            if alert:
+                alert.sleep((r_end - depart).total_seconds())
             depart = r_end
         leg_rest_s = sum((r["end"] - r["start"]).total_seconds() for r in leg_rests)
         forced_rest_total_s += leg_rest_s
@@ -524,6 +551,9 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         "moving_time_s": round(running_moving_s, 1),
         "stop_time_s": round(total_stop_s, 1),
         "sleep_time_s": round(sleep_time_s, 1),
+        "alertness": None if not alert else {
+            "model": "twoprocess", "min": round(alert.min_alertness, 1),
+            "min_at": _fmt(alert.min_at) if alert.min_at else None},
         "no_ride": None if not nr else {"start_h": nr[0], "end_h": nr[1], "rest_s": round(forced_rest_total_s, 1)},
         "elapsed_time_s": round(elapsed_s, 1),
         "confidence": route_est.get("confidence", "low"),
