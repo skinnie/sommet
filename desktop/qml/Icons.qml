@@ -14,6 +14,7 @@ QtObject {
     readonly property string activities: ""       // directions_run
     readonly property string routes: ""            // route
     readonly property string pois: ""              // place
+    readonly property string church: "\ueaae"      // chapel with a cross - map pin for cemeteries (POI planner)
     readonly property string backup: ""
     readonly property string settings: ""
     readonly property string sportModes: ""        // sports
