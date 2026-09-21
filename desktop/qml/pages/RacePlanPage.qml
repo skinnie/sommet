@@ -37,6 +37,27 @@ Item {
             openGaps = (status === 200 && res && res.ok) ? res : null
         })
     }
+    property var sleepOpts: null     // race_sleepopt result: ranked sleep plans
+    property bool sleepOptsBusy: false
+    function suggestSleep() {
+        if (!basePayload) return
+        var body = JSON.parse(JSON.stringify(basePayload))
+        delete body.sleep_windows; delete body.sleep; delete body.no_ride; delete body.fatigue
+        body.habit = { bed_h: hhmmToHours(usualBed.text, 22), wake_h: hhmmToHours(usualWake.text, 6) }
+        if (PlanStore.pois) body.pois = PlanStore.pois
+        sleepOptsBusy = true; sleepOpts = null
+        api("POST", "/api/race/sleep-options", body, function(status, res) {
+            sleepOptsBusy = false
+            sleepOpts = (status === 200 && res && res.ok) ? res : null
+            if (!sleepOpts) statusMsg = qsTr("Couldn't compute sleep options: ") + ((res && res.error) ? res.error : status)
+        })
+    }
+    function useSleepOption(o) {
+        noRideOn = true; fatigueOn = true
+        noRideFrom.text = o.bed; noRideTo.text = o.wake
+        noRideStartH = hhmmToHours(o.bed, 23); noRideEndH = hhmmToHours(o.wake, 3.5)
+        computeTimeline()
+    }
     property var daysPlan: null      // race_days result: nights, days, comparison with an equal split
     Connections { target: PlanStore; function onPoisChanged() { root.fetchDays() } }
     function fetchDays() {
@@ -310,7 +331,9 @@ Item {
         } else {
             payload.stop_profile = { ratio: 0.18, source: "default", confidence: "low" }
         }
-        if (fatigueOn) payload.fatigue = { enabled: true }     // multi-day sleep-debt slowdown
+        if (fatigueOn)     // sleepiness slowdown: sleep pressure + a body clock shifted to the rider's usual sleep
+            payload.fatigue = { enabled: true, model: "twoprocess",
+                                bed_h: hhmmToHours(usualBed.text, 22), wake_h: hhmmToHours(usualWake.text, 6) }
         if (noRideOn) {
             noRideStartH = hhmmToHours(noRideFrom.text, noRideStartH)
             noRideEndH = hhmmToHours(noRideTo.text, noRideEndH)
@@ -638,6 +661,7 @@ Item {
         return { gpx: gpxText, gpxName: gpxName, startDate: startDate.text, startTime: startTime.text,
                  eventName: eventName.text, baseSpeed: baseSpeed.text, stopTotal: stopTotalH.text,
                  sleep: sleepH.text, fatigueOn: fatigueOn, plannedStops: plannedStops,
+                 usualBed: usualBed.text, usualWake: usualWake.text,
                  noRideOn: noRideOn, noRideFrom: noRideFrom.text, noRideTo: noRideTo.text,
                  calibratedProfile: calibratedProfile, controls: ctrls, controlOverrides: controlOverrides }
     }
@@ -669,6 +693,7 @@ Item {
             stopTotalH.text = u.stopTotal || ""
             sleepH.text = u.sleep || ""
             fatigueOn = u.fatigueOn || false
+            usualBed.text = u.usualBed || "22:00"; usualWake.text = u.usualWake || "06:00"
             noRideOn = u.noRideOn || false
             noRideFrom.text = u.noRideFrom || "23:00"; noRideTo.text = u.noRideTo || "03:30"
             noRideStartH = hhmmToHours(noRideFrom.text, 23); noRideEndH = hhmmToHours(noRideTo.text, 3.5)
@@ -850,7 +875,7 @@ Item {
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap
                             visible: root.fatigueOn
-                            text: qsTr("For rides crossing more than one night (PBP, TCR…): pace fades the longer you're awake and recovers after sleep — no magic \"day-3\" rebound. Leave off for a one-night brevet.")
+                            text: qsTr("For rides that run into the night (or several): you slow down as sleep pressure builds and your body clock dips, and a short night leaves some of it behind. Uses your usual sleep (next step). Leave off for a day ride.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                     }
@@ -859,6 +884,23 @@ Item {
                     ColumnLayout {
                         Layout.fillWidth: true; visible: root.wizardStep === 4
                         spacing: Theme.spacingSmall
+                        Text { text: qsTr("Your usual sleep"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Theme.spacingSmall
+                            Text { text: qsTr("Bed"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            RoundedTextField { id: usualBed; Layout.preferredWidth: 90; text: "22:00"; placeholderText: "HH:MM" }
+                            Text { text: qsTr("Wake"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                            RoundedTextField { id: usualWake; Layout.preferredWidth: 90; text: "06:00"; placeholderText: "HH:MM" }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            text: qsTr("Your body clock and how fast you get sleepy follow this. Used when \"model fatigue\" is on, and by \"Suggest my sleep\" in your plan.")
+                        }
+                        Text { text: qsTr("Hours you never ride"); color: Theme.text
+                               font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Bold
+                               Layout.topMargin: Theme.spacingSmall }
                         RoundedCheckBox {
                             text: qsTr("There are hours I never ride (night, curfew…)")
                             checked: root.noRideOn
@@ -1228,6 +1270,71 @@ Item {
                             visible: timeline && timeline.per_control_provisional
                             text: qsTr("Per-control times are approximate.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+
+                        // --- Suggest my sleep: try many sleep plans, rank by finish vs how sleepy you get ---
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Theme.spacingSmall
+                            spacing: 4
+                            visible: !!timeline
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { text: qsTr("Suggest my sleep"); color: Theme.text; font.weight: Font.Bold
+                                       font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true }
+                                RoundedButton {
+                                    text: root.sleepOptsBusy ? qsTr("Trying plans…") : qsTr("Try sleep plans")
+                                    enabled: !root.sleepOptsBusy && !!root.basePayload
+                                    onClicked: root.suggestSleep()
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                visible: !root.sleepOpts
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                text: qsTr("Tries different bedtimes and lengths on your ride and ranks them: finish time against how sleepy you get at your worst moment.")
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                visible: !!root.sleepOpts
+                                color: marginBad; font.pixelSize: Theme.fontSizeCaption
+                                text: root.sleepOpts
+                                      ? qsTr("No sleep: finish %1, and your alertness drops to %2 around %3 (%4).")
+                                            .arg(root.fmtClockDay(root.sleepOpts.baseline.finish))
+                                            .arg(Math.round(root.sleepOpts.baseline.min_alertness))
+                                            .arg(root.fmtClockDay(root.sleepOpts.baseline.min_at))
+                                            .arg(root.sleepOpts.baseline.band)
+                                      : ""
+                            }
+                            Repeater {
+                                model: root.sleepOpts ? root.sleepOpts.options : []
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+                                    Text {
+                                        Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                        font.pixelSize: Theme.fontSizeCaption
+                                        color: modelData.band === "fine" ? Theme.text : (modelData.band === "tired" ? "#e0912f" : marginBad)
+                                        readonly property var n1: (modelData.nights && modelData.nights.length > 0) ? modelData.nights[0] : null
+                                        text: qsTr("%1–%2 (%3 h): finish %4 · lowest alertness %5 (%6)%7")
+                                            .arg(modelData.bed).arg(modelData.wake).arg(modelData.hours)
+                                            .arg(root.fmtClockDay(modelData.finish))
+                                            .arg(Math.round(modelData.min_alertness)).arg(modelData.band)
+                                            .arg(n1 ? qsTr(" · night 1 at km %1, %2").arg(Math.round(n1.km))
+                                                      .arg(n1.no_bed ? qsTr("no bed within 20 km")
+                                                           : (n1.nearest_bed ? qsTr("bed: %1 (%2 km)").arg(n1.nearest_bed.name).arg(Math.abs(n1.nearest_bed.offset_km))
+                                                                             : qsTr("beds unknown"))) : "")
+                                    }
+                                    RoundedButton { text: qsTr("Use"); onClicked: root.useSleepOption(modelData) }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                visible: !!root.sleepOpts
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; font.italic: true
+                                text: root.sleepOpts ? root.sleepOpts.note : ""
+                            }
                         }
 
                         // --- Days & nights: where each night falls vs cutting the GPX into equal days ---

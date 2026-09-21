@@ -1267,6 +1267,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_router_color(body)
         elif self.path == "/api/route/slice":
             self._handle_route_slice(body)
+        elif self.path == "/api/route/etrex":
+            self._handle_route_etrex(body)
         elif self.path == "/api/weather/route":
             self._handle_weather_route(body)
         elif self.path == "/api/race/plan/create":
@@ -1283,6 +1285,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_alerts(body)
         elif self.path == "/api/race/days":
             self._handle_race_days(body)
+        elif self.path == "/api/race/sleep-options":
+            self._handle_race_sleep_options(body)
         elif self.path == "/api/race/calibrate":
             self._handle_race_calibrate(body)
         elif self.path == "/api/race/roadbook":
@@ -2282,6 +2286,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "gpx": out})
 
+    def _handle_route_etrex(self, body):
+        """Body: {"gpx": str, "mode"?: "track"|"route", "name"?, "max_via"?: int, "reverse"?}. Returns {ok, gpx,
+        stats} - the GPX rebuilt for a Garmin eTrex 30/30x/32x: full track + named turn / crossing
+        waypoints ("track"), or a <=50-point route with the via points placed at turns ("route")."""
+        gpx = body.get("gpx")
+        if not gpx:
+            self._send_json(400, {"error": '"gpx" is required'})
+            return
+        mode = body.get("mode") or "track"
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+            f.write(gpx)
+            path = f.name
+        try:
+            args = [path, "--mode", str(mode), "--json"]
+            if body.get("name"):
+                args += ["--name", str(body["name"])]
+            if body.get("max_via"):
+                args += ["--max-via", str(int(body["max_via"]))]
+            if body.get("reverse"):
+                args += ["--reverse"]
+            code, out, err = run_tool("etrex_export.py", args)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        res = self._parse_last_json_line(out)
+        if not res:
+            self._send_json(502, {"ok": False, "error": err.strip() or "eTrex export failed"})
+            return
+        self._send_json(200 if res.get("ok") else 400, res)
+
     def _handle_weather_route(self, body):
         """Body: {"points":[{lat,lon,ele?}] (>=2) OR "gpx": str, "start"?:"HH:MM",
         "date"?:"YYYY-MM-DD", "pace"?:float km/h, "tz"?:float UTC-offset-hours}. Forecasts
@@ -2418,6 +2451,23 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "poi search failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_sleep_options(self, body):
+        """Body: the /api/race/timeline body + {"habit": {"bed_h", "wake_h"}, "pois"?}. Tries many nightly
+        sleep plans on the ride with the two-process alertness model and returns them ranked
+        (race_sleepopt.py). Offline."""
+        if not (body.get("event") and body.get("habit")):
+            self._send_json(400, {"error": '"event" and "habit" are required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_sleepopt.py", [path], timeout=150)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "sleep options failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_days(self, body):

@@ -244,8 +244,23 @@ ASCENT_SMOOTH_M = 200.0
 ASCENT_HYSTERESIS_M = 3.0
 
 
+_ASCENT_CACHE: Dict[Any, List[tuple]] = {}
+
+
 def ascent_steps(points: List[Dict[str, Any]], cumul_m: List[float]) -> List[tuple]:
-    """Per point: (gain_m, loss_m) credited at that point after smoothing + hysteresis."""
+    """Per point: (gain_m, loss_m) credited at that point after smoothing + hysteresis. Memoised per
+    route (the sleep optimiser builds dozens of timelines over the same points)."""
+    key = (id(points), len(points), round(cumul_m[-1], 1) if cumul_m else 0.0)
+    hit = _ASCENT_CACHE.get(key)
+    if hit is not None:
+        return hit
+    if len(_ASCENT_CACHE) > 4:
+        _ASCENT_CACHE.clear()
+    _ASCENT_CACHE[key] = _ascent_steps(points, cumul_m)
+    return _ASCENT_CACHE[key]
+
+
+def _ascent_steps(points: List[Dict[str, Any]], cumul_m: List[float]) -> List[tuple]:
     import bisect
     n = len(points)
     ele = []
