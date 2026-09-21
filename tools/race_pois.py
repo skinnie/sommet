@@ -108,26 +108,78 @@ def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], tot
             info["count"] = len(pois)
             if pois:
                 nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services",
-                        "cemetery": "Cemeteries (likely water)"}.get(cat, cat)
+                        "cemetery": "Cemeteries (likely water)", "other": "Other places"}.get(cat, cat)
                 summary.append("%s: %d" % (nice, len(pois)))
         out_cats[cat] = info
     return {"ok": True, "total_km": round(total_km, 1), "categories": out_cats, "summary": summary}
 
 
 # --- PitStopper GPX ------------------------------------------------------------------------------
-# PitStopper <cmt> category -> ours.
+# PitStopper writes ONE of 25 <cmt> keys per waypoint (read from pitstopper.net's own script on
+# 2026-09-21; its internal ~90 categories in 12 groups collapse onto these keys). We keep EVERY
+# waypoint - a rider may export any of them - and only decide (a) which of our categories it feeds
+# and (b) whether it is a "cyclist" type (PitStopper's Cyclist preset), which is what gets its own
+# map icon for now.
+#
+#   PitStopper groups: Water, Food & Drink, Accommodation, Transport, Cycling, Services, Shopping,
+#   Amenities, Recreation, Historical, Emergency, Weather Shelter (+ the rider's Custom Tags).
+#   Cyclist preset = drinking_water, water_point, water_tap, spring, fountain, watering_place, fuel,
+#   cafe, restaurant, toilet, bicycle_parking, bicycle_repair, bicycle_rental, convenience.
+#
+# <cmt> key -> our category. Anything not listed (and every shop that isn't a supermarket) is kept as
+# "other": shown on request, never used for the refill/food gaps.
 _PS_CATEGORY = {
-    "water": "water", "cemetery": "cemetery", "graveyard": "cemetery",
-    # things that count as a place to refill/eat: cafe, restaurant, shop, fuel
+    "water": "water",
+    # a place to refill/eat: cafe, restaurant, convenience store, fuel ("shopping" -> see supermarket rule)
     "food": "food", "coffee": "food", "gas": "food", "convenience_store": "food",
     "lodging": "shelter", "camping": "shelter",
-    "bike_shop": "bike", "restroom": "safety", "hospital": "safety", "pharmacy": "safety",
-    # deliberately ignored: bike_parking / bikeshare (noise). "shopping" is handled below: only
-    # supermarkets count (its other shops aren't a place to refill).
+    "bike_shop": "bike",
+    "restroom": "safety", "shower": "safety", "hospital": "safety", "first_aid": "safety", "atm": "safety",
 }
+# <cmt> key -> the PitStopper group it belongs to (for the "what's in this file" summary).
+_PS_GROUP = {
+    "water": "Water", "food": "Food & Drink", "coffee": "Food & Drink", "bar": "Food & Drink",
+    "gas": "Food & Drink", "lodging": "Accommodation", "camping": "Accommodation",
+    "transit": "Transport", "parking": "Transport", "caution": "Transport",
+    "bike_parking": "Cycling", "bikeshare": "Cycling", "bike_shop": "Cycling",
+    "hospital": "Emergency", "first_aid": "Emergency", "atm": "Services",
+    "shopping": "Shopping", "convenience_store": "Shopping",
+    "restroom": "Amenities", "shower": "Amenities", "rest_stop": "Amenities",
+    "viewpoint": "Recreation", "park": "Recreation", "swimming": "Recreation",
+    "generic": "Other",
+}
+_CYCLIST_KEYS = {"water", "gas", "coffee", "restroom", "bike_parking", "bike_shop", "bikeshare",
+                 "convenience_store"}
 _PS_SYM = {"Drinking Water": "water", "Restaurant": "food", "Gas Station": "food",
            "Convenience Store": "food", "Lodging": "shelter", "Campground": "shelter",
            "Restroom": "safety", "Car Repair": "bike"}
+
+
+def _is_placeholder_name(name: str, kind: str) -> bool:
+    """PitStopper names an UNNAMED place after its type, cut to 10 chars for bike computers:
+    "drinking_w", "guest_hou", "bicycle_pa", "toilets", "Spring1". Real names never look like a
+    shortened type, so such a name should be replaced by the proper type ("Drinking Water")."""
+    if not name or not kind:
+        return False
+    n = name.strip()
+    if re.fullmatch(r"[a-z]+(?:_[a-z]+)+\d*", n):        # a raw OSM value ("camp_site", "drinking_water")
+        return True
+    norm = re.sub(r"\d+$", "", n).lower().replace(" ", "_")
+    snake = kind.strip().lower().replace(" ", "_")
+    # the type itself ("Spring1"), its plural ("toilets"), or a cut-off of it ("drinking_w") - but NOT a
+    # real name that merely starts with the type ("Fountain A")
+    return bool(norm) and (norm in (snake, snake + "s") or snake.startswith(norm))
+
+
+def _is_cyclist(key: str, kind: str) -> bool:
+    """Is this one of PitStopper's Cyclist-preset types? ("food" covers restaurants AND fast food /
+    bakeries, only the first is in the preset; "water" excludes non-potable and bottle-refill.)"""
+    k = kind.lower()
+    if key == "water":
+        return not (("non" in k and "potable" in k) or "refill" in k)
+    if key == "food":
+        return k.startswith("restaurant")
+    return key in _CYCLIST_KEYS
 
 
 def _clean_name(name: str) -> str:
@@ -175,28 +227,35 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
         full, kind = full.strip(), kind.strip()
 
         if key == "shopping":
-            cat = "food" if kind.lower().startswith("supermarket") else None
+            cat = "food" if kind.lower().startswith("supermarket") else "other"
         elif key == "generic":
-            # PitStopper exports the rider's CUSTOM TAGS as "generic". André's is cemetery/graveyard
-            # (a likely water tap), so read them as cemeteries.
-            cat = "cemetery"
-            kind = "Cemetery"
+            # "generic" is shared by the rider's CUSTOM TAGS and PitStopper's own catch-all types (post
+            # office, castle, monument, EV charging...). A custom tag's description is just "POI"; the
+            # built-in ones carry their type name. André's custom tag is cemetery/graveyard (a likely
+            # water tap), so custom tags are read as cemeteries - and a castle is NOT a cemetery.
+            if kind == "POI":
+                cat, kind = "cemetery", "Cemetery"
+            else:
+                cat = "other"
         else:
-            cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym)
-        if not cat:
-            continue
+            cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym) or "other"
         if full:
             name = full
         elif key == "generic" and (not name or re.match(r"^POI\d*$", name)):   # unnamed ("POI1 R139m")
             name = "Cemetery"
+        use_kind_as_name = (not full) and key != "generic" and _is_placeholder_name(name, kind)
         kind = re.split(r"\s+-\s+(?:Outbound|Return|Pass)\b", kind)[0].strip()   # loop-pass note
         if kind.endswith("s") and not kind.endswith("ss") and len(kind) > 3:
             kind = kind[:-1]                                                    # "Guest Houses" -> "Guest House"
+        if use_kind_as_name:
+            name = kind                          # unnamed place: show its type, not "drinking_w"
         kms = [float(x) for x in re.findall(r"at\s+([0-9]+(?:\.[0-9]+)?)\s*km", cmt)]
         hm = re.search(r"Hours:\s*(.+?)(?:\.\s+(?:Website|Phone)|$)", desc)
+        group = "Custom tag" if (key == "generic" and cat == "cemetery") else _PS_GROUP.get(key, "Other")
         out.append({"lat": float(w.get("lat")), "lon": float(w.get("lon")),
                     "name": name or key.title(), "cat": cat, "kms": kms, "sub": key,
-                    "kind": kind, "hours": hm.group(1).strip() if hm else ""})
+                    "kind": kind, "group": group, "cyclist": _is_cyclist(key, kind),
+                    "hours": hm.group(1).strip() if hm else ""})
     return out
 
 
@@ -213,9 +272,12 @@ def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
         return {"ok": False, "error": "route needs >= 2 points"}
     cumul_m = geo_util.cumulative_distances([(p["lat"], p["lon"]) for p in points])
     total_km = cumul_m[-1] / 1000.0
-    cats = ["water", "food", "cemetery", "bike", "shelter", "safety"]
+    cats = ["water", "food", "cemetery", "bike", "shelter", "safety", "other"]
     per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in cats}
     seen = set()
+    groups: Dict[str, int] = {}
+    for w in wpts:
+        groups[w.get("group", "Other")] = groups.get(w.get("group", "Other"), 0) + 1
 
     # Spatial grid over the route (0.01 deg ~ 1 km cells) so each waypoint only checks the handful
     # of route points near it instead of all of them - the naive scan took ~10 s on a 600 km route.
@@ -248,12 +310,15 @@ def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
                 continue
             seen.add(key)
             poi = {"name": w["name"], "km": round(km, 1), "lat": w["lat"], "lon": w["lon"],
-                   "subtype": w["sub"], "kind": w.get("kind", "")}
+                   "subtype": w["sub"], "kind": w.get("kind", ""),
+                   "group": w.get("group", "Other"), "cyclist": bool(w.get("cyclist"))}
             if w.get("hours"):
                 poi["hours"] = w["hours"]
             per_cat[w["cat"]].append(poi)
-    return _build_output(per_cat, [c for c in cats if per_cat[c] or c in RESUPPLY],
-                         total_km, water_l_per_100km, carry_l)
+    out = _build_output(per_cat, [c for c in cats if per_cat[c] or c in RESUPPLY],
+                        total_km, water_l_per_100km, carry_l)
+    out["groups"] = groups          # what the file holds, by PitStopper group (all kept)
+    return out
 
 
 # --- self test (offline) --------------------------------------------------------------------
@@ -282,6 +347,8 @@ def _synthetic_gpx() -> str:
         wpt(0.271, "Clothes", "shopping", "Clothing", "Shopping Center"),      # ignored
         wpt(0.540, "Cycles Pro", "bike_shop", "Bicycle Repair", "Car Repair"),
         wpt(0.300, "Parking", "bike_parking", "Bicycle Parking", "Parking Area"),  # ignored
+        # a BUILT-IN generic type (castle): shares the "generic" key with custom tags but is not one
+        wpt(0.350, "Château de T R20m", "generic", "Full name: Château de Test. Castles", "Dot"),
         # a custom-tag POI (PitStopper exports these as "generic"); real name is in the description
         wpt(0.600, "Cimetière  R32m", "generic", "Full name: Cimetière de Test. POI", "Dot"),
         wpt(0.601, "POI1 R10m", "generic", "POI", "Dot"),                       # unnamed custom-tag POI
@@ -296,7 +363,9 @@ def _selftest():
     pts = _synthetic_route()
     wpts = parse_pitstopper_gpx(_synthetic_gpx())
     cats = {w["name"]: w["cat"] for w in wpts}
-    assert "Parking" not in cats and "Clothes" not in cats, cats      # noise + non-food shopping ignored
+    # EVERYTHING is kept now; what isn't refill/food/etc. goes to "other" (never used for the gaps)
+    assert cats["Parking"] == "other" and cats["Clothes"] == "other", cats
+    assert cats["Château de Test"] == "other", cats                   # a castle is NOT a cemetery
     assert cats["Norma"] == "food", cats                              # supermarkets DO count
     r = analyze_waypoints(pts, wpts, water_l_per_100km=2.0, carry_l=1.5)
     assert r["ok"], r
@@ -313,7 +382,12 @@ def _selftest():
     assert 18 <= w["longest_gap_km"] <= 22, w["longest_gap_km"]
     assert w["longest_gap_over_carry"] is False
     c = r["categories"]["cemetery"]
-    assert c["count"] == 2, c
+    assert c["count"] == 2, c                                          # custom tags only, not the castle
+    oth = {p["name"]: p for p in r["categories"]["other"]["pois"]}
+    assert set(oth) == {"Parking", "Clothes", "Château de Test"}, set(oth)
+    assert oth["Parking"]["cyclist"] is True and oth["Clothes"]["cyclist"] is False, oth
+    assert oth["Château de Test"]["kind"] == "Castle" and oth["Château de Test"]["group"] == "Other", oth
+    assert r["groups"]["Water"] == 3 and r["groups"]["Custom tag"] == 2, r["groups"]
     assert c["pois"][0]["name"] == "Cimetière de Test", c["pois"]     # real name, not the truncated one
     f = r["categories"]["food"]
     assert f["count"] == 6, f["count"]        # Carrefour, Boulangerie, Norma, Leclerc, Loop cafe (x2 passes)
@@ -341,6 +415,11 @@ def _selftest():
     lec = next(p for p in r["categories"]["food"]["pois"] if p["name"].startswith("Centre Commercial"))
     assert lec["name"] == "Centre Commercial E. Leclerc" and lec["kind"] == "Supermarket", lec
     assert lec["hours"] == "Mo-Sa 08:30-19:30; Su off", lec
+
+    # unnamed places are shown by their type, not PitStopper's 10-char raw type
+    assert _is_placeholder_name("drinking_w", "Drinking Water") and _is_placeholder_name("Spring1", "Spring")
+    assert _is_placeholder_name("toilets", "Toilet") and _is_placeholder_name("guest_hou", "Guest House")
+    assert not _is_placeholder_name("Café de la Place", "Cafe") and not _is_placeholder_name("Le Spring Bar", "Spring")
 
     # PitStopper name decorations are stripped: "^" (waypoint moved onto the track) and the
     # side+distance suffix; a custom-tag POI exported with FULL names has no "Full name:" note.

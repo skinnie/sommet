@@ -171,8 +171,10 @@ Item {
         // A route loaded on ANOTHER page (Race Plan) only shares the GPX text, not the coloured
         // line this map draws - so the route showed no line (André, 2026-09-21: "it shows the
         // points but not the routes"). Colour it now.
-        if (coloredSegments.length === 0 && plannedGpx.length > 0)
+        if (coloredSegments.length === 0 && plannedGpx.length > 0) {
             colorTrack()
+            forecastWeather()      // loadGpx does both; without this the weather never appeared
+        }
     }
 
     function persist() {
@@ -231,41 +233,51 @@ Item {
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
     // Icon + colour for a POI pin, using the SAME 18 icons the watch shows for its POI types
     // (Icons.poiTypeGlyphs, indexed by type id) so the map matches the watch: water=Water(16),
-    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Sight(13),
+    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Building(0),
     // bike shop=Road(14), toilets/services=Building(0), anything else=Waypoint(17).
     function poiStyle(cat, sub) {
         var G = Icons.poiTypeGlyphs
         if (cat === "water")    return { glyph: G[16], color: "#1f78d1" }
-        if (cat === "cemetery") return { glyph: G[13], color: "#6b6b6b" }
+        if (cat === "cemetery") return { glyph: G[0], color: "#6b6b6b" }     // Building (Sight looked like a camera)
         if (cat === "food")     return { glyph: (sub === "gas" ? G[3] : G[7]), color: "#d9822b" }
         if (cat === "shelter")  return { glyph: (sub === "camping" ? G[2] : G[10]), color: "#7b4fc4" }
         if (cat === "bike")     return { glyph: G[14], color: "#1a9d6b" }
-        if (cat === "safety")   return { glyph: G[0], color: "#c0392b" }
-        return { glyph: G[17], color: Theme.mapAccent }
+        if (cat === "safety")   return { glyph: G[17], color: "#c0392b" }
+        // "other": only the cyclist types get a specific icon for now (parking = the watch's Car icon);
+        // the rest (historic sites, post offices, ...) are plain grey waypoints.
+        if (sub === "bike_parking") return { glyph: G[3], color: "#1a9d6b" }
+        if (sub === "bikeshare")    return { glyph: G[17], color: "#1a9d6b" }
+        return { glyph: G[17], color: "#8a8a8a" }
     }
 
     // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
     readonly property var poiMarkers: {
         var out = []
         var p = PlanStore.pois
-        if (p && p.categories) {
+        if (p && p.categories && PlanStore.showPlaces) {
+            // Pins appear as you zoom in (a 600 km route with 500+ places is an unreadable band at
+            // country zoom, and buried the weather markers): the useful ones first, shops later.
+            var zoomFor = { water: 9, cemetery: 10, food: 11, safety: 11, bike: 11, shelter: 11, other: 12 }
             // Most useful first, so the cap drops the least useful pins (a PitStopper export can hold
             // 500+; 253 of them are restaurants and would otherwise crowd out water/cemeteries).
-            var order = ["water", "cemetery", "food", "safety", "bike", "shelter"]
+            var order = ["water", "cemetery", "food", "safety", "bike", "shelter", "other"]
             for (var k in p.categories) if (order.indexOf(k) < 0) order.push(k)
-            for (var c = 0; c < order.length; c++) {
+            var full = false
+            for (var c = 0; c < order.length && !full; c++) {
                 var cat = order[c]
                 if (!p.categories[cat]) continue
+                if (cat === "other" && !PlanStore.showOtherPlaces) continue   // bike parking etc.: on request
                 var list = p.categories[cat].pois || []
                 for (var i = 0; i < list.length; i++) {
                     var st = poiStyle(cat, list[i].subtype)
                     out.push({ lat: list[i].lat, lon: list[i].lon,
                                label: (list[i].name || cat), glyph: st.glyph, color: st.color,
                                type: (list[i].kind || cat), hours: (list[i].hours || ""),
-                               km: list[i].km })
-                    if (out.length >= 600) return out
+                               km: list[i].km, minZoom: (zoomFor[cat] || 11) })
+                    if (out.length >= 600) { full = true; break }
                 }
             }
+            out.reverse()      // the most useful are now LAST = drawn on top of the rest
         }
         return out
     }
@@ -1080,6 +1092,25 @@ Item {
                                 : root.overlayMode === 1 ? qsTr("Map: climb + wind & rain — tap for temperature")
                                 : qsTr("Map: climb + temperature — tap for only climb")
                             onClicked: { root.overlayMode = (root.overlayMode + 1) % 3; root.persist() }
+                        }
+                        // Layers: weather and POIs share the map and can crowd each other, so each can be
+                        // switched off. "More" = the rest of the PitStopper export (bike parking, ...).
+                        Flow {
+                            width: parent.width; spacing: Theme.spacingMedium
+                            visible: !!PlanStore.pois
+                            Text { text: qsTr("Show on map:"); color: Theme.mutedText
+                                   font.pixelSize: Theme.fontSizeCaption; height: 28; verticalAlignment: Text.AlignVCenter }
+                            RoundedCheckBox { text: qsTr("Places (water, food…)")
+                                              checked: PlanStore.showPlaces
+                                              onToggled: PlanStore.showPlaces = checked }
+                            Text { text: qsTr("(zoom in to see them on the map)"); color: Theme.mutedText
+                                   font.pixelSize: Theme.fontSizeCaption; font.italic: true
+                                   height: 28; verticalAlignment: Text.AlignVCenter; visible: PlanStore.showPlaces }
+                            RoundedCheckBox { text: qsTr("More (%1)").arg(PlanStore.pois && PlanStore.pois.categories && PlanStore.pois.categories.other ? PlanStore.pois.categories.other.count : 0)
+                                              visible: !!(PlanStore.pois && PlanStore.pois.categories && PlanStore.pois.categories.other)
+                                              enabled: PlanStore.showPlaces
+                                              checked: PlanStore.showOtherPlaces
+                                              onToggled: PlanStore.showOtherPlaces = checked }
                         }
 
                         // Weather summary chips, with units (mirrors the mobile Route-weather screen)
