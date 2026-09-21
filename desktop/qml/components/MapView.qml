@@ -819,13 +819,15 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 4
                 color: "white"
-                border.color: Theme.mapAccent
+                // A pin may carry its own `color` and `glyph` (e.g. the Route page's POIs: water,
+                // food, cemetery...); plain pins keep the app accent + generic place icon.
+                border.color: modelData.color || Theme.mapAccent
                 border.width: 2
             }
             Icon {
-                glyph: Icons.pois
+                glyph: modelData.glyph || Icons.pois
                 size: 16
-                color: Theme.mapAccent
+                color: modelData.color || Theme.mapAccent
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 9

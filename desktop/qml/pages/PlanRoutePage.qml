@@ -168,6 +168,11 @@ Item {
         weatherAstro = PlanStore.weatherAstro; weatherVerdict = PlanStore.weatherVerdict
         weatherSummary = PlanStore.weatherSummary; weatherLegend = PlanStore.weatherLegend
         overlayMode = PlanStore.overlayMode; reversed = PlanStore.reversed; numDays = PlanStore.numDays; splitMode = PlanStore.splitMode; dayBounds = PlanStore.dayBounds
+        // A route loaded on ANOTHER page (Race Plan) only shares the GPX text, not the coloured
+        // line this map draws - so the route showed no line (André, 2026-09-21: "it shows the
+        // points but not the routes"). Colour it now.
+        if (coloredSegments.length === 0 && plannedGpx.length > 0)
+            colorTrack()
     }
 
     function persist() {
@@ -225,6 +230,21 @@ Item {
     // POIs / resupply along the route (Overpass, online). Lives on the Route page (spatial data);
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
     property bool poiBusy: false
+    // Icon + colour for a POI pin, using the SAME 18 icons the watch shows for its POI types
+    // (Icons.poiTypeGlyphs, indexed by type id) so the map matches the watch: water=Water(16),
+    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Sight(13),
+    // bike shop=Road(14), toilets/services=Building(0), anything else=Waypoint(17).
+    function poiStyle(cat, sub) {
+        var G = Icons.poiTypeGlyphs
+        if (cat === "water")    return { glyph: G[16], color: "#1f78d1" }
+        if (cat === "cemetery") return { glyph: G[13], color: "#6b6b6b" }
+        if (cat === "food")     return { glyph: (sub === "gas" ? G[3] : G[7]), color: "#d9822b" }
+        if (cat === "shelter")  return { glyph: (sub === "camping" ? G[2] : G[10]), color: "#7b4fc4" }
+        if (cat === "bike")     return { glyph: G[14], color: "#1a9d6b" }
+        if (cat === "safety")   return { glyph: G[0], color: "#c0392b" }
+        return { glyph: G[17], color: Theme.mapAccent }
+    }
+
     // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
     readonly property var poiMarkers: {
         var out = []
@@ -239,8 +259,9 @@ Item {
                 if (!p.categories[cat]) continue
                 var list = p.categories[cat].pois || []
                 for (var i = 0; i < list.length; i++) {
+                    var st = poiStyle(cat, list[i].subtype)
                     out.push({ lat: list[i].lat, lon: list[i].lon,
-                               label: (list[i].name || cat) })
+                               label: (list[i].name || cat), glyph: st.glyph, color: st.color })
                     if (out.length >= 600) return out
                 }
             }
