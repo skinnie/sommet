@@ -125,6 +125,15 @@ int main(int argc, char *argv[])
         &engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, [] { QCoreApplication::exit(-1); },
         Qt::QueuedConnection);
+
+#ifdef SOMMET_PERSONAL
+    // Optional local-only extensions, compiled in ONLY with -DSOMMET_PERSONAL=ON. The
+    // implementation lives outside the tracked tree (desktop/personal/, git-ignored) and is
+    // never shipped. Runs before the UI is built so AppExtensions is populated in time.
+    void registerPersonalExtensions();
+    registerPersonalExtensions();
+#endif
+
     engine.loadFromModule("AmbitApp", "Main");
 
     return app.exec();

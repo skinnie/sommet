@@ -295,6 +295,20 @@ Rectangle {
                 selected: root.currentPage === "suuntoT6"
                 onClicked: root.pageSelected("suuntoT6")
             }
+            // Optional local-only extension pages (AppExtensions is empty in the public build).
+            // Rendered just above Settings, in registration order. Each supplies either a glyph
+            // or an inline iconSource. See desktop/src/appextensions.h.
+            Repeater {
+                model: AppExtensions.pages
+                delegate: NavItem {
+                    width: parent.width
+                    glyph: modelData.glyph !== undefined ? modelData.glyph : ""
+                    iconSource: modelData.iconSource !== undefined ? modelData.iconSource : ""
+                    label: modelData.label !== undefined ? modelData.label : ""
+                    selected: root.currentPage === modelData.id
+                    onClicked: root.pageSelected(modelData.id)
+                }
+            }
             // Settings - last row in the scroll (2026-08-29: André moved it out of the fixed pin
             // into the scroll "as everything"). Always shown.
             NavItem {

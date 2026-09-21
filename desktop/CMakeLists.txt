@@ -8,6 +8,12 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2
     Network Sql)
 
+# Optional, local-only extensions. OFF by default, so the public app and every CI/release
+# build contain nothing from it. Turn ON (-DSOMMET_PERSONAL=ON) to compile in private modules
+# dropped under desktop/personal/ (a git-ignored, never-shipped directory) via AppExtensions.
+# The wiring here is generic and content-free; nothing about any specific extension is tracked.
+option(SOMMET_PERSONAL "Build local-only personal extensions from desktop/personal/" OFF)
+
 # Step 6 (Maps) - two real backends tried and abandoned, both after real hardware testing:
 # maplibre-native-qt (a separate ~1.7GB build) crashed outright (std::bad_alloc, reproducible
 # even under forced software OpenGL, so not a driver quirk); Qt's own built-in "osm"
@@ -226,6 +232,8 @@ qt_add_qml_module(ambitapp
     # Step 10+ pages/components get added here as they're built - each spec step should
     # compile independently, so this list grows incrementally rather than all at once.
     SOURCES
+        src/appextensions.h
+        src/appextensions.cpp
         src/services/backendprocess.h
         src/services/backendprocess.cpp
         src/services/deviceservice.h
@@ -305,6 +313,7 @@ target_link_libraries(ambitapp PRIVATE
 # its path under src/services/ - needs that directory on the include path explicitly, or every
 # one of those checks silently fails and the include gets skipped (2026-08-07, first real build).
 target_include_directories(ambitapp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/services
 )
 
@@ -318,3 +327,17 @@ target_compile_definitions(ambitapp PRIVATE
     # Previously the About card hardcoded "v0.2.1" and silently drifted from PROJECT_VERSION.
     APP_VERSION="${PROJECT_VERSION}"
 )
+
+# Local-only extensions (see the SOMMET_PERSONAL option above). When ON, define the guard for
+# main.cpp's hook and pull in every desktop/personal/*.cmake, which add their own sources / QML
+# to the ambitapp target. When OFF (public + CI + release default) this whole block is skipped,
+# so the build is byte-for-byte the public app. CONFIGURE_DEPENDS re-globs when files change.
+if(SOMMET_PERSONAL)
+    target_compile_definitions(ambitapp PRIVATE SOMMET_PERSONAL)
+    file(GLOB _sommet_personal_ext CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/personal/*.cmake")
+    foreach(_ext ${_sommet_personal_ext})
+        message(STATUS "Sommet: including local extension ${_ext}")
+        include(${_ext})
+    endforeach()
+endif()
