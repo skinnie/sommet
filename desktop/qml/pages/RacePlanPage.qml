@@ -95,6 +95,8 @@ Item {
         gpxText = gpx
         // Shared sticky route: a GPX loaded here also becomes the Plan (Route) page's route, and
         // survives navigation. PlanStore is a singleton that outlives this page's Loader.
+        PlanStore.reversed = false       // a freshly loaded route starts un-reversed (set BEFORE plannedGpx:
+                                         // changing it triggers the POI import, which reads this flag)
         PlanStore.plannedGpx = gpx
         PlanStore.routeName = gpxName
         PlanStore.pois = null            // new route -> stale services cleared (shared w/ Route page)
@@ -705,6 +707,17 @@ Item {
                         }
                         RoundedButton { text: gpxName ? qsTr("Change route") : qsTr("Load GPX")
                                         onClicked: gpxDialog.open() }
+                        // Water / food / cemetery stops come from PitStopper's export, loaded HERE as the
+                        // route (same card as the Route page). Shown until the route carries POIs.
+                        PoiHowTo { Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
+                                   visible: !PlanStore.pois }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: !!PlanStore.pois
+                            text: qsTr("✓ %1 places along the route (water, food, cemeteries…) — they'll show up in your plan's warnings.")
+                                  .arg(PlanStore.pois ? (PlanStore.pois.imported || 0) : 0)
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
                     }
 
                     // --- Step 1: Start ---

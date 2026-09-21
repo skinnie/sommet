@@ -201,8 +201,14 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
 
 
 def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
-                      water_l_per_100km: float = 2.0, carry_l: float = 1.5) -> Dict[str, Any]:
-    """Resupply gaps + per-category POI lists from imported PitStopper waypoints."""
+                      water_l_per_100km: float = 2.0, carry_l: float = 1.5,
+                      mirror_kms: bool = False) -> Dict[str, Any]:
+    """Resupply gaps + per-category POI lists from imported PitStopper waypoints.
+
+    `points` is the route in the direction being planned. When that is the REVERSE of the direction
+    the export was made in, pass mirror_kms=True: the route km(s) PitStopper wrote down ("Outbound at
+    80 km") are measured in its own direction, so they become total - km; POIs without them are
+    simply snapped to the (already reversed) `points`."""
     if len(points) < 2:
         return {"ok": False, "error": "route needs >= 2 points"}
     cumul_m = geo_util.cumulative_distances([(p["lat"], p["lon"]) for p in points])
@@ -234,7 +240,8 @@ def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
     for w in wpts:
         # Placed at PitStopper's own route km(s) when it gave them (correct for loops/out-and-backs);
         # otherwise at the nearest point of our route.
-        kms = w["kms"] or [round(nearest_km_fast(w["lat"], w["lon"]), 1)]
+        given = [total_km - k for k in w["kms"]] if mirror_kms else w["kms"]
+        kms = given or [round(nearest_km_fast(w["lat"], w["lon"]), 1)]
         for km in kms:
             key = (w["cat"], round(w["lat"], 5), round(w["lon"], 5), round(km, 1))
             if key in seen:
@@ -315,6 +322,17 @@ def _selftest():
     assert sorted(p["km"] for p in f["pois"] if p["name"] == "Loop cafe") == [80.0, 99.0]  # both loop passes
     assert r["categories"]["bike"]["count"] == 1
 
+    # Reversed route: the loop POI PitStopper put at 80 / 99 km is at total-80 / total-99, and a POI
+    # snapped to the route moves to total-km.
+    rev = analyze_waypoints(list(reversed(pts)), wpts, mirror_kms=True)
+    total = rev["total_km"]
+    loop = sorted(p["km"] for p in rev["categories"]["food"]["pois"] if p["name"] == "Loop cafe")
+    assert loop == sorted([round(total - 99.0, 1), round(total - 80.0, 1)]), (loop, total)
+    fa = next(p for p in r["categories"]["water"]["pois"] if p["name"] == "Fountain B")["km"]
+    fb = next(p for p in rev["categories"]["water"]["pois"] if p["name"] == "Fountain B")["km"]
+    assert abs((total - fa) - fb) < 0.5, (fa, fb, total)
+    assert abs(rev["categories"]["water"]["longest_gap_km"] - r["categories"]["water"]["longest_gap_km"]) < 1.0
+
     # The human type is kept (singularised) for the map label.
     kinds = {p["name"]: p.get("kind") for cat in r["categories"].values() for p in cat["pois"]}
     assert kinds["Fountain A"] == "Fountain" and kinds["Carrefour"] == "Restaurant", kinds
@@ -356,9 +374,13 @@ def main(argv=None):
             print(json.dumps({"ok": False, "error": "poi_gpx (a PitStopper GPX export) is required"}))
             return
         wpts = parse_pitstopper_gpx(body["poi_gpx"])
+        rev = bool(body.get("reverse"))
+        if rev:
+            points = list(reversed(points or []))     # plan the route the other way round
         r = analyze_waypoints(points or [], wpts,
                               water_l_per_100km=float(body.get("water_l_per_100km") or 2.0),
-                              carry_l=float(body.get("carry_l") or 1.5))
+                              carry_l=float(body.get("carry_l") or 1.5),
+                              mirror_kms=rev)
         if r.get("ok"):
             r["imported"] = len(wpts)
         print(json.dumps(r))

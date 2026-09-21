@@ -229,7 +229,6 @@ Item {
 
     // POIs / resupply along the route (Overpass, online). Lives on the Route page (spatial data);
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
-    property bool poiBusy: false
     // Icon + colour for a POI pin, using the SAME 18 icons the watch shows for its POI types
     // (Icons.poiTypeGlyphs, indexed by type id) so the map matches the watch: water=Water(16),
     // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Sight(13),
@@ -286,23 +285,6 @@ Item {
         w.carry_l = carry
         w.longest_gap_over_carry = w.longest_gap_litres > carry
         PlanStore.pois = np
-    }
-
-    // Read a PitStopper POI export (GPX waypoints) and compute the resupply gaps from it - no
-    // search, so it returns instantly. The result feeds the map pins, alerts and Race Plan.
-    function importPoisFile(fileUrl) {
-        if (!plannedGpx) { statusMsg = qsTr("Load your route first"); return }
-        var txt = LocalFileService.readText(fileUrl)
-        if (!txt || txt.length === 0) { statusMsg = qsTr("Couldn't read that file"); return }
-        poiBusy = true
-        PlanStore.poiWaterRate = waterRate.text      // remember the water-planning numbers
-        PlanStore.poiCarryL = carryL.text
-        PlanStore.importPois(plannedGpx, txt, function(ok, res) {
-            poiBusy = false
-            statusMsg = ok
-                ? qsTr("Imported %1 places from PitStopper.").arg(res.imported || 0)
-                : qsTr("No POIs found in that file — is it a PitStopper GPX export (with waypoints)?")
-        })
     }
 
     function colorTrack() {
@@ -375,6 +357,10 @@ Item {
         if (!plannedGpx) return
         reversed = !reversed
         cursorDist = -1; resetView()
+        // The POI km positions are measured along the direction they were read in: recompute them
+        // for the new direction from the loaded file (the PitStopper waypoints are inside plannedGpx).
+        if (PlanStore.pois && plannedGpx.indexOf("<wpt") >= 0)
+            PlanStore.importPois(plannedGpx, plannedGpx, null, reversed)
         colorTrack()
         forecastWeather()
         persist()
@@ -469,15 +455,6 @@ Item {
         title: qsTr("Choose a GPX route")
         nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
         onAccepted: root.loadGpx(selectedFile)
-    }
-
-    // POIs exported from PitStopper (pitstopper.net) as a GPX with waypoints - instant + offline,
-    // no Overpass search (André, 2026-09-21: "no one in 2026 will wait 1-3 min").
-    FileDialog {
-        id: poiFileDialog
-        title: qsTr("Choose the POIs file exported from PitStopper (GPX)")
-        nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
-        onAccepted: root.importPoisFile(selectedFile)
     }
 
     // Save dialog for exporting one day's GPX portion.
@@ -740,21 +717,20 @@ Item {
                         Rectangle { width: parent.width; height: 1; color: Theme.border }
                         Text { text: qsTr("Water, food & services"); color: Theme.text
                                font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
-                        // Main path: import PitStopper's export - instant, offline.
-                        RoundedButton {
-                            width: parent.width; accent: true
-                            text: root.poiBusy ? qsTr("Reading…") : qsTr("Import POIs from PitStopper (GPX)")
-                            enabled: !root.poiBusy
-                            onClicked: poiFileDialog.open()
-                        }
+                        // No POIs on this route yet -> how to get them (same card as Race Plan). Loading
+                        // PitStopper's export as the route is the one way in; there is no separate import.
+                        PoiHowTo { width: parent.width; visible: !PlanStore.pois }
                         Text {
                             width: parent.width; wrapMode: Text.WordWrap
-                            text: qsTr("On pitstopper.net: load your route, tick the categories you want (add a custom tag for cemeteries), Search, then Export → GPX with waypoints (GPX, not FIT — FIT cuts the names). Pick that file here for instant water/food gaps.")
+                            visible: !!PlanStore.pois
+                            text: qsTr("✓ %1 places along the route (from PitStopper).").arg(PlanStore.pois ? (PlanStore.pois.imported || 0) : 0)
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
-                        Text { text: qsTr("Water planning — used to flag long dry stretches:")
+                        Text { visible: !!PlanStore.pois
+                               text: qsTr("Water planning — used to flag long dry stretches:")
                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                         Row {
+                            visible: !!PlanStore.pois
                             width: parent.width; spacing: Theme.spacingSmall
                             readonly property real cellW: (width - Theme.spacingSmall) / 2
                             Column { width: parent.cellW; spacing: 2
