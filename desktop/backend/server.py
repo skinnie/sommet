@@ -1281,6 +1281,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_race_pois(body)
         elif self.path == "/api/race/alerts":
             self._handle_race_alerts(body)
+        elif self.path == "/api/race/days":
+            self._handle_race_days(body)
         elif self.path == "/api/race/calibrate":
             self._handle_race_calibrate(body)
         elif self.path == "/api/race/roadbook":
@@ -2416,6 +2418,23 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "poi search failed"}
+        self._send_json(200 if result.get("ok") else 502, result)
+
+    def _handle_race_days(self, body):
+        """Body: {"timeline": <race_timeline result>, "pois"?: <race_pois result>, "reach_km"?}. The nights
+        (forced rests + planned sleep), the days between them, the equal-split comparison and the
+        accommodation near each night (race_days.py). Offline."""
+        if not body.get("timeline"):
+            self._send_json(400, {"error": '"timeline" is required'})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            path = f.name
+        try:
+            code, out, err = run_tool("race_days.py", [path])
+        finally:
+            Path(path).unlink(missing_ok=True)
+        result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "days failed"}
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_alerts(self, body):
