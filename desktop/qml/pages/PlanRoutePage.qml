@@ -250,6 +250,17 @@ Item {
         return { glyph: G[17], color: "#8a8a8a" }
     }
 
+    // Label for the "more places" checkbox: name what they are ("Bicycle Parking, Bicycle Rental (108)").
+    readonly property string otherPlacesLabel: {
+        var o = (PlanStore.pois && PlanStore.pois.categories) ? PlanStore.pois.categories.other : null
+        if (!o || !o.kinds) return qsTr("More places")
+        var arr = []
+        for (var k in o.kinds) arr.push([k, o.kinds[k]])
+        arr.sort(function(a, b) { return b[1] - a[1] })
+        var names = arr.slice(0, 2).map(function(x) { return x[0] }).join(", ")
+        return names + (arr.length > 2 ? "…" : "") + " (" + o.count + ")"
+    }
+
     // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
     readonly property var poiMarkers: {
         var out = []
@@ -1106,7 +1117,7 @@ Item {
                             Text { text: qsTr("(zoom in to see them on the map)"); color: Theme.mutedText
                                    font.pixelSize: Theme.fontSizeCaption; font.italic: true
                                    height: 28; verticalAlignment: Text.AlignVCenter; visible: PlanStore.showPlaces }
-                            RoundedCheckBox { text: qsTr("More (%1)").arg(PlanStore.pois && PlanStore.pois.categories && PlanStore.pois.categories.other ? PlanStore.pois.categories.other.count : 0)
+                            RoundedCheckBox { text: root.otherPlacesLabel
                                               visible: !!(PlanStore.pois && PlanStore.pois.categories && PlanStore.pois.categories.other)
                                               enabled: PlanStore.showPlaces
                                               checked: PlanStore.showOtherPlaces
