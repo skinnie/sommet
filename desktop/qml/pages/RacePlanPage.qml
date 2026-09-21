@@ -149,7 +149,8 @@ Item {
         statusMsg = qsTr("Reading roadbook…")
         api("POST", "/api/race/roadbook", payload, function(status, res) {
             if (status !== 200 || !res || !res.ok || !res.controls) {
-                statusMsg = qsTr("Couldn't read roadbook: ") + ((res && res.error) ? res.error : status)
+                console.warn("[roadbook] import failed: HTTP", status, JSON.stringify(res || {}).slice(0, 200))
+                statusMsg = qsTr("Couldn't read roadbook: ") + ((res && res.error) ? res.error : ("no answer from the backend (HTTP " + status + ")"))
                 return
             }
             controlsModel.clear()
@@ -844,8 +845,16 @@ Item {
                             onClicked: root.wizardNext()
                         }
                     }
-                    Text { visible: statusMsg.indexOf("Error") === 0; text: statusMsg; color: marginBad
-                           font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    // Show EVERY status message, not only ones starting with "Error": a failed roadbook
+                    // import ("Couldn't read roadbook: ...") was invisible, so it just looked like the
+                    // import did nothing (André: "import roadbook is broken"). Failures are red.
+                    Text {
+                        visible: statusMsg.length > 0
+                        text: statusMsg
+                        readonly property bool bad: /^(Error|Couldn't|No )/.test(statusMsg)
+                        color: bad ? marginBad : Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                    }
                 }
 
                 // Results toolbar: shown with the plan, to tweak inputs or export/save.
