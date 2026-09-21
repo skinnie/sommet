@@ -25,3 +25,6 @@ pyftsubset static.ttf --output-file=MaterialSymbolsRounded.ttf \
 
 Codepoints for each name come from the same repo's `.codepoints` file (a plain `name hex`
 list) - see `qml/Icons.qml` for the ones currently in use and their meaning in this app.
+
+Added 2026-09-21: `church` (U+EAAE) for the POI planner's cemetery pin. Regenerated with the steps above;
+all 58 earlier glyphs verified pixel-identical before/after.

@@ -233,12 +233,14 @@ Item {
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
     // Icon + colour for a POI pin, using the SAME 18 icons the watch shows for its POI types
     // (Icons.poiTypeGlyphs, indexed by type id) so the map matches the watch: water=Water(16),
-    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Forest(8),
+    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=church (not a watch icon),
     // bike shop=Building(0), toilets/services + anything else=Waypoint(17).
     function poiStyle(cat, sub) {
         var G = Icons.poiTypeGlyphs
         if (cat === "water")    return { glyph: G[16], color: "#1f78d1" }
-        if (cat === "cemetery") return { glyph: G[8], color: "#6b6b6b" }     // Forest (trees): none of the watch icons is a cemetery; Sight is a camera
+        // Cemetery: a church (chapel + cross - the churchyard cue). None of the watch's 18 icons is a
+        // cemetery (Sight is a camera), so the MAP uses this; a future send-to-watch would use Forest.
+        if (cat === "cemetery") return { glyph: Icons.church, color: "#6b6b6b" }
         if (cat === "food")     return { glyph: (sub === "gas" ? G[3] : G[7]), color: "#d9822b" }
         if (cat === "shelter")  return { glyph: (sub === "camping" ? G[2] : G[10]), color: "#7b4fc4" }
         if (cat === "bike")     return { glyph: G[0], color: "#1a9d6b" }     // Building (a shop); Road is a route line
@@ -266,9 +268,8 @@ Item {
         var out = []
         var p = PlanStore.pois
         if (p && p.categories && PlanStore.showPlaces) {
-            // Pins appear as you zoom in (a 600 km route with 500+ places is an unreadable band at
-            // country zoom, and buried the weather markers): the useful ones first, shops later.
-            var zoomFor = { water: 9, cemetery: 10, food: 11, safety: 11, bike: 11, shelter: 11, other: 12 }
+            // All categories show at the same zoom level (André, 2026-09-21); the "Show on map" toggles
+            // control crowding instead.
             // Most useful first, so the cap drops the least useful pins (a PitStopper export can hold
             // 500+; 253 of them are restaurants and would otherwise crowd out water/cemeteries).
             var order = ["water", "cemetery", "food", "safety", "bike", "shelter", "other"]
@@ -284,7 +285,7 @@ Item {
                     out.push({ lat: list[i].lat, lon: list[i].lon,
                                label: (list[i].name || cat), glyph: st.glyph, color: st.color,
                                type: (list[i].kind || cat), hours: (list[i].hours || ""),
-                               km: list[i].km, minZoom: (zoomFor[cat] || 11) })
+                               km: list[i].km, minZoom: 0 })
                     if (out.length >= 600) { full = true; break }
                 }
             }
