@@ -52,6 +52,11 @@ Item {
             if (!sleepOpts) statusMsg = qsTr("Couldn't compute sleep options: ") + ((res && res.error) ? res.error : status)
         })
     }
+    // Plain words for the sleepiness verdict (the model's band names are fine/tired/dangerous).
+    function sleepinessWord(band) {
+        return band === "fine" ? qsTr("awake enough") : (band === "tired" ? qsTr("tired but OK")
+                                                                            : qsTr("too sleepy to ride safely"))
+    }
     function useSleepOption(o) {
         noRideOn = true; fatigueOn = true
         noRideFrom.text = o.bed; noRideTo.text = o.wake
@@ -1294,18 +1299,17 @@ Item {
                                 Layout.fillWidth: true; wrapMode: Text.WordWrap
                                 visible: !root.sleepOpts
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                                text: qsTr("Tries different bedtimes and lengths on your ride and ranks them: finish time against how sleepy you get at your worst moment.")
+                                text: qsTr("Tries different bedtimes and lengths on your ride and ranks them: finish time against how sleepy you get at your sleepiest moment (awake enough / tired but OK / too sleepy to ride safely).")
                             }
                             Text {
                                 Layout.fillWidth: true; wrapMode: Text.WordWrap
                                 visible: !!root.sleepOpts
                                 color: marginBad; font.pixelSize: Theme.fontSizeCaption
                                 text: root.sleepOpts
-                                      ? qsTr("No sleep: finish %1, and your alertness drops to %2 around %3 (%4).")
+                                      ? qsTr("No sleep: finish %1. Your sleepiest moment is %2 — %3.")
                                             .arg(root.fmtClockDay(root.sleepOpts.baseline.finish))
-                                            .arg(Math.round(root.sleepOpts.baseline.min_alertness))
                                             .arg(root.fmtClockDay(root.sleepOpts.baseline.min_at))
-                                            .arg(root.sleepOpts.baseline.band)
+                                            .arg(root.sleepinessWord(root.sleepOpts.baseline.band))
                                       : ""
                             }
                             Repeater {
@@ -1317,10 +1321,10 @@ Item {
                                         font.pixelSize: Theme.fontSizeCaption
                                         color: modelData.band === "fine" ? Theme.text : (modelData.band === "tired" ? "#e0912f" : marginBad)
                                         readonly property var n1: (modelData.nights && modelData.nights.length > 0) ? modelData.nights[0] : null
-                                        text: qsTr("%1–%2 (%3 h): finish %4 · lowest alertness %5 (%6)%7")
+                                        text: qsTr("%1–%2 (%3 h): finish %4 · sleepiest at %5 — %6%7")
                                             .arg(modelData.bed).arg(modelData.wake).arg(modelData.hours)
                                             .arg(root.fmtClockDay(modelData.finish))
-                                            .arg(Math.round(modelData.min_alertness)).arg(modelData.band)
+                                            .arg(root.fmtClockDay(modelData.min_at)).arg(root.sleepinessWord(modelData.band))
                                             .arg(n1 ? qsTr(" · night 1 at km %1, %2").arg(Math.round(n1.km))
                                                       .arg(n1.no_bed ? qsTr("no bed within 20 km")
                                                            : (n1.nearest_bed ? qsTr("bed: %1 (%2 km)").arg(n1.nearest_bed.name).arg(Math.abs(n1.nearest_bed.offset_km))
