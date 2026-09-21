@@ -58,6 +58,20 @@ ApplicationWindow {
         trainingProgram: "pages/TrainingProgramPage.qml",
     })
 
+    // Optional local-only extension pages (AppExtensions is empty in the public build; see
+    // desktop/src/appextensions.h). These resolve a page id to its QML source / existence,
+    // preferring an extension when one claims the id, otherwise the built-in map above.
+    function pageSourceFor(id) {
+        for (var i = 0; i < AppExtensions.pages.length; i++)
+            if (AppExtensions.pages[i].id === id) return AppExtensions.pages[i].source
+        return pageSources[id]
+    }
+    function hasPage(id) {
+        for (var i = 0; i < AppExtensions.pages.length; i++)
+            if (AppExtensions.pages[i].id === id) return true
+        return id in pageSources
+    }
+
     // Testing mode's simulated eTrex, wired here rather than in Settings: the device stays
     // simulated while you walk around Activities, Routes and POIs, so the binding has to
     // outlive whichever page is loaded. GarminService then discovers the fixture folder with
@@ -168,7 +182,7 @@ ApplicationWindow {
             Connections {
                 target: NavBus
                 function onNavigate(pageId) {
-                    if (pageId in window.pageSources)
+                    if (window.hasPage(pageId))
                         navRail.currentPage = pageId
                 }
             }
@@ -186,7 +200,7 @@ ApplicationWindow {
 
             Loader {
                 anchors.fill: parent
-                source: window.pageSources[navRail.currentPage]
+                source: window.pageSourceFor(navRail.currentPage)
             }
         }
     }

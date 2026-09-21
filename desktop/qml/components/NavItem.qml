@@ -17,6 +17,11 @@ Rectangle {
     // Garmin hero icon already uses, rather than a generic Component-swap mechanism for what
     // is, so far, exactly one non-glyph nav icon.
     property bool useIntervalsIcon: false
+    // Optional custom nav icon: a QML component URL drawn instead of the Material Symbols
+    // glyph. Generalises the useIntervalsIcon pattern above so an extension (AppExtensions)
+    // can supply an inline-drawn icon without needing a codepoint in the subset font. If the
+    // loaded item exposes a `color` property it's bound to the selected/normal colour.
+    property url iconSource
 
     implicitHeight: 44
     radius: Theme.radiusSmall
@@ -54,7 +59,7 @@ Rectangle {
         spacing: Theme.spacingSmall
 
         Icon {
-            visible: !root.useIntervalsIcon
+            visible: !root.useIntervalsIcon && String(root.iconSource) === ""
             glyph: root.glyph
             size: 20
             color: root.selected ? Theme.card : Theme.text
@@ -65,6 +70,15 @@ Rectangle {
             size: 20
             color: root.selected ? Theme.card : Theme.text
             anchors.verticalCenter: parent.verticalCenter
+        }
+        Loader {
+            active: String(root.iconSource) !== ""
+            visible: active
+            source: root.iconSource
+            anchors.verticalCenter: parent.verticalCenter
+            onLoaded: if (item && item.color !== undefined)
+                          item.color = Qt.binding(function() {
+                              return root.selected ? Theme.card : Theme.text })
         }
         Text {
             text: root.label
