@@ -71,8 +71,8 @@ Item {
     }
     // Hours the rider never rides (a personal rule, or a curfew): riding stops, the rest is sleep.
     property bool noRideOn: false
-    property real noRideStartH: 0
-    property real noRideEndH: 3
+    property real noRideStartH: 23
+    property real noRideEndH: 3.5
     function hhmmToHours(t, dflt) {
         var m = /^\s*(\d{1,2})(?::(\d{2}))?\s*$/.exec(t || "")
         if (!m) return dflt
@@ -670,8 +670,8 @@ Item {
             sleepH.text = u.sleep || ""
             fatigueOn = u.fatigueOn || false
             noRideOn = u.noRideOn || false
-            noRideFrom.text = u.noRideFrom || "00:00"; noRideTo.text = u.noRideTo || "03:00"
-            noRideStartH = hhmmToHours(noRideFrom.text, 0); noRideEndH = hhmmToHours(noRideTo.text, 3)
+            noRideFrom.text = u.noRideFrom || "23:00"; noRideTo.text = u.noRideTo || "03:30"
+            noRideStartH = hhmmToHours(noRideFrom.text, 23); noRideEndH = hhmmToHours(noRideTo.text, 3.5)
             plannedStops = u.plannedStops || []
             calibratedProfile = u.calibratedProfile || null
             controlOverrides = u.controlOverrides || ({})
@@ -868,19 +868,19 @@ Item {
                             visible: root.noRideOn
                             Layout.fillWidth: true; spacing: Theme.spacingSmall
                             Text { text: qsTr("From"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            RoundedTextField { id: noRideFrom; Layout.preferredWidth: 90; text: "00:00"
+                            RoundedTextField { id: noRideFrom; Layout.preferredWidth: 90; text: "23:00"
                                                placeholderText: "HH:MM"
-                                               onEditingFinished: root.noRideStartH = root.hhmmToHours(text, 0) }
+                                               onEditingFinished: root.noRideStartH = root.hhmmToHours(text, 23) }
                             Text { text: qsTr("to"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                            RoundedTextField { id: noRideTo; Layout.preferredWidth: 90; text: "03:00"
+                            RoundedTextField { id: noRideTo; Layout.preferredWidth: 90; text: "03:30"
                                                placeholderText: "HH:MM"
-                                               onEditingFinished: root.noRideEndH = root.hhmmToHours(text, 3) }
+                                               onEditingFinished: root.noRideEndH = root.hhmmToHours(text, 3.5) }
                         }
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             text: root.noRideOn
-                                  ? qsTr("The plan never has you riding in these hours: you stop and rest until they end. That rest IS your sleep, so the sleep field above is ignored. Examples: 00:00 to 03:00 (your own rule), or 21:00 to 06:00 (a curfew like Bikingman Corsica 2021). Your plan then shows the days and nights this creates — and how they compare with cutting the route into equal days.")
+                                  ? qsTr("The plan never has you riding in these hours: you stop and rest until they end. That rest IS your sleep, so the sleep field above is ignored. Examples: 23:00 to 03:30 (what you did on the BRM600 Verdun), or 00:00 to 03:00, or 21:00 to 06:00 (a curfew like Bikingman Corsica 2021). Your plan then shows the days and nights this creates — and how they compare with cutting the route into equal days.")
                                   : qsTr("Optional. Tick it if you refuse to ride at certain hours, or the event forbids it. Leave it off and sleep is placed where the body clock says it is worst to ride.")
                         }
                     }
