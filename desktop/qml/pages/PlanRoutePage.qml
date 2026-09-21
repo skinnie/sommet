@@ -241,6 +241,30 @@ Item {
         }
         return out
     }
+    // Read a PitStopper POI export (GPX waypoints) and compute the resupply gaps from it - no
+    // search, so it returns instantly. Uses the same result shape as findPois, so the map pins,
+    // alerts and Race Plan pick it up unchanged.
+    function importPoisFile(fileUrl) {
+        if (!plannedGpx) { statusMsg = qsTr("Load your route first"); return }
+        var txt = LocalFileService.readText(fileUrl)
+        if (!txt || txt.length === 0) { statusMsg = qsTr("Couldn't read that file"); return }
+        poiBusy = true
+        api("POST", "/api/race/pois",
+            { gpx: plannedGpx, poi_gpx: txt,
+              water_l_per_100km: parseFloat(waterRate.text) || 2.0,
+              carry_l: parseFloat(carryL.text) || 1.5 },
+            function(status, res) {
+                poiBusy = false
+                if (status === 200 && res && res.ok) {
+                    PlanStore.pois = res
+                    statusMsg = qsTr("Imported %1 places from PitStopper.").arg(res.imported || 0)
+                } else {
+                    PlanStore.pois = null
+                    statusMsg = qsTr("Couldn't read POIs from that file — is it a PitStopper GPX export?")
+                }
+            })
+    }
+
     function findPois() {
         if (!plannedGpx) return
         var cats = []
@@ -434,6 +458,15 @@ Item {
         title: qsTr("Choose a GPX route")
         nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
         onAccepted: root.loadGpx(selectedFile)
+    }
+
+    // POIs exported from PitStopper (pitstopper.net) as a GPX with waypoints - instant + offline,
+    // no Overpass search (André, 2026-09-21: "no one in 2026 will wait 1-3 min").
+    FileDialog {
+        id: poiFileDialog
+        title: qsTr("Choose the POIs file exported from PitStopper (GPX)")
+        nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
+        onAccepted: root.importPoisFile(selectedFile)
     }
 
     // Save dialog for exporting one day's GPX portion.
@@ -696,6 +729,20 @@ Item {
                         Rectangle { width: parent.width; height: 1; color: Theme.border }
                         Text { text: qsTr("Water, food & services"); color: Theme.text
                                font.pixelSize: Theme.fontSizeLabel; font.weight: Font.Medium }
+                        // Main path: import PitStopper's export - instant, offline.
+                        RoundedButton {
+                            width: parent.width; accent: true
+                            text: root.poiBusy ? qsTr("Reading…") : qsTr("Import POIs from PitStopper (GPX)")
+                            enabled: !root.poiBusy
+                            onClicked: poiFileDialog.open()
+                        }
+                        Text {
+                            width: parent.width; wrapMode: Text.WordWrap
+                            text: qsTr("On pitstopper.net: load your route, tick the categories you want, Search, then Export → GPX with waypoints. Pick that file here for instant water/food gaps.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text { text: qsTr("…or search online instead (slow — can take minutes on a long route):")
+                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                         Flow {
                             width: parent.width; spacing: Theme.spacingMedium
                             RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }

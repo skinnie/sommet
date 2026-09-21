@@ -160,6 +160,147 @@ def _gaps(kms: List[float], total_km: float) -> Dict[str, Any]:
             "longest_gap_km": round(longest, 1), "longest_gap_after_km": round(after, 1)}
 
 
+def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], total_km: float,
+                  water_l_per_100km: float, carry_l: float) -> Dict[str, Any]:
+    """Turn per-category POI lists into the result the UI reads: sorted pois, resupply-gap stats and
+    the human summary lines. Shared by the live Overpass search and the PitStopper GPX import."""
+    out_cats: Dict[str, Any] = {}
+    summary: List[str] = []
+    for cat in cats:
+        pois = sorted(per_cat.get(cat, []), key=lambda p: p["km"])
+        info: Dict[str, Any] = {"pois": pois}
+        if cat in RESUPPLY:
+            # Realistic refill: a rider gets WATER not only at tagged fountains but at cafes/shops/
+            # fuel and cemeteries too. So the "water" gap credits every refill source that was found,
+            # not just water nodes (André, 2026-09-21: reliability comes from realistic assumptions,
+            # not tag purity). Food credits food + fuel. (Opening-hours / night-safe split: later.)
+            gap_kms = [p["km"] for p in pois]
+            if cat == "water":
+                for extra in ("cemetery", "food"):
+                    if extra in per_cat:
+                        gap_kms += [p["km"] for p in per_cat[extra]]
+            g = _gaps(gap_kms, total_km)
+            info.update(g)
+            if cat == "water":
+                # distance-based budget: litres for the longest gap, and gaps over carry capacity.
+                need_longest = round(water_l_per_100km * g["longest_gap_km"] / 100.0, 1)
+                info["longest_gap_litres"] = need_longest
+                info["carry_l"] = carry_l
+                info["longest_gap_over_carry"] = need_longest > carry_l
+            label = {"water": "refill (water/café/shop)", "food": "food"}[cat]
+            short = {"water": "refill", "food": "food"}[cat]
+            if g["count"] == 0:
+                summary.append("No %s found on this route." % label)
+            else:
+                summary.append("Next %s: %.0f km · longest stretch with no %s: %.0f km (after km %.0f)"
+                               % (short, g["first_km"], short, g["longest_gap_km"], g["longest_gap_after_km"]))
+                if cat == "water" and info["longest_gap_over_carry"]:
+                    summary.append("  ⚠ that %.0f km dry stretch needs ~%.1f L (> %.1f L carried) — top up early."
+                                   % (g["longest_gap_km"], info["longest_gap_litres"], carry_l))
+        else:
+            info["count"] = len(pois)
+            if pois:
+                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services",
+                        "cemetery": "Cemeteries (likely water)"}.get(cat, cat[7:].title() if cat.startswith("custom:") else cat)
+                summary.append("%s: %d (first at km %.0f)" % (nice, len(pois), pois[0]["km"]))
+        out_cats[cat] = info
+    return {"ok": True, "total_km": round(total_km, 1), "categories": out_cats, "summary": summary}
+
+
+# --- Import a PitStopper GPX (waypoints) instead of searching (André, 2026-09-21) --------------
+# PitStopper (pitstopper.net) already does the fast spatial search server-side; exporting its POIs
+# as a GPX and reading it here is instant, offline and needs no Overpass. Each <wpt> carries a
+# category in <cmt> ("water", "food", "coffee", "gas", ...) and, for loops, the route km(s) it sits
+# at ("Outbound at 0.00km, Return at 599.77km").
+_PS_CATEGORY = {
+    "water": "water", "cemetery": "cemetery",
+    # things that count as a place to refill/eat: cafe, restaurant, shop, fuel
+    "food": "food", "coffee": "food", "gas": "food", "convenience_store": "food",
+    "lodging": "shelter", "camping": "shelter",
+    "bike_shop": "bike", "restroom": "safety", "hospital": "safety", "pharmacy": "safety",
+    # deliberately ignored: bike_parking / bikeshare (noise) and generic "shopping" (not always food)
+}
+_PS_SYM = {"Drinking Water": "water", "Restaurant": "food", "Gas Station": "food",
+           "Convenience Store": "food", "Lodging": "shelter", "Campground": "shelter",
+           "Restroom": "safety", "Car Repair": "bike"}
+
+
+def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
+    """Read <wpt> elements -> [{lat, lon, name, cat, kms:[route km, ...]}]. Unknown categories are
+    skipped. `kms` is filled from PitStopper's own "at X.XXkm" notes when present (a loop passes the
+    same POI more than once), else left empty and computed from the nearest route point."""
+    import re
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(gpx_text)
+    except ET.ParseError:
+        return []
+    out = []
+    for w in root.iter():
+        if not w.tag.endswith("}wpt") and w.tag != "wpt":
+            continue
+        def f(tag: str) -> str:
+            for c in w:
+                if c.tag.split("}")[-1] == tag:
+                    return (c.text or "").strip()
+            return ""
+        cmt, sym, name = f("cmt"), f("sym"), f("name")
+        key = cmt.split(".")[0].strip().lower()
+        cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym)
+        if not cat:
+            continue
+        kms = [float(x) for x in re.findall(r"at\s+([0-9]+(?:\.[0-9]+)?)\s*km", cmt)]
+        out.append({"lat": float(w.get("lat")), "lon": float(w.get("lon")),
+                    "name": name or key.title(), "cat": cat, "kms": kms, "sub": key})
+    return out
+
+
+def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
+                      water_l_per_100km: float = 2.0, carry_l: float = 1.5) -> Dict[str, Any]:
+    """Same result shape as analyze(), from imported waypoints instead of an Overpass search."""
+    if len(points) < 2:
+        return {"ok": False, "error": "route needs >= 2 points"}
+    cumul_m = geo_util.cumulative_distances([(p["lat"], p["lon"]) for p in points])
+    total_km = cumul_m[-1] / 1000.0
+    cats = ["water", "food", "cemetery", "bike", "shelter", "safety"]
+    per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in cats}
+    seen = set()
+
+    # Spatial grid over the route (0.01 deg ~ 1 km cells) so each waypoint only checks the handful
+    # of route points near it instead of all of them - the naive scan took ~10 s on a 600 km route.
+    CELL = 0.01
+    grid: Dict[Tuple[int, int], List[int]] = {}
+    for i, p in enumerate(points):
+        grid.setdefault((int(p["lat"] / CELL), int(p["lon"] / CELL)), []).append(i)
+
+    def nearest_km_fast(lat: float, lon: float) -> float:
+        cx, cy = int(lat / CELL), int(lon / CELL)
+        best_i, best_d = -1, float("inf")
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for i in grid.get((cx + dx, cy + dy), ()):
+                    d = geo_util.haversine_m(lat, lon, points[i]["lat"], points[i]["lon"])
+                    if d < best_d:
+                        best_d, best_i = d, i
+        if best_i < 0:                      # nothing in the neighbourhood: fall back to a full scan
+            return _nearest_km(points, cumul_m, lat, lon)[0]
+        return cumul_m[best_i] / 1000.0
+
+    for w in wpts:
+        # Placed at PitStopper's own route km(s) when it gave them (correct for loops/out-and-backs);
+        # otherwise at the nearest point of our route.
+        kms = w["kms"] or [round(nearest_km_fast(w["lat"], w["lon"]), 1)]
+        for km in kms:
+            key = (w["cat"], round(w["lat"], 5), round(w["lon"], 5), round(km, 1))
+            if key in seen:
+                continue
+            seen.add(key)
+            per_cat[w["cat"]].append({"name": w["name"], "km": round(km, 1), "lat": w["lat"],
+                                      "lon": w["lon"], "subtype": w["sub"]})
+    return _build_output(per_cat, [c for c in cats if per_cat[c] or c in RESUPPLY],
+                         total_km, water_l_per_100km, carry_l)
+
+
 def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int = DEFAULT_RADIUS_M,
             water_l_per_100km: float = 2.0, carry_l: float = 1.5,
             custom_tags: Optional[List[str]] = None,
@@ -234,48 +375,8 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
                              "km": round(km, 1), "lat": lat, "lon": lon,
                              "subtype": _subtype(tags)})
 
-    out_cats: Dict[str, Any] = {}
-    summary: List[str] = []
-    for cat in list(categories) + ["custom:" + t for t in custom]:
-        pois = sorted(per_cat[cat], key=lambda p: p["km"])
-        info: Dict[str, Any] = {"pois": pois}
-        if cat in RESUPPLY:
-            # Realistic refill: a rider gets WATER not only at tagged fountains but at cafes/shops/
-            # fuel and cemeteries too. So the "water" gap credits every refill source that was found,
-            # not just water nodes (André, 2026-09-21: reliability comes from realistic assumptions,
-            # not tag purity). Food credits food + fuel. (Opening-hours / night-safe split: later.)
-            gap_kms = [p["km"] for p in pois]
-            if cat == "water":
-                for extra in ("cemetery", "food"):
-                    if extra in per_cat:
-                        gap_kms += [p["km"] for p in per_cat[extra]]
-            g = _gaps(gap_kms, total_km)
-            info.update(g)
-            if cat == "water":
-                # distance-based budget: litres for the longest gap, and gaps over carry capacity.
-                need_longest = round(water_l_per_100km * g["longest_gap_km"] / 100.0, 1)
-                info["longest_gap_litres"] = need_longest
-                info["carry_l"] = carry_l
-                info["longest_gap_over_carry"] = need_longest > carry_l
-            label = {"water": "refill (water/café/shop)", "food": "food"}[cat]
-            short = {"water": "refill", "food": "food"}[cat]
-            if g["count"] == 0:
-                summary.append("No %s found on this route." % label)
-            else:
-                summary.append("Next %s: %.0f km · longest stretch with no %s: %.0f km (after km %.0f)"
-                               % (short, g["first_km"], short, g["longest_gap_km"], g["longest_gap_after_km"]))
-                if cat == "water" and info["longest_gap_over_carry"]:
-                    summary.append("  ⚠ that %.0f km dry stretch needs ~%.1f L (> %.1f L carried) — top up early."
-                                   % (g["longest_gap_km"], info["longest_gap_litres"], carry_l))
-        else:
-            info["count"] = len(pois)
-            if pois:
-                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services",
-                        "cemetery": "Cemeteries (likely water)"}.get(cat, cat[7:].title() if cat.startswith("custom:") else cat)
-                summary.append("%s: %d (first at km %.0f)" % (nice, len(pois), pois[0]["km"]))
-        out_cats[cat] = info
-
-    return {"ok": True, "total_km": round(total_km, 1), "categories": out_cats, "summary": summary}
+    return _build_output(per_cat, list(categories) + ["custom:" + t for t in custom],
+                         total_km, water_l_per_100km, carry_l)
 
 
 # --- self test (offline) --------------------------------------------------------------------
@@ -340,11 +441,20 @@ def main(argv=None):
         points = body.get("points")
         if not points and body.get("gpx"):
             points = geo_util.parse_gpx_points(body["gpx"])
-        r = analyze(points or [], body.get("categories") or list(CATEGORIES.keys()),
-                    radius_m=int(body.get("radius_m") or DEFAULT_RADIUS_M),
-                    water_l_per_100km=float(body.get("water_l_per_100km") or 2.0),
-                    carry_l=float(body.get("carry_l") or 1.5),
-                    custom_tags=body.get("custom_tags"))
+        if body.get("poi_gpx"):
+            # Imported PitStopper GPX: no search, instant.
+            wpts = parse_pitstopper_gpx(body["poi_gpx"])
+            r = analyze_waypoints(points or [], wpts,
+                                  water_l_per_100km=float(body.get("water_l_per_100km") or 2.0),
+                                  carry_l=float(body.get("carry_l") or 1.5))
+            if r.get("ok"):
+                r["imported"] = len(wpts)
+        else:
+            r = analyze(points or [], body.get("categories") or list(CATEGORIES.keys()),
+                        radius_m=int(body.get("radius_m") or DEFAULT_RADIUS_M),
+                        water_l_per_100km=float(body.get("water_l_per_100km") or 2.0),
+                        carry_l=float(body.get("carry_l") or 1.5),
+                        custom_tags=body.get("custom_tags"))
         print(json.dumps(r))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}))
