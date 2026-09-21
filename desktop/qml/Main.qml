@@ -50,7 +50,6 @@ ApplicationWindow {
         calendar: "pages/CalendarPage.qml",
         gear: "pages/GearPage.qml",
         coach: "pages/CoachPage.qml",
-        journal: "pages/JournalPage.qml",
         weight: "pages/WeightPage.qml",
         health: "pages/HealthPage.qml",
         ember: "pages/EmberPage.qml",
