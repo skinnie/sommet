@@ -2400,9 +2400,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if result.get("ok") else 502, result)
 
     def _handle_race_pois(self, body):
-        """Body: {"gpx"|"points", "categories":[...], "radius_m"?, "water_l_per_100km"?, "carry_l"?}.
-        POIs in a corridor around the route + resupply gap analysis (race_pois.py). Talks to OSM
-        Overpass, so it needs network and can be slow (bumped run_tool timeout)."""
+        """Body: {"gpx"|"points" (the route), "poi_gpx" (a PitStopper GPX export), "water_l_per_100km"?,
+        "carry_l"?}. Reads the exported POI waypoints and returns the resupply-gap analysis
+        (race_pois.py). Offline and instant - the old live Overpass search was removed."""
         if not (body.get("gpx") or body.get("points")):
             self._send_json(400, {"error": '"gpx" or "points" is required'})
             return
@@ -2410,7 +2410,7 @@ class Handler(BaseHTTPRequestHandler):
             json.dump(body, f)
             path = f.name
         try:
-            code, out, err = run_tool("race_pois.py", [path], timeout=300)  # long routes = many Overpass chunks
+            code, out, err = run_tool("race_pois.py", [path], timeout=60)
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "poi search failed"}

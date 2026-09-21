@@ -710,7 +710,7 @@ Item {
                         }
                         Text {
                             width: parent.width; wrapMode: Text.WordWrap
-                            text: qsTr("On pitstopper.net: load your route, tick the categories you want, Search, then Export → GPX with waypoints. Pick that file here for instant water/food gaps.")
+                            text: qsTr("On pitstopper.net: load your route, tick the categories you want (add a custom tag for cemeteries), Search, then Export → GPX with waypoints (GPX, not FIT — FIT cuts the names). Pick that file here for instant water/food gaps.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                         Text { text: qsTr("Water planning — used to flag long dry stretches:")
