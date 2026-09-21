@@ -233,15 +233,15 @@ Item {
     // the result is stored in PlanStore.pois and read by Race Plan's critical-points/water gaps.
     // Icon + colour for a POI pin, using the SAME 18 icons the watch shows for its POI types
     // (Icons.poiTypeGlyphs, indexed by type id) so the map matches the watch: water=Water(16),
-    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Building(0),
-    // bike shop=Road(14), toilets/services=Building(0), anything else=Waypoint(17).
+    // food=Food(7), fuel=Car(3), lodging=Lodging(10), camping=Camp(2), cemetery=Forest(8),
+    // bike shop=Building(0), toilets/services + anything else=Waypoint(17).
     function poiStyle(cat, sub) {
         var G = Icons.poiTypeGlyphs
         if (cat === "water")    return { glyph: G[16], color: "#1f78d1" }
-        if (cat === "cemetery") return { glyph: G[0], color: "#6b6b6b" }     // Building (Sight looked like a camera)
+        if (cat === "cemetery") return { glyph: G[8], color: "#6b6b6b" }     // Forest (trees): none of the watch icons is a cemetery; Sight is a camera
         if (cat === "food")     return { glyph: (sub === "gas" ? G[3] : G[7]), color: "#d9822b" }
         if (cat === "shelter")  return { glyph: (sub === "camping" ? G[2] : G[10]), color: "#7b4fc4" }
-        if (cat === "bike")     return { glyph: G[14], color: "#1a9d6b" }
+        if (cat === "bike")     return { glyph: G[0], color: "#1a9d6b" }     // Building (a shop); Road is a route line
         if (cat === "safety")   return { glyph: G[17], color: "#c0392b" }
         // "other": only the cyclist types get a specific icon for now (parking = the watch's Car icon);
         // the rest (historic sites, post offices, ...) are plain grey waypoints.
