@@ -41,6 +41,8 @@ CATEGORIES: Dict[str, List[str]] = {
         "[shop=supermarket]", "[shop=convenience]", "[shop=bakery]",
         "[amenity=cafe]", "[amenity=restaurant]", "[amenity=fast_food]",
     ],
+    # Cemeteries almost always have a water tap - a randonneur staple for refills (André, 2026-09-21).
+    "cemetery": ["[landuse=cemetery]", "[amenity=grave_yard]"],
     "bike": ["[shop=bicycle]", "[amenity=bicycle_repair_station]"],
     "shelter": ["[tourism=hotel]", "[tourism=hostel]", "[tourism=guest_house]",
                 "[tourism=motel]", "[tourism=camp_site]"],
@@ -105,7 +107,7 @@ def _overpass_fetch(query: str) -> Dict[str, Any]:
 
 
 def _subtype(tags: Dict[str, str]) -> str:
-    for k in ("amenity", "shop", "tourism", "man_made", "railway"):
+    for k in ("amenity", "shop", "tourism", "man_made", "railway", "landuse"):
         if k in tags:
             return tags[k]
     return "poi"
@@ -118,6 +120,8 @@ def _categorize(tags: Dict[str, str]) -> Optional[str]:
         return "water"
     if s in ("supermarket", "convenience", "bakery") or a in ("cafe", "restaurant", "fast_food"):
         return "food"
+    if tags.get("landuse") == "cemetery" or a == "grave_yard":
+        return "cemetery"
     if s == "bicycle" or a == "bicycle_repair_station":
         return "bike"
     if t in ("hotel", "hostel", "guest_house", "motel", "camp_site"):
@@ -256,8 +260,8 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
         else:
             info["count"] = len(pois)
             if pois:
-                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation",
-                        "safety": "Services"}.get(cat, cat[7:].title() if cat.startswith("custom:") else cat)
+                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services",
+                        "cemetery": "Cemeteries (likely water)"}.get(cat, cat[7:].title() if cat.startswith("custom:") else cat)
                 summary.append("%s: %d (first at km %.0f)" % (nice, len(pois), pois[0]["km"]))
         out_cats[cat] = info
 

@@ -246,6 +246,7 @@ Item {
         var cats = []
         if (catWater.checked) cats.push("water")
         if (catFood.checked) cats.push("food")
+        if (catCemetery.checked) cats.push("cemetery")
         if (catBike.checked) cats.push("bike")
         if (catShelter.checked) cats.push("shelter")
         if (catSafety.checked) cats.push("safety")
@@ -256,8 +257,10 @@ Item {
         PlanStore.poiWaterRate = waterRate.text
         PlanStore.poiCarryL = carryL.text
         PlanStore.poiCustom = customCats.text
+        PlanStore.poiRadius = poiRadius.text
         api("POST", "/api/race/pois",
             { gpx: plannedGpx, categories: cats, custom_tags: customTags,
+              radius_m: parseInt(poiRadius.text) || 250,
               water_l_per_100km: parseFloat(waterRate.text) || 2.0,
               carry_l: parseFloat(carryL.text) || 1.5 },
             function(status, res) {
@@ -697,9 +700,25 @@ Item {
                             width: parent.width; spacing: Theme.spacingMedium
                             RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }
                             RoundedCheckBox { id: catFood; text: qsTr("Food"); checked: true }
+                            RoundedCheckBox { id: catCemetery; text: qsTr("Cemeteries (water)"); checked: false }
                             RoundedCheckBox { id: catBike; text: qsTr("Bike shops"); checked: false }
                             RoundedCheckBox { id: catShelter; text: qsTr("Places to sleep"); checked: false }
                             RoundedCheckBox { id: catSafety; text: qsTr("Emergency"); checked: false }
+                        }
+                        RowLayout {
+                            width: parent.width; spacing: Theme.spacingSmall
+                            RoundedButton { text: qsTr("Cyclist preset")   // one-tap brevet set
+                                onClicked: { catWater.checked = true; catFood.checked = true;
+                                             catCemetery.checked = true; catBike.checked = true;
+                                             catSafety.checked = true; catShelter.checked = false } }
+                            Item { width: Theme.spacingMedium; height: 1 }
+                            Text { text: qsTr("Search within"); color: Theme.mutedText
+                                   font.pixelSize: Theme.fontSizeCaption; anchors.verticalCenter: parent.verticalCenter }
+                            RoundedTextField { id: poiRadius; width: 70
+                                               placeholderText: qsTr("m"); text: PlanStore.poiRadius || "250"
+                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                            Text { text: qsTr("m of the route"); color: Theme.mutedText
+                                   font.pixelSize: Theme.fontSizeCaption; anchors.verticalCenter: parent.verticalCenter }
                         }
                         // Custom categories (André, 2026-09-21: "add categories, like pitstopper").
                         RoundedTextField { id: customCats; width: parent.width
