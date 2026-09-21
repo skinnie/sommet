@@ -811,6 +811,8 @@ Item {
             height: 38
             x: root.lonToWorldX(modelData.lon) - root.originX - width / 2
             y: root.latToWorldY(modelData.lat) - root.originY - height
+            // An optional per-pin `minZoom` keeps dense POI sets readable: hidden until zoomed in.
+            visible: root.currentZoom >= (modelData.minZoom || 0)
 
             // A pin with a `label` shows its name + type (+ km, opening hours) in a small callout
             // while the pointer is over it, and keeps it open after a click (André, 2026-09-21: "when

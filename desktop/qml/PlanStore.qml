@@ -49,6 +49,12 @@ QtObject {
 
     property bool poiBusy: false
 
+    // Map layers for the loaded POIs (André, 2026-09-21: weather + POIs crowd each other, so let the
+    // rider choose). "Places" = the useful ones (water, food, cemeteries, sleep, bike shops, services);
+    // "More" = everything else in the export (bike parking, bike-share, historic sites...), off by default.
+    property bool showPlaces: true
+    property bool showOtherPlaces: false
+
     // Read POIs from a PitStopper GPX (waypoints) against the route and publish the result to `pois`
     // (map pins, Race Plan alerts). `done(ok, res)` is optional. A result with zero recognised POIs
     // is NOT published - otherwise an ordinary GPX with a few unrelated waypoints would claim
