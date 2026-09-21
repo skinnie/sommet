@@ -270,6 +270,24 @@ Item {
         }
         return out
     }
+    // The rider changed the drink / carry numbers: remember them, and refresh the litres + "over what
+    // you carry" flag inside the saved POI result, which Race Plan's critical-points reads. (The
+    // sentence under the fields is a live binding and needs none of this.) Only on editingFinished,
+    // not per keystroke: reassigning the result rebuilds the map pins.
+    function applyWaterBudget() {
+        PlanStore.poiWaterRate = waterRate.text
+        PlanStore.poiCarryL = carryL.text
+        var p = PlanStore.pois
+        if (!p || !p.categories || !p.categories.water) return
+        var rate = parseFloat(waterRate.text) || 2.0, carry = parseFloat(carryL.text) || 1.5
+        var np = JSON.parse(JSON.stringify(p))
+        var w = np.categories.water
+        w.longest_gap_litres = Math.round(rate * w.longest_gap_km / 10) / 10
+        w.carry_l = carry
+        w.longest_gap_over_carry = w.longest_gap_litres > carry
+        PlanStore.pois = np
+    }
+
     // Read a PitStopper POI export (GPX waypoints) and compute the resupply gaps from it - no
     // search, so it returns instantly. The result feeds the map pins, alerts and Race Plan.
     function importPoisFile(fileUrl) {
@@ -743,12 +761,31 @@ Item {
                                 Text { text: qsTr("You drink (L / 100 km)"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 RoundedTextField { id: waterRate; width: parent.width
                                                    placeholderText: qsTr("e.g. 2.0"); text: PlanStore.poiWaterRate
-                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly } }
+                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                   onEditingFinished: root.applyWaterBudget() } }
                             Column { width: parent.cellW; spacing: 2
                                 Text { text: qsTr("You can carry (L)"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 RoundedTextField { id: carryL; width: parent.width
                                                    placeholderText: qsTr("e.g. 1.5"); text: PlanStore.poiCarryL
-                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly } }
+                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                                   onEditingFinished: root.applyWaterBudget() } }
+                        }
+                        // Live: recalculates as you type (the numbers used to be applied only at import
+                        // time, so changing them did nothing until you re-imported).
+                        Text {
+                            width: parent.width; wrapMode: Text.WordWrap
+                            readonly property var w: (PlanStore.pois && PlanStore.pois.categories)
+                                                     ? PlanStore.pois.categories.water : null
+                            readonly property real need: w ? Math.round((parseFloat(waterRate.text) || 2.0)
+                                                                        * w.longest_gap_km / 10) / 10 : 0
+                            readonly property real carry: parseFloat(carryL.text) || 1.5
+                            visible: w !== null
+                            text: !w ? "" : (need > carry
+                                ? qsTr("⚠ Your longest stretch with no refill (%1 km, after km %2) needs about %3 L — more than the %4 L you carry. Top up before it.")
+                                : qsTr("✓ Your longest stretch with no refill (%1 km, after km %2) needs about %3 L — you carry %4 L, enough."))
+                                  .arg(w.longest_gap_km).arg(Math.round(w.longest_gap_after_km)).arg(need).arg(carry)
+                            color: need > carry ? "#d6453f" : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                         Column {
                             width: parent.width; spacing: 2
