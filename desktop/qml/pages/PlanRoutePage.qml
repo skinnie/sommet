@@ -242,13 +242,14 @@ Item {
         return out
     }
     // Read a PitStopper POI export (GPX waypoints) and compute the resupply gaps from it - no
-    // search, so it returns instantly. Uses the same result shape as findPois, so the map pins,
-    // alerts and Race Plan pick it up unchanged.
+    // search, so it returns instantly. The result feeds the map pins, alerts and Race Plan.
     function importPoisFile(fileUrl) {
         if (!plannedGpx) { statusMsg = qsTr("Load your route first"); return }
         var txt = LocalFileService.readText(fileUrl)
         if (!txt || txt.length === 0) { statusMsg = qsTr("Couldn't read that file"); return }
         poiBusy = true
+        PlanStore.poiWaterRate = waterRate.text      // remember the water-planning numbers
+        PlanStore.poiCarryL = carryL.text
         api("POST", "/api/race/pois",
             { gpx: plannedGpx, poi_gpx: txt,
               water_l_per_100km: parseFloat(waterRate.text) || 2.0,
@@ -262,35 +263,6 @@ Item {
                     PlanStore.pois = null
                     statusMsg = qsTr("Couldn't read POIs from that file — is it a PitStopper GPX export?")
                 }
-            })
-    }
-
-    function findPois() {
-        if (!plannedGpx) return
-        var cats = []
-        if (catWater.checked) cats.push("water")
-        if (catFood.checked) cats.push("food")
-        if (catCemetery.checked) cats.push("cemetery")
-        if (catBike.checked) cats.push("bike")
-        if (catShelter.checked) cats.push("shelter")
-        if (catSafety.checked) cats.push("safety")
-        var customTags = (customCats.text || "").split(",").map(function(s){return s.trim()}).filter(function(s){return s.length})
-        if (cats.length === 0 && customTags.length === 0) { statusMsg = qsTr("Pick at least one thing to find"); return }
-        poiBusy = true
-        PlanStore.poiCategories = cats
-        PlanStore.poiWaterRate = waterRate.text
-        PlanStore.poiCarryL = carryL.text
-        PlanStore.poiCustom = customCats.text
-        PlanStore.poiRadius = poiRadius.text
-        api("POST", "/api/race/pois",
-            { gpx: plannedGpx, categories: cats, custom_tags: customTags,
-              radius_m: parseInt(poiRadius.text) || 250,
-              water_l_per_100km: parseFloat(waterRate.text) || 2.0,
-              carry_l: parseFloat(carryL.text) || 1.5 },
-            function(status, res) {
-                poiBusy = false
-                PlanStore.pois = (status === 200 && res && res.ok) ? res : null
-                if (!PlanStore.pois) statusMsg = qsTr("Couldn't fetch services (try again)")
             })
     }
 
@@ -741,36 +713,6 @@ Item {
                             text: qsTr("On pitstopper.net: load your route, tick the categories you want, Search, then Export → GPX with waypoints. Pick that file here for instant water/food gaps.")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
-                        Text { text: qsTr("…or search online instead (slow — can take minutes on a long route):")
-                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                        Flow {
-                            width: parent.width; spacing: Theme.spacingMedium
-                            RoundedCheckBox { id: catWater; text: qsTr("Water"); checked: true }
-                            RoundedCheckBox { id: catFood; text: qsTr("Food"); checked: true }
-                            RoundedCheckBox { id: catCemetery; text: qsTr("Cemeteries (water)"); checked: false }
-                            RoundedCheckBox { id: catBike; text: qsTr("Bike shops"); checked: false }
-                            RoundedCheckBox { id: catShelter; text: qsTr("Places to sleep"); checked: false }
-                            RoundedCheckBox { id: catSafety; text: qsTr("Emergency"); checked: false }
-                        }
-                        Row {
-                            width: parent.width; spacing: Theme.spacingSmall
-                            RoundedButton { text: qsTr("Cyclist preset")   // one-tap brevet set
-                                onClicked: { catWater.checked = true; catFood.checked = true;
-                                             catCemetery.checked = true; catBike.checked = true;
-                                             catSafety.checked = true; catShelter.checked = false } }
-                            Item { width: Theme.spacingMedium; height: 1 }
-                            Text { text: qsTr("Search within"); color: Theme.mutedText
-                                   font.pixelSize: Theme.fontSizeCaption; anchors.verticalCenter: parent.verticalCenter }
-                            RoundedTextField { id: poiRadius; width: 70
-                                               placeholderText: qsTr("m"); text: PlanStore.poiRadius || "250"
-                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                            Text { text: qsTr("m of the route"); color: Theme.mutedText
-                                   font.pixelSize: Theme.fontSizeCaption; anchors.verticalCenter: parent.verticalCenter }
-                        }
-                        // Custom categories (André, 2026-09-21: "add categories, like pitstopper").
-                        RoundedTextField { id: customCats; width: parent.width
-                                           placeholderText: qsTr("Also find (comma-separated): pharmacy, atm, bakery, campsite…")
-                                           text: PlanStore.poiCustom || "" }
                         Text { text: qsTr("Water planning — used to flag long dry stretches:")
                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                         Row {
@@ -786,12 +728,6 @@ Item {
                                 RoundedTextField { id: carryL; width: parent.width
                                                    placeholderText: qsTr("e.g. 1.5"); text: PlanStore.poiCarryL
                                                    inputMethodHints: Qt.ImhFormattedNumbersOnly } }
-                        }
-                        RoundedButton {
-                            width: parent.width
-                            text: root.poiBusy ? qsTr("Searching…") : qsTr("Find water, food & services")
-                            enabled: !root.poiBusy && root.plannedGpx.length > 0
-                            onClicked: root.findPois()
                         }
                         Column {
                             width: parent.width; spacing: 2
