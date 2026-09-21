@@ -116,7 +116,7 @@ def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], tot
                 txt = " · ".join("%s %d" % (k, n) for k, n in top[:4])
                 if len(top) > 4:
                     txt += " · +%d more types" % (len(top) - 4)
-                summary.append("Also on the route (hidden on the map by default): " + txt)
+                summary.append("Also on the route: " + txt)
         else:
             info["count"] = len(pois)
             if pois:

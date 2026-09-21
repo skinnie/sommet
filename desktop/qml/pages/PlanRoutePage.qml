@@ -252,24 +252,13 @@ Item {
         return { glyph: G[17], color: "#8a8a8a" }
     }
 
-    // Label for the "more places" checkbox: name what they are ("Bicycle Parking, Bicycle Rental (108)").
-    readonly property string otherPlacesLabel: {
-        var o = (PlanStore.pois && PlanStore.pois.categories) ? PlanStore.pois.categories.other : null
-        if (!o || !o.kinds) return qsTr("More places")
-        var arr = []
-        for (var k in o.kinds) arr.push([k, o.kinds[k]])
-        arr.sort(function(a, b) { return b[1] - a[1] })
-        var names = arr.slice(0, 2).map(function(x) { return x[0] }).join(", ")
-        return names + (arr.length > 2 ? "…" : "") + " (" + o.count + ")"
-    }
-
     // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
     readonly property var poiMarkers: {
         var out = []
         var p = PlanStore.pois
         if (p && p.categories && PlanStore.showPlaces) {
-            // All categories show at the same zoom level (André, 2026-09-21); the "Show on map" toggles
-            // control crowding instead.
+            // All categories show at the same zoom level (André, 2026-09-21); a single "Show POIs"
+            // toggle takes them all off the map.
             // Most useful first, so the cap drops the least useful pins (a PitStopper export can hold
             // 500+; 253 of them are restaurants and would otherwise crowd out water/cemeteries).
             var order = ["water", "cemetery", "food", "safety", "bike", "shelter", "other"]
@@ -278,7 +267,6 @@ Item {
             for (var c = 0; c < order.length && !full; c++) {
                 var cat = order[c]
                 if (!p.categories[cat]) continue
-                if (cat === "other" && !PlanStore.showOtherPlaces) continue   // bike parking etc.: on request
                 var list = p.categories[cat].pois || []
                 for (var i = 0; i < list.length; i++) {
                     var st = poiStyle(cat, list[i].subtype)
@@ -731,6 +719,11 @@ Item {
                             enabled: !root.busy && !root.weatherBusy
                             onClicked: root.toggleReverse()
                         }
+                        // POIs and weather share the map and can crowd each other: one switch hides every POI.
+                        RoundedCheckBox { text: qsTr("Show POIs")
+                                          visible: !!PlanStore.pois
+                                          checked: PlanStore.showPlaces
+                                          onToggled: PlanStore.showPlaces = checked }
                     }
 
                     // Water, food & services (POIs) — spatial route data belongs on the Route page.
@@ -1105,26 +1098,6 @@ Item {
                                 : qsTr("Map: climb + temperature — tap for only climb")
                             onClicked: { root.overlayMode = (root.overlayMode + 1) % 3; root.persist() }
                         }
-                        // Layers: weather and POIs share the map and can crowd each other, so each can be
-                        // switched off. "More" = the rest of the PitStopper export (bike parking, ...).
-                        Flow {
-                            width: parent.width; spacing: Theme.spacingMedium
-                            visible: !!PlanStore.pois
-                            Text { text: qsTr("Show on map:"); color: Theme.mutedText
-                                   font.pixelSize: Theme.fontSizeCaption; height: 28; verticalAlignment: Text.AlignVCenter }
-                            RoundedCheckBox { text: qsTr("Places (water, food…)")
-                                              checked: PlanStore.showPlaces
-                                              onToggled: PlanStore.showPlaces = checked }
-                            Text { text: qsTr("(zoom in to see them on the map)"); color: Theme.mutedText
-                                   font.pixelSize: Theme.fontSizeCaption; font.italic: true
-                                   height: 28; verticalAlignment: Text.AlignVCenter; visible: PlanStore.showPlaces }
-                            RoundedCheckBox { text: root.otherPlacesLabel
-                                              visible: !!(PlanStore.pois && PlanStore.pois.categories && PlanStore.pois.categories.other)
-                                              enabled: PlanStore.showPlaces
-                                              checked: PlanStore.showOtherPlaces
-                                              onToggled: PlanStore.showOtherPlaces = checked }
-                        }
-
                         // Weather summary chips, with units (mirrors the mobile Route-weather screen)
                         Flow {
                             width: parent.width
