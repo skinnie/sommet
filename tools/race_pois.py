@@ -130,6 +130,14 @@ _PS_SYM = {"Drinking Water": "water", "Restaurant": "food", "Gas Station": "food
            "Restroom": "safety", "Car Repair": "bike"}
 
 
+def _clean_name(name: str) -> str:
+    """Undo PitStopper's name decorations: the "^" it prefixes to waypoints it moved onto the track,
+    and the side+distance suffix ("... L20m" / "... R139m") added by "Add direction to name"."""
+    n = name.strip().lstrip("^").strip()
+    n = re.sub(r"\s+[LR]\d+\s*m?$", "", n).strip()
+    return n
+
+
 def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
     """Read <wpt> elements -> [{lat, lon, name, cat, kms:[route km, ...], sub, hours}]. Unknown
     categories are skipped. `kms` is filled from PitStopper's own "at X.XXkm" notes when present
@@ -150,7 +158,7 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
                 if c.tag.split("}")[-1] == tag:
                     return (c.text or "").strip()
             return ""
-        cmt, sym, name, desc = f("cmt"), f("sym"), f("name"), f("desc")
+        cmt, sym, name, desc = f("cmt"), f("sym"), _clean_name(f("name")), f("desc")
         key = cmt.split(".")[0].strip().lower()
         if key == "shopping":
             cat = "food" if desc.lower().startswith("supermarket") else None
@@ -160,7 +168,10 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
             # ("Cimetière  R32m"); the real name is in the description ("Full name: ...").
             cat = "cemetery"
             fm = re.search(r"Full name:\s*(.+?)(?:\.\s*POI\s*$|$)", desc)
-            name = fm.group(1).strip() if fm else "Cemetery"
+            if fm:
+                name = fm.group(1).strip()
+            elif not name or re.match(r"^POI\d*$", name):   # unnamed custom-tag POI ("POI1 R139m")
+                name = "Cemetery"
         else:
             cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym)
         if not cat:
@@ -283,6 +294,17 @@ def _selftest():
     assert hours and hours[0]["hours"] == "24/7", hours                # opening hours kept for later
     assert sorted(p["km"] for p in f["pois"] if p["name"] == "Loop cafe") == [80.0, 99.0]  # both loop passes
     assert r["categories"]["bike"]["count"] == 1
+
+    # PitStopper name decorations are stripped: "^" (waypoint moved onto the track) and the
+    # side+distance suffix; a custom-tag POI exported with FULL names has no "Full name:" note.
+    assert _clean_name("^Café de la Place L105m") == "Café de la Place"
+    assert _clean_name("Grand vélo vert R166m") == "Grand vélo vert"
+    assert _clean_name("Route de Lille") == "Route de Lille"           # not a suffix: kept
+    gx = ('<gpx xmlns="http://www.topografix.com/GPX/1/1">'
+          '<wpt lat="45.1" lon="3.0"><name>^Cimetière de Foo L12m</name><cmt>generic</cmt>'
+          '<desc>POI</desc></wpt></gpx>')
+    g = parse_pitstopper_gpx(gx)
+    assert g and g[0]["name"] == "Cimetière de Foo" and g[0]["cat"] == "cemetery", g
     print("\n✓ All race_pois selftest checks passed")
 
 
