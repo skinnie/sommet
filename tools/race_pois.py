@@ -99,17 +99,17 @@ def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], tot
             if g["count"] == 0:
                 summary.append("No %s found on this route." % label)
             else:
-                summary.append("Next %s: %.0f km · longest stretch with no %s: %.0f km (after km %.0f)"
-                               % (short, g["first_km"], short, g["longest_gap_km"], g["longest_gap_after_km"]))
-                if cat == "water" and info["longest_gap_over_carry"]:
-                    summary.append("  ⚠ that %.0f km dry stretch needs ~%.1f L (> %.1f L carried) — top up early."
-                                   % (g["longest_gap_km"], info["longest_gap_litres"], carry_l))
+                # (No "next refill at km N" - it is always ~0 when the route starts in a town, so it
+                # says nothing.) The litres check lives in the UI, where it recalculates live as the
+                # rider edits the drink / carry numbers; the numbers are still returned for alerts.
+                summary.append("Longest stretch with no %s: %.0f km (after km %.0f)"
+                               % (short, g["longest_gap_km"], g["longest_gap_after_km"]))
         else:
             info["count"] = len(pois)
             if pois:
                 nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services",
                         "cemetery": "Cemeteries (likely water)"}.get(cat, cat)
-                summary.append("%s: %d (first at km %.0f)" % (nice, len(pois), pois[0]["km"]))
+                summary.append("%s: %d" % (nice, len(pois)))
         out_cats[cat] = info
     return {"ok": True, "total_km": round(total_km, 1), "categories": out_cats, "summary": summary}
 
