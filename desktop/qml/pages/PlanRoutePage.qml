@@ -252,6 +252,27 @@ Item {
         return { glyph: G[17], color: "#8a8a8a" }
     }
 
+    // Legend entries: one per kind of pin this route actually has.
+    readonly property var poiLegend: {
+        var p = PlanStore.pois
+        if (!p || !p.categories) return []
+        var c = p.categories, out = []
+        function add(cat, sub, label) { var st = poiStyle(cat, sub); out.push({ glyph: st.glyph, color: st.color, label: label }) }
+        function has(cat) { return c[cat] && (c[cat].pois || []).length > 0 }
+        if (has("water"))    add("water", "", qsTr("Water"))
+        if (has("cemetery")) add("cemetery", "", qsTr("Cemetery (custom tag)"))
+        if (has("food")) {
+            add("food", "", qsTr("Food & drink"))
+            var fuel = (c.food.pois || []).some(function(x) { return x.subtype === "gas" })
+            if (fuel) add("food", "gas", qsTr("Fuel"))
+        }
+        if (has("shelter"))  add("shelter", "", qsTr("Sleep"))
+        if (has("bike"))     add("bike", "", qsTr("Bike shop"))
+        if (has("safety"))   add("safety", "", qsTr("Services"))
+        if (has("other"))    add("other", "", qsTr("Other"))
+        return out
+    }
+
     // Map pins for the found POIs (all categories), capped so a dense route stays responsive.
     readonly property var poiMarkers: {
         var out = []
@@ -273,7 +294,9 @@ Item {
                     out.push({ lat: list[i].lat, lon: list[i].lon,
                                label: (list[i].name || cat), glyph: st.glyph, color: st.color,
                                type: (list[i].kind || cat), hours: (list[i].hours || ""),
-                               km: list[i].km, minZoom: 0 })
+                               km: list[i].km, minZoom: 0,
+                               // places that keep opening hours but have none published: offer Google Maps
+                               checkHours: (cat !== "water" && cat !== "other" && !list[i].hours) })
                     if (out.length >= 600) { full = true; break }
                 }
             }
@@ -724,6 +747,23 @@ Item {
                                           visible: !!PlanStore.pois
                                           checked: PlanStore.showPlaces
                                           onToggled: PlanStore.showPlaces = checked }
+                        // Legend: what each pin colour / icon means (only the kinds this route has).
+                        Flow {
+                            width: parent.width; spacing: Theme.spacingMedium
+                            visible: !!PlanStore.pois && PlanStore.showPlaces
+                            Repeater {
+                                model: root.poiLegend
+                                delegate: Row {
+                                    spacing: 4
+                                    Text { text: modelData.glyph; color: modelData.color
+                                           font.family: Icons.fontFamily; font.pixelSize: 18
+                                           verticalAlignment: Text.AlignVCenter }
+                                    Text { text: modelData.label; color: Theme.mutedText
+                                           font.pixelSize: Theme.fontSizeCaption
+                                           anchors.verticalCenter: parent.verticalCenter }
+                                }
+                            }
+                        }
                     }
 
                     // Water, food & services (POIs) — spatial route data belongs on the Route page.
@@ -762,6 +802,25 @@ Item {
                                                    placeholderText: qsTr("e.g. 1.5"); text: PlanStore.poiCarryL
                                                    inputMethodHints: Qt.ImhFormattedNumbersOnly
                                                    onEditingFinished: root.applyWaterBudget() } }
+                        }
+                        // PitStopper does not export the NAME of a custom tag, so say what yours is.
+                        Column {
+                            width: parent.width; spacing: 2
+                            visible: !!(PlanStore.pois && PlanStore.pois.groups && PlanStore.pois.groups["Custom tag"] > 0)
+                            Text { text: qsTr("My PitStopper custom tag is a…"); color: Theme.mutedText
+                                   font.pixelSize: Theme.fontSizeCaption }
+                            RoundedComboBox {
+                                width: parent.width
+                                readonly property var tags: ["cemetery", "water", "food", "other"]
+                                model: [qsTr("Cemetery (likely water)"), qsTr("Water point"),
+                                        qsTr("Food or drink"), qsTr("Something else (not a refill)")]
+                                currentIndex: Math.max(0, tags.indexOf(PlanStore.customTag))
+                                onActivated: {
+                                    PlanStore.customTag = tags[currentIndex]
+                                    if (root.plannedGpx.indexOf("<wpt") >= 0)
+                                        PlanStore.importPois(root.plannedGpx, root.plannedGpx, null, root.reversed)
+                                }
+                            }
                         }
                         // Live: recalculates as you type (the numbers used to be applied only at import
                         // time, so changing them did nothing until you re-imported).

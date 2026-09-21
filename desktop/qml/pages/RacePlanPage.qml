@@ -24,6 +24,19 @@ Item {
     property bool busy: false
     property string statusMsg: ""
     property var timeline: null
+    // Refill/food gaps counting only places open at the planned ETAs (race_pois.open_refill_analysis).
+    property var openGaps: null
+    onTimelineChanged: fetchOpenGaps()
+    Connections { target: PlanStore; function onPoisChanged() { root.fetchOpenGaps() } }
+    function fetchOpenGaps() {
+        if (!timeline || !PlanStore.pois || !timeline.controls) { openGaps = null; return }
+        var eta = [{ km: 0, dt: timeline.start_dt }]
+        for (var i = 0; i < timeline.controls.length; i++)
+            eta.push({ km: timeline.controls[i].distance_km, dt: timeline.controls[i].arrival_dt })
+        api("POST", "/api/race/pois", { pois: PlanStore.pois, eta: eta }, function(status, res) {
+            openGaps = (status === 200 && res && res.ok) ? res : null
+        })
+    }
     property var weather: null       // race_weather result: per-control temp/wind/rain + daylight
     property var sleepPlan: null     // race_sleep result: circadian sleep windows
     property var alerts: null        // race_alerts result: ranked critical points
@@ -1195,6 +1208,20 @@ Item {
                                     font.pixelSize: Theme.fontSizeCaption
                                 }
                             }
+                        }
+                        Repeater {
+                            model: (openGaps && PlanStore.pois) ? openGaps.lines : []
+                            delegate: Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                text: modelData
+                                color: Theme.text; font.pixelSize: Theme.fontSizeCaption
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            visible: !!openGaps && !!PlanStore.pois
+                            text: openGaps ? openGaps.note : ""
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; font.italic: true
                         }
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap

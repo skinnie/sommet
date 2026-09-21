@@ -51,6 +51,16 @@ _DEFAULT_CONTROL_BASE_S = 600.0
 _FATIGUE_ONSET_H = 16.0          # fresh until ~16 h continuously awake
 _FATIGUE_RATE_PER_H = 0.010      # then ~1% slower per extra hour awake
 _FATIGUE_FLOOR = 0.80            # never worse than 20% slower (riders nap rather than crawl)
+# Multi-day WEAR (2021 Bikingman Corsica, 5 days x 10.5 h nights, real moving time vs the model with each
+# day's real climb: days 1-2 on the model, days 3-5 7-19 % slower, total +5 %). Full nights reset the
+# awake-clock but not the accumulated wear, so each completed night (a sleep block >= 2 h) costs ~3 %
+# speed from then on. One ride, so deliberately mild; the overall floor above still applies.
+# Planning margin: predicted moving time is padded 4 % so the plan errs slow (André, 2026-09-21: "better
+# a good surprise than a bad one"). With the smoothed ascent the bare model ran ~2 % FAST on the real
+# BRM600 (24.9 h vs ~25.6 h); +4 % puts it ~1.5 % slow there, and ~10 % slow on Corsica.
+_PLANNING_MARGIN = 1.04
+_WEAR_PER_NIGHT = 0.03
+_WEAR_MIN_SLEEP_S = 2 * 3600
 _SLEEP_RESET_K = 8.0             # 1 s of sleep pays down ~8 s of awake-time (3 h block -> full reset;
                                  # a 20 min nap -> ~2.7 h off the clock)
 
@@ -129,6 +139,7 @@ def segment_route(points: List[Dict[str, Any]],
                 return i
         return n_seg - 1
 
+    steps = race_event.ascent_steps(points, cumul_m)      # smoothed + hysteresis (raw GPX elevation is noisy)
     for i in range(1, len(points)):
         step_m = cumul_m[i] - cumul_m[i - 1]
         if step_m <= 0:
@@ -136,13 +147,9 @@ def segment_route(points: List[Dict[str, Any]],
         mid_km = (cumul_m[i] + cumul_m[i - 1]) / 2000.0
         s = seg_of(mid_km)
         legs[s]["distance_km"] += step_m / 1000.0
-        e0, e1 = points[i - 1].get("ele"), points[i].get("ele")
-        if e0 not in (None, "") and e1 not in (None, ""):
-            de = float(e1) - float(e0)
-            if de > 0:
-                legs[s]["ascent_m"] += de
-            else:
-                legs[s]["descent_m"] += -de
+        g, l_ = steps[i]
+        legs[s]["ascent_m"] += g
+        legs[s]["descent_m"] += l_
 
     for leg in legs:
         leg["distance_km"] = round(leg["distance_km"], 3)
@@ -304,7 +311,9 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         leg_event_stop[_assign_to_leg(float(e.get("km", 0.0)))] += dur
 
     fatigue_on = bool(fatigue and fatigue.get("enabled"))
+    margin = _PLANNING_MARGIN if route_estimator is None else 1.0     # only the real engine is padded
     awake_s = float((fatigue or {}).get("awake_at_start_s", 0.0))   # already-awake at the start line
+    nights_slept = 0                  # completed real nights so far (multi-day wear)
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
@@ -320,10 +329,12 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         lt = leg_estimates[i] if i < len(leg_estimates) else {"moving_time_s": 0.0, "avg_speed_kmh": 0.0,
                                                               "confidence": "low", "model_source": "placeholder"}
         ctrl = end_controls[i] if i < len(end_controls) else None
-        base_move_s = float(lt.get("moving_time_s", 0.0))
+        base_move_s = float(lt.get("moving_time_s", 0.0)) * margin
         # Fatigue: how tired at the MIDDLE of this leg (awake-time so far + half the leg), turned into
         # a speed multiplier; slower when awake > onset. A sleep block later in this leg resets it.
         fac = _fatigue_factor(awake_s + 0.5 * base_move_s, fatigue_on)
+        if fatigue_on:
+            fac = max(_FATIGUE_FLOOR, fac * (1.0 - _WEAR_PER_NIGHT * nights_slept))
         move_s = base_move_s / fac if fac > 0 else base_move_s
         running_moving_s += move_s
         arrival = clock + timedelta(seconds=move_s)
@@ -342,6 +353,8 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         awake_s += move_s + stop_s
         if slp > 0:
             awake_s = max(0.0, awake_s - slp * _SLEEP_RESET_K)
+            if slp >= _WEAR_MIN_SLEEP_S:
+                nights_slept += 1
 
         cutoff_dt = ctrl.cutoff_dt if ctrl else None
         margin_s = None
@@ -408,7 +421,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         "total_ascent_m": total_ascent_m,
         "start_dt": _fmt(event.start_dt),
         "finish_eta_dt": _fmt(finish_eta),
-        "moving_time_s": round(total_moving_s, 1),
+        "moving_time_s": round(running_moving_s, 1),
         "stop_time_s": round(total_stop_s, 1),
         "sleep_time_s": round(sleep_time_s, 1),
         "elapsed_time_s": round(elapsed_s, 1),
