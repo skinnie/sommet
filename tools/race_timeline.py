@@ -51,16 +51,20 @@ _DEFAULT_CONTROL_BASE_S = 600.0
 _FATIGUE_ONSET_H = 16.0          # fresh until ~16 h continuously awake
 _FATIGUE_RATE_PER_H = 0.010      # then ~1% slower per extra hour awake
 _FATIGUE_FLOOR = 0.80            # never worse than 20% slower (riders nap rather than crawl)
-# Multi-day WEAR (2021 Bikingman Corsica, 5 days x 10.5 h nights, real moving time vs the model with each
-# day's real climb: days 1-2 on the model, days 3-5 7-19 % slower, total +5 %). Full nights reset the
-# awake-clock but not the accumulated wear, so each completed night (a sleep block >= 2 h) costs ~3 %
-# speed from then on. One ride, so deliberately mild; the overall floor above still applies.
+# Multi-day WEAR: a night does not fully undo the days before it, but how much it undoes depends on how
+# much you slept. Each real night (a sleep block >= 2 h) costs up to 3 % speed from then on, scaled by the
+# shortfall against 8 h: 10.5 h -> no wear, 4 h -> 1.5 %, nothing -> 3 %. (First cut, 2021 Bikingman Corsica,
+# charged a flat 3 % per night; André pointed out that ride had full 10.5 h nights and that he could have
+# ridden it faster, so the days-3-5 slowdown was not wear - the curfew capped him, and one ride cannot
+# separate wear from terrain/weather. Sleep-scaled wear is the conservative middle for short-sleep PBP-style
+# rides and is not fitted to that ride.) The overall floor above still applies.
+_WEAR_PER_NIGHT = 0.03
+_WEAR_FULL_NIGHT_S = 8 * 3600
+_WEAR_MIN_SLEEP_S = 2 * 3600
 # Planning margin: predicted moving time is padded 4 % so the plan errs slow (André, 2026-09-21: "better
 # a good surprise than a bad one"). With the smoothed ascent the bare model ran ~2 % FAST on the real
-# BRM600 (24.9 h vs ~25.6 h); +4 % puts it ~1.5 % slow there, and ~10 % slow on Corsica.
+# BRM600 (24.9 h vs ~25.6 h); +4 % puts it ~1.5 % slow there.
 _PLANNING_MARGIN = 1.04
-_WEAR_PER_NIGHT = 0.03
-_WEAR_MIN_SLEEP_S = 2 * 3600
 _SLEEP_RESET_K = 8.0             # 1 s of sleep pays down ~8 s of awake-time (3 h block -> full reset;
                                  # a 20 min nap -> ~2.7 h off the clock)
 
@@ -313,7 +317,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
     fatigue_on = bool(fatigue and fatigue.get("enabled"))
     margin = _PLANNING_MARGIN if route_estimator is None else 1.0     # only the real engine is padded
     awake_s = float((fatigue or {}).get("awake_at_start_s", 0.0))   # already-awake at the start line
-    nights_slept = 0                  # completed real nights so far (multi-day wear)
+    wear = 0.0                        # accumulated multi-day wear (fraction of speed lost)
 
     rows: List[Dict[str, Any]] = []
     clock = event.start_dt
@@ -334,7 +338,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         # a speed multiplier; slower when awake > onset. A sleep block later in this leg resets it.
         fac = _fatigue_factor(awake_s + 0.5 * base_move_s, fatigue_on)
         if fatigue_on:
-            fac = max(_FATIGUE_FLOOR, fac * (1.0 - _WEAR_PER_NIGHT * nights_slept))
+            fac = max(_FATIGUE_FLOOR, fac * (1.0 - wear))
         move_s = base_move_s / fac if fac > 0 else base_move_s
         running_moving_s += move_s
         arrival = clock + timedelta(seconds=move_s)
@@ -354,7 +358,7 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         if slp > 0:
             awake_s = max(0.0, awake_s - slp * _SLEEP_RESET_K)
             if slp >= _WEAR_MIN_SLEEP_S:
-                nights_slept += 1
+                wear += _WEAR_PER_NIGHT * max(0.0, 1.0 - slp / _WEAR_FULL_NIGHT_S)
 
         cutoff_dt = ctrl.cutoff_dt if ctrl else None
         margin_s = None
