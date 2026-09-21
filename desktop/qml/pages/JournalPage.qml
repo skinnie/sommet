@@ -157,8 +157,9 @@ Item {
                                     Rectangle {
                                         visible: (modelData.kindLabel || "").length > 0
                                         radius: 4
-                                        color: root.kindColor(modelData.kind, modelData.status)
-                                        opacity: 0.18
+                                        color: Qt.rgba(root.kindColor(modelData.kind, modelData.status).r,
+                                                       root.kindColor(modelData.kind, modelData.status).g,
+                                                       root.kindColor(modelData.kind, modelData.status).b, 0.18)
                                         implicitWidth: kindTxt.implicitWidth + 12
                                         implicitHeight: kindTxt.implicitHeight + 6
                                         Text {
@@ -197,7 +198,151 @@ Item {
                 }
             }
 
-            // ---- 3) Habit experiments ----
+            // ---- 3) The knowledge base (1 + 2 -> 3, grows over time) ----
+            Card {
+                id: knowledgeCard
+                Layout.fillWidth: true
+                padding: Theme.spacingMedium
+                function originColor(o) {
+                    return o === "pubmed" ? Theme.success : o === "model" ? Theme.primary : Theme.mutedText
+                }
+                ColumnLayout {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: qsTr("Science Sommet has gathered"); color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeSubtitle }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: qsTr("%1 in your base").arg(JournalService.knowledge.length)
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Claude's own knowledge + real Europe PMC studies, fused into a local base and cited. "
+                                 + "It fills up as you deepen topics, so over time Sommet leans on this and needs the internet less.")
+                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                    }
+
+                    // Deepen: the ONLY control that goes online — topic phrases only, never your data.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacingSmall
+                        RoundedButton {
+                            text: JournalService.enriching ? qsTr("Deepening…") : qsTr("Deepen the science on your habits")
+                            enabled: !JournalService.enriching && JournalService.anthropicKeySet
+                            onClicked: JournalService.deepenScience()
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: JournalService.enrichStatus
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: !JournalService.anthropicKeySet
+                        text: qsTr("Needs an Anthropic key (Settings → Coach) to ground and cite sources.")
+                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("↗ Goes online to Europe PMC (open research). Only the general topic is sent — never your journal or habits.")
+                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeTiny; wrapMode: Text.WordWrap
+                    }
+
+                    // Per-topic chips drawn from YOUR habits: tap one to deepen just that topic.
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacingSmall
+                        visible: JournalService.knowledgeTopics.length > 0
+                        Repeater {
+                            model: JournalService.knowledgeTopics
+                            delegate: RoundedButton {
+                                text: (modelData.have ? "✓ " : "+ ") + modelData.topic
+                                enabled: !modelData.have && !JournalService.enriching && JournalService.anthropicKeySet
+                                onClicked: JournalService.enrichTopic(modelData.topic, modelData.query)
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border; visible: JournalService.knowledge.length > 0 }
+
+                    // The base itself — cited items first.
+                    Repeater {
+                        model: JournalService.knowledge
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            radius: Theme.radiusSmall
+                            color: Theme.cardNested
+                            implicitHeight: kCol.implicitHeight + 2 * Theme.spacingSmall
+                            ColumnLayout {
+                                id: kCol
+                                x: Theme.spacingSmall; y: Theme.spacingSmall
+                                width: parent.width - 2 * Theme.spacingSmall
+                                spacing: 3
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: Theme.spacingSmall
+                                    Rectangle {
+                                        radius: 4
+                                        color: Qt.rgba(knowledgeCard.originColor(modelData.origin).r,
+                                                       knowledgeCard.originColor(modelData.origin).g,
+                                                       knowledgeCard.originColor(modelData.origin).b, 0.18)
+                                        implicitWidth: oTxt.implicitWidth + 12
+                                        implicitHeight: oTxt.implicitHeight + 6
+                                        Text {
+                                            id: oTxt
+                                            anchors.centerIn: parent
+                                            text: (modelData.origin === "pubmed" ? qsTr("CITED")
+                                                 : modelData.origin === "model" ? qsTr("AI")
+                                                 : qsTr("SEED")) + " · " + (modelData.evidenceLevel || "")
+                                            color: knowledgeCard.originColor(modelData.origin)
+                                            font.pixelSize: Theme.fontSizeTiny; font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.topic || ""
+                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                        horizontalAlignment: Text.AlignRight
+                                    }
+                                    RoundedButton {
+                                        text: "×"
+                                        onClicked: JournalService.deleteKnowledge(modelData.id)
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.statement || ""
+                                    color: Theme.text; font.pixelSize: Theme.fontSizeLabel; wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    visible: (modelData.caveats || "").length > 0
+                                    Layout.fillWidth: true
+                                    text: qsTr("Caveat: %1").arg(modelData.caveats)
+                                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap
+                                }
+                                Text {
+                                    visible: (modelData.source || "").length > 0 || (modelData.sourceUrl || "").length > 0
+                                    Layout.fillWidth: true
+                                    text: (modelData.sourceUrl && modelData.sourceUrl.length
+                                           ? '<a href="' + modelData.sourceUrl + '">' + (modelData.source || modelData.sourceUrl) + '</a>'
+                                           : modelData.source || "")
+                                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                    textFormat: Text.RichText; wrapMode: Text.WordWrap
+                                    onLinkActivated: (url) => Qt.openUrlExternally(url)
+                                    linkColor: Theme.primary
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- 4) Habit experiments ----
             Card {
                 Layout.fillWidth: true
                 visible: JournalService.experiments.length > 0

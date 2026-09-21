@@ -2410,7 +2410,7 @@ class Handler(BaseHTTPRequestHandler):
             json.dump(body, f)
             path = f.name
         try:
-            code, out, err = run_tool("race_pois.py", [path], timeout=120)
+            code, out, err = run_tool("race_pois.py", [path], timeout=300)  # long routes = many Overpass chunks
         finally:
             Path(path).unlink(missing_ok=True)
         result = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "poi search failed"}

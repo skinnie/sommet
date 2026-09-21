@@ -10,6 +10,7 @@
 #include <QSqlQuery>
 #include <QStringList>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVariant>
 #include <algorithm>
 
@@ -58,6 +59,7 @@ JournalService::JournalService(QObject *parent) : QObject(parent)
     seedKnowledge();
     loadEntries();
     loadExperiments();
+    loadKnowledge();
     computeInsights();
 }
 
@@ -114,6 +116,12 @@ void JournalService::ensureSchema()
         "id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, statement TEXT, "
         "evidence_level TEXT, source TEXT, variables TEXT, caveats TEXT, "
         "UNIQUE(topic, statement))"));
+    // Provenance for the growing base (1+2->3). Added via ALTER so existing journal.db files
+    // gain the columns; the errors on a second run (column exists) are expected and ignored,
+    // same pattern ActivityService uses for its own migrations.
+    q.exec(QStringLiteral("ALTER TABLE knowledge_items ADD COLUMN origin TEXT"));       // seed|model|pubmed
+    q.exec(QStringLiteral("ALTER TABLE knowledge_items ADD COLUMN source_url TEXT"));
+    q.exec(QStringLiteral("ALTER TABLE knowledge_items ADD COLUMN fetched_at TEXT"));
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS hypotheses ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, statement TEXT, chain TEXT, "
@@ -141,8 +149,8 @@ void JournalService::seedKnowledge()
         // Idempotent upsert on (topic, statement): re-seed on every start so edits to the
         // bundled JSON land, but never duplicate.
         q.prepare(QStringLiteral(
-            "INSERT INTO knowledge_items (topic, statement, evidence_level, source, variables, caveats) "
-            "VALUES (?,?,?,?,?,?) "
+            "INSERT INTO knowledge_items (topic, statement, evidence_level, source, variables, "
+            "caveats, origin) VALUES (?,?,?,?,?,?, 'seed') "
             "ON CONFLICT(topic, statement) DO UPDATE SET "
             "evidence_level=excluded.evidence_level, source=excluded.source, "
             "variables=excluded.variables, caveats=excluded.caveats"));
@@ -156,6 +164,35 @@ void JournalService::seedKnowledge()
     }
 }
 
+void JournalService::loadKnowledge()
+{
+    m_knowledge.clear();
+    if (m_db.isOpen()) {
+        // Cited (pubmed) first, then model-derived, then seed — and newest fetches on top —
+        // so the base visibly "grows real" as André deepens topics.
+        QSqlQuery q(QStringLiteral(
+            "SELECT id, topic, statement, evidence_level, source, variables, caveats, "
+            "COALESCE(origin,'seed'), COALESCE(source_url,''), COALESCE(fetched_at,'') "
+            "FROM knowledge_items ORDER BY "
+            "CASE COALESCE(origin,'seed') WHEN 'pubmed' THEN 0 WHEN 'model' THEN 1 ELSE 2 END, "
+            "fetched_at DESC, id DESC"), m_db);
+        while (q.next()) {
+            m_knowledge.append(QVariantMap{
+                {QStringLiteral("id"), q.value(0).toInt()},
+                {QStringLiteral("topic"), q.value(1).toString()},
+                {QStringLiteral("statement"), q.value(2).toString()},
+                {QStringLiteral("evidenceLevel"), q.value(3).toString()},
+                {QStringLiteral("source"), q.value(4).toString()},
+                {QStringLiteral("caveats"), q.value(6).toString()},
+                {QStringLiteral("origin"), q.value(7).toString()},
+                {QStringLiteral("sourceUrl"), q.value(8).toString()},
+                {QStringLiteral("fetchedAt"), q.value(9).toString()},
+            });
+        }
+    }
+    emit knowledgeChanged();
+}
+
 // ---------------------------------------------------------------------------
 // Loading / display
 // ---------------------------------------------------------------------------
@@ -164,6 +201,7 @@ void JournalService::refresh()
 {
     loadEntries();
     loadExperiments();
+    loadKnowledge();
     computeInsights();
 }
 
@@ -685,6 +723,300 @@ void JournalService::computeInsights()
 }
 
 // ---------------------------------------------------------------------------
+// Knowledge growth: 1 (Claude's own knowledge) + 2 (real Europe PMC sources)
+// FUSED into 3 (the local base). The ONLY code here that reaches the public
+// internet — and it sends ONLY a generic science topic string, never André's
+// journal text or logged habits. His habits only decide WHICH topics to pull.
+// ---------------------------------------------------------------------------
+
+// tag -> {human topic label, generic Europe PMC query}. No personal data — these are the
+// same phrases anyone researching the topic would type. Add a row to teach a new lens.
+struct TopicMap { const char *tag; const char *label; const char *query; };
+static const TopicMap kTopics[] = {
+    {"late_coffee",         "Afternoon caffeine & sleep", "afternoon caffeine consumption sleep quality"},
+    {"coffee",              "Caffeine & sleep",           "caffeine sleep quality dose timing"},
+    {"late_screen",         "Evening screens & sleep",    "evening screen light exposure sleep onset latency"},
+    {"stressed",            "Stress & fatigue",           "psychological stress perceived fatigue recovery"},
+    {"exercise",            "Exercise & mood",            "acute aerobic exercise mood affect"},
+    {"outdoor",             "Daylight & mood",            "outdoor daylight exposure mood wellbeing"},
+    {"sleepy_after_eating", "Meals & sleepiness",         "postprandial somnolence meal composition"},
+    {"sleep_interruption",  "Fragmented sleep",           "nocturnal awakenings sleep fragmentation causes"},
+    {"poor_morning",        "Morning grogginess",         "sleep inertia grogginess morning alertness"},
+    {"bored",               "Boredom & mood",             "boredom mood motivation state"},
+    {"masturbation",        "Sex & sleepiness",           "sexual activity orgasm prolactin sleepiness"},
+    {"meditation",          "Mindfulness & stress",       "mindfulness meditation perceived stress"},
+    {"journaling",          "Expressive writing",         "expressive writing journaling wellbeing"},
+    {"social",              "Social contact & mood",      "social interaction mood wellbeing"},
+    {"low_energy",          "Perceived energy",           "perceived energy vitality determinants daily"},
+};
+
+QString JournalService::topicQueryForTag(const QString &tag)
+{
+    for (const auto &t : kTopics)
+        if (tag == QLatin1String(t.tag)) return QString::fromLatin1(t.query);
+    return QString();
+}
+
+QVariantList JournalService::knowledgeTopics() const
+{
+    // Topics André's own logged habits actually touch, marked with whether the local base
+    // already has a deepened (model/pubmed) item for them. This is the menu the UI offers.
+    QSet<QString> present;
+    const auto tags = dayTags();
+    for (auto it = tags.constBegin(); it != tags.constEnd(); ++it)
+        present.unite(it.value());
+
+    QSet<QString> haveTopics;
+    if (m_db.isOpen()) {
+        QSqlQuery q(QStringLiteral(
+            "SELECT DISTINCT topic FROM knowledge_items WHERE origin IN ('model','pubmed')"), m_db);
+        while (q.next()) haveTopics.insert(q.value(0).toString());
+    }
+
+    QVariantList out;
+    QSet<QString> seenLabels;
+    for (const auto &t : kTopics) {
+        if (!present.contains(QLatin1String(t.tag))) continue;
+        const QString label = QString::fromLatin1(t.label);
+        if (seenLabels.contains(label)) continue;   // coffee + late_coffee etc. can overlap
+        seenLabels.insert(label);
+        out.append(QVariantMap{
+            {QStringLiteral("topic"), label},
+            {QStringLiteral("query"), QString::fromLatin1(t.query)},
+            {QStringLiteral("have"), haveTopics.contains(label)},
+        });
+    }
+    return out;
+}
+
+void JournalService::deepenScience()
+{
+    if (!anthropicKeySet()) {
+        setEnrichStatus(QStringLiteral("Add an Anthropic key (Settings → Coach) to ground and store sources."));
+        return;
+    }
+    m_enrichQueue.clear();
+    for (const auto &tv : knowledgeTopics()) {
+        const auto t = tv.toMap();
+        if (t.value(QStringLiteral("have")).toBool()) continue;   // already deepened
+        m_enrichQueue.append({t.value(QStringLiteral("topic")).toString(),
+                              t.value(QStringLiteral("query")).toString()});
+    }
+    if (m_enrichQueue.isEmpty()) {
+        setEnrichStatus(QStringLiteral("Everything your habits touch is already in the local base."));
+        return;
+    }
+    setEnriching(true);
+    processEnrichQueue();
+}
+
+void JournalService::enrichTopic(const QString &topic, const QString &query)
+{
+    if (!anthropicKeySet()) {
+        setEnrichStatus(QStringLiteral("Add an Anthropic key (Settings → Coach) first."));
+        return;
+    }
+    QString q = query;
+    if (q.isEmpty()) {
+        for (const auto &t : kTopics)
+            if (topic == QLatin1String(t.label)) { q = QString::fromLatin1(t.query); break; }
+    }
+    if (q.isEmpty()) q = topic;
+    m_enrichQueue.append({topic, q});
+    if (!m_enriching) { setEnriching(true); processEnrichQueue(); }
+}
+
+void JournalService::processEnrichQueue()
+{
+    if (m_enrichQueue.isEmpty()) {
+        setEnriching(false);
+        setEnrichStatus(QStringLiteral("Done."));
+        loadKnowledge();
+        return;
+    }
+    const auto job = m_enrichQueue.first();
+    setEnrichStatus(QStringLiteral("Looking up: %1…").arg(job.first));
+    fetchEuropePmc(job.first, job.second);
+}
+
+void JournalService::fetchEuropePmc(const QString &topic, const QString &query)
+{
+    // Europe PMC REST — free, no key, real peer-reviewed abstracts + citations. resultType=core
+    // includes abstractText so Claude can ground against the actual source, not a title alone.
+    QUrl url(QStringLiteral("https://www.ebi.ac.uk/europepmc/webservices/rest/search"));
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("query"),
+                    query + QStringLiteral(" AND (SRC:MED) AND HAS_ABSTRACT:Y"));
+    qq.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+    qq.addQueryItem(QStringLiteral("pageSize"), QStringLiteral("5"));
+    qq.addQueryItem(QStringLiteral("resultType"), QStringLiteral("core"));
+    qq.addQueryItem(QStringLiteral("sort"), QStringLiteral("CITED desc"));   // well-cited first
+    url.setQuery(qq);
+
+    auto *reply = m_net.get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, topic]() {
+        reply->deleteLater();
+        QJsonArray citations;
+        if (reply->error() == QNetworkReply::NoError) {
+            const auto results = QJsonDocument::fromJson(reply->readAll()).object()
+                                     .value(QStringLiteral("resultList")).toObject()
+                                     .value(QStringLiteral("result")).toArray();
+            for (const auto &rv : results) {
+                const QJsonObject r = rv.toObject();
+                const QString src = r.value(QStringLiteral("source")).toString();
+                const QString id = r.value(QStringLiteral("id")).toString();
+                const QString doi = r.value(QStringLiteral("doi")).toString();
+                QString link = doi.isEmpty()
+                    ? QStringLiteral("https://europepmc.org/article/%1/%2").arg(src, id)
+                    : QStringLiteral("https://doi.org/%1").arg(doi);
+                QString abs = r.value(QStringLiteral("abstractText")).toString();
+                if (abs.length() > 900) abs = abs.left(900) + QStringLiteral("…");
+                citations.append(QJsonObject{
+                    {QStringLiteral("title"), r.value(QStringLiteral("title")).toString()},
+                    {QStringLiteral("authors"), r.value(QStringLiteral("authorString")).toString()},
+                    {QStringLiteral("year"), r.value(QStringLiteral("pubYear")).toString()},
+                    {QStringLiteral("journal"), r.value(QStringLiteral("journalTitle")).toString()},
+                    {QStringLiteral("url"), link},
+                    {QStringLiteral("abstract"), abs},
+                });
+            }
+        }
+        // Even with zero citations (offline / no hits) we still ground with Claude's own
+        // knowledge -> origin "model". That's the "1" feeding "3" when "2" isn't available.
+        groundAndStore(topic, citations);
+    });
+}
+
+void JournalService::groundAndStore(const QString &topic, const QJsonArray &citations)
+{
+    if (!anthropicKeySet()) { m_enrichQueue.removeFirst(); processEnrichQueue(); return; }
+
+    QString abstracts;
+    for (int i = 0; i < citations.size(); ++i) {
+        const QJsonObject c = citations[i].toObject();
+        abstracts += QStringLiteral("[%1] %2 (%3, %4)\n%5\n\n")
+            .arg(i).arg(c.value(QStringLiteral("title")).toString(),
+                        c.value(QStringLiteral("authors")).toString(),
+                        c.value(QStringLiteral("year")).toString(),
+                        c.value(QStringLiteral("abstract")).toString());
+    }
+    if (abstracts.isEmpty()) abstracts = QStringLiteral("(no sources retrieved — use only well-established consensus)");
+
+    const QString system = QStringLiteral(
+        "You curate ONE entry for a personal journaling app's local science base. Given a TOPIC "
+        "and REAL study abstracts (possibly none), write a single concise, honest consensus "
+        "statement a careful clinician would accept — plain language, no hype, no fake precision. "
+        "Ground it in the abstracts plus well-established consensus. NEVER invent a citation. "
+        "Pick the SINGLE best supporting citation index from the list, or -1 if none genuinely "
+        "fits. Grade the evidence honestly. Return ONLY JSON: {\"statement\": \"...\", "
+        "\"evidence_level\": \"strong|moderate|preliminary|uncertain\", \"caveats\": \"...\", "
+        "\"variables\": [\"day-tags this relates to\"], \"citation_index\": <int>}");
+
+    QNetworkRequest req{QUrl(QStringLiteral("https://api.anthropic.com/v1/messages"))};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setRawHeader("x-api-key", apiKey().toUtf8());
+    req.setRawHeader("anthropic-version", "2023-06-01");
+
+    QJsonObject body;
+    body[QStringLiteral("model")] = QStringLiteral("claude-sonnet-5");
+    body[QStringLiteral("max_tokens")] = 700;
+    body[QStringLiteral("system")] = system;
+    QJsonArray messages;
+    messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+        {QStringLiteral("content"), QStringLiteral("TOPIC: %1\n\nABSTRACTS:\n%2").arg(topic, abstracts)}});
+    body[QStringLiteral("messages")] = messages;
+
+    auto *reply = m_net.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, topic, citations]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            const auto content = QJsonDocument::fromJson(reply->readAll()).object()
+                                     .value(QStringLiteral("content")).toArray();
+            QString text = content.isEmpty() ? QString()
+                : content.first().toObject().value(QStringLiteral("text")).toString();
+            text = text.trimmed();
+            const int lb = text.indexOf(QLatin1Char('{')), rb = text.lastIndexOf(QLatin1Char('}'));
+            if (lb >= 0 && rb > lb) text = text.mid(lb, rb - lb + 1);
+            const QJsonObject item = QJsonDocument::fromJson(text.toUtf8()).object();
+
+            if (!item.isEmpty() && !item.value(QStringLiteral("statement")).toString().isEmpty()) {
+                int ci = item.value(QStringLiteral("citation_index")).toInt(-1);
+                QString origin = QStringLiteral("model"), url, source;
+                if (ci >= 0 && ci < citations.size()) {
+                    const QJsonObject c = citations[ci].toObject();
+                    origin = QStringLiteral("pubmed");
+                    url = c.value(QStringLiteral("url")).toString();
+                    source = QStringLiteral("%1 (%2), %3")
+                        .arg(c.value(QStringLiteral("authors")).toString(),
+                             c.value(QStringLiteral("year")).toString(),
+                             c.value(QStringLiteral("journal")).toString());
+                } else {
+                    source = QStringLiteral("Claude (built-in knowledge, %1)")
+                                 .arg(QDate::currentDate().toString(Qt::ISODate));
+                }
+                // Pack "<url> | <human source>" when cited; storeKnowledge() unpacks it.
+                storeKnowledge(topic, item, origin,
+                               url.isEmpty() ? source : url + QStringLiteral(" | ") + source);
+            }
+        }
+        m_enrichQueue.removeFirst();
+        loadKnowledge();
+        processEnrichQueue();
+    });
+}
+
+void JournalService::storeKnowledge(const QString &topic, const QJsonObject &item,
+                                    const QString &origin, const QString &sourceUrl)
+{
+    if (!m_db.isOpen()) return;
+    QStringList vars;
+    for (const auto &vv : item.value(QStringLiteral("variables")).toArray())
+        vars << vv.toString();
+
+    // One fresh enriched item per topic: drop any prior model/pubmed row for this topic (seed
+    // rows are left untouched), then insert. Keeps the base from piling duplicates on re-deepen.
+    QSqlQuery del(m_db);
+    del.prepare(QStringLiteral(
+        "DELETE FROM knowledge_items WHERE topic=? AND origin IN ('model','pubmed')"));
+    del.addBindValue(topic);
+    del.exec();
+
+    // sourceUrl arrives as "<url> | <human source>" when cited, or just the human source string.
+    QString url, human = sourceUrl;
+    const int sep = sourceUrl.indexOf(QStringLiteral(" | "));
+    if (sep >= 0) { url = sourceUrl.left(sep); human = sourceUrl.mid(sep + 3); }
+    else if (sourceUrl.startsWith(QStringLiteral("http"))) { url = sourceUrl; human.clear(); }
+
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "INSERT INTO knowledge_items (topic, statement, evidence_level, source, variables, "
+        "caveats, origin, source_url, fetched_at) VALUES (?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(topic, statement) DO UPDATE SET evidence_level=excluded.evidence_level, "
+        "source=excluded.source, variables=excluded.variables, caveats=excluded.caveats, "
+        "origin=excluded.origin, source_url=excluded.source_url, fetched_at=excluded.fetched_at"));
+    q.addBindValue(topic);
+    q.addBindValue(item.value(QStringLiteral("statement")).toString());
+    q.addBindValue(item.value(QStringLiteral("evidence_level")).toString());
+    q.addBindValue(human);
+    q.addBindValue(vars.join(QStringLiteral(",")));
+    q.addBindValue(item.value(QStringLiteral("caveats")).toString());
+    q.addBindValue(origin);
+    q.addBindValue(url);
+    q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    q.exec();
+}
+
+void JournalService::deleteKnowledge(int knowledgeId)
+{
+    if (!m_db.isOpen()) return;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("DELETE FROM knowledge_items WHERE id=?"));
+    q.addBindValue(knowledgeId);
+    q.exec();
+    loadKnowledge();
+}
+
+// ---------------------------------------------------------------------------
 // Free-form reflection question (LLM boundary #2)
 // ---------------------------------------------------------------------------
 
@@ -736,17 +1068,29 @@ QString JournalService::buildReflectionContext() const
     for (auto it = tags.constBegin(); it != tags.constEnd(); ++it)
         present.unite(it.value());
     lines << QStringLiteral("\n## SCIENTIFIC CONTEXT (general priors, not about André)");
+    lines << QStringLiteral("(Prefer these local items; where one carries a citation you may name "
+                            "it, e.g. \"per Smith 2021\". Do NOT invent citations.)");
     if (m_db.isOpen()) {
+        // Cited (pubmed) items first, then model-derived, then bundled seeds — so the reflection
+        // leans on the real, sourced knowledge the base has accumulated (1+2->3).
         QSqlQuery k(QStringLiteral(
-            "SELECT statement, evidence_level, variables, caveats FROM knowledge_items"), m_db);
+            "SELECT statement, evidence_level, variables, caveats, COALESCE(origin,'seed'), "
+            "COALESCE(source,''), COALESCE(source_url,'') FROM knowledge_items ORDER BY "
+            "CASE COALESCE(origin,'seed') WHEN 'pubmed' THEN 0 WHEN 'model' THEN 1 ELSE 2 END"), m_db);
         int kn = 0;
-        while (k.next() && kn < 8) {
+        while (k.next() && kn < 10) {
             bool relevant = present.isEmpty();
             for (const QString &v : k.value(2).toString().split(QLatin1Char(',')))
                 if (present.contains(v.trimmed())) { relevant = true; break; }
             if (!relevant) continue;
-            lines << QStringLiteral("- %1 (evidence: %2; caveat: %3)")
-                         .arg(k.value(0).toString(), k.value(1).toString(), k.value(3).toString());
+            const QString origin = k.value(4).toString();
+            QString cite;
+            if (origin == QStringLiteral("pubmed"))
+                cite = QStringLiteral("; source: %1 %2").arg(k.value(5).toString(), k.value(6).toString());
+            else if (origin == QStringLiteral("model"))
+                cite = QStringLiteral("; source: general knowledge, uncited");
+            lines << QStringLiteral("- %1 (evidence: %2; caveat: %3%4)")
+                         .arg(k.value(0).toString(), k.value(1).toString(), k.value(3).toString(), cite);
             kn++;
         }
     }
@@ -780,7 +1124,10 @@ void JournalService::ask(const QString &question)
         "  • FACT — only what André actually wrote, or what the activity data actually shows.\n"
         "  • OBSERVATION — a pattern across days, stated with the counts (\"on 6 of 9 days…\").\n"
         "  • HYPOTHESIS — a tentative 'may' link; NEVER assert causality as established.\n"
-        "  • SCIENTIFIC CONTEXT — general research priors, explicitly not about André specifically.\n\n"
+        "  • SCIENTIFIC CONTEXT — general research priors, explicitly not about André specifically. "
+        "Prefer the SCIENTIFIC CONTEXT items provided below over your own recall; when one carries "
+        "a source, you may name it (e.g. \"per Smith 2021\"). NEVER fabricate a citation, a study "
+        "or a statistic.\n\n"
         "No wellness scores, no readiness numbers, no guilt, no daily to-dos. If nothing "
         "meaningful has emerged, say so plainly. You may, at most, gently offer ONE small, "
         "reversible experiment if the evidence genuinely warrants it — as an option, not advice.\n\n"
@@ -884,6 +1231,20 @@ void JournalService::setAsking(bool v)
     if (m_asking == v) return;
     m_asking = v;
     emit askingChanged();
+}
+
+void JournalService::setEnriching(bool v)
+{
+    if (m_enriching == v) return;
+    m_enriching = v;
+    emit enrichingChanged();
+}
+
+void JournalService::setEnrichStatus(const QString &s)
+{
+    if (m_enrichStatus == s) return;
+    m_enrichStatus = s;
+    emit enrichStatusChanged();
 }
 
 void JournalService::setLastError(const QString &e)

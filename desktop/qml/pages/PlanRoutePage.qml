@@ -249,13 +249,15 @@ Item {
         if (catBike.checked) cats.push("bike")
         if (catShelter.checked) cats.push("shelter")
         if (catSafety.checked) cats.push("safety")
-        if (cats.length === 0) { statusMsg = qsTr("Pick at least one thing to find"); return }
+        var customTags = (customCats.text || "").split(",").map(function(s){return s.trim()}).filter(function(s){return s.length})
+        if (cats.length === 0 && customTags.length === 0) { statusMsg = qsTr("Pick at least one thing to find"); return }
         poiBusy = true
         PlanStore.poiCategories = cats
         PlanStore.poiWaterRate = waterRate.text
         PlanStore.poiCarryL = carryL.text
+        PlanStore.poiCustom = customCats.text
         api("POST", "/api/race/pois",
-            { gpx: plannedGpx, categories: cats,
+            { gpx: plannedGpx, categories: cats, custom_tags: customTags,
               water_l_per_100km: parseFloat(waterRate.text) || 2.0,
               carry_l: parseFloat(carryL.text) || 1.5 },
             function(status, res) {
@@ -699,15 +701,25 @@ Item {
                             RoundedCheckBox { id: catShelter; text: qsTr("Places to sleep"); checked: false }
                             RoundedCheckBox { id: catSafety; text: qsTr("Emergency"); checked: false }
                         }
+                        // Custom categories (André, 2026-09-21: "add categories, like pitstopper").
+                        RoundedTextField { id: customCats; width: parent.width
+                                           placeholderText: qsTr("Also find (comma-separated): pharmacy, atm, bakery, campsite…")
+                                           text: PlanStore.poiCustom || "" }
+                        Text { text: qsTr("Water planning — used to flag long dry stretches:")
+                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                         Row {
                             width: parent.width; spacing: Theme.spacingSmall
                             readonly property real cellW: (width - Theme.spacingSmall) / 2
-                            RoundedTextField { id: waterRate; width: parent.cellW
-                                               placeholderText: qsTr("Water L/100km"); text: PlanStore.poiWaterRate
-                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
-                            RoundedTextField { id: carryL; width: parent.cellW
-                                               placeholderText: qsTr("Carry (L)"); text: PlanStore.poiCarryL
-                                               inputMethodHints: Qt.ImhFormattedNumbersOnly }
+                            Column { width: parent.cellW; spacing: 2
+                                Text { text: qsTr("You drink (L / 100 km)"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                RoundedTextField { id: waterRate; width: parent.width
+                                                   placeholderText: qsTr("e.g. 2.0"); text: PlanStore.poiWaterRate
+                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly } }
+                            Column { width: parent.cellW; spacing: 2
+                                Text { text: qsTr("You can carry (L)"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                RoundedTextField { id: carryL; width: parent.width
+                                                   placeholderText: qsTr("e.g. 1.5"); text: PlanStore.poiCarryL
+                                                   inputMethodHints: Qt.ImhFormattedNumbersOnly } }
                         }
                         RoundedButton {
                             width: parent.width
