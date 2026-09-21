@@ -104,6 +104,19 @@ def _build_output(per_cat: Dict[str, List[Dict[str, Any]]], cats: List[str], tot
                 # rider edits the drink / carry numbers; the numbers are still returned for alerts.
                 summary.append("Longest stretch with no %s: %.0f km (after km %.0f)"
                                % (short, g["longest_gap_km"], g["longest_gap_after_km"]))
+        elif cat == "other":
+            # Not "Other places: 108" - say WHAT they are (e.g. "Bicycle Parking 100 · Bicycle Rental 8").
+            info["count"] = len(pois)
+            kinds: Dict[str, int] = {}
+            for p_ in pois:
+                kinds[p_.get("kind") or p_.get("subtype") or "Other"] = kinds.get(p_.get("kind") or p_.get("subtype") or "Other", 0) + 1
+            info["kinds"] = kinds
+            if pois:
+                top = sorted(kinds.items(), key=lambda kv: -kv[1])
+                txt = " · ".join("%s %d" % (k, n) for k, n in top[:4])
+                if len(top) > 4:
+                    txt += " · +%d more types" % (len(top) - 4)
+                summary.append("Also on the route (hidden on the map by default): " + txt)
         else:
             info["count"] = len(pois)
             if pois:
