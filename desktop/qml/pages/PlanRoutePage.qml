@@ -705,7 +705,7 @@ Item {
                             RoundedCheckBox { id: catShelter; text: qsTr("Places to sleep"); checked: false }
                             RoundedCheckBox { id: catSafety; text: qsTr("Emergency"); checked: false }
                         }
-                        RowLayout {
+                        Row {
                             width: parent.width; spacing: Theme.spacingSmall
                             RoundedButton { text: qsTr("Cyclist preset")   // one-tap brevet set
                                 onClicked: { catWater.checked = true; catFood.checked = true;
