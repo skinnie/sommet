@@ -230,12 +230,18 @@ Item {
         var out = []
         var p = PlanStore.pois
         if (p && p.categories) {
-            for (var cat in p.categories) {
+            // Most useful first, so the cap drops the least useful pins (a PitStopper export can hold
+            // 500+; 253 of them are restaurants and would otherwise crowd out water/cemeteries).
+            var order = ["water", "cemetery", "food", "safety", "bike", "shelter"]
+            for (var k in p.categories) if (order.indexOf(k) < 0) order.push(k)
+            for (var c = 0; c < order.length; c++) {
+                var cat = order[c]
+                if (!p.categories[cat]) continue
                 var list = p.categories[cat].pois || []
                 for (var i = 0; i < list.length; i++) {
                     out.push({ lat: list[i].lat, lon: list[i].lon,
                                label: (list[i].name || cat) })
-                    if (out.length >= 300) return out
+                    if (out.length >= 600) return out
                 }
             }
         }
@@ -250,20 +256,12 @@ Item {
         poiBusy = true
         PlanStore.poiWaterRate = waterRate.text      // remember the water-planning numbers
         PlanStore.poiCarryL = carryL.text
-        api("POST", "/api/race/pois",
-            { gpx: plannedGpx, poi_gpx: txt,
-              water_l_per_100km: parseFloat(waterRate.text) || 2.0,
-              carry_l: parseFloat(carryL.text) || 1.5 },
-            function(status, res) {
-                poiBusy = false
-                if (status === 200 && res && res.ok) {
-                    PlanStore.pois = res
-                    statusMsg = qsTr("Imported %1 places from PitStopper.").arg(res.imported || 0)
-                } else {
-                    PlanStore.pois = null
-                    statusMsg = qsTr("Couldn't read POIs from that file — is it a PitStopper GPX export?")
-                }
-            })
+        PlanStore.importPois(plannedGpx, txt, function(ok, res) {
+            poiBusy = false
+            statusMsg = ok
+                ? qsTr("Imported %1 places from PitStopper.").arg(res.imported || 0)
+                : qsTr("No POIs found in that file — is it a PitStopper GPX export (with waypoints)?")
+        })
     }
 
     function colorTrack() {

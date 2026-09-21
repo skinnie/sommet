@@ -46,4 +46,39 @@ QtObject {
     property string poiCarryL: "1.5"
     property string poiCustom: ""   // free-text extra POI categories (comma-separated), PitStopper-style
     property string poiRadius: "250"   // POI search radius (metres) around the route
+
+    property bool poiBusy: false
+
+    // Read POIs from a PitStopper GPX (waypoints) against the route and publish the result to `pois`
+    // (map pins, Race Plan alerts). `done(ok, res)` is optional. A result with zero recognised POIs
+    // is NOT published - otherwise an ordinary GPX with a few unrelated waypoints would claim
+    // "no water on this route".
+    function importPois(routeGpx, poiGpxText, done) {
+        if (!routeGpx || !poiGpxText) return
+        poiBusy = true
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            poiBusy = false
+            var res = null
+            try { res = JSON.parse(xhr.responseText) } catch (e) { res = null }
+            var ok = xhr.status === 200 && res && res.ok && (res.imported || 0) > 0
+            if (ok && routeGpx === plannedGpx)      // ignore a stale answer if the route changed
+                pois = res
+            if (done) done(ok, res)
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/race/pois")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify({ gpx: routeGpx, poi_gpx: poiGpxText,
+                                  water_l_per_100km: parseFloat(poiWaterRate) || 2.0,
+                                  carry_l: parseFloat(poiCarryL) || 1.5 }))
+    }
+
+    // A PitStopper export loaded AS the route (GPX with waypoints + track) carries its own POIs:
+    // read them automatically, so loading that one file on either page shows them on the map
+    // (André, 2026-09-21: "I uploaded the gpx from pitstopper... it doesn't show on the map").
+    onPlannedGpxChanged: {
+        if (plannedGpx.indexOf("<wpt") >= 0)
+            importPois(plannedGpx, plannedGpx, null)
+    }
 }
