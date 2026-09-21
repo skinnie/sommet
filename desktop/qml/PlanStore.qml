@@ -44,4 +44,5 @@ QtObject {
     property var poiCategories: ["water", "food"]
     property string poiWaterRate: "2.0"
     property string poiCarryL: "1.5"
+    property string poiCustom: ""   // free-text extra POI categories (comma-separated), PitStopper-style
 }

@@ -54,7 +54,7 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 def _downsample(points: List[Dict[str, Any]], cumul_m: List[float],
-                step_m: float = 1500.0, cap: int = 300) -> List[Tuple[float, float]]:
+                step_m: float = 2500.0, cap: int = 260) -> List[Tuple[float, float]]:
     """Thin the route to ~one coord per step_m (capped) for a compact Overpass corridor filter."""
     out = [(points[0]["lat"], points[0]["lon"])]
     last = 0.0
@@ -70,14 +70,25 @@ def _downsample(points: List[Dict[str, Any]], cumul_m: List[float],
     return out
 
 
+def _custom_selectors(term: str) -> List[str]:
+    """Overpass selectors for a free-text category term (PitStopper-style). A plain word matches the
+    common OSM keys it could live under; a raw "key=value" is used verbatim."""
+    t = term.strip()
+    if not t:
+        return []
+    if "=" in t:                     # power users can pass an exact "amenity=pharmacy"
+        return ["[%s]" % t]
+    t = t.replace(" ", "_").lower()
+    return ["[amenity=%s]" % t, "[shop=%s]" % t, "[tourism=%s]" % t, "[leisure=%s]" % t]
+
+
 def build_query(coords: List[Tuple[float, float]], radius_m: int,
-                categories: List[str]) -> str:
+                selectors: List[str]) -> str:
     poly = ",".join("%.5f,%.5f" % (lat, lon) for lat, lon in coords)
     around = "(around:%d,%s)" % (radius_m, poly)
     lines = ["[out:json][timeout:90];", "("]
-    for cat in categories:
-        for sel in CATEGORIES.get(cat, []):
-            lines.append("  nwr%s%s;" % (sel, around))
+    for sel in selectors:
+        lines.append("  nwr%s%s;" % (sel, around))
     lines.append(");")
     lines.append("out center tags;")
     return "\n".join(lines)
@@ -147,10 +158,15 @@ def _gaps(kms: List[float], total_km: float) -> Dict[str, Any]:
 
 def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int = DEFAULT_RADIUS_M,
             water_l_per_100km: float = 2.0, carry_l: float = 1.5,
+            custom_tags: Optional[List[str]] = None,
             fetch: Optional[Callable[[str], Dict[str, Any]]] = None) -> Dict[str, Any]:
     if len(points) < 2:
         return {"ok": False, "error": "route needs >= 2 points"}
     categories = [c for c in categories if c in CATEGORIES] or list(CATEGORIES.keys())
+    # Free-text extra categories (André, 2026-09-21: "add categories, like pitstopper"). Each term
+    # becomes its own bucket, keyed "custom:<term>", matched against the common OSM keys.
+    custom = [t.strip() for t in (custom_tags or []) if t and t.strip()]
+    custom_norm = {t: t.replace(" ", "_").lower() for t in custom}
     cumul_m = geo_util.cumulative_distances([(p["lat"], p["lon"]) for p in points])
     total_km = cumul_m[-1] / 1000.0
 
@@ -159,7 +175,12 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
     # overlapping chunks and union the results, so brevet-length routes work. A failed chunk is
     # skipped (partial results still useful) rather than failing the whole search.
     fetch = fetch or _overpass_fetch
-    CHUNK, OVERLAP = 40, 1
+    selectors: List[str] = []
+    for c in categories:
+        selectors.extend(CATEGORIES[c])
+    for t in custom:
+        selectors.extend(_custom_selectors(t))
+    CHUNK, OVERLAP = 55, 1
     elements = []
     i = 0
     errors = 0
@@ -168,7 +189,7 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
         if len(chunk) < 2 and elements:
             break
         try:
-            doc = fetch(build_query(chunk, radius_m, categories))
+            doc = fetch(build_query(chunk, radius_m, selectors))
             if isinstance(doc, dict):
                 elements.extend(doc.get("elements", []))
         except Exception:
@@ -178,10 +199,20 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
         i += CHUNK - OVERLAP
 
     per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in categories}
+    for t in custom:
+        per_cat["custom:" + t] = []
+
+    def _match_custom(tags: Dict[str, str]) -> Optional[str]:
+        vals = {tags.get(k) for k in ("amenity", "shop", "tourism", "leisure")}
+        for t, norm in custom_norm.items():
+            if norm in vals or ("=" in t and tags.get(t.split("=", 1)[0]) == t.split("=", 1)[1]):
+                return "custom:" + t
+        return None
+
     seen = set()
     for el in elements:
         tags = el.get("tags") or {}
-        cat = _categorize(tags)
+        cat = _match_custom(tags) or _categorize(tags)
         if cat not in per_cat:
             continue
         lat = el.get("lat") or (el.get("center") or {}).get("lat")
@@ -201,7 +232,7 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
 
     out_cats: Dict[str, Any] = {}
     summary: List[str] = []
-    for cat in categories:
+    for cat in list(categories) + ["custom:" + t for t in custom]:
         pois = sorted(per_cat[cat], key=lambda p: p["km"])
         info: Dict[str, Any] = {"pois": pois}
         if cat in RESUPPLY:
@@ -225,7 +256,8 @@ def analyze(points: List[Dict[str, Any]], categories: List[str], radius_m: int =
         else:
             info["count"] = len(pois)
             if pois:
-                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation", "safety": "Services"}[cat]
+                nice = {"bike": "Bike shop/repair", "shelter": "Accommodation",
+                        "safety": "Services"}.get(cat, cat[7:].title() if cat.startswith("custom:") else cat)
                 summary.append("%s: %d (first at km %.0f)" % (nice, len(pois), pois[0]["km"]))
         out_cats[cat] = info
 
@@ -295,7 +327,8 @@ def main(argv=None):
         r = analyze(points or [], body.get("categories") or list(CATEGORIES.keys()),
                     radius_m=int(body.get("radius_m") or DEFAULT_RADIUS_M),
                     water_l_per_100km=float(body.get("water_l_per_100km") or 2.0),
-                    carry_l=float(body.get("carry_l") or 1.5))
+                    carry_l=float(body.get("carry_l") or 1.5),
+                    custom_tags=body.get("custom_tags"))
         print(json.dumps(r))
     except Exception as e:
         print(json.dumps({"ok": False, "error": str(e)}))
