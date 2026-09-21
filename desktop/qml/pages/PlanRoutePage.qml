@@ -261,7 +261,9 @@ Item {
                 for (var i = 0; i < list.length; i++) {
                     var st = poiStyle(cat, list[i].subtype)
                     out.push({ lat: list[i].lat, lon: list[i].lon,
-                               label: (list[i].name || cat), glyph: st.glyph, color: st.color })
+                               label: (list[i].name || cat), glyph: st.glyph, color: st.color,
+                               type: (list[i].kind || cat), hours: (list[i].hours || ""),
+                               km: list[i].km })
                     if (out.length >= 600) return out
                 }
             }
