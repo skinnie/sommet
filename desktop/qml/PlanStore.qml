@@ -53,7 +53,7 @@ QtObject {
     // (map pins, Race Plan alerts). `done(ok, res)` is optional. A result with zero recognised POIs
     // is NOT published - otherwise an ordinary GPX with a few unrelated waypoints would claim
     // "no water on this route".
-    function importPois(routeGpx, poiGpxText, done) {
+    function importPois(routeGpx, poiGpxText, done, reverse) {
         if (!routeGpx || !poiGpxText) return
         poiBusy = true
         var xhr = new XMLHttpRequest()
@@ -70,6 +70,7 @@ QtObject {
         xhr.open("POST", "http://127.0.0.1:8766/api/race/pois")
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.send(JSON.stringify({ gpx: routeGpx, poi_gpx: poiGpxText,
+                                  reverse: !!reverse,     // km measured along the reversed route
                                   water_l_per_100km: parseFloat(poiWaterRate) || 2.0,
                                   carry_l: parseFloat(poiCarryL) || 1.5 }))
     }
@@ -79,6 +80,6 @@ QtObject {
     // (André, 2026-09-21: "I uploaded the gpx from pitstopper... it doesn't show on the map").
     onPlannedGpxChanged: {
         if (plannedGpx.indexOf("<wpt") >= 0)
-            importPois(plannedGpx, plannedGpx, null)
+            importPois(plannedGpx, plannedGpx, null, reversed)
     }
 }

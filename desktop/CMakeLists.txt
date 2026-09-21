@@ -159,6 +159,7 @@ qt_add_qml_module(ambitapp
         qml/components/ActivityRow.qml
         qml/components/DemoDevicePicker.qml
         qml/components/LoadingPill.qml
+        qml/components/PoiHowTo.qml
         qml/WatchUnits.qml
         qml/ActivityMetrics.qml
         qml/TotalsFacts.qml
