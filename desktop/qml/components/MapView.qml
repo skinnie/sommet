@@ -805,11 +805,66 @@ Item {
     Repeater {
         model: root.markers
         delegate: Item {
+            id: pin
             required property var modelData
             width: 30
             height: 38
             x: root.lonToWorldX(modelData.lon) - root.originX - width / 2
             y: root.latToWorldY(modelData.lat) - root.originY - height
+
+            // A pin with a `label` shows its name + type (+ km, opening hours) in a small callout
+            // while the pointer is over it, and keeps it open after a click (André, 2026-09-21: "when
+            // I click or pass through it doesn't show the name nor the type - it is important").
+            // Raised above its neighbours while open so a crowded cluster can't cover it.
+            readonly property bool hasInfo: !!(modelData.label && modelData.label.length > 0)
+            property bool pinned: false
+            readonly property bool showInfo: hasInfo && (hoverInfo.hovered || pinned)
+            z: showInfo ? 100 : 0
+            HoverHandler { id: hoverInfo; enabled: pin.hasInfo; cursorShape: Qt.PointingHandCursor }
+            TapHandler { enabled: pin.hasInfo; onTapped: pin.pinned = !pin.pinned }
+
+            Loader {
+                active: pin.showInfo      // built only while shown: a route can carry 500+ pins
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.top
+                anchors.bottomMargin: 2
+                sourceComponent: Rectangle {
+                    width: infoCol.implicitWidth + 20
+                    height: infoCol.implicitHeight + 14
+                    radius: Theme.radiusSmall
+                    color: Theme.card
+                    border.color: pin.modelData.color || Theme.border
+                    border.width: 2
+                    Column {
+                        id: infoCol
+                        anchors.centerIn: parent
+                        spacing: 2
+                        Text {
+                            text: pin.modelData.label
+                            color: Theme.text
+                            font.bold: true
+                            font.pixelSize: Theme.fontSizeBody
+                            width: Math.min(implicitWidth, 240)
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            visible: !!pin.modelData.type
+                            text: pin.modelData.type + (pin.modelData.km !== undefined
+                                  ? "  ·  km " + Math.round(pin.modelData.km) : "")
+                            color: pin.modelData.color || Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        Text {
+                            visible: !!pin.modelData.hours
+                            text: "🕒 " + pin.modelData.hours
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            width: Math.min(implicitWidth, 240)
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+            }
 
             Rectangle {
                 width: 26

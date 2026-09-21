@@ -160,27 +160,43 @@ def parse_pitstopper_gpx(gpx_text: str) -> List[Dict[str, Any]]:
             return ""
         cmt, sym, name, desc = f("cmt"), f("sym"), _clean_name(f("name")), f("desc")
         key = cmt.split(".")[0].strip().lower()
+
+        # The description is "[Full name: X. ]Type[. Hours: ...][. Website: ...][. Phone: ...]".
+        # "Full name" is the real, untruncated name (present whenever PitStopper shortened the
+        # <name> for a bike computer); the type is the last part before the Hours/Website/Phone tail.
+        core = re.split(r"\.\s*(?:Hours|Website|Phone):", desc, maxsplit=1)[0].strip().rstrip(".")
+        full, kind = "", core
+        if core.startswith("Full name:"):
+            rest = core[len("Full name:"):].strip()
+            if ". " in rest:
+                full, kind = rest.rsplit(". ", 1)
+            else:
+                full, kind = rest, ""
+        full, kind = full.strip(), kind.strip()
+
         if key == "shopping":
-            cat = "food" if desc.lower().startswith("supermarket") else None
+            cat = "food" if kind.lower().startswith("supermarket") else None
         elif key == "generic":
             # PitStopper exports the rider's CUSTOM TAGS as "generic". André's is cemetery/graveyard
-            # (a likely water tap), so read them as cemeteries. The device-style <name> is truncated
-            # ("Cimetière  R32m"); the real name is in the description ("Full name: ...").
+            # (a likely water tap), so read them as cemeteries.
             cat = "cemetery"
-            fm = re.search(r"Full name:\s*(.+?)(?:\.\s*POI\s*$|$)", desc)
-            if fm:
-                name = fm.group(1).strip()
-            elif not name or re.match(r"^POI\d*$", name):   # unnamed custom-tag POI ("POI1 R139m")
-                name = "Cemetery"
+            kind = "Cemetery"
         else:
             cat = _PS_CATEGORY.get(key) or _PS_SYM.get(sym)
         if not cat:
             continue
+        if full:
+            name = full
+        elif key == "generic" and (not name or re.match(r"^POI\d*$", name)):   # unnamed ("POI1 R139m")
+            name = "Cemetery"
+        kind = re.split(r"\s+-\s+(?:Outbound|Return|Pass)\b", kind)[0].strip()   # loop-pass note
+        if kind.endswith("s") and not kind.endswith("ss") and len(kind) > 3:
+            kind = kind[:-1]                                                    # "Guest Houses" -> "Guest House"
         kms = [float(x) for x in re.findall(r"at\s+([0-9]+(?:\.[0-9]+)?)\s*km", cmt)]
         hm = re.search(r"Hours:\s*(.+?)(?:\.\s+(?:Website|Phone)|$)", desc)
         out.append({"lat": float(w.get("lat")), "lon": float(w.get("lon")),
                     "name": name or key.title(), "cat": cat, "kms": kms, "sub": key,
-                    "hours": hm.group(1).strip() if hm else ""})
+                    "kind": kind, "hours": hm.group(1).strip() if hm else ""})
     return out
 
 
@@ -225,7 +241,7 @@ def analyze_waypoints(points: List[Dict[str, Any]], wpts: List[Dict[str, Any]],
                 continue
             seen.add(key)
             poi = {"name": w["name"], "km": round(km, 1), "lat": w["lat"], "lon": w["lon"],
-                   "subtype": w["sub"]}
+                   "subtype": w["sub"], "kind": w.get("kind", "")}
             if w.get("hours"):
                 poi["hours"] = w["hours"]
             per_cat[w["cat"]].append(poi)
@@ -252,6 +268,10 @@ def _synthetic_gpx() -> str:
         wpt(0.045, "Carrefour", "food", "Restaurants. Hours: 24/7. Website: x"),
         wpt(0.450, "Boulangerie", "coffee", "Cafes"),
         wpt(0.270, "Norma", "shopping", "Supermarkets", "Shopping Center"),
+        # truncated <name>, real name in the description - even when the name itself contains ". "
+        wpt(0.280, "Centre Co R115m", "shopping",
+            "Full name: Centre Commercial E. Leclerc. Supermarkets. Hours: Mo-Sa 08:30-19:30; Su off. "
+            "Website: https://x. Phone: +33", "Shopping Center"),
         wpt(0.271, "Clothes", "shopping", "Clothing", "Shopping Center"),      # ignored
         wpt(0.540, "Cycles Pro", "bike_shop", "Bicycle Repair", "Car Repair"),
         wpt(0.300, "Parking", "bike_parking", "Bicycle Parking", "Parking Area"),  # ignored
@@ -289,11 +309,20 @@ def _selftest():
     assert c["count"] == 2, c
     assert c["pois"][0]["name"] == "Cimetière de Test", c["pois"]     # real name, not the truncated one
     f = r["categories"]["food"]
-    assert f["count"] == 5, f["count"]        # Carrefour, Boulangerie, Norma, Loop cafe (x2 passes)
+    assert f["count"] == 6, f["count"]        # Carrefour, Boulangerie, Norma, Leclerc, Loop cafe (x2 passes)
     hours = [p for p in f["pois"] if p.get("hours")]
     assert hours and hours[0]["hours"] == "24/7", hours                # opening hours kept for later
     assert sorted(p["km"] for p in f["pois"] if p["name"] == "Loop cafe") == [80.0, 99.0]  # both loop passes
     assert r["categories"]["bike"]["count"] == 1
+
+    # The human type is kept (singularised) for the map label.
+    kinds = {p["name"]: p.get("kind") for cat in r["categories"].values() for p in cat["pois"]}
+    assert kinds["Fountain A"] == "Fountain" and kinds["Carrefour"] == "Restaurant", kinds
+    assert kinds["Norma"] == "Supermarket" and kinds["Cimetière de Test"] == "Cemetery", kinds
+    # real name + type + opening hours recovered from a "Full name: ..." description
+    lec = next(p for p in r["categories"]["food"]["pois"] if p["name"].startswith("Centre Commercial"))
+    assert lec["name"] == "Centre Commercial E. Leclerc" and lec["kind"] == "Supermarket", lec
+    assert lec["hours"] == "Mo-Sa 08:30-19:30; Su off", lec
 
     # PitStopper name decorations are stripped: "^" (waypoint moved onto the track) and the
     # side+distance suffix; a custom-tag POI exported with FULL names has no "Full name:" note.
