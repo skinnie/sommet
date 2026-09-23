@@ -259,21 +259,39 @@ static uint8_t to_fit_sport(const char *name) {
     return 0;
 }
 
-// Suunto sport_type byte -> FIT sport enum (fallback when the name is empty). Twin of
-// jni_bridge.cpp's suunto_byte_to_fit_sport / the desktop _SUUNTO_BYTE_TO_FIT_SPORT.
-static uint8_t suunto_byte_to_fit_sport(uint8_t b) {
-    switch (b) {
-        case 0x03: case 0x51: return 1;
-        case 0x04: case 0x05: return 2;
-        case 0x0a: return 17;
-        case 0x0b: return 11;
-        case 0x13: return 13;
-        case 0x14: return 14;
-        case 0x15: case 0x4d: return 12;
-        case 0x49: return 16;
-        case 0x52: return 5;
-        default:   return 0;
+// Suunto activity id -> FIT sport, filling *sub_sport (fallback when the name is empty). Twin of
+// jni_bridge.cpp's suunto_id_to_fit_sport / the desktop _SUUNTO_ID_TO_FIT. Keep in sync.
+static uint8_t suunto_id_to_fit_sport(uint8_t id, uint8_t *sub_sport) {
+    uint8_t ss = 0, sp = 0;
+    switch (id) {
+        case 3:  sp = 1;  break;
+        case 82: sp = 1;  ss = 3;  break;
+        case 93: sp = 1;  ss = 1;  break;
+        case 84: sp = 11; break;
+        case 4:  sp = 2;  break;
+        case 5:  sp = 2;  ss = 8;  break;
+        case 17: sp = 2;  ss = 58; break;   // Indoor cycling -> Virtual Ride
+        case 6:  sp = 5;  ss = 17; break;
+        case 83: sp = 5;  ss = 18; break;
+        case 11: sp = 17; break;
+        case 12: sp = 11; break;
+        case 85: sp = 11; break;
+        case 20: case 80: sp = 13; break;
+        case 21: sp = 14; break;
+        case 22: case 78: sp = 12; break;
+        case 15: sp = 15; break;
+        case 71: sp = 15; ss = 14; break;
+        case 14: case 72: case 89: sp = 19; break;
+        case 16: case 74: sp = 16; break;
+        case 23: case 87: case 90: sp = 4; ss = 20; break;
+        case 18: case 9: sp = 4; ss = 26; break;
+        case 64: sp = 4; ss = 15; break;
+        case 10: case 79: sp = 4; ss = 21; break;
+        case 95: sp = 4; break;
+        default: sp = 0; break;
     }
+    if (sub_sport) *sub_sport = ss;
+    return sp;
 }
 
 static void chan_write(Buf &b, int idx, long v) {
@@ -403,8 +421,9 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     uint32_t end_g   = recs.back().t_g;
     uint32_t dur_ms  = h.duration;
     uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
+    uint8_t  sub_sport = 0;
     uint8_t  sport   = to_fit_sport(h.activity_name);
-    if (sport == 0) sport = suunto_byte_to_fit_sport(h.activity_type);
+    if (sport == 0) sport = suunto_id_to_fit_sport(h.activity_type, &sub_sport);
 
     Buf b;
     b.def(0, 0, {{0,1,FE},{1,2,FU16},{2,2,FU16},{4,4,FU32}});
@@ -412,9 +431,9 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     b.def(1, 34, {{253,4,FU32},{1,2,FU16},{2,1,FE},{3,1,FE},{4,1,FE}});
     b.u8(1); b.u32(end_g); b.u16(1); b.u8(0); b.u8(26); b.u8(1);
     b.def(2, 18, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
-                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{0,1,FE},{1,1,FE}});
+                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}});
     b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
-    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(8); b.u8(1);
+    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(sub_sport); b.u8(8); b.u8(1);
     b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
     b.u8(3); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dist_cm); b.u8(9); b.u8(1);
 
