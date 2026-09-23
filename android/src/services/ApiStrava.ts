@@ -124,57 +124,37 @@ async function getValidToken(): Promise<string> {
   return token.access_token;
 }
 
-// ─── Mapping type d'activité → sport Strava ───────────────────────────────────
-
-function mapActivityType(rawType: string): string {
-  const t = rawType.toLowerCase();
-  if (t.includes('course') || t.includes('orientation') || t.includes('marche') || t.includes('trail')) {
-    return 'Run';
-  }
-  if (t.includes('vtt') || t.includes('cycl')) {
-    return 'Ride';
-  }
-  if (t.includes('ski de fond') || t.includes('nordique')) {
-    return 'NordicSki';
-  }
-  if (t.includes('ski alpin')) {
-    return 'AlpineSki';
-  }
-  if (t.includes('natation') || t.includes('swim')) {
-    return 'Swim';
-  }
-  if (t.includes('kayak')) {
-    return 'Kayaking';
-  }
-  return 'Workout';
-}
-
-// ─── Upload GPX vers Strava ───────────────────────────────────────────────────
+// ─── Upload FIT vers Strava ───────────────────────────────────────────────────
 
 /**
- * Uploade un fichier GPX vers Strava et attend la fin du traitement.
- * Retourne l'URL de l'activité sur Strava.
+ * Uploads a FIT file to Strava and waits for processing to finish. Strava reads the sport from
+ * the FIT itself (we no longer guess a Strava type from the activity name). Returns the activity
+ * URL on Strava.
  */
-export async function uploadGpxToStrava(
-  gpxPath: string,
-  activityName: string,
-  activityType: string,
+export async function uploadFitToStrava(
+  fitPath: string,
+  activityName?: string,
 ): Promise<StravaUploadResult> {
   const accessToken   = await getValidToken();
-  const stravaType    = mapActivityType(activityType);
-  const fileUri       = gpxPath.startsWith('file://') ? gpxPath : `file://${gpxPath}`;
-  const fileName      = gpxPath.split('/').pop() ?? 'activity.gpx';
+  const fileUri       = fitPath.startsWith('file://') ? fitPath : `file://${fitPath}`;
+  const fileName      = fitPath.split('/').pop() ?? 'activity.fit';
 
-  // 1. Soumettre le GPX via multipart/form-data
+  // Upload the FIT, not the GPX. Strava reads the sport (and sub_sport - so an indoor ride comes
+  // in as a Virtual Ride) straight from the FIT, which fixes two things at once: the old GPX path
+  // carried no sport (Strava guessed "Workout"), and an indoor move has no GPS track for a GPX to
+  // even hold - the FIT is the only thing that represents it. Trainer flag set for indoor/virtual
+  // moves so Strava marks them as such.
+  const indoor = /indoor|virtual|trainer|treadmill|home\s*trainer/i.test(activityName || '');
+
   const formData = new FormData();
   formData.append('file', {
     uri:  fileUri,
-    type: 'application/gpx+xml',
+    type: 'application/vnd.ant.fit',
     name: fileName,
   } as any);
-  formData.append('data_type',     'gpx');
-  formData.append('activity_type', stravaType);
-  formData.append('name',          activityName || fileName.replace('.gpx', ''));
+  formData.append('data_type', 'fit');
+  formData.append('name',      activityName || fileName.replace('.fit', ''));
+  if (indoor) formData.append('trainer', '1');
 
   const uploadRes = await fetch(`${STRAVA_API_BASE}/uploads`, {
     method: 'POST',

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Linking } from 'react-native';
 import { shareFile, saveToDownloads } from '../native/AmbitUsbModule';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
-import { uploadGpxToStrava, isAuthenticated as stravaIsAuthenticated } from '../services/ApiStrava';
+import { uploadFitToStrava, isAuthenticated as stravaIsAuthenticated } from '../services/ApiStrava';
 import { getRunalyzeApiKey, uploadFitToRunalyze } from '../services/ApiRunalyze';
 import { getIntervalsIcuCredentials, uploadFitToIntervalsIcu } from '../services/ApiIntervalsIcu';
 import { pushGearToIntervals } from '../services/GearAutoAssign';
@@ -547,11 +547,10 @@ export default function MapScreen() {
       }
       setExporting(true);
       try {
-        const result = await uploadGpxToStrava(
-          activity.gpx_path,
-          activity.id,
-          activity.activity_type,
-        );
+        // Upload the FIT (correct sport + indoor moves), not the GPX. getFitFile prefers the
+        // native FIT and falls back to converting the GPX for older outdoor moves.
+        const fitPath = await getFitFile(activity.gpx_path, activity);
+        const result = await uploadFitToStrava(fitPath, activity.activity_type);
         Alert.alert(
           'Strava',
           t.stravaSuccess,
