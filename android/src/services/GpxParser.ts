@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
+import { ACTIVITY_TYPES } from './ActivityColors';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,26 +53,14 @@ function extTag(gpxXml: string, tag: string): number {
   return m ? parseFloat(m[1]) : 0;
 }
 
-// ─── Suunto sport_type uint8 → readable name ──────────────────────────────────
-// Source: AmbitSync / openambit (MoveInfoActivity.java) + known Suunto codes
-const SPORT_TYPE_MAP: Record<number, string> = {
-  0x03: 'Running',
-  0x04: 'Cycling',
-  0x05: 'Mountain biking',
-  0x07: 'Skating',
-  0x0a: 'Hiking',
-  0x0b: 'Walking',
-  0x13: 'Alpine skiing',
-  0x14: 'Snowboarding',
-  0x15: 'Cross-country skiing',
-  0x45: 'Ice skating',
-  0x49: 'Mountaineering',
-  0x4a: 'Orienteering',   // Ambit 3+
-  0x4b: 'Orienteering',   // Ambit 1
-  0x4d: 'Ski touring',
-  0x51: 'Trail running',
-  0x52: 'Swimming',
-};
+// The log header's <sport_type> is the watch's Suunto activity id (the sport mode's id from
+// assets/activity_types.json - 17 = Indoor cycling, 93 = Treadmill, ...). Name it from that same
+// authoritative table (ACTIVITY_TYPES), like the desktop does. The previous hand-rolled map here
+// was a different, older scheme that was off by one on the ski sports and had no indoor cycling,
+// so those moves were mislabelled or blank (found 2026-09-23 alongside the FIT-sport fix).
+function sportTypeName(code: number): string {
+  return ACTIVITY_TYPES[code]?.name ?? '';
+}
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
@@ -205,7 +194,7 @@ export function extractGpxMetadata(gpxXml: string): GpxMetadata {
       // 2. Regex sur la string brute — plus fiable que le parser pour les extensions
       const m = gpxXml.match(/<sport_type>(\d+)<\/sport_type>/);
       const code = m ? parseInt(m[1], 10) : -1;
-      return SPORT_TYPE_MAP[code] ?? '';
+      return sportTypeName(code);
     })(),
     energyKcal:  extTag(gpxXml, 'energy'),
     avgHr:       extTag(gpxXml, 'avg_hr'),
