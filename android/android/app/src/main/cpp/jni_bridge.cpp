@@ -422,22 +422,46 @@ static uint8_t to_fit_sport(const char *name) {
     return 0;
 }
 
-// Suunto sport_type byte -> FIT sport enum. Most watch moves store an empty activity_name and
-// carry only this byte, so name matching alone leaves them generic. Byte values match the app's
-// SPORT_TYPE_MAP (GpxParser.ts) / openambit. Used as the fallback when the name gives nothing.
-static uint8_t suunto_byte_to_fit_sport(uint8_t b) {
-    switch (b) {
-        case 0x03: case 0x51: return 1;    // Running, Trail running
-        case 0x04: case 0x05: return 2;    // Cycling, Mountain biking
-        case 0x0a: return 17;              // Hiking
-        case 0x0b: return 11;              // Walking
-        case 0x13: return 13;              // Alpine skiing
-        case 0x14: return 14;              // Snowboarding
-        case 0x15: case 0x4d: return 12;   // Cross-country skiing, Ski touring
-        case 0x49: return 16;              // Mountaineering
-        case 0x52: return 5;               // Swimming
-        default:   return 0;               // generic
+// Suunto activity id (the header's activity_type byte = the sport mode's id from
+// assets/activity_types.json - 17 = Indoor cycling, 93 = Treadmill, ...) -> FIT sport, filling
+// *sub_sport. Most watch moves have an empty activity_name and only this id, so without a mapping
+// they land as FIT "generic", which intervals.icu files as *strength training* (forum report: an
+// Ambit2 indoor ride showed up as strength). Real ids + a sub_sport make an indoor ride upload as
+// a Virtual Ride. Twin of the desktop _SUUNTO_ID_TO_FIT. Unlisted ids -> generic (0,0).
+static uint8_t suunto_id_to_fit_sport(uint8_t id, uint8_t *sub_sport) {
+    // FIT sub_sport codes: 1 treadmill, 3 trail, 6 indoor_cycling, 8 mountain, 14 indoor_rowing,
+    // 15 elliptical, 17 lap_swimming, 18 open_water, 20 strength, 21 flexibility, 26 cardio,
+    // 58 virtual_activity.
+    uint8_t ss = 0, sp = 0;
+    switch (id) {
+        case 3:  sp = 1;  break;            // Running
+        case 82: sp = 1;  ss = 3;  break;   // Trail running
+        case 93: sp = 1;  ss = 1;  break;   // Treadmill
+        case 84: sp = 11; break;            // Nordic walking
+        case 4:  sp = 2;  break;            // Cycling
+        case 5:  sp = 2;  ss = 8;  break;   // Mountain biking
+        case 17: sp = 2;  ss = 58; break;   // Indoor cycling -> Virtual Ride
+        case 6:  sp = 5;  ss = 17; break;   // Pool swimming
+        case 83: sp = 5;  ss = 18; break;   // Open-water swimming
+        case 11: sp = 17; break;            // Trekking -> hiking
+        case 12: sp = 11; break;            // Walking
+        case 85: sp = 11; break;            // Snowshoeing
+        case 20: case 80: sp = 13; break;   // Alpine skiing / Telemark
+        case 21: sp = 14; break;            // Snowboarding
+        case 22: case 78: sp = 12; break;   // Cross-country skiing / Ski touring
+        case 15: sp = 15; break;            // Rowing
+        case 71: sp = 15; ss = 14; break;   // Indoor rowing
+        case 14: case 72: case 89: sp = 19; break;  // Kayak / Canoe / SUP
+        case 16: case 74: sp = 16; break;   // Climbing / Mountaineering
+        case 23: case 87: case 90: sp = 4; ss = 20; break;  // Weights / Kettlebell / Crossfit
+        case 18: case 9: sp = 4; ss = 26; break;            // Circuit / Aerobics
+        case 64: sp = 4; ss = 15; break;    // Crosstrainer
+        case 10: case 79: sp = 4; ss = 21; break;           // Yoga/Pilates / Stretching
+        case 95: sp = 4; break;             // Indoor training
+        default: sp = 0; break;             // generic
     }
+    if (sub_sport) *sub_sport = ss;
+    return sp;
 }
 
 static void chan_write(Buf &b, int idx, long v) {
@@ -585,8 +609,9 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     uint32_t end_g   = recs.back().t_g;
     uint32_t dur_ms  = h.duration;
     uint32_t dist_cm = (uint32_t)((double)h.distance * 100.0);
+    uint8_t  sub_sport = 0;
     uint8_t  sport   = to_fit_sport(h.activity_name);   // categorise the uploaded FIT
-    if (sport == 0) sport = suunto_byte_to_fit_sport(h.activity_type);  // fall back to the byte
+    if (sport == 0) sport = suunto_id_to_fit_sport(h.activity_type, &sub_sport);  // fall back to the id
 
     Buf b;
     // file_id (local 0, global 0)
@@ -597,9 +622,9 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     b.u8(1); b.u32(end_g); b.u16(1); b.u8(0); b.u8(26); b.u8(1);
     // session (local 2, global 18)
     b.def(2, 18, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
-                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{0,1,FE},{1,1,FE}});
+                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}});
     b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
-    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(8); b.u8(1);
+    b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(sub_sport); b.u8(8); b.u8(1);
     // lap (local 3, global 19)
     b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
     b.u8(3); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dist_cm); b.u8(9); b.u8(1);

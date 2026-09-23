@@ -888,29 +888,43 @@ def _to_fit_sport(activity_type):
     return 0  # generic
 
 
-# Suunto sport_type byte -> FIT sport enum. Many watch moves store activity_name = "" and carry
-# only this byte, so name-based mapping alone leaves them "generic". Byte values from the same
-# table the app uses to label them (SPORT_TYPE_MAP in GpxParser.ts / openambit MoveInfoActivity).
-_SUUNTO_BYTE_TO_FIT_SPORT = {
-    0x03: 1, 0x51: 1,          # Running, Trail running
-    0x04: 2, 0x05: 2,          # Cycling, Mountain biking
-    0x0a: 17,                  # Hiking
-    0x0b: 11,                  # Walking
-    0x13: 13,                  # Alpine skiing
-    0x14: 14,                  # Snowboarding
-    0x15: 12, 0x4d: 12,        # Cross-country skiing, Ski touring
-    0x49: 16,                  # Mountaineering
-    0x52: 5,                   # Swimming
+# Suunto activity id (the header's activity_type byte = the sport mode's id from
+# assets/activity_types.json - 17 = Indoor cycling, 93 = Treadmill, ...; the desktop names moves
+# from this same table) -> (FIT sport, FIT sub_sport). Most watch moves store an empty
+# activity_name and carry only this id, so without a mapping they land as FIT "generic", which
+# intervals.icu then files as *strength training* (the forum report, 2026-09-23: an Ambit2
+# indoor-riding move showed up as strength). Using the real ids (NOT the older, off-by-one
+# GpxParser.SPORT_TYPE_MAP) and a sub_sport, an indoor ride now uploads as a Virtual Ride.
+#   FIT sub_sport codes used below:
+_SS_TREADMILL, _SS_MTB, _SS_INDOOR_CYC, _SS_ELLIPTICAL = 1, 8, 6, 15
+_SS_LAP_SWIM, _SS_OPEN_WATER, _SS_INDOOR_ROW, _SS_STRENGTH = 17, 18, 14, 20
+_SS_FLEX, _SS_TRAIL, _SS_CARDIO, _SS_VIRTUAL = 21, 3, 26, 58
+# FIT sport codes: 1 running, 2 cycling, 4 fitness_equipment, 5 swimming, 10 training,
+# 11 walking, 12 xc_skiing, 13 alpine_skiing, 14 snowboarding, 15 rowing, 16 mountaineering,
+# 17 hiking, 19 paddling. Unlisted ids -> (0, 0) generic.
+_SUUNTO_ID_TO_FIT = {
+    3:  (1, 0), 82: (1, _SS_TRAIL), 93: (1, _SS_TREADMILL), 84: (11, 0),   # run / trail / treadmill / nordic walk
+    4:  (2, 0), 5:  (2, _SS_MTB), 17: (2, _SS_VIRTUAL),                     # cycling / MTB / indoor cycling
+    6:  (5, _SS_LAP_SWIM), 83: (5, _SS_OPEN_WATER),                          # pool / open-water swimming
+    11: (17, 0), 12: (11, 0), 85: (11, 0),                                  # trekking(->hiking) / walking / snowshoe
+    20: (13, 0), 80: (13, 0), 21: (14, 0), 22: (12, 0), 78: (12, 0),        # alpine/telemark / snowboard / xc / ski-touring
+    15: (15, 0), 71: (15, _SS_INDOOR_ROW),                                  # rowing / indoor rowing
+    14: (19, 0), 72: (19, 0), 89: (19, 0),                                  # kayak / canoe / SUP
+    16: (16, 0), 74: (16, 0),                                               # climbing / mountaineering
+    23: (4, _SS_STRENGTH), 87: (4, _SS_STRENGTH), 90: (4, _SS_STRENGTH),    # weights / kettlebell / crossfit
+    18: (4, _SS_CARDIO), 9: (4, _SS_CARDIO), 64: (4, _SS_ELLIPTICAL),       # circuit / aerobics / crosstrainer
+    10: (4, _SS_FLEX), 79: (4, _SS_FLEX), 95: (4, 0),                       # yoga/pilates / stretching / indoor training
 }
 
 
 def _fit_sport(header):
-    """FIT sport for a move: prefer its name (catches custom mode names), fall back to the watch's
-    sport_type byte when the name gives nothing (most watch moves have an empty name)."""
+    """(FIT sport, FIT sub_sport) for a move: prefer its name (catches custom mode names, sport
+    only), fall back to the watch's activity id when the name gives nothing (most watch moves have
+    an empty name). See _SUUNTO_ID_TO_FIT."""
     sport = _to_fit_sport(header.get("activity_name") or "")
-    if sport == 0:
-        sport = _SUUNTO_BYTE_TO_FIT_SPORT.get(header.get("activity_type"), 0)
-    return sport
+    if sport != 0:
+        return sport, 0
+    return _SUUNTO_ID_TO_FIT.get(header.get("activity_type"), (0, 0))
 
 
 # Optional native-stream targets a logged Suunto App output can be mapped onto, so it rides in
@@ -1016,7 +1030,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     dist_m = header["distance"]
     d_plus = round(header["ascent"])
     d_minus = round(header["descent"])
-    sport = _fit_sport(header)
+    sport, sub_sport = _fit_sport(header)
 
     data = bytearray()
 
@@ -1041,7 +1055,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     # session (local 2, global 18)
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
-        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (0, 1, _E), (1, 1, _E),
+        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
     ])
     _u8(data, 2)
     _u16(data, 0)                             # message_index
@@ -1053,6 +1067,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u16(data, d_plus)
     _u16(data, d_minus)
     _u8(data, sport)
+    _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
     _u8(data, 1)          # event_type = 1 (stop)
 
@@ -1244,7 +1259,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     dist_m = header["distance"]
     d_plus = round(header["ascent"])
     d_minus = round(header["descent"])
-    sport = _fit_sport(header)
+    sport, sub_sport = _fit_sport(header)
 
     data = bytearray()
 
@@ -1269,7 +1284,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     # session (local 2, global 18)
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
-        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (0, 1, _E), (1, 1, _E),
+        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
     ])
     _u8(data, 2)
     _u16(data, 0)                             # message_index
@@ -1281,6 +1296,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u16(data, d_plus)
     _u16(data, d_minus)
     _u8(data, sport)
+    _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
     _u8(data, 1)          # event_type = 1 (stop)
 
