@@ -43,6 +43,24 @@ Matching rule (`garminManualUrl` on desktop, `garminManualUrlFor()` on Android):
 description containing "22x" or "32x" gets the second guide; everything else in the eTrex
 10/20/30 generation gets the first.
 
+## Bike computers (activity import only)
+
+Head units whose recorded rides Sommet imports into the library (source-tagged per brand) and,
+when the intervals.icu export scope is "all", uploads to intervals.icu as the device's own FIT.
+Import only - Sommet does not configure these devices.
+
+| Device | Source tag | Transport | Notes |
+|---|---|---|---|
+| Garmin Edge | `edge` | USB mass storage (MTP / gvfs) | `Garmin/Activities/*.fit`; Linux gvfs path (`tools/mtp_import.py`) |
+| Hammerhead Karoo | `karoo` | USB mass storage (MTP / gvfs) | `FitFiles/*.fit`; MTP enabled in the Karoo's dev options |
+| Magene C406 Pro | `c406` | **Bluetooth LE** (must bond) | no USB data mode; `tools/magene_import.py`, protocol in [`magene_c406_protocol.md`](magene_c406_protocol.md) |
+
+The Magene is found by an on-demand Bluetooth scan (behind the experimental Bluetooth toggle,
+with the watch's own BLE pairing) rather than the USB poll the Edge/Karoo use, and it **must be
+BLE-bonded** or it stays on its "please pair" screen - see the protocol doc. Ride sport type
+(Cycling vs Indoor Cycling) comes from the FIT's `sub_sport`, so it matches on intervals.icu by
+construction.
+
 ## Not yet in `manualslinks` / not linked in-app
 
 Nothing currently known to be missing - if a new device gets added to this project (a new
