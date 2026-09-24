@@ -784,7 +784,9 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # holding the watch lock across a multi-minute ride pull needlessly blocked every watch poll
     # behind it, which surfaced as "server didn't reply" with several devices plugged (André,
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
-    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py"}
+    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py",
+                     "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
+                     "intervals_athlete.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     if lock is not None:
         lock.acquire()
@@ -1353,6 +1355,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_device_select(body)
         elif self.path == "/api/mtp/import":
             self._handle_mtp_import(body)
+        elif self.path == "/api/bryton/profile/compare":
+            self._handle_bryton_profile_compare(body)
+        elif self.path == "/api/bryton/profile/apply":
+            self._handle_bryton_profile_apply(body)
+        elif self.path == "/api/bryton/workout":
+            self._handle_bryton_workout(body)
+        elif self.path == "/api/bryton/workout/native":
+            self._handle_bryton_workout_native(body)
         elif self.path == "/api/magene/import":
             self._handle_magene_import(body)
         elif self.path == "/api/time/sync":
@@ -1669,9 +1679,10 @@ class Handler(BaseHTTPRequestHandler):
                                    "raw_output": out})
 
     def _handle_mtp_devices(self):
-        """GET /api/mtp/devices - bike computers (Garmin Edge, Hammerhead Karoo) reachable over
-        MTP right now, with how many recorded rides each has. tools/mtp_import.py --list.
-        Linux-only in practice (uses gvfs/gio); returns an empty list elsewhere, not an error."""
+        """GET /api/mtp/devices - bike computers reachable over USB right now (Garmin Edge and
+        Hammerhead Karoo over MTP; Bryton Aero 60 as a mounted mass-storage drive), with how many
+        recorded rides each has. tools/mtp_import.py --list. Linux-only in practice (MTP uses
+        gvfs/gio); returns an empty list elsewhere, not an error."""
         code, out, err = run_tool("mtp_import.py", ["--list"])
         try:
             payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
@@ -1682,8 +1693,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_mtp_import(self, body=None):
         """Pull ride .fit files off the connected bike computer(s) and decode each to a summary +
         GPX track (tools/mtp_import.py + fit_decode.py). Returns activities ready for the local
-        library, tagged by device kind ('edge'/'karoo'), external_id = the .fit filename (unique
-        per ride). Read-only on the device (André, 2026-09-04).
+        library, tagged by device kind ('edge'/'karoo'/'bryton'), external_id = the .fit filename
+        (unique per ride). Read-only on the device (André, 2026-09-04).
 
         GET /api/mtp/import[?since=NAME]  - pull ALL rides (optionally newer than NAME).
         POST /api/mtp/import {"files":[{"kind","name"}]} - pull ONLY those files (incremental
@@ -1731,7 +1742,7 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     fit_b64 = ""
                 activities.append({
-                    "kind": item["kind"],           # 'edge' | 'karoo' - the library source tag
+                    "kind": item["kind"],           # 'edge'|'karoo'|'bryton' - library source tag
                     "external_id": item["name"],    # the .fit filename, unique per ride
                     "sport": summary.get("sport"),
                     "subSportCode": summary.get("subSportCode"),
@@ -1744,6 +1755,178 @@ class Handler(BaseHTTPRequestHandler):
                     "fit": fit_b64,                  # the device's own FIT, for intervals.icu upload
                 })
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
+
+    # ── Bryton Aero 60 athlete-profile reconciliation ────────────────────────────────────────
+    # The Aero 60 keeps FTP/LTHR/MaxHR/MAP/weight/... in System/Profile.bin (tools/bryton_profile.py,
+    # HW-proven writable). intervals.icu is André's source of truth for FTP/LTHR/MaxHR/weight
+    # (tools/intervals_athlete.py). "compare" diffs the two so the UI can ask which side is right;
+    # "apply" writes the chosen values to the device and/or back to intervals.icu.
+    _BRYTON_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "weight", "height", "gender")
+
+    def _bryton_mount(self):
+        """The mounted Bryton's path right now, or None. Reads the same discovery the device list
+        uses (tools/mtp_import.py --list), picking the kind == 'bryton' entry."""
+        code, out, _err = run_tool("mtp_import.py", ["--list"])
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+        except (json.JSONDecodeError, IndexError):
+            return None
+        for dev in payload.get("devices", []) or []:
+            if dev.get("kind") == "bryton" and dev.get("mount"):
+                return dev["mount"]
+        return None
+
+    def _handle_bryton_profile_compare(self, body):
+        """POST /api/bryton/profile/compare {athlete_id?, api_key?}. Returns the device profile,
+        the intervals.icu thresholds (when creds are given), and the list of fields that differ."""
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        code, out, err = run_tool("bryton_profile.py", ["read", mount])
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": "could not read device profile", "stderr": err})
+            return
+        device = json.loads(out)
+
+        intervals = None
+        aid, akey = (body or {}).get("athlete_id"), (body or {}).get("api_key")
+        if aid and akey:
+            c2, o2, _e2 = run_tool("intervals_athlete.py", ["get", str(aid), str(akey)])
+            if c2 == 0:
+                intervals = json.loads(o2)
+
+        diff = []
+        if intervals:
+            for f in self._BRYTON_COMPARE_FIELDS:
+                dv, iv = device.get(f), intervals.get(f)
+                if dv is None or iv is None:
+                    continue
+                # weight is a float; treat <0.5 kg apart as equal so 91.2 vs 92 can still show
+                same = abs(dv - iv) < 0.5 if f == "weight" else dv == iv
+                if not same:
+                    diff.append({"field": f, "device": dv, "intervals": iv})
+        self._send_json(200, {"ok": True, "mount": mount, "device": device,
+                              "intervals": intervals, "diff": diff})
+
+    def _handle_bryton_profile_apply(self, body):
+        """POST /api/bryton/profile/apply {direction, fields, athlete_id?, api_key?}.
+        direction 'to_device' writes fields into Profile.bin; 'to_intervals' pushes FTP/LTHR/
+        MaxHR/weight back to intervals.icu. `fields` is {name: value}."""
+        body = body or {}
+        direction = body.get("direction")
+        fields = body.get("fields") or {}
+        if not fields:
+            self._send_json(400, {"ok": False, "error": "no fields to apply"})
+            return
+
+        if direction == "to_device":
+            mount = self._bryton_mount()
+            if not mount:
+                self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+                return
+            args = ["write", mount]
+            for name in ("ftp", "lthr", "max_hr", "map", "weight", "height", "gender", "age", "rest_hr"):
+                if name in fields and fields[name] is not None:
+                    args += [f"--{name.replace('_', '-')}", str(fields[name])]
+            code, out, err = run_tool("bryton_profile.py", args)
+            if code != 0:
+                self._send_json(502, {"ok": False, "error": err.strip() or "device write failed"})
+                return
+            self._send_json(200, {"ok": True, "written": out.strip()})
+            return
+
+        if direction == "to_intervals":
+            aid, akey = body.get("athlete_id"), body.get("api_key")
+            if not aid or not akey:
+                self._send_json(400, {"ok": False, "error": "intervals.icu not connected"})
+                return
+            args = ["put", str(aid), str(akey)]
+            for name in ("ftp", "lthr", "max_hr", "weight"):
+                if name in fields and fields[name] is not None:
+                    args += [f"--{name.replace('_', '-')}", str(fields[name])]
+            code, out, err = run_tool("intervals_athlete.py", args)
+            if code != 0:
+                self._send_json(502, {"ok": False, "error": err.strip() or "intervals write failed"})
+                return
+            self._send_json(200, {"ok": True, "sent": out.strip()})
+            return
+
+        self._send_json(400, {"ok": False, "error": f"unknown direction {direction!r}"})
+
+    @staticmethod
+    def _bryton_plan_path(mount: str, name: str) -> str:
+        """Sanitise a workout name into a .fit path under the device's planned-workout folder."""
+        safe = "".join(c for c in (name or "Workout") if c.isalnum() or c in " -_").strip()[:40]
+        folder = os.path.join(mount, "System", "Plan", "Cycling")
+        return os.path.join(folder, (safe or "Workout") + ".fit")
+
+    def _handle_bryton_workout(self, body):
+        """POST /api/bryton/workout {workout, name?}. Convert one workout in the project schema
+        (absolute watts/bpm) to a Bryton .fit and write it to System/Plan/Cycling. The watts/bpm ->
+        % conversion uses the DEVICE'S OWN FTP/Max HR/LTHR (read from Profile.bin) so the target the
+        watch computes matches what was planned. tools/bryton_from_intervals.py + bryton_workout.py."""
+        body = body or {}
+        workout = body.get("workout")
+        if not workout:
+            self._send_json(400, {"ok": False, "error": "no workout"})
+            return
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        code, out, _err = run_tool("bryton_profile.py", ["read", mount])
+        prof = json.loads(out) if code == 0 else {}
+        name = body.get("name") or workout.get("name") or "Workout"
+        out_path = self._bryton_plan_path(mount, name)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+            json.dump(workout, tf)
+            tmp = tf.name
+        try:
+            args = [tmp, "-o", out_path]
+            for flag, key in (("--ftp", "ftp"), ("--max-hr", "max_hr"), ("--lthr", "lthr")):
+                if prof.get(key):
+                    args += [flag, str(prof[key])]
+            code, out, err = run_tool("bryton_from_intervals.py", args)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": err.strip() or "conversion failed"})
+            return
+        self._send_json(200, {"ok": True, "file": os.path.basename(out_path), "detail": out.strip()})
+
+    def _handle_bryton_workout_native(self, body):
+        """POST /api/bryton/workout/native {workout}. `workout` is already a Bryton-native dict
+        ({name, unit, based_on, interval_mode, steps:[{intensity,duration,low,high}]}) - what the
+        Bryton Workout Builder produces (targets typed straight in %/rpm/km-h). Encoded as-is and
+        written to System/Plan/Cycling. tools/bryton_workout.py encode."""
+        body = body or {}
+        workout = body.get("workout")
+        if not workout or not workout.get("steps"):
+            self._send_json(400, {"ok": False, "error": "empty workout"})
+            return
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        out_path = self._bryton_plan_path(mount, workout.get("name"))
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+            json.dump(workout, tf)
+            tmp = tf.name
+        try:
+            code, out, err = run_tool("bryton_workout.py", ["encode", tmp, out_path])
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": err.strip() or "encode failed"})
+            return
+        self._send_json(200, {"ok": True, "file": os.path.basename(out_path)})
 
     def _handle_magene_devices(self):
         """GET /api/magene/devices - Magene C406 (Pro) bike computers advertising over BLE right

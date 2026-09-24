@@ -31,10 +31,13 @@ PageFlickable {
         root.refreshBikeComputers();
     }
 
-    // --- Bike computer over USB: Garmin Edge / Hammerhead Karoo (André, 2026-09-04) ---
-    // Detected by polling the backend's /api/mtp/devices (Linux/gvfs MTP). Shown on Home like
-    // any other connected device; its rides import into the library on Sync, reusing
-    // ActivityService.importFromBikeComputers(). No account, no settings.
+    // --- Bike computer over USB: Garmin Edge / Hammerhead Karoo (MTP) + Bryton Aero 60 (mass
+    // storage) (André, 2026-09-04; Bryton added 2026-09-24) ---
+    // Detected by polling the backend's /api/mtp/devices, which covers both transports: gvfs/MTP
+    // for the Garmins/Hammerhead and a plain mounted-drive scan for the Bryton (whose rides are
+    // .fit at the volume root). Shown on Home like any other connected device; its rides import
+    // into the library on Sync, reusing ActivityService.importFromBikeComputers() by kind. No
+    // account, no settings.
     property var mtpBikeComputers: []
     // --- Bike computer over BLE: Magene C406 Pro (André, 2026-09-24) ---
     // The C406 has no USB data mode, so it's found by an on-demand Bluetooth scan (the "Search
@@ -511,6 +514,7 @@ PageFlickable {
                                 if (root.activeBike.kind === "edge") return qsTr("Garmin Edge");
                                 if (root.activeBike.kind === "karoo") return qsTr("Hammerhead Karoo");
                                 if (root.activeBike.kind === "c406") return qsTr("Magene C406 Pro");
+                                if (root.activeBike.kind === "bryton") return qsTr("Bryton Aero 60");
                                 return "";
                             }
                                 font.pixelSize: Theme.fontSizeTitle; font.bold: true
@@ -557,6 +561,21 @@ PageFlickable {
                                 else
                                     ActivityService.importFromBikeComputers();
                             }
+                        }
+                        RoundedButton {
+                            // Bryton only: its FTP/LTHR/Max HR/weight live in Profile.bin and can
+                            // drift from intervals.icu (André's source of truth). Opens the
+                            // reconcile dialog to compare and write the right values both ways.
+                            visible: root.activeBike && root.activeBike.kind === "bryton"
+                            text: qsTr("Sync profile")
+                            onClicked: brytonProfileDialog.open()
+                        }
+                        RoundedButton {
+                            // Bryton only: build a workout on this computer (like the Bryton app)
+                            // and send it to the device's planned-workout list.
+                            visible: root.activeBike && root.activeBike.kind === "bryton"
+                            text: qsTr("Workout Builder")
+                            onClicked: NavBus.navigate("brytonWorkoutBuilder")
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
@@ -632,6 +651,10 @@ PageFlickable {
                             onTriggered: root.scanMagene()
                         }
                     }
+
+                    // Bryton profile <-> intervals.icu reconciliation dialog (opened by "Sync
+                    // profile" on the Bryton device card above).
+                    BrytonProfileDialog { id: brytonProfileDialog }
 
                     // Shared status line for both flows (only one runs at a time).
                     Text {

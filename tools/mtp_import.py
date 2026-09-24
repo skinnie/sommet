@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
-"""Detect a bike computer connected over MTP (Garmin Edge, Hammerhead Karoo) and pull its
-recorded activities (.fit files) off it - rough direct-USB import, no settings, read-only.
+"""Detect a bike computer connected over USB and pull its recorded activities (.fit files) off
+it - rough direct-USB import, no settings, read-only. Two transports, one device list:
 
-    ./tools/mtp_import.py --list                 # JSON: which MTP bike computers are connected
+  * MTP (Garmin Edge, Hammerhead Karoo): gvfs via `gio` - auto-mounts, no root, no install
+    (confirmed against a real Edge 1040 Solar, 2026-09-04).
+  * Mass storage (Bryton Aero 60 and its siblings): the unit shows up as a plain USB drive that
+    udisks mounts under /media|/run/media (or /Volumes on macOS), so it's a normal filesystem
+    copy - no gio needed (confirmed against a real Aero 60, 2026-09-24).
+
+    ./tools/mtp_import.py --list                 # JSON: which USB bike computers are connected
     ./tools/mtp_import.py --pull <dest-dir>      # copy every activity .fit into dest-dir
     ./tools/mtp_import.py --pull <dest> --since 2026-09-01-00-00-00.fit   # only newer names
 
-Linux desktop path only for now: uses gvfs via `gio`, which auto-mounts MTP devices with no
-root and no extra install (confirmed against a real Edge 1040 Solar, 2026-09-04). libmtp
-(mtp-detect/mtp-files) would be the cross-platform route for Windows/macOS later - kept out
-here so this stays dependency-free on the box it runs on.
+Linux desktop path in practice (macOS mass-storage paths are included for parity; MTP there
+would need libmtp). Kept dependency-free on the box it runs on.
 
 Activity locations, confirmed/observed:
   * Garmin Edge  : "<mount>/<store>/Garmin/Activities/*.fit"   (store e.g. "Internal Storage")
   * Hammerhead   : "<mount>/<store>/FitFiles/*.fit"            (Karoo, MTP enabled in dev options)
-Both are timestamp-named (YYYY-MM-DD-HH-MM-SS.fit), so a plain name sort is chronological and
---since is a simple string compare.
+  * Bryton Aero  : "<mount>/*.fit"  (rides sit at the volume ROOT, YYMMDDHHMMSS.fit; PlanTrip/
+    System/ hold routes, planned workouts and tests - NOT rides, so root-only is the rule).
+The Garmin/Hammerhead names are YYYY-MM-DD-HH-MM-SS.fit; Bryton's are YYMMDDHHMMSS.fit. Either
+way a plain name sort is chronological within one device, and --since is a string compare.
 """
 
 import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -79,6 +86,80 @@ def _activities_dir(mount_path, rel):
     return None
 
 
+# --- Mass-storage bike computers (Bryton Aero 60) --------------------------------------------
+# These aren't MTP: the unit exposes a plain USB drive, so udisks/Finder mounts it as a real
+# filesystem and we read it directly (no gio). A device is recognised by a signature that a
+# random USB stick can't fake, so a plugged thumb drive never gets mistaken for a bike computer.
+# (kind, source-tag, fingerprint(mount)->bool, activities_dir(mount)->path).
+MASS_STORAGE_KINDS = [
+    # Bryton: a "System/History" tree is the definitive marker; rides live at the volume root.
+    ("bryton", "bryton",
+     lambda m: (os.path.isdir(os.path.join(m, "System", "History"))
+                or os.path.basename(m.rstrip("/")).upper() == "BRYTON"),
+     lambda m: m),
+]
+
+
+def _mass_storage_mounts():
+    """Every removable volume currently mounted, as (label, mount_path). Covers the Linux udisks
+    roots (/media/<user>, /run/media/<user>, /media) and macOS (/Volumes)."""
+    roots = []
+    user = ""
+    try:
+        import getpass
+        user = getpass.getuser()
+    except Exception:                       # noqa: BLE001 - fall back to a userless scan below
+        user = ""
+    bases = []
+    for base in (f"/media/{user}", f"/run/media/{user}", "/media", "/Volumes"):
+        if base and os.path.isdir(base):
+            bases.append(base)
+    seen = set()
+    for base in bases:
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for name in entries:
+            path = os.path.join(base, name)
+            if path in seen or not os.path.isdir(path):
+                continue
+            seen.add(path)
+            roots.append((name, path))
+    return roots
+
+
+def _mass_storage_devices():
+    devices = []
+    for label, mount in _mass_storage_mounts():
+        for kind, tag, matches, adir_of in MASS_STORAGE_KINDS:
+            try:
+                if not matches(mount):
+                    continue
+            except OSError:
+                continue
+            adir = adir_of(mount)
+            # Rides sit directly in adir; subdirectories (routes, plans, tests) are ignored.
+            try:
+                fits = sorted(f for f in os.listdir(adir)
+                              if f.lower().endswith(".fit")
+                              and os.path.isfile(os.path.join(adir, f)))
+            except OSError:
+                fits = []
+            devices.append({
+                "kind": kind,
+                "host": label,
+                "name": "Bryton Aero 60" if kind == "bryton" else label,
+                "mount": mount,
+                "activitiesDir": adir,
+                "activityCount": len(fits),
+                "files": fits,
+                "transport": "mass",        # copied with shutil, not gio (see pull())
+            })
+            break                           # one kind per mount
+    return devices
+
+
 def discover():
     devices = []
     for host, mount in _mount_roots():
@@ -96,7 +177,9 @@ def discover():
             "activitiesDir": adir or "",
             "activityCount": len(fits),
             "files": fits,          # ride filenames on the device (cheap - listed, not pulled)
+            "transport": "mtp",
         })
+    devices.extend(_mass_storage_devices())
     return devices
 
 
@@ -124,10 +207,14 @@ def pull(dest, since=None, only=None):
             # Namespaced by kind so an Edge and a Karoo file of the same timestamp can't collide.
             out = os.path.join(dest, f"{dev['kind']}__{name}")
             try:
-                # gio copy handles the gvfs backend cleanly; a plain shutil.copy also works on
-                # the fuse path but gio is the documented, retrying route.
-                subprocess.run(["gio", "copy", src, out], check=True,
-                               capture_output=True, timeout=120)
+                if dev.get("transport") == "mass":
+                    # A real local filesystem (Bryton) - a plain copy, no gvfs in the way.
+                    shutil.copy2(src, out)
+                else:
+                    # gio copy handles the gvfs backend cleanly; a plain shutil.copy also works
+                    # on the fuse path but gio is the documented, retrying route.
+                    subprocess.run(["gio", "copy", src, out], check=True,
+                                   capture_output=True, timeout=120)
                 copied.append({"kind": dev["kind"], "name": name, "path": out})
             except (OSError, subprocess.SubprocessError):
                 continue

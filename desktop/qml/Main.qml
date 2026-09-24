@@ -56,6 +56,7 @@ ApplicationWindow {
         gpsTrackPod: "pages/GpsTrackPodPage.qml",
         suuntoT6: "pages/SuuntoT6Page.qml",
         trainingProgram: "pages/TrainingProgramPage.qml",
+        brytonWorkoutBuilder: "pages/BrytonWorkoutBuilderPage.qml",
     })
 
     // Optional local-only extension pages (AppExtensions is empty in the public build; see
