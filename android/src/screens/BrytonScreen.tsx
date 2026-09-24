@@ -100,7 +100,7 @@ export default function BrytonScreen() {
           <Card><Text style={{ color: t.error }}>USB support isn't available in this build.</Text></Card>
         )}
 
-        {status === 'connecting' && (
+        {(status === 'connecting' || status === 'idle') && (
           <Card><View style={{ flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small }}>
             <ActivityIndicator color={t.primary} />
             <Text style={{ color: t.text }}>Connecting to the Bryton over USB…</Text>

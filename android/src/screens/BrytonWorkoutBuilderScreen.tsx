@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TextInput, TouchableOpacity, Pressable } from 'react-native';
 import { useV3Theme, v3Spacing, v3Radius, v3Type } from '../theme/v3';
 import { Button, StatusLine } from '../components/ui/primitives';
 import { Card } from '../components/ui/Card';
@@ -32,13 +32,13 @@ interface Row { intensity: BrytonIntensity; durVal: string; low: string; high: s
 function Seg({ t, selected, label, onPress }:
   { t: any; selected: boolean; label: string; onPress: () => void }) {
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress}
+    <Pressable onPress={onPress}
       style={{
         paddingVertical: 8, paddingHorizontal: 12, borderRadius: v3Radius.small, borderWidth: 1,
         borderColor: selected ? t.primary : t.border, backgroundColor: selected ? t.primary : t.card,
       }}>
-      <Text style={{ color: selected ? t.card : t.text, fontWeight: '600' }}>{label}</Text>
-    </TouchableOpacity>
+      <Text style={{ color: selected ? t.card : t.text, fontSize: v3Type.body, fontWeight: '600' }}>{label}</Text>
+    </Pressable>
   );
 }
 
