@@ -54,6 +54,27 @@ class BrytonUsbModule(private val reactContext: ReactApplicationContext) :
         return DocumentFile.fromTreeUri(reactContext, uri)
     }
 
+    // Non-prompting detection for the Home screen: is a BRYTON volume plugged in, and do we
+    // already hold a usable grant? Never launches the picker.
+    @ReactMethod
+    fun detect(promise: Promise) {
+        var plugged = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val sm = reactContext.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                plugged = sm.storageVolumes.any {
+                    it.isRemovable && it.getDescription(reactContext)?.contains("BRYTON", true) == true
+                }
+            } catch (_: Exception) {}
+        }
+        val root = rootDoc()
+        val granted = root != null && traverse(root, "System/Profile.bin") != null
+        promise.resolve(Arguments.createMap().apply {
+            putBoolean("plugged", plugged || granted)
+            putBoolean("granted", granted)
+        })
+    }
+
     @ReactMethod
     fun connect(promise: Promise) {
         val root = rootDoc()

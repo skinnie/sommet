@@ -15,12 +15,19 @@ import {
 // known paths and en/decode. The Aero 60 must be plugged into the tablet/phone over USB-OTG.
 
 const Native = NativeModules.BrytonUsb as {
+  detect(): Promise<{ plugged: boolean; granted: boolean }>;
   connect(): Promise<{ found: boolean; name: string }>;
   readFile(path: string): Promise<string>;      // base64
   writeFile(path: string, base64: string): Promise<boolean>;
   listDir(path: string): Promise<string[]>;
   disconnect(): Promise<boolean>;
 };
+
+// Non-prompting: is a Bryton plugged in, and do we already hold a usable folder grant?
+export async function detectBryton(): Promise<{ plugged: boolean; granted: boolean }> {
+  if (!isBrytonUsbAvailable() || typeof Native.detect !== 'function') return { plugged: false, granted: false };
+  try { return await Native.detect(); } catch { return { plugged: false, granted: false }; }
+}
 
 const PROFILE_PATH = 'System/Profile.bin';
 const PLAN_DIR = 'System/Plan/Cycling';

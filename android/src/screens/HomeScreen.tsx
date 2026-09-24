@@ -29,6 +29,7 @@ import {
 } from '../native/AmbitBleModule';
 import * as Garmin from '../native/GarminModule';
 import type { GarminConnectResult } from '../native/GarminModule';
+import { detectBryton } from '../services/BrytonUsb';
 import { syncGarminActivities, GarminActivitySyncState } from '../services/GarminActivityService';
 import { kailashDeviceProvider } from '../services/devices/KailashDeviceProvider';
 import { ambitBleDeviceProvider } from '../services/devices/AmbitBleDeviceProvider';
@@ -214,6 +215,19 @@ export default function HomeScreen() {
   const [selectedWatch, setSelectedWatch] = useState<string | null>(null);   // USB path of active cabled watch
   const [connectedBleAddress, setConnectedBleAddress] = useState<string | null>(null); // MAC of active BLE watch
   const [garminInfo, setGarminInfo] = useState<GarminConnectResult | null>(null);
+
+  // Bryton Aero 60 — like the watch/eTrex, it's detected here on Home and its own menu items
+  // (Workouts, Profile) appear when it's plugged in (André, 2026-09-24). Detection is a light,
+  // non-prompting poll (checks for a mounted BRYTON volume / an existing folder grant); the actual
+  // SAF grant happens when the user opens one of those screens.
+  const [brytonPlugged, setBrytonPlugged] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => { const d = await detectBryton(); if (alive) setBrytonPlugged(d.plugged); };
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   // Locally-synced activities, for the desktop-parity "This year" + "Last Activity" cards
   // (HomePage.qml). Read from the same local DB the Activities/Totals screens use - no watch
@@ -857,7 +871,14 @@ export default function HomeScreen() {
     // Gear tracker (v3): derived from the local gear DB + intervals.icu, so it's always
     // reachable — no connected watch needed, not gated behind Experimental.
     { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear'), group: 'training' as const },
-    { id: 'bryton', label: 'Bryton', icon: 'cycling' as const, onPress: () => navigation.navigate('Bryton'), group: 'training' as const },
+    // Bryton Aero 60 — its own device-gated items, like the watch's Routes/Sport Modes. Only when
+    // the head unit is plugged in. Workouts = the builder; Profile = FTP/LTHR/Max HR reconciliation.
+    ...(brytonPlugged
+      ? [
+          { id: 'brytonWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('BrytonWorkoutBuilder'), group: 'watch' as const },
+          { id: 'brytonProfile', label: 'Bryton profile', icon: 'cycling' as const, onPress: () => navigation.navigate('Bryton'), group: 'watch' as const },
+        ]
+      : []),
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
     { id: 'coach', label: 'Coach', icon: 'coach' as const, onPress: () => navigation.navigate('Coach'), group: 'training' as const },
@@ -1209,6 +1230,22 @@ export default function HomeScreen() {
         </Card>
       )}
       </View>
+
+      {/* ── Bryton Aero 60 detected: a small "connected" card like the watch/eTrex hero. Its
+          actions (Workouts, Bryton profile) live in the menu, device-gated (André, 2026-09-24). ── */}
+      {brytonPlugged && (
+        <View style={[styles.weatherWrap, roomy && styles.weatherWrapRoomy]}>
+          <Card style={styles.deviceCardInner}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[styles.statValue, v3TextStyle]}>Bryton Aero 60</Text>
+                <Text style={[styles.teaser, v3MutedStyle]}>Connected over USB — Workouts and Bryton profile are in the menu.</Text>
+              </View>
+              <Chip icon="check" label={t.homeDeviceConnectedStatus} />
+            </View>
+          </Card>
+        </View>
+      )}
 
       {/* ── This year - desktop HomePage.qml's headline totals surfaced on Home, and a
           doorway to the Totals screen. Uses locally-synced activities (no watch needed);
