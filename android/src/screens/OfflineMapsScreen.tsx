@@ -46,6 +46,11 @@ function buildOfflineMapHtml(provider: MapProvider, cacheDirUri: string): string
   return `<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 ${LEAFLET_STYLE_TAG}
+<!-- Leaflet defined INLINE here (not via injectedJavaScriptBeforeContentLoaded, which does not
+     run before the page script on Android's Chromium WebView -> "L is not defined" -> blank map,
+     André 2026-09-24). An inline head <script> runs during parse on every WebView, before the
+     body map script, so L is always defined. -->
+<script>${LEAFLET_INJECT_JS}</script>
 <style>*{margin:0;padding:0}html,body,#map{width:100%;height:100%}
 .selbox{position:absolute;top:8%;left:8%;right:8%;bottom:8%;border:2px solid #0a79d0;border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.14);pointer-events:none;z-index:600}</style>
 </head><body><div id="map"></div><div class="selbox"></div><script>
@@ -188,7 +193,6 @@ export default function OfflineMapsScreen() {
             style={{ flex: 1, backgroundColor: theme.cardNested }}
             originWhitelist={['*']}
             source={{ uri: mapUri }}
-            injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
             javaScriptEnabled
             domStorageEnabled={false}
             onMessage={onMessage}
