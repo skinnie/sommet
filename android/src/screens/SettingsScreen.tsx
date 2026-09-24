@@ -765,6 +765,7 @@ export default function SettingsScreen() {
             the world so the map works with no signal. */}
         <Button label="Download offline maps…" icon="download" variant="outline"
           onPress={() => navigation.navigate('OfflineMaps')} style={{ marginTop: 10 }} />
+        {/* placed after the provider chips; the tile-cache readout follows below */}
         {/* Real, 2026-08-10 ("let's go for the offline maps solution") - TileCache.ts's own
             cache (route/activity map tiles saved for offline use via MapScreen.tsx's own
             download button) is unbounded until cleared manually - a simple size readout +
@@ -784,6 +785,20 @@ export default function SettingsScreen() {
             onPress={handleClearTileCache}
           />
         </View>
+      </View>
+
+      {/* ── Backup & restore — desktop parity: SettingsPage.qml's Backup card (moved out of the
+          nav with Offline maps, André 2026-08-31). Was a top-level Home item on Android. ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="backup" />
+          <Text style={styles.cardTitle}>Backup &amp; restore</Text>
+        </View>
+        <Text style={styles.sectionDesc}>
+          Back up your watch and app data, and restore from a backup.
+        </Text>
+        <Button label={'Open backup & restore…'} icon="backup" variant="outline"
+          onPress={() => navigation.navigate('Backup')} style={{ marginTop: 10 }} />
       </View>
 
       {/* ── Ember (2026-08-29, desktop parity): openly opt-in. The 10-tap easter egg was retired
