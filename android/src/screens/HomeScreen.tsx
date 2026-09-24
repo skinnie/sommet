@@ -834,8 +834,8 @@ export default function HomeScreen() {
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
     // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
     { id: 'routeweather', label: 'Weather', icon: 'sun', onPress: () => navigation.navigate('RouteWeather') },
-    // Offline maps — download any area of the world for use with no signal (no watch needed).
-    { id: 'offlinemaps', label: 'Offline maps', icon: 'backup', onPress: () => navigation.navigate('OfflineMaps') },
+    // Offline maps lives in Settings > Maps (desktop parity — moved out of the main menu,
+    // André 2026-09-24), not as a top-level item.
     ...(!connected ? [] : deviceType === 'garmin'
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
