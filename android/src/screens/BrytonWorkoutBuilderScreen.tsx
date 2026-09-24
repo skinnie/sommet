@@ -124,29 +124,29 @@ export default function BrytonWorkoutBuilderScreen() {
 
         <Card>
           <Text style={{ color: t.text, fontSize: v3Type.title, fontWeight: '700' }}>Workout Builder</Text>
-          <Text style={{ color: t.mutedText, marginTop: 2 }}>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: 2 }}>
             Targets are in the workout's unit; the watt/bpm shown uses the device's own thresholds.
           </Text>
 
-          <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Name</Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: v3Spacing.medium, marginBottom: 4 }}>Name</Text>
           <TextInput value={name} onChangeText={setName}
             style={{
               borderWidth: 1, borderColor: t.border, borderRadius: v3Radius.small, color: t.text,
               backgroundColor: t.surface, paddingHorizontal: 10, paddingVertical: 8,
             }} placeholderTextColor={t.mutedText} />
 
-          <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Unit</Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: v3Spacing.medium, marginBottom: 4 }}>Unit</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: v3Spacing.small }}>
             {UNITS.map(u => <Seg t={t} key={u.key} selected={unit === u.key} label={u.label} onPress={() => setUnit(u.key)} />)}
           </View>
 
-          <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Based on</Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: v3Spacing.medium, marginBottom: 4 }}>Based on</Text>
           <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
             <Seg t={t} selected={rangeMode} label="Range" onPress={() => setRangeMode(true)} />
             <Seg t={t} selected={!rangeMode} label="Target" onPress={() => setRangeMode(false)} />
           </View>
 
-          <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Interval</Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: v3Spacing.medium, marginBottom: 4 }}>Interval</Text>
           <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
             <Seg t={t} selected={intervalMode === 'time'} label="Time" onPress={() => setIntervalMode('time')} />
             <Seg t={t} selected={intervalMode === 'distance'} label="Distance" onPress={() => setIntervalMode('distance')} />
@@ -181,7 +181,7 @@ export default function BrytonWorkoutBuilderScreen() {
                   {preview(rangeMode ? Math.round((Number(r.low) + Number(r.high)) / 2) : Number(r.low))}
                 </Text>
                 <TouchableOpacity onPress={() => removeRow(i)}>
-                  <Text style={{ color: t.error, paddingHorizontal: 6 }}>✕</Text>
+                  <Text style={{ color: t.error, fontSize: v3Type.subtitle, paddingHorizontal: 6 }}>✕</Text>
                 </TouchableOpacity>
               </View>
             </View>

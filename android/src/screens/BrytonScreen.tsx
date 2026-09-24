@@ -97,20 +97,20 @@ export default function BrytonScreen() {
       <View style={{ width: '100%', maxWidth: 640, gap: v3Spacing.medium }}>
 
         {!isBrytonUsbAvailable() && (
-          <Card><Text style={{ color: t.error }}>USB support isn't available in this build.</Text></Card>
+          <Card><Text style={{ color: t.error, fontSize: v3Type.body }}>USB support isn't available in this build.</Text></Card>
         )}
 
         {(status === 'connecting' || status === 'idle') && (
           <Card><View style={{ flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small }}>
             <ActivityIndicator color={t.primary} />
-            <Text style={{ color: t.text }}>Connecting to the Bryton over USB…</Text>
+            <Text style={{ color: t.text, fontSize: v3Type.body }}>Connecting to the Bryton over USB…</Text>
           </View></Card>
         )}
 
         {status === 'error' && (
           <Card>
-            <Text style={{ color: t.error, marginBottom: v3Spacing.small }}>{error}</Text>
-            <Text style={{ color: t.mutedText, marginBottom: v3Spacing.medium }}>
+            <Text style={{ color: t.error, fontSize: v3Type.body, marginBottom: v3Spacing.small }}>{error}</Text>
+            <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginBottom: v3Spacing.medium }}>
               Plug the Aero 60 into this device with a USB-OTG cable that carries data, then retry.
             </Text>
             <Button label="Retry" icon="sync" onPress={connect} grow={false} />
@@ -121,31 +121,31 @@ export default function BrytonScreen() {
           <>
             <Card>
               <Text style={{ color: t.text, fontSize: v3Type.title, fontWeight: '700' }}>{deviceName}</Text>
-              <Text style={{ color: t.mutedText, marginTop: 2 }}>
+              <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: 2 }}>
                 Device profile: FTP {device.ftp} W · LTHR {device.lthr} · Max HR {device.maxHr} · {device.weight} kg
               </Text>
             </Card>
 
             {!intervals && (
-              <Card><Text style={{ color: t.mutedText }}>
+              <Card><Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
                 Connect intervals.icu in Settings to reconcile FTP / LTHR / Max HR / weight.
               </Text></Card>
             )}
 
             {intervals && diffs.length === 0 && (
-              <Card><Text style={{ color: t.success }}>Device and intervals.icu already match. ✓</Text></Card>
+              <Card><Text style={{ color: t.success, fontSize: v3Type.body }}>Device and intervals.icu already match. ✓</Text></Card>
             )}
 
             {intervals && diffs.length > 0 && (
               <Card>
                 <Text style={{ color: t.text, fontSize: v3Type.heading, fontWeight: '700' }}>Sync profile</Text>
-                <Text style={{ color: t.mutedText, marginTop: 2, marginBottom: v3Spacing.medium }}>
+                <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: 2, marginBottom: v3Spacing.medium }}>
                   Pick the value that's right for each — it's written to the device and/or intervals.icu.
                 </Text>
 
                 {diffs.map(f => (
                   <View key={f} style={{ marginBottom: v3Spacing.medium }}>
-                    <Text style={{ color: t.text, fontWeight: '600', marginBottom: 6 }}>{LABELS[f]}</Text>
+                    <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '600', marginBottom: 6 }}>{LABELS[f]}</Text>
                     <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
                       {(['device', 'intervals'] as const).map(src => {
                         const sel = choice[f] === src;
@@ -161,7 +161,7 @@ export default function BrytonScreen() {
                             <Text style={{ color: sel ? t.card : t.mutedText, fontSize: v3Type.caption }}>
                               {src === 'device' ? 'Bryton' : 'intervals.icu'}
                             </Text>
-                            <Text style={{ color: sel ? t.card : t.text, fontWeight: '700' }}>{fmt(f, val)}</Text>
+                            <Text style={{ color: sel ? t.card : t.text, fontSize: v3Type.body, fontWeight: '700' }}>{fmt(f, val)}</Text>
                           </TouchableOpacity>
                         );
                       })}
