@@ -138,6 +138,11 @@ dependencies {
     // driver, no root/OS automount needed. Apache 2.0. See GARMIN_USB_IMPORT_SPEC.md.
     implementation("me.jahnen.libaums:core:0.10.0")
 
+    // Bryton Aero 60 access over SAF (André, 2026-09-24): unlike the eTrex, Android AUTO-MOUNTS the
+    // Bryton's FAT volume, which blocks libaums (the kernel owns the device) but makes it reachable
+    // through the Storage Access Framework. DocumentFile is the tree-walking helper for that.
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     // Polar BLE SDK — Verity Sense overnight OFFLINE recording (PolarSleep module). It is
     // RxJava3-based, so the reactive runtime comes with it. The band records raw PPG+ACC to its
     // own flash while disconnected; we fetch and process it in the morning (tools/sleep_stage.py).
