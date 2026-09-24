@@ -62,8 +62,10 @@ class BrytonUsbModule(private val reactContext: ReactApplicationContext) :
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val sm = reactContext.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                // Match by the BRYTON label (isRemovable is unreliable for USB-OTG drives on some
+                // tablets, e.g. Android-x86/BlissOS); not primary so we never match internal storage.
                 plugged = sm.storageVolumes.any {
-                    it.isRemovable && it.getDescription(reactContext)?.contains("BRYTON", true) == true
+                    !it.isPrimary && it.getDescription(reactContext)?.contains("BRYTON", true) == true
                 }
             } catch (_: Exception) {}
         }
@@ -99,7 +101,7 @@ class BrytonUsbModule(private val reactContext: ReactApplicationContext) :
         // Pre-target the removable (Bryton) volume so the picker opens on it.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val sm = reactContext.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-            val vols = sm.storageVolumes.filter { it.isRemovable && !it.isPrimary }
+            val vols = sm.storageVolumes.filter { !it.isPrimary }
             // Prefer the volume actually labelled BRYTON (the tablet may have several USB drives),
             // else fall back to the first removable one.
             val vol = vols.firstOrNull { it.getDescription(reactContext)?.contains("BRYTON", true) == true }
