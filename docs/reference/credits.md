@@ -118,6 +118,19 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   a JAXB (XML-binding) model of Suunto's SML activity format, an independent reference point
   for this project's own exercise-log / SML work.
 
+- **[Taxom/OpenBikeCompanion](https://github.com/Taxom/OpenBikeCompanion)** (GPL-3.0) - the
+  independent reverse-engineering of the Magene C406's BLE protocol this project's own
+  `tools/magene_import.py` builds on: the GATT service/characteristic UUIDs and the Pages /
+  ride-list wire format come from its `docs/PROTOCOL.md`. Its committed code implements the Pages
+  config channel; the ride-**download** CC03 framing its docs call "work in progress" was worked
+  out here from the live device and CRC-verified (see `docs/reference/magene_c406_protocol.md`).
+  No code was copied - the protocol notes were the foundation, and the device is import-only here.
+
+- **[WSTRN/C406pro_Hack](https://github.com/WSTRN/C406pro_Hack)** - a custom Zephyr firmware and
+  hardware teardown for the Magene C406 Pro. This project does not touch the firmware, but its
+  documented hardware (nRF52840 SoC, ST75256 LCD, UC6226 GNSS, SPL06 baro, GD25Q256 flash) is the
+  reference for what the C406 Pro actually is - cited in the Magene protocol doc.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 
