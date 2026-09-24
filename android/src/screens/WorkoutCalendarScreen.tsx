@@ -12,6 +12,7 @@ import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
+import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
@@ -51,6 +52,29 @@ export default function WorkoutCalendarScreen() {
   const [compileTarget, setCompileTarget] = useState<number | null>(null);
 
   const [plan, setPlan] = useState<CalendarPlanEntry[]>([]);
+  const [brytonBusy, setBrytonBusy] = useState(false);
+  const [brytonMsg, setBrytonMsg] = useState('');
+
+  // Send the plan's intervals.icu-imported workouts (those carrying a workout schema) to a plugged
+  // Bryton Aero 60 as native .fit, converted with the device's own thresholds (BrytonUsb).
+  async function sendToBryton() {
+    const withWorkout = plan.filter((e: any) => e.workout);
+    if (withWorkout.length === 0) { setBrytonMsg('No intervals.icu workouts in the plan to send.'); return; }
+    setBrytonBusy(true); setBrytonMsg('');
+    try {
+      await connectBryton();
+      let ok = 0, fail = 0;
+      for (const e of withWorkout) {
+        try { await sendSchemaWorkout({ name: (e as any).workoutName, ...(e as any).workout }); ok++; }
+        catch { fail++; }
+      }
+      setBrytonMsg(`Sent ${ok} to Bryton${fail ? `, ${fail} failed` : ''}.`);
+    } catch (err: any) {
+      setBrytonMsg(String(err?.message ?? err));
+    } finally {
+      setBrytonBusy(false);
+    }
+  }
 
   const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
@@ -309,6 +333,14 @@ export default function WorkoutCalendarScreen() {
         <Row>
           <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, syncBusy && { opacity: 0.5 }]} disabled={syncBusy} onPress={() => doSync(true)}>
             <Text style={s.primaryBtnText}>{t.workoutCalendarSyncBtn}</Text>
+          </TouchableOpacity>
+        </Row>
+
+        {/* Send the same plan to a plugged Bryton Aero 60 (André, 2026-09-24). */}
+        {brytonMsg ? <Text style={[s.desc, { marginTop: 8 }]}>{brytonMsg}</Text> : null}
+        <Row>
+          <TouchableOpacity style={[s.btn, { flex: 1 }, brytonBusy && { opacity: 0.5 }]} disabled={brytonBusy} onPress={sendToBryton}>
+            <Text style={s.btnText}>{brytonBusy ? 'Sending…' : 'Send to Bryton'}</Text>
           </TouchableOpacity>
         </Row>
       </Card>

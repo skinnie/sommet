@@ -30,6 +30,8 @@ import AppsScreen from './src/screens/AppsScreen';
 import WatchSettingsScreen from './src/screens/WatchSettingsScreen';
 import IntervalsScreen from './src/screens/IntervalsScreen';
 import WorkoutCalendarScreen from './src/screens/WorkoutCalendarScreen';
+import BrytonScreen from './src/screens/BrytonScreen';
+import BrytonWorkoutBuilderScreen from './src/screens/BrytonWorkoutBuilderScreen';
 import GearScreen from './src/screens/GearScreen';
 // Weight/Health - desktop parity (2026-08-26). Both read intervals.icu's wellness feed via
 // src/services/WellnessService.ts; see that file for what Android can and cannot reach.
@@ -49,6 +51,8 @@ import { t, dateLocale } from './src/i18n';
 
 export type RootStackParamList = {
   Home: undefined;
+  Bryton: undefined;
+  BrytonWorkoutBuilder: undefined;
   LogList: undefined;
   Map: { activity: ActivityRecord };
   Settings: undefined;
@@ -307,6 +311,16 @@ function AppShell() {
             name="WorkoutCalendar"
             component={WorkoutCalendarScreen}
             options={{ title: t.experimentalWorkoutCalendar }}
+          />
+          <Stack.Screen
+            name="Bryton"
+            component={BrytonScreen}
+            options={{ title: 'Bryton Aero 60' }}
+          />
+          <Stack.Screen
+            name="BrytonWorkoutBuilder"
+            component={BrytonWorkoutBuilderScreen}
+            options={{ title: 'Workout Builder' }}
           />
           <Stack.Screen
             name="Gear"

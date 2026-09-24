@@ -10,6 +10,7 @@ import com.ambitsyncmodern.smartsensor.AmbitSmartSensorPackage
 import com.ambitsyncmodern.hrstrap.HrStrapPackage
 import com.ambitsyncmodern.polarsleep.PolarSleepPackage
 import com.ambitsyncmodern.catalog.AmbitCatalogPackage
+import com.ambitsyncmodern.bryton.BrytonUsbPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
@@ -30,6 +31,7 @@ class MainApplication : Application(), ReactApplication {
           add(HrStrapPackage())
           add(PolarSleepPackage())
           add(AmbitCatalogPackage())
+          add(BrytonUsbPackage())
         },
     )
   }
