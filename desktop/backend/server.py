@@ -784,7 +784,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # holding the watch lock across a multi-minute ride pull needlessly blocked every watch poll
     # behind it, which surfaced as "server didn't reply" with several devices plugged (André,
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
-    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py"}
+    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     if lock is not None:
         lock.acquire()
@@ -1137,6 +1137,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_devices()
         elif self.path == "/api/mtp/import" or self.path.startswith("/api/mtp/import?"):
             self._handle_mtp_import()
+        elif self.path == "/api/magene/devices":
+            self._handle_magene_devices()
+        elif self.path.startswith("/api/magene/rides"):
+            self._handle_magene_rides()
+        elif self.path == "/api/magene/import" or self.path.startswith("/api/magene/import?"):
+            self._handle_magene_import()
         elif self.path == "/api/garmin/weight" or self.path.startswith("/api/garmin/weight?"):
             self._handle_garmin_weight()
         elif self.path.startswith("/api/garmin/activities"):
@@ -1347,6 +1353,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_device_select(body)
         elif self.path == "/api/mtp/import":
             self._handle_mtp_import(body)
+        elif self.path == "/api/magene/import":
+            self._handle_magene_import(body)
         elif self.path == "/api/time/sync":
             self._handle_time_sync(body)
         elif self.path == "/api/demo":
@@ -1719,6 +1727,103 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 activities.append({
                     "kind": item["kind"],           # 'edge' | 'karoo' - the library source tag
+                    "external_id": item["name"],    # the .fit filename, unique per ride
+                    "sport": summary.get("sport"),
+                    "startTime": summary.get("startTime"),
+                    "durationSeconds": summary.get("durationSeconds"),
+                    "distanceMeters": summary.get("distanceMeters"),
+                    "ascentMeters": summary.get("ascentMeters"),
+                    "energyKcal": summary.get("energyKcal"),
+                    "gpx": gpx_text,                 # empty for indoor/no-GPS rides
+                })
+            self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
+
+    def _handle_magene_devices(self):
+        """GET /api/magene/devices - Magene C406 (Pro) bike computers advertising over BLE right
+        now. tools/magene_import.py --list (a ~6s BLE scan; the C406 has no USB data mode, so BLE
+        is the only import path). Returns {ok, devices:[{kind:"c406", name, address, rssi}]} - no
+        ride count here (that needs a connect; the client fetches /api/magene/rides for that)."""
+        code, out, err = run_tool("magene_import.py", ["--list"], timeout=30)
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            payload = {"ok": False, "error": "magene_import.py produced no JSON", "stderr": err}
+        # Tag each with the library source kind so the client's model matches the MTP one.
+        for d in payload.get("devices", []):
+            d["kind"] = "c406"
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_magene_rides(self):
+        """GET /api/magene/rides?address=ADDR - ride files stored on that C406 (a BLE connect +
+        ride-list). Returns {ok, files:[NAME]} using the same timestamp filenames the MTP path
+        uses (YYYY-MM-DD-HH-MM-SS.fit), so the client's sync-history/dedup logic is identical."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        address = query.get("address", [None])[0]
+        if not address:
+            self._send_json(400, {"ok": False, "error": "address required"})
+            return
+        code, out, err = run_tool("magene_import.py", ["--rides", address], timeout=60)
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            self._send_json(502, {"ok": False, "error": "magene_import.py produced no JSON",
+                                   "stderr": err})
+            return
+        files = [r.get("name") for r in payload.get("rides", []) if r.get("name")]
+        self._send_json(200 if payload.get("ok") else 502,
+                        {"ok": payload.get("ok", False), "files": files})
+
+    def _handle_magene_import(self, body=None):
+        """Pull ride .fit files off a Magene C406 over BLE and decode each to a summary + GPX
+        track (tools/magene_import.py + fit_decode.py). Same activity shape and source tag
+        ("c406") as the MTP bike-computer import - see _handle_mtp_import - so the client's library
+        insert/dedup path is shared. The BLE address is required (rides live behind a connect).
+
+        POST /api/magene/import {"address":ADDR, "files":[{"name"}]} - pull ONLY those files
+        (incremental sync). Omit "files" to pull every ride on the device.
+        GET  /api/magene/import?address=ADDR[&since=NAME] - pull all (optionally newer than NAME)."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        address = (body or {}).get("address") or query.get("address", [None])[0]
+        since = query.get("since", [None])[0]
+        if not address:
+            self._send_json(400, {"ok": False, "error": "address required"})
+            return
+        stdin = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pull_args = ["--pull", tmpdir, "--address", address]
+            if body and isinstance(body.get("files"), list):
+                pull_args.append("--only-stdin")
+                stdin = json.dumps({"files": body["files"]})
+            elif since:
+                pull_args += ["--since", since]
+            code, out, err = run_tool("magene_import.py", pull_args, timeout=600, stdin=stdin)
+            try:
+                pulled = (json.loads(out.strip().splitlines()[-1]).get("copied", [])
+                          if out.strip() else [])
+            except (json.JSONDecodeError, IndexError):
+                self._send_json(502, {"ok": False, "error": "Magene pull failed",
+                                       "raw_output": out, "stderr": err})
+                return
+            activities = []
+            for item in pulled:
+                fit_path = item["path"]
+                gpx_path = fit_path + ".gpx"
+                dcode, dout, _derr = run_tool("fit_decode.py", [fit_path, "--gpx", gpx_path])
+                if dcode != 0 or not dout.strip():
+                    continue
+                try:
+                    summary = json.loads(dout.strip().splitlines()[-1])
+                except (json.JSONDecodeError, IndexError):
+                    continue
+                gpx_text = ""
+                if summary.get("trackPoints"):
+                    try:
+                        with open(gpx_path) as fh:
+                            gpx_text = fh.read()
+                    except OSError:
+                        pass
+                activities.append({
+                    "kind": "c406",                 # the library source tag (Magene C406 Pro)
                     "external_id": item["name"],    # the .fit filename, unique per ride
                     "sport": summary.get("sport"),
                     "startTime": summary.get("startTime"),
