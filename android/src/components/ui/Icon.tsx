@@ -8,7 +8,7 @@ export type IconName =
   | 'sync' | 'satellite' | 'route' | 'poi' | 'backup' | 'settings'
   | 'list' | 'link' | 'map' | 'chart' | 'apps' | 'activity' | 'key' | 'person'
   | 'delete' | 'check' | 'info' | 'battery' | 'warning' | 'mountain'
-  | 'watch' | 'etrex' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
+  | 'watch' | 'etrex' | 'bryton' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
   | 'cycling' | 'running' | 'walking'
   | 'play' | 'pause' | 'skipBack' | 'skipForward'
   | 'download' | 'upload' | 'calendar' | 'bluetooth'
@@ -367,6 +367,23 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
           <Circle cx={14.6} cy={5.1} r={1.2} stroke={color} strokeWidth={1.5} fill="none" />
           <Line x1={6} y1={10.5} x2={4.6} y2={10.5} {...s} />
           <Line x1={18} y1={14.5} x2={19.4} y2={14.5} {...s} />
+        </Svg>
+      );
+    case 'bryton':
+      // Bryton Aero 60 bike computer — rounded body, big screen with two data-field lines,
+      // arrow buttons on the left, OK/back on the right, and the round power button below the
+      // screen (see bryton.png reference, André 2026-09-24).
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={5} y={1.5} width={14} height={21} rx={3.5} stroke={color} strokeWidth={1.9} fill="none" />
+          <Rect x={7} y={4.5} width={10} height={11} rx={1} stroke={color} strokeWidth={1.7} fill="none" />
+          <Line x1={9} y1={9} x2={15} y2={9} stroke={color} strokeWidth={1.3} strokeLinecap="round" />
+          <Line x1={9} y1={12} x2={15} y2={12} stroke={color} strokeWidth={1.3} strokeLinecap="round" />
+          <Line x1={5} y1={7.5} x2={3.7} y2={7.5} {...s} />
+          <Line x1={5} y1={11.5} x2={3.7} y2={11.5} {...s} />
+          <Line x1={19} y1={7.5} x2={20.3} y2={7.5} {...s} />
+          <Line x1={19} y1={11.5} x2={20.3} y2={11.5} {...s} />
+          <Circle cx={12} cy={19} r={1.4} stroke={color} strokeWidth={1.5} fill="none" />
         </Svg>
       );
     case 'sun':

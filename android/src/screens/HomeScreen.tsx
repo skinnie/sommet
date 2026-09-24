@@ -953,8 +953,8 @@ export default function HomeScreen() {
           watch glyph at the same nominal size - a further 10% bump, on top of the same
           portrait/landscape scaling above, Garmin-only. */}
       <Icon
-        name={deviceType === 'bryton' ? 'cycling' : deviceType === 'garmin' ? 'etrex' : 'watch'}
-        size={Math.round((winWidth < winHeight ? 48 : 40) * (deviceType === 'garmin' ? 1.1 : 1))}
+        name={deviceType === 'bryton' ? 'bryton' : deviceType === 'garmin' ? 'etrex' : 'watch'}
+        size={Math.round((winWidth < winHeight ? 48 : 40) * (deviceType === 'garmin' || deviceType === 'bryton' ? 1.1 : 1))}
         color={connected || deviceType === 'bryton' ? theme.text : theme.mutedText}
       />
 
