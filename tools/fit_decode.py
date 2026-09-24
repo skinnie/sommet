@@ -46,6 +46,19 @@ SPORT = {0: "Activity", 1: "Running", 2: "Cycling", 5: "Swimming", 11: "Walking"
          12: "Cross Country Skiing", 13: "Alpine Skiing", 15: "Rowing", 17: "Hiking",
          18: "Multisport", 25: "Indoor Cycling"}
 
+# (sport, sub_sport) -> a more specific name than sport alone. FIT carries the indoor/outdoor
+# split in sub_sport (session field 6), not sport: a Magene C406 outdoor ride is sport 2 /
+# sub_sport 7 (road), and a training ride is sport 2 / sub_sport 6 (indoor_cycling) - both are
+# sport 2, so reading sport alone labels them both "Cycling" and loses the trainer distinction
+# (André, 2026-09-24). These are the standard FIT sub_sport enum values, not device-specific.
+SUB_SPORT = {
+    (2, 5): "Indoor Cycling",    # spin
+    (2, 6): "Indoor Cycling",    # indoor_cycling (the C406 "training" profile)
+    (2, 58): "Indoor Cycling",   # virtual_activity (trainer/Zwift-style)
+    (1, 1): "Treadmill",         # running on a treadmill
+    (1, 45): "Treadmill",        # indoor_running
+}
+
 
 class _Reader:
     def __init__(self, data):
@@ -175,6 +188,8 @@ def _read_data(r, definition, arch, records, session, comp_ts):
     elif g == 18:                # session (summary)
         if vals.get(5) is not None:
             session["sport"] = vals[5]
+        if vals.get(6) is not None:
+            session["sub_sport"] = vals[6]
         if vals.get(2) is not None:
             session["start_time"] = vals[2]
         if vals.get(7) is not None:
@@ -202,10 +217,15 @@ def _summarize(session, records, path):
     if start is None and records:
         start = records[0]["t"]
     sport = session.get("sport")
+    sub_sport = session.get("sub_sport")
+    # sub_sport wins when it names a more specific activity (indoor cycling, treadmill), else the
+    # plain sport name. Keeps outdoor cycling (sub_sport 7 = road) as "Cycling".
+    sport_name = SUB_SPORT.get((sport, sub_sport)) or SPORT.get(sport, "Activity")
     return {
         "ok": True,
-        "sport": SPORT.get(sport, "Activity"),
+        "sport": sport_name,
         "sportCode": sport,
+        "subSportCode": sub_sport,
         "startTime": _iso(start),
         "durationSeconds": int(session.get("elapsed_s") or 0),
         "movingSeconds": int(session.get("timer_s") or 0),  # total_timer_time; 0 if the device didn't record it

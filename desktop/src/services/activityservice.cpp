@@ -1715,12 +1715,17 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
             trackJson = QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(
                 parsed.value(QStringLiteral("track")).toList())).toJson(QJsonDocument::Compact));
         }
+        // The device's own FIT, kept so it can be uploaded to intervals.icu verbatim - intervals
+        // reads sport/sub_sport straight from it, so the type there matches our library by
+        // construction (André, 2026-09-24: outdoor -> Cycling, trainer -> Indoor Cycling). Empty
+        // for a source that didn't return one; exportToIntervals() just skips those.
+        const QString fitB64 = o.value(QStringLiteral("fit")).toString();
         QSqlQuery ins(m_db);
         ins.prepare(QStringLiteral(
             "INSERT INTO activities "
             "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-            " start_time, track_json, gpx_text, source, external_id, device) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)"));
+            " start_time, track_json, gpx_text, fit_base64, source, external_id, device) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)"));
         ins.addBindValue(idx--);
         ins.addBindValue(o.value(QStringLiteral("sport")).toString());
         ins.addBindValue(duration);
@@ -1730,9 +1735,10 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(o.value(QStringLiteral("startTime")).toString());
         ins.addBindValue(trackJson);
         ins.addBindValue(gpx);
+        ins.addBindValue(fitB64);
         ins.addBindValue(source);
         ins.addBindValue(extId);
-        ins.addBindValue(source);            // device = the source tag (edge/karoo)
+        ins.addBindValue(source);            // device = the source tag (edge/karoo/c406)
         ins.exec();
         existing.append({epoch, duration});  // so two incoming copies of one ride also de-dup
         ++count;
@@ -1741,6 +1747,13 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
     dbLoadAll();
     emit activitiesChanged();
     emit bikeImportFinished(count, skipped);
+
+    // Push the new rides to intervals.icu when the export scope is "everything" (bike computers
+    // aren't the "suunto" watch scope). exportToIntervals() only uploads rows with a FIT that
+    // aren't already marked exported, so this is a no-op when nothing new landed or nothing is
+    // configured (André, 2026-09-24: bike rides should reach intervals like watch moves do).
+    if (count > 0 && intervalsExportScope() == QStringLiteral("all"))
+        exportToIntervals();
 }
 
 void ActivityService::exportToIntervals()
@@ -1758,13 +1771,16 @@ void ActivityService::exportToIntervals()
         emit exportError(tr("Local activity store isn't open."));
         return;
     }
-    // Watch activities with a FIT we haven't already uploaded. Imports (source='intervals')
-    // came FROM intervals.icu, so they're never pushed back.
+    // Activities with a FIT we haven't already uploaded: the watch's own moves, plus bike
+    // computers (Edge/Karoo/Magene) whose device FIT we now keep. Rows that came FROM a cloud -
+    // source='intervals' (this very service) or 'garmin' - are never pushed back; whitelisting
+    // the push-able sources (rather than excluding intervals) keeps that safe by construction.
     QList<QPair<int, QByteArray>> items;
     QSqlQuery q(QStringLiteral(
         "SELECT idx, fit_base64 FROM activities "
-        "WHERE (source IS NULL OR source = 'watch') AND fit_base64 IS NOT NULL "
-        "AND fit_base64 <> '' AND (exported IS NULL OR exported = 0)"), m_db);
+        "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406')) "
+        "AND fit_base64 IS NOT NULL AND fit_base64 <> '' "
+        "AND (exported IS NULL OR exported = 0)"), m_db);
     while (q.next()) {
         const QByteArray fit = QByteArray::fromBase64(q.value(1).toString().toLatin1());
         if (!fit.isEmpty())

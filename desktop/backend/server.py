@@ -1725,16 +1725,23 @@ class Handler(BaseHTTPRequestHandler):
                             gpx_text = fh.read()
                     except OSError:
                         pass
+                try:
+                    with open(fit_path, "rb") as fh:
+                        fit_b64 = base64.b64encode(fh.read()).decode("ascii")
+                except OSError:
+                    fit_b64 = ""
                 activities.append({
                     "kind": item["kind"],           # 'edge' | 'karoo' - the library source tag
                     "external_id": item["name"],    # the .fit filename, unique per ride
                     "sport": summary.get("sport"),
+                    "subSportCode": summary.get("subSportCode"),
                     "startTime": summary.get("startTime"),
                     "durationSeconds": summary.get("durationSeconds"),
                     "distanceMeters": summary.get("distanceMeters"),
                     "ascentMeters": summary.get("ascentMeters"),
                     "energyKcal": summary.get("energyKcal"),
                     "gpx": gpx_text,                 # empty for indoor/no-GPS rides
+                    "fit": fit_b64,                  # the device's own FIT, for intervals.icu upload
                 })
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
@@ -1822,16 +1829,23 @@ class Handler(BaseHTTPRequestHandler):
                             gpx_text = fh.read()
                     except OSError:
                         pass
+                try:
+                    with open(fit_path, "rb") as fh:
+                        fit_b64 = base64.b64encode(fh.read()).decode("ascii")
+                except OSError:
+                    fit_b64 = ""
                 activities.append({
                     "kind": "c406",                 # the library source tag (Magene C406 Pro)
                     "external_id": item["name"],    # the .fit filename, unique per ride
                     "sport": summary.get("sport"),
+                    "subSportCode": summary.get("subSportCode"),
                     "startTime": summary.get("startTime"),
                     "durationSeconds": summary.get("durationSeconds"),
                     "distanceMeters": summary.get("distanceMeters"),
                     "ascentMeters": summary.get("ascentMeters"),
                     "energyKcal": summary.get("energyKcal"),
                     "gpx": gpx_text,                 # empty for indoor/no-GPS rides
+                    "fit": fit_b64,                  # the device's own FIT, for intervals.icu upload
                 })
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
