@@ -24,6 +24,58 @@ Item {
     property bool dirty: false
     property string importStatus: ""
 
+    // ---- Send to Bryton Aero 60 --------------------------------------------------------------
+    // The Bryton takes the same planned workouts, converted to its own .fit (watts/bpm -> % of the
+    // device's own FTP/Max HR/LTHR, done backend-side). Shown only when a Bryton is mounted.
+    property bool brytonConnected: false
+    property string brytonMsg: ""
+    property bool brytonSending: false
+
+    function pollBryton() {
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            var found = false
+            try {
+                var r = JSON.parse(xhr.responseText)
+                for (var i = 0; i < (r.devices || []).length; i++)
+                    if (r.devices[i].kind === "bryton") found = true
+            } catch (e) {}
+            root.brytonConnected = found
+        }
+        xhr.open("GET", "http://127.0.0.1:8766/api/mtp/devices")
+        xhr.send()
+    }
+
+    function sendAllToBryton() {
+        if (root.entries.length === 0) return
+        root.brytonSending = true; root.brytonMsg = ""
+        var i = 0, ok = 0, fail = 0
+        function next() {
+            if (i >= root.entries.length) {
+                root.brytonSending = false
+                root.brytonMsg = qsTr("Sent %1 workout(s) to Bryton").arg(ok)
+                    + (fail ? qsTr(", %1 failed").arg(fail) : "")
+                return
+            }
+            var e = root.entries[i++]
+            var nm = (e.workout && e.workout.name) ? e.workout.name : ("Workout " + (e.date || i))
+            var xhr = new XMLHttpRequest()
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return
+                var r = {}; try { r = JSON.parse(xhr.responseText) } catch (err) {}
+                if (r.ok) ok++; else fail++
+                next()
+            }
+            xhr.open("POST", "http://127.0.0.1:8766/api/bryton/workout")
+            xhr.setRequestHeader("Content-Type", "application/json")
+            xhr.send(JSON.stringify({ workout: e.workout, name: nm }))
+        }
+        next()
+    }
+
+    Timer { interval: 4000; running: true; repeat: true; onTriggered: root.pollBryton() }
+
     // Merge intervals.icu-imported entries into the plan, replacing any existing entry on the
     // same date (dedupe by date) and keeping the list date-sorted. Imported entries carry their
     // own {mode}, which the guided-workout rotation sync uses.
@@ -68,7 +120,7 @@ Item {
         return y + "-" + mm + "-" + dd
     }
 
-    Component.onCompleted: TrainingProgramService.refreshPlans()
+    Component.onCompleted: { TrainingProgramService.refreshPlans(); root.pollBryton() }
 
     // ---- month navigation (CalendarPage's own model) --------------------------------
     readonly property date today: new Date()
@@ -470,9 +522,25 @@ Item {
                                                 cursorShape: Qt.PointingHandCursor
                                             }
                                             TapHandler {
+                                                acceptedButtons: Qt.LeftButton
                                                 onTapped: {
                                                     if (!dayCell.modelData) return
                                                     editor.openFor(dayCell.modelData.iso)
+                                                }
+                                            }
+                                            // Right click on a planned day removes it directly,
+                                            // same effect as opening the editor and clicking
+                                            // "Remove workout" but one step - André, 2026-09-22.
+                                            // Left click still opens the editor either way (also
+                                            // free days, to plan one) - only the remove shortcut
+                                            // needs the day to already be planned.
+                                            TapHandler {
+                                                acceptedButtons: Qt.RightButton
+                                                enabled: dayCell.planned
+                                                onTapped: {
+                                                    root.entries = root.entries.filter(
+                                                        e => e.date !== dayCell.modelData.iso)
+                                                    root.dirty = true
                                                 }
                                             }
                                         }
@@ -550,6 +618,21 @@ Item {
                                      && HomeViewModel.anyDevice
                             onClicked: TrainingProgramService.syncCalendar(
                                 root.entriesWithMode(modePicker.currentText), true)
+                        }
+                        RoundedButton {
+                            // Same planned workouts, sent to a mounted Bryton Aero 60 as its own
+                            // .fit (watts/bpm converted to % of the device's own thresholds).
+                            visible: root.brytonConnected
+                            text: root.brytonSending ? qsTr("Sending…") : qsTr("Send to Bryton")
+                            enabled: root.entries.length > 0 && !root.brytonSending
+                            onClicked: root.sendAllToBryton()
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: root.brytonMsg.length > 0
+                            text: root.brytonMsg
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                         LoadingPill {
                             anchors.verticalCenter: parent.verticalCenter

@@ -155,6 +155,7 @@ qt_add_qml_module(ambitapp
         qml/components/CreateSportModeDialog.qml
         qml/components/MultisportEditorDialog.qml
         qml/components/ThemedDialog.qml
+        qml/components/BrytonProfileDialog.qml
         qml/components/ClockSyncDialog.qml
         qml/components/ActivityRow.qml
         qml/components/DemoDevicePicker.qml
@@ -201,6 +202,7 @@ qt_add_qml_module(ambitapp
         qml/components/EdgeIcon.qml
         qml/components/KarooIcon.qml
         qml/components/MageneIcon.qml
+        qml/components/BrytonIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
         qml/PlanStore.qml
@@ -229,6 +231,7 @@ qt_add_qml_module(ambitapp
         qml/components/MetricChart.qml
         qml/pages/AppZonePage.qml
         qml/pages/TrainingProgramPage.qml
+        qml/pages/BrytonWorkoutBuilderPage.qml
         qml/pages/GpsTrackPodPage.qml
         qml/pages/SuuntoT6Page.qml
     # Step 10+ pages/components get added here as they're built - each spec step should
