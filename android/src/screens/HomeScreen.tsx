@@ -857,6 +857,7 @@ export default function HomeScreen() {
     // Gear tracker (v3): derived from the local gear DB + intervals.icu, so it's always
     // reachable — no connected watch needed, not gated behind Experimental.
     { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear'), group: 'training' as const },
+    { id: 'bryton', label: 'Bryton', icon: 'cycling' as const, onPress: () => navigation.navigate('Bryton'), group: 'training' as const },
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
     { id: 'coach', label: 'Coach', icon: 'coach' as const, onPress: () => navigation.navigate('Coach'), group: 'training' as const },

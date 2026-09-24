@@ -103,3 +103,72 @@ export async function deleteIntervalsIcuActivity(activityId: string): Promise<bo
   });
   return resp.ok || resp.status === 404;
 }
+
+// ─── Athlete training thresholds (FTP / LTHR / Max HR / weight) ────────────────
+// For the Bryton profile reconciliation (BrytonProfile.ts): intervals.icu is the source of truth
+// for these numbers. Mirrors the desktop tools/intervals_athlete.py. Read from the Ride
+// sportSettings group + profile; write FTP/LTHR/MaxHR back to that group (merge) and weight to
+// today's wellness. Gender/birthday/height are athlete-profile fields not writable this way.
+export interface AthleteThresholds {
+  ftp?: number; lthr?: number; maxHr?: number;
+  weight?: number; height?: number; gender?: number; // read-only extras
+  rideGroupId?: number;
+}
+
+function authHeader(apiKey: string): string { return 'Basic ' + btoa(`API_KEY:${apiKey}`); }
+
+export async function getAthleteThresholds(): Promise<AthleteThresholds | null> {
+  const creds = await getIntervalsIcuCredentials();
+  if (!creds) return null;
+  const resp = await fetch(`${API_BASE}/athlete/${encodeURIComponent(creds.athleteId)}`, {
+    headers: { Authorization: authHeader(creds.apiKey), 'User-Agent': 'Sommet/1.0' },
+  });
+  if (!resp.ok) return null;
+  let prof: any = await resp.json();
+  if (Array.isArray(prof)) prof = prof[0];
+  const groups: any[] = prof.sportSettings || [];
+  const ride = groups.find(g => (g.types || []).includes('Ride')) || groups[0] || {};
+  const weight = prof.icu_weight ?? prof.weight;
+  return {
+    ftp: ride.ftp ?? undefined,
+    lthr: ride.lthr ?? undefined,
+    maxHr: ride.max_hr ?? undefined,
+    weight: weight ? Math.round(weight * 10) / 10 : undefined,
+    height: prof.height ? Math.round(prof.height * 100) : undefined,
+    gender: prof.sex === 'M' ? 1 : prof.sex === 'F' ? 0 : undefined,
+    rideGroupId: ride.id,
+  };
+}
+
+export async function putAthleteThresholds(
+  changes: { ftp?: number; lthr?: number; maxHr?: number; weight?: number },
+): Promise<boolean> {
+  const creds = await getIntervalsIcuCredentials();
+  if (!creds) return false;
+  const headers = {
+    Authorization: authHeader(creds.apiKey), 'User-Agent': 'Sommet/1.0',
+    'Content-Type': 'application/json',
+  };
+  const ss: any = {};
+  if (changes.ftp != null) ss.ftp = Math.round(changes.ftp);
+  if (changes.lthr != null) ss.lthr = Math.round(changes.lthr);
+  if (changes.maxHr != null) ss.max_hr = Math.round(changes.maxHr);
+  if (Object.keys(ss).length) {
+    const cur = await getAthleteThresholds();
+    if (!cur?.rideGroupId) return false;
+    const r = await fetch(
+      `${API_BASE}/athlete/${encodeURIComponent(creds.athleteId)}/sport-settings/${cur.rideGroupId}`,
+      { method: 'PUT', headers, body: JSON.stringify(ss) },
+    );
+    if (!r.ok) return false;
+  }
+  if (changes.weight != null) {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await fetch(
+      `${API_BASE}/athlete/${encodeURIComponent(creds.athleteId)}/wellness/${today}`,
+      { method: 'PUT', headers, body: JSON.stringify({ weight: changes.weight }) },
+    );
+    if (!r.ok) return false;
+  }
+  return true;
+}
