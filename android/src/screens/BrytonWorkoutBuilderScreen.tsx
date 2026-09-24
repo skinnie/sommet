@@ -26,6 +26,33 @@ const INTENSITIES: { key: BrytonIntensity; label: string }[] = [
 
 interface Row { intensity: BrytonIntensity; durVal: string; low: string; high: string; }
 
+// Module-scope so their component identity is stable across renders — an inline component defined
+// in the render body is recreated every render and, under Fabric, its <Text> failed to paint
+// (André saw empty selector boxes, 2026-09-24).
+function Seg({ t, selected, label, onPress }:
+  { t: any; selected: boolean; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity activeOpacity={0.8} onPress={onPress}
+      style={{
+        paddingVertical: 8, paddingHorizontal: 12, borderRadius: v3Radius.small, borderWidth: 1,
+        borderColor: selected ? t.primary : t.border, backgroundColor: selected ? t.primary : t.card,
+      }}>
+      <Text style={{ color: selected ? t.card : t.text, fontWeight: '600' }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function NumField({ t, value, onChange, w = 64 }:
+  { t: any; value: string; onChange: (s: string) => void; w?: number }) {
+  return (
+    <TextInput value={value} onChangeText={onChange} keyboardType="numeric"
+      style={{
+        width: w, borderWidth: 1, borderColor: t.border, borderRadius: v3Radius.small,
+        color: t.text, backgroundColor: t.surface, paddingHorizontal: 8, paddingVertical: 6,
+      }} placeholderTextColor={t.mutedText} />
+  );
+}
+
 export default function BrytonWorkoutBuilderScreen() {
   const t = useV3Theme();
 
@@ -89,23 +116,6 @@ export default function BrytonWorkoutBuilderScreen() {
     }
   }, [rows, name, unit, rangeMode, intervalMode]);
 
-  const Seg = ({ selected, label, onPress }: { selected: boolean; label: string; onPress: () => void }) => (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress}
-      style={{
-        paddingVertical: 8, paddingHorizontal: 12, borderRadius: v3Radius.small, borderWidth: 1,
-        borderColor: selected ? t.primary : t.border, backgroundColor: selected ? t.primary : t.card,
-      }}>
-      <Text style={{ color: selected ? t.card : t.text, fontWeight: '600' }}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const numField = (value: string, onChange: (s: string) => void, w = 64) => (
-    <TextInput value={value} onChangeText={onChange} keyboardType="numeric"
-      style={{
-        width: w, borderWidth: 1, borderColor: t.border, borderRadius: v3Radius.small,
-        color: t.text, backgroundColor: t.surface, paddingHorizontal: 8, paddingVertical: 6,
-      }} placeholderTextColor={t.mutedText} />
-  );
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.background }}
@@ -127,19 +137,19 @@ export default function BrytonWorkoutBuilderScreen() {
 
           <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Unit</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: v3Spacing.small }}>
-            {UNITS.map(u => <Seg key={u.key} selected={unit === u.key} label={u.label} onPress={() => setUnit(u.key)} />)}
+            {UNITS.map(u => <Seg t={t} key={u.key} selected={unit === u.key} label={u.label} onPress={() => setUnit(u.key)} />)}
           </View>
 
           <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Based on</Text>
           <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
-            <Seg selected={rangeMode} label="Range" onPress={() => setRangeMode(true)} />
-            <Seg selected={!rangeMode} label="Target" onPress={() => setRangeMode(false)} />
+            <Seg t={t} selected={rangeMode} label="Range" onPress={() => setRangeMode(true)} />
+            <Seg t={t} selected={!rangeMode} label="Target" onPress={() => setRangeMode(false)} />
           </View>
 
           <Text style={{ color: t.mutedText, marginTop: v3Spacing.medium, marginBottom: 4 }}>Interval</Text>
           <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
-            <Seg selected={intervalMode === 'time'} label="Time" onPress={() => setIntervalMode('time')} />
-            <Seg selected={intervalMode === 'distance'} label="Distance" onPress={() => setIntervalMode('distance')} />
+            <Seg t={t} selected={intervalMode === 'time'} label="Time" onPress={() => setIntervalMode('time')} />
+            <Seg t={t} selected={intervalMode === 'distance'} label="Distance" onPress={() => setIntervalMode('distance')} />
           </View>
         </Card>
 
@@ -152,7 +162,7 @@ export default function BrytonWorkoutBuilderScreen() {
             }}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 {INTENSITIES.map(it => (
-                  <Seg key={it.key} selected={r.intensity === it.key} label={it.label}
+                  <Seg t={t} key={it.key} selected={r.intensity === it.key} label={it.label}
                     onPress={() => setRow(i, { intensity: it.key })} />
                 ))}
               </View>
@@ -160,12 +170,12 @@ export default function BrytonWorkoutBuilderScreen() {
                 <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>
                   {intervalMode === 'time' ? 'min' : 'km'}
                 </Text>
-                {numField(r.durVal, s => setRow(i, { durVal: s }))}
+                <NumField t={t} value={r.durVal} onChange={s => setRow(i, { durVal: s })} />
                 <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>{rangeMode ? `low ${suffix}` : suffix}</Text>
-                {numField(r.low, s => setRow(i, { low: s }))}
+                <NumField t={t} value={r.low} onChange={s => setRow(i, { low: s })} />
                 {rangeMode && <>
                   <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>{`high ${suffix}`}</Text>
-                  {numField(r.high, s => setRow(i, { high: s }))}
+                  <NumField t={t} value={r.high} onChange={s => setRow(i, { high: s })} />
                 </>}
                 <Text style={{ color: t.secondary, fontSize: v3Type.caption }}>
                   {preview(rangeMode ? Math.round((Number(r.low) + Number(r.high)) / 2) : Number(r.low))}

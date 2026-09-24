@@ -124,10 +124,6 @@ export default function BrytonScreen() {
               <Text style={{ color: t.mutedText, marginTop: 2 }}>
                 Device profile: FTP {device.ftp} W · LTHR {device.lthr} · Max HR {device.maxHr} · {device.weight} kg
               </Text>
-              <View style={{ marginTop: v3Spacing.medium }}>
-                <Button label="Workout Builder" icon="chart"
-                  onPress={() => navigation.navigate('BrytonWorkoutBuilder')} grow={false} />
-              </View>
             </Card>
 
             {!intervals && (
