@@ -51,15 +51,18 @@ Import only - Sommet does not configure these devices.
 
 | Device | Source tag | Transport | Notes |
 |---|---|---|---|
-| Garmin Edge | `edge` | USB mass storage (MTP / gvfs) | `Garmin/Activities/*.fit`; Linux gvfs path (`tools/mtp_import.py`) |
-| Hammerhead Karoo | `karoo` | USB mass storage (MTP / gvfs) | `FitFiles/*.fit`; MTP enabled in the Karoo's dev options |
+| Garmin Edge | `edge` | USB (MTP / gvfs) | `Garmin/Activities/*.fit`; Linux gvfs path (`tools/mtp_import.py`) |
+| Hammerhead Karoo | `karoo` | USB (MTP / gvfs) | `FitFiles/*.fit`; MTP enabled in the Karoo's dev options |
+| Bryton Aero 60 | `bryton` | USB mass storage (mounted drive) | rides at the volume root (`YYMMDDHHMMSS.fit`); also profile sync (`Profile.bin`) + on-device workout builder |
 | Magene C406 Pro | `c406` | **Bluetooth LE** (must bond) | no USB data mode; `tools/magene_import.py`, protocol in [`magene_c406_protocol.md`](magene_c406_protocol.md) |
 
-The Magene is found by an on-demand Bluetooth scan (behind the experimental Bluetooth toggle,
-with the watch's own BLE pairing) rather than the USB poll the Edge/Karoo use, and it **must be
-BLE-bonded** or it stays on its "please pair" screen - see the protocol doc. Ride sport type
-(Cycling vs Indoor Cycling) comes from the FIT's `sub_sport`, so it matches on intervals.icu by
-construction.
+The Edge/Karoo/Bryton import over USB (`tools/mtp_import.py` handles both the gvfs-MTP Garmins
+and the plain mounted-drive Bryton); the Magene is found by an on-demand Bluetooth scan (behind
+the experimental Bluetooth toggle, with the watch's own BLE pairing) and **must be BLE-bonded** or
+it stays on its "please pair" screen - see the protocol doc. Ride sport type (Cycling vs Indoor
+Cycling) comes from the FIT's `sub_sport`, so it matches on intervals.icu by construction. The
+Bryton Aero 60 also carries its own reverse-engineered profile-sync and workout formats beyond
+plain import.
 
 ## Not yet in `manualslinks` / not linked in-app
 
