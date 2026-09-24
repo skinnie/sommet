@@ -833,7 +833,10 @@ export default function HomeScreen() {
     { id: 'totals', label: 'Totals', icon: 'chart', onPress: () => navigation.navigate('Totals') },
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
     // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
-    { id: 'routeweather', label: 'Weather', icon: 'sun', onPress: () => navigation.navigate('RouteWeather') },
+    // The route planner (map + GPX + weather/climb along the route), a separate item from Routes —
+    // matches desktop's "Route" planner (planRoute), which is apart from the "Routes" list. It was
+    // mislabeled "Weather" on Android (André, 2026-09-25).
+    { id: 'planRoute', label: 'Route', icon: 'route', onPress: () => navigation.navigate('RouteWeather') },
     // Offline maps lives in Settings > Maps (desktop parity — moved out of the main menu,
     // André 2026-09-24), not as a top-level item.
     ...(!connected ? [] : deviceType === 'garmin'
