@@ -203,7 +203,9 @@ export default function HomeScreen() {
 
   // ── Connecting flow (v2.3.2 beta) ────────────────────────────────────────
   const [phase, setPhase] = useState<ConnPhase>('searching');
-  const [deviceType, setDeviceType] = useState<AttachedDeviceType>('none');
+  // 'bryton' is a Home-only device type (the Aero 60 in the single USB hero); the native
+  // detectAttachedDeviceType only knows ambit/garmin/none, so widen just the state here.
+  const [deviceType, setDeviceType] = useState<AttachedDeviceType | 'bryton'>('none');
   const [connectError, setConnectError] = useState<string | undefined>();
   const [waitingSeconds, setWaitingSeconds] = useState<number | null>(null);
   const [ambitInfo, setAmbitInfo] = useState<AmbitDeviceInfo | null>(null);
@@ -216,14 +218,25 @@ export default function HomeScreen() {
   const [connectedBleAddress, setConnectedBleAddress] = useState<string | null>(null); // MAC of active BLE watch
   const [garminInfo, setGarminInfo] = useState<GarminConnectResult | null>(null);
 
-  // Bryton Aero 60 — like the watch/eTrex, it's detected here on Home and its own menu items
-  // (Workouts, Profile) appear when it's plugged in (André, 2026-09-24). Detection is a light,
-  // non-prompting poll (checks for a mounted BRYTON volume / an existing folder grant); the actual
-  // SAF grant happens when the user opens one of those screens.
-  const [brytonPlugged, setBrytonPlugged] = useState(false);
+  // Bryton Aero 60 — like the watch/eTrex, it IS the detected device in the single USB hero slot
+  // (only one device is plugged over USB at a time, André, 2026-09-24). A light non-prompting poll
+  // (mounted BRYTON volume / existing folder grant) claims the hero when no watch/Garmin is active;
+  // the SAF grant itself happens when the user opens the Workouts/Profile screen.
   useEffect(() => {
     let alive = true;
-    const tick = async () => { const d = await detectBryton(); if (alive) setBrytonPlugged(d.plugged); };
+    const tick = async () => {
+      const d = await detectBryton();
+      if (!alive) return;
+      if (d.plugged) {
+        // take the hero only when nothing else owns it (never clobber a live watch/Garmin).
+        // We set ONLY deviceType, not phase='connected' — the watch/Garmin menu items key off
+        // `connected`, and the Bryton must not switch those on. Its own hero + menu items key off
+        // deviceType === 'bryton'.
+        if (deviceTypeRef.current === 'none') setDeviceType('bryton');
+      } else if (deviceTypeRef.current === 'bryton') {
+        setDeviceType('none');
+      }
+    };
     tick();
     const id = setInterval(tick, 4000);
     return () => { alive = false; clearInterval(id); };
@@ -873,7 +886,7 @@ export default function HomeScreen() {
     { id: 'gear', label: t.gearButton, icon: 'cycling' as const, onPress: () => navigation.navigate('Gear'), group: 'training' as const },
     // Bryton Aero 60 — its own device-gated items, like the watch's Routes/Sport Modes. Only when
     // the head unit is plugged in. Workouts = the builder; Profile = FTP/LTHR/Max HR reconciliation.
-    ...(brytonPlugged
+    ...(deviceType === 'bryton'
       ? [
           { id: 'brytonWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('BrytonWorkoutBuilder'), group: 'watch' as const },
           { id: 'brytonProfile', label: 'Bryton profile', icon: 'cycling' as const, onPress: () => navigation.navigate('Bryton'), group: 'watch' as const },
@@ -940,9 +953,9 @@ export default function HomeScreen() {
           watch glyph at the same nominal size - a further 10% bump, on top of the same
           portrait/landscape scaling above, Garmin-only. */}
       <Icon
-        name={deviceType === 'garmin' ? 'etrex' : 'watch'}
+        name={deviceType === 'bryton' ? 'cycling' : deviceType === 'garmin' ? 'etrex' : 'watch'}
         size={Math.round((winWidth < winHeight ? 48 : 40) * (deviceType === 'garmin' ? 1.1 : 1))}
-        color={connected ? theme.text : theme.mutedText}
+        color={connected || deviceType === 'bryton' ? theme.text : theme.mutedText}
       />
 
       {/* ── Device info cards. Portrait: one centered column. Roomy/landscape: a
@@ -953,7 +966,7 @@ export default function HomeScreen() {
           timeout/no-watch, actively connecting, connect error) lives in this one card on the
           dashboard, holding the right message + connect options, instead of a separate
           full-screen splash. `busy` = actively connecting or scanning (spinner, no buttons). ── */}
-      {!connected && (() => {
+      {!connected && deviceType !== 'bryton' && (() => {
         const busy = phase === 'connecting';
         const title = phase === 'searching' ? t.homeSearchingTitle
           : phase === 'connecting' ? connectingMsg
@@ -1041,6 +1054,16 @@ export default function HomeScreen() {
           </Card>
         );
       })()}
+      {deviceType === 'bryton' && (
+        <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
+          <Text style={[styles.deviceName, v3TextStyle]}>Bryton Aero 60</Text>
+          <View style={styles.deviceMetaRow}>
+            <Text style={[styles.deviceSub, v3MutedStyle]}>Connected over USB</Text>
+            <Chip icon="check" label={t.homeDeviceConnectedStatus} />
+          </View>
+          <Text style={[styles.deviceSub, v3MutedStyle]}>Workouts and Bryton profile are in the menu.</Text>
+        </Card>
+      )}
       {deviceType === 'ambit' && ambitInfo && (
         <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
           <Text style={[styles.deviceName, v3TextStyle]}>{ambitInfo.name}</Text>
@@ -1230,22 +1253,6 @@ export default function HomeScreen() {
         </Card>
       )}
       </View>
-
-      {/* ── Bryton Aero 60 detected: a small "connected" card like the watch/eTrex hero. Its
-          actions (Workouts, Bryton profile) live in the menu, device-gated (André, 2026-09-24). ── */}
-      {brytonPlugged && (
-        <View style={[styles.weatherWrap, roomy && styles.weatherWrapRoomy]}>
-          <Card style={styles.deviceCardInner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={[styles.statValue, v3TextStyle]}>Bryton Aero 60</Text>
-                <Text style={[styles.teaser, v3MutedStyle]}>Connected over USB — Workouts and Bryton profile are in the menu.</Text>
-              </View>
-              <Chip icon="check" label={t.homeDeviceConnectedStatus} />
-            </View>
-          </Card>
-        </View>
-      )}
 
       {/* ── This year - desktop HomePage.qml's headline totals surfaced on Home, and a
           doorway to the Totals screen. Uses locally-synced activities (no watch needed);
