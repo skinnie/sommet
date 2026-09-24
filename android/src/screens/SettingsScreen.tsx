@@ -563,20 +563,6 @@ export default function SettingsScreen() {
       </View>
       )}
 
-      {/* ── Maps — desktop parity: Offline maps lives in Settings > Maps, not the main menu
-          (SettingsPage.qml's Maps card; André moved it out of the nav 2026-08-31). ── */}
-      <View style={styles.section}>
-        <View style={styles.cardHead}>
-          <IconBadge icon="map" />
-          <Text style={styles.cardTitle}>Maps</Text>
-        </View>
-        <Text style={styles.sectionDesc}>
-          Download any area of the world so the map works with no signal. Browse to an area, pick a
-          detail level, and save it.
-        </Text>
-        <Button label="Download offline maps…" icon="download" variant="outline"
-          onPress={() => navigation.navigate('OfflineMaps')} style={{ marginTop: 10 }} />
-      </View>
 
 
       {/* ── Connections - real, 2026-08-09 ("settings was completely reworked in our
@@ -774,6 +760,11 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        {/* Offline maps — desktop parity: SettingsPage.qml's Maps card has this button; on Android
+            it used to be a top-level menu item (moved here, André 2026-09-24). Download any area of
+            the world so the map works with no signal. */}
+        <Button label="Download offline maps…" icon="download" variant="outline"
+          onPress={() => navigation.navigate('OfflineMaps')} style={{ marginTop: 10 }} />
         {/* Real, 2026-08-10 ("let's go for the offline maps solution") - TileCache.ts's own
             cache (route/activity map tiles saved for offline use via MapScreen.tsx's own
             download button) is unbounded until cleared manually - a simple size readout +
