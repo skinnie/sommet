@@ -847,7 +847,8 @@ export default function HomeScreen() {
             { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const },
           ]
         : []),
-    ...(connected ? [{ id: 'backup', label: t.backupButton, icon: 'backup' as const, onPress: () => navigation.navigate('Backup', { deviceModel: ambitInfo?.model }), group: 'watch' as const }] : []),
+    // Backup & restore lives in Settings (desktop parity — moved out of the menu with Offline
+    // maps, André 2026-08-31 / ported 2026-09-25), not as a top-level item.
     ...(connected && deviceType === 'ambit' && !isKailash(ambitInfo)
       ? [{ id: 'sportModes', label: t.sportModesButton, icon: 'watch' as const, onPress: () => navigation.navigate('SportModes', { overBle: bleConnectedRef.current, variant: ambitInfo?.model }), group: 'watch' as const }]
       : []),
