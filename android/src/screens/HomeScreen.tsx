@@ -1062,6 +1062,14 @@ export default function HomeScreen() {
             <Chip icon="check" label={t.homeDeviceConnectedStatus} />
           </View>
           <Text style={[styles.deviceSub, v3MutedStyle]}>Workouts and Bryton profile are in the menu.</Text>
+          {/* Bluetooth is a separate transport from the USB Bryton (André, 2026-09-24): you can
+              still pair an Ambit watch over BLE while the head unit is plugged in. */}
+          {!bleConnected && (
+            <View style={styles.heroButtons}>
+              <Button label={t.homeBleConnectBtn} onPress={() => handleBleConnectRef.current()}
+                variant="text" grow={false} />
+            </View>
+          )}
         </Card>
       )}
       {deviceType === 'ambit' && ambitInfo && (
