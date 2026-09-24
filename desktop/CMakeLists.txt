@@ -200,6 +200,7 @@ qt_add_qml_module(ambitapp
         qml/components/BikeComputerIcon.qml
         qml/components/EdgeIcon.qml
         qml/components/KarooIcon.qml
+        qml/components/MageneIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
         qml/PlanStore.qml

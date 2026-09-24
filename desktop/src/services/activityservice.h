@@ -120,6 +120,13 @@ public:
     // and decodes it (tools/mtp_import.py + fit_decode.py); rows are tagged source="edge"/"karoo"
     // with the .fit filename as external_id (de-dups on re-import). No account, no settings.
     Q_INVOKABLE void importFromBikeComputers();
+    // Same import, but for a Magene C406 (Pro) over BLE (André, 2026-09-24). The C406 has no USB
+    // data mode, so it can't come through the MTP path above; the client scans/lists it over
+    // Bluetooth (behind the experimental toggle) and passes the device address + the ride
+    // filenames it already listed, so we skip a second slow BLE re-list here and pull only the
+    // files not yet in bike_seen via /api/magene/import. Rows are tagged source="c406", sharing
+    // the same bike_seen history and library-dedup as the MTP bike computers.
+    Q_INVOKABLE void importFromMagene(const QString &address, const QStringList &files);
     // How many of a bike computer's ride files a Sync would still pull (not yet in the bike_seen
     // history). Used only to decide whether "Sync rides" has anything to do - NOT a count of new
     // library entries (that needs decoding). 0 => everything's been checked, grey the button out.

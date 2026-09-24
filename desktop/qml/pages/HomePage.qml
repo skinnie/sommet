@@ -35,9 +35,21 @@ PageFlickable {
     // Detected by polling the backend's /api/mtp/devices (Linux/gvfs MTP). Shown on Home like
     // any other connected device; its rides import into the library on Sync, reusing
     // ActivityService.importFromBikeComputers(). No account, no settings.
-    property var bikeComputers: []
+    property var mtpBikeComputers: []
+    // --- Bike computer over BLE: Magene C406 Pro (André, 2026-09-24) ---
+    // The C406 has no USB data mode, so it's found by an on-demand Bluetooth scan (the "Search
+    // for Magene" button in the experimental section below), not the MTP poll - a c406 entry
+    // carries an `address` the MTP ones don't. Once found it joins the SAME unified device model
+    // (switcher + hero), and Sync routes to ActivityService.importFromMagene() by kind.
+    property var mageneDevices: []
+    // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
+    // over Bluetooth. One "active device across watches and bike computers" (André, 2026-09-04).
+    readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices)
     property string bikeSyncMsg: ""
     property bool bikeSyncOk: false
+    // Magene BLE scan state (the button in the experimental section drives these).
+    property bool mageneScanning: false
+    property string mageneMsg: ""
     // Bumped after every bike sync so anything that reads the (notify-less) sync history - the
     // "Sync rides" enabled state below - re-evaluates immediately, not only on the next poll.
     property int bikeSyncTick: 0
@@ -78,13 +90,65 @@ PageFlickable {
                 return;
             try {
                 const r = JSON.parse(xhr.responseText);
-                root.bikeComputers = (r && r.ok && r.devices) ? r.devices : [];
+                root.mtpBikeComputers = (r && r.ok && r.devices) ? r.devices : [];
             } catch (e) {
-                root.bikeComputers = [];
+                root.mtpBikeComputers = [];
             }
         };
         xhr.open("GET", "http://127.0.0.1:8766/api/mtp/devices");
         xhr.send();
+    }
+
+    // On-demand Bluetooth scan for a Magene C406 (a ~6s BLE scan; the button below triggers it).
+    // Two steps: find the device, then list its rides (both need the BLE radio, so this is not on
+    // the 8s poll). A found device is added to mageneDevices, joining the unified switcher/hero.
+    function scanMagene() {
+        if (root.mageneScanning)
+            return;
+        root.mageneScanning = true;
+        root.mageneMsg = qsTr("Searching…");
+        const scan = new XMLHttpRequest();
+        scan.onreadystatechange = function() {
+            if (scan.readyState !== XMLHttpRequest.DONE)
+                return;
+            var dev = null;
+            try {
+                const r = JSON.parse(scan.responseText);
+                if (r && r.ok && r.devices && r.devices.length > 0)
+                    dev = r.devices[0];
+            } catch (e) { dev = null; }
+            if (!dev) {
+                root.mageneScanning = false;
+                root.mageneDevices = [];
+                root.mageneMsg = qsTr("No Magene found — wake it and open its pairing screen.");
+                return;
+            }
+            // Step 2 - list the rides on it (fills the "N rides · M new" line and Sync's list).
+            const rides = new XMLHttpRequest();
+            rides.onreadystatechange = function() {
+                if (rides.readyState !== XMLHttpRequest.DONE)
+                    return;
+                root.mageneScanning = false;
+                var files = [];
+                try {
+                    const rr = JSON.parse(rides.responseText);
+                    if (rr && rr.ok && rr.files) files = rr.files;
+                } catch (e) { files = []; }
+                root.mageneDevices = [{
+                    "kind": "c406",
+                    "name": dev.name || "Magene C406",
+                    "address": dev.address,
+                    "activityCount": files.length,
+                    "files": files
+                }];
+                root.mageneMsg = qsTr("Found %1").arg(dev.name || "Magene C406");
+            };
+            rides.open("GET", "http://127.0.0.1:8766/api/magene/rides?address="
+                       + encodeURIComponent(dev.address));
+            rides.send();
+        };
+        scan.open("GET", "http://127.0.0.1:8766/api/magene/devices");
+        scan.send();
     }
 
     Timer {
@@ -442,10 +506,13 @@ PageFlickable {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
                             Text {
-                                text: root.activeBike
-                                    ? (root.activeBike.kind === "edge"
-                                        ? qsTr("Garmin Edge") : qsTr("Hammerhead Karoo"))
-                                    : ""
+                                text: {
+                                if (!root.activeBike) return "";
+                                if (root.activeBike.kind === "edge") return qsTr("Garmin Edge");
+                                if (root.activeBike.kind === "karoo") return qsTr("Hammerhead Karoo");
+                                if (root.activeBike.kind === "c406") return qsTr("Magene C406 Pro");
+                                return "";
+                            }
                                 font.pixelSize: Theme.fontSizeTitle; font.bold: true
                                 color: Theme.text
                             }
@@ -479,7 +546,17 @@ PageFlickable {
                                 ? qsTr("Syncing…")
                                 : (root.activeBikeUnsynced > 0 ? qsTr("Sync rides")
                                                                : qsTr("Up to date"))
-                            onClicked: { root.bikeSyncMsg = ""; ActivityService.importFromBikeComputers() }
+                            onClicked: {
+                                root.bikeSyncMsg = "";
+                                // Route by transport: the Magene pulls over BLE (needs its address
+                                // + the ride list); Edge/Karoo pull over MTP. Both land in the same
+                                // library via the shared bikeImportFinished/Error signals.
+                                if (root.activeBike && root.activeBike.kind === "c406")
+                                    ActivityService.importFromMagene(
+                                        root.activeBike.address, root.activeBike.files || []);
+                                else
+                                    ActivityService.importFromBikeComputers();
+                            }
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
@@ -491,22 +568,31 @@ PageFlickable {
                     }
                 }
 
-                // --- Bluetooth connect (Linux/BlueZ only, and Experimental-only - real
-                // decision, 2026-08-11: a live session that same night hit real BlueZ
-                // reliability trouble and a route-write bug (both since fixed - HANDOFF.md
-                // Milestone 7 items 16-19), so this stays behind Settings' "Experimental
-                // Features" toggle (off by default - SettingsPage.qml) rather than being
-                // part of the default cable-first Home experience. macOS/Windows BLE were
-                // explicitly dropped from scope the same night, not deferred. Shown only
-                // while nothing is connected: once a BLE watch subscribes, /api/device
-                // answers over BLE transparently and this row's own job is done - the
-                // existing "Ambit3 info rows" below just starts showing real data, no
-                // separate "connected via BLE" state to maintain here. ---
+                // --- Bluetooth devices (Linux/BlueZ only, Experimental-only - real decision,
+                // 2026-08-11: a live session that same night hit real BlueZ reliability trouble
+                // and a route-write bug (both since fixed - HANDOFF.md Milestone 7 items 16-19),
+                // so this stays behind Settings' "Experimental Features" toggle, off by default.
+                // macOS/Windows BLE were dropped from scope the same night, not deferred.
+                //
+                // ONE "Pair over Bluetooth" button, not one per device (André, 2026-09-24: "can't
+                // we put just pair and it searches for suunto or magene?"). It opens a small menu
+                // rather than searching both at once ON PURPOSE: the two flows share nothing at
+                // the BLE layer - the Suunto watch needs a bonded LE-Legacy passkey handshake run
+                // by ble_server.py (which owns the BlueZ adapter through its own agent), while the
+                // Magene is a plain unbonded bleak scan+connect. Kicking both off together would
+                // put two stacks on the same adapter at once, exactly the kind of contention that
+                // caused the trouble above. The menu lets André pick, and only one runs.
+                //
+                // Forget stays a single button, and only for the watch: the Magene never bonds
+                // (we connect to it unpaired), so there is literally nothing to "forget" for it -
+                // a "Forget Magene" entry would be a no-op. Forget is useful WHILE connected too
+                // (the "always Unpair, never Replace" recovery PROJECT_RULES.md recommends on the
+                // watch's own menu), so it isn't gated on being disconnected. Neither is shown for
+                // Garmin (no BLE pairing concept) or in Testing mode. ---
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    visible: DeviceService.bleExperimentEnabled
-                             && !HomeViewModel.connected && !HomeViewModel.isGarmin
+                    visible: DeviceService.bleExperimentEnabled && !HomeViewModel.isGarmin
                              && !DeviceService.demoMode
 
                     Row {
@@ -514,27 +600,59 @@ PageFlickable {
                         spacing: Theme.spacingMedium
 
                         RoundedButton {
-                            // Real request, 2026-08-13 (André, live testing: "it is still
-                            // on 'connecting'... maybe we should put a timer no?") - a bare
-                            // "Connecting…" gave no way to tell "still genuinely searching"
-                            // from "stuck". Ticking count only, no hard cutoff - a fresh
-                            // pairing's passkey wait can legitimately run long (see
-                            // DeviceService::connectBle()'s own comment), so this never
-                            // stops the attempt on its own.
+                            // Reflects whichever flow is mid-connect so the one button still gives
+                            // the live feedback the two separate buttons used to (the passkey wait
+                            // can legitimately run long - see DeviceService::connectBle()).
                             text: DeviceService.bleAttempting
                                 ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
-                                : qsTr("Connect via Bluetooth")
-                            enabled: !DeviceService.bleAttempting
-                            onClicked: DeviceService.connectBle(false)
+                                : root.mageneScanning ? qsTr("Searching…")
+                                                      : qsTr("Pair over Bluetooth")
+                            enabled: !DeviceService.bleAttempting && !root.mageneScanning
+                            onClicked: pairMenu.popup()
                         }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: DeviceService.bleAttempting && !DeviceService.bleSubscribed
-                            text: qsTr("Trigger \"Pair Mobile App\" or \"Sync now\" on the " +
-                                       "watch now - its window is short")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeLabel
+                        RoundedButton {
+                            text: qsTr("Forget this watch (Bluetooth)")
+                            onClicked: DeviceService.forgetBle()
                         }
+                    }
+
+                    // Menu behind the single Pair button: one entry per wireless device kind.
+                    ThemedMenu {
+                        id: pairMenu
+                        ThemedMenuItem {
+                            // A connected watch is already talking over its cable/BLE, so pairing
+                            // it again is pointless - offer it only when there's no watch yet.
+                            text: qsTr("Suunto watch")
+                            enabled: !HomeViewModel.connected
+                            onTriggered: DeviceService.connectBle(false)
+                        }
+                        ThemedMenuItem {
+                            text: qsTr("Magene C406")
+                            enabled: !root.mageneScanning
+                            onTriggered: root.scanMagene()
+                        }
+                    }
+
+                    // Shared status line for both flows (only one runs at a time).
+                    Text {
+                        visible: DeviceService.bleAttempting && !DeviceService.bleSubscribed
+                        text: qsTr("Trigger \"Pair Mobile App\" or \"Sync now\" on the watch " +
+                                   "now — its window is short")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeLabel
+                    }
+                    Text {
+                        visible: root.mageneScanning
+                        text: qsTr("Wake the C406 and open its pairing screen — its window is short")
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeLabel
+                    }
+                    Text {
+                        visible: !DeviceService.bleAttempting && !root.mageneScanning
+                                 && root.mageneMsg.length > 0
+                        text: root.mageneMsg
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeLabel
                     }
                     Text {
                         visible: DeviceService.bleError.length > 0
@@ -542,32 +660,13 @@ PageFlickable {
                         color: Theme.error
                         font.pixelSize: Theme.fontSizeLabel
                     }
-                }
-
-                // --- Forget (Bluetooth bond), real 2026-08-13 (André, live BLE testing:
-                // "we need to add a button to forget the watch"). Deliberately its own row,
-                // not folded into the Connect row above: unlike Connect, this is useful
-                // WHILE connected too - the same "always Unpair, never Replace" recovery
-                // PROJECT_RULES.md already recommends on the watch's own menu, now
-                // reachable from the Linux side of the same bond without a terminal. Never
-                // shown for Garmin (no such concept) or in Testing mode (nothing real to
-                // forget). ---
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingMedium
-                    visible: DeviceService.bleExperimentEnabled && !HomeViewModel.isGarmin
-                             && !DeviceService.demoMode
-
-                    RoundedButton {
-                        text: qsTr("Forget this watch (Bluetooth)")
-                        onClicked: DeviceService.forgetBle()
-                    }
                     Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Drops the Bluetooth pairing on this computer. Pair " +
-                                   "again from the watch's own menu afterward.")
+                        text: qsTr("Forget drops this computer's Bluetooth pairing with the watch; " +
+                                   "pair again from the watch's own menu afterward.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeLabel
+                        wrapMode: Text.WordWrap
+                        width: parent.width
                     }
                 }
 
@@ -891,13 +990,14 @@ PageFlickable {
                             onPicked: DeviceService.selectWatch(modelData.productId)
                         }
                     }
-                    // Bike computers (Edge / Karoo)
+                    // Bike computers (Edge / Karoo / Magene C406)
                     Repeater {
                         model: root.bikeComputers
                         delegate: DeviceChip {
                             required property var modelData
                             label: modelData.kind === "edge" ? qsTr("Garmin Edge")
-                                                             : qsTr("Hammerhead Karoo")
+                                 : modelData.kind === "c406" ? qsTr("Magene C406 Pro")
+                                 : qsTr("Hammerhead Karoo")
                             active: DeviceService.activeBikeKind === modelData.kind
                             onPicked: DeviceService.selectBikeComputer(modelData.kind)
                         }

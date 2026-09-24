@@ -1574,6 +1574,74 @@ void ActivityService::importFromBikeComputers()
     });
 }
 
+void ActivityService::importFromMagene(const QString &address, const QStringList &files)
+{
+    if (address.isEmpty()) {
+        emit bikeImportError(tr("No Magene device selected."));
+        return;
+    }
+    setLoading(true);
+    // The client already listed the device's ride files over BLE (the scan step), so - unlike the
+    // MTP path - there's no cheap re-list to do here; work straight from `files`. Dedup against
+    // the sync history so a slow BLE pull only ever fetches genuinely-new rides.
+    QSet<QString> seen;
+    if (m_db.isOpen()) {
+        QSqlQuery q(QStringLiteral("SELECT key FROM bike_seen"), m_db);
+        while (q.next())
+            seen.insert(q.value(0).toString());
+    }
+    QJsonArray toPull;      // {name} of files not yet handled
+    QStringList allKeys;    // "c406|name" of every file currently on the device
+    for (const QString &name : files) {
+        const QString key = QStringLiteral("c406|") + name;
+        allKeys << key;
+        if (!seen.contains(key)) {
+            QJsonObject f;
+            f.insert(QStringLiteral("name"), name);
+            toPull.append(f);
+        }
+    }
+    if (toPull.isEmpty()) {                 // nothing new on the device - instant, no BLE pull
+        setLoading(false);
+        emit bikeImportFinished(0, 0);
+        return;
+    }
+    QJsonObject payload;
+    payload.insert(QStringLiteral("address"), address);
+    payload.insert(QStringLiteral("files"), toPull);
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/magene/import")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(600000);        // a BLE pull + decode is slow; plenty of headroom
+    QNetworkReply *imp = m_network.post(req, QJsonDocument(payload).toJson());
+    connect(imp, &QNetworkReply::finished, this, [this, imp, allKeys]() {
+        imp->deleteLater();
+        setLoading(false);
+        if (imp->error() != QNetworkReply::NoError) {
+            emit bikeImportError(imp->errorString());
+            return;
+        }
+        const auto o = QJsonDocument::fromJson(imp->readAll()).object();
+        if (!o.value(QStringLiteral("ok")).toBool(false)) {
+            emit bikeImportError(o.value(QStringLiteral("error"))
+                                 .toString(tr("Import from the Magene failed.")));
+            return;
+        }
+        importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+        // Mark every file now on the device as handled - duplicates included, so they're never
+        // pulled/decoded again on the next sync (the FreeFileSync-style history, shared with MTP).
+        if (m_db.isOpen()) {
+            m_db.transaction();
+            QSqlQuery ins(m_db);
+            ins.prepare(QStringLiteral("INSERT OR IGNORE INTO bike_seen (key) VALUES (?)"));
+            for (const QString &k : allKeys) {
+                ins.addBindValue(k);
+                ins.exec();
+            }
+            m_db.commit();
+        }
+    });
+}
+
 void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
 {
     if (!m_db.isOpen()) {
