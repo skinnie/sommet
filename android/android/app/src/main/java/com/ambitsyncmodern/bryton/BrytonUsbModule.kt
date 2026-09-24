@@ -19,7 +19,7 @@ import java.util.concurrent.Executors
 
 /*
  * Bryton Aero 60 over USB Mass Storage (André, 2026-09-24). The Aero 60 exposes a plain FAT
- * volume with its files at known paths (System/Profile.bin, System/Plan/Cycling/*.fit) - the
+ * volume with its files at known paths (System/Profile.bin, workouts under System/Plan/Cycling) - the
  * same transport GarminModule already handles with libaums (me.jahnen.libaums:core). This is a
  * generic path-based read/write/list over that volume, identified by a filesystem MARKER
  * (System/Profile.bin) rather than a USB vendor id, since the Bryton's VID isn't fixed. The TS
