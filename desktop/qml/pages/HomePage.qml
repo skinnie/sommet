@@ -13,6 +13,7 @@ PageFlickable {
     clip: true
 
     Component.onCompleted: {
+        root.restoreMagene();
         // Which watch we are looking at - a real one, or the sample Testing mode serves.
         DeviceService.refreshDemoMode();
         DeviceService.refresh();
@@ -46,6 +47,41 @@ PageFlickable {
     // carries an `address` the MTP ones don't. Once found it joins the SAME unified device model
     // (switcher + hero), and Sync routes to ActivityService.importFromMagene() by kind.
     property var mageneDevices: []
+    // The last Magene found, remembered across restarts (André, 2026-09-25: the desktop forgot it
+    // every session). It's a sleeping BLE device, so the card is restored straight away from here
+    // and Sync lists its rides on demand (a remembered entry has no ride list yet: files = null).
+    Settings { id: mageneMemory; category: "magene"; property string address: ""; property string name: "" }
+    function restoreMagene() {
+        if (mageneMemory.address.length > 0 && root.mageneDevices.length === 0)
+            root.mageneDevices = [{ "kind": "c406", "name": mageneMemory.name || "Magene C406",
+                                    "address": mageneMemory.address, "activityCount": -1, "files": null }];
+    }
+    // Magene Sync: list the rides over BLE when this session hasn't yet, then import the new ones.
+    function syncMagene(bike) {
+        if (bike.files) {
+            ActivityService.importFromMagene(bike.address, bike.files);
+            return;
+        }
+        root.bikeSyncMsg = qsTr("Reading rides from the Magene…");
+        root.bikeSyncOk = true;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            var r = {};
+            try { r = JSON.parse(xhr.responseText); } catch (e) {}
+            if (!r.ok) {
+                root.bikeSyncOk = false;
+                root.bikeSyncMsg = qsTr("Magene not in range — wake it (any button) and retry.");
+                return;
+            }
+            root.bikeSyncMsg = "";
+            root.mageneDevices = [Object.assign({}, bike, { "activityCount": r.files.length, "files": r.files })];
+            ActivityService.importFromMagene(bike.address, r.files);
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/magene/rides?address=" + encodeURIComponent(bike.address));
+        xhr.send();
+    }
     // Shared with the Training Program (its "Send to / Create for Magene" menu entries).
     onMageneDevicesChanged: BikeDevices.magene = mageneDevices.length > 0 ? mageneDevices[0] : null
     // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
@@ -279,10 +315,14 @@ PageFlickable {
             } catch (e) { dev = null; }
             if (!dev) {
                 root.mageneScanning = false;
-                root.mageneDevices = [];
-                root.mageneMsg = qsTr("No Magene found — wake it and open its pairing screen.");
+                // Keep a remembered Magene's card: not advertising right now just means asleep.
+                root.mageneMsg = root.mageneDevices.length > 0
+                    ? qsTr("Magene not in range — wake it (any button) and retry.")
+                    : qsTr("No Magene found — wake it and open its pairing screen.");
                 return;
             }
+            mageneMemory.address = dev.address;
+            mageneMemory.name = dev.name || "Magene C406";
             // Step 2 - list the rides on it (fills the "N rides · M new" line and Sync's list).
             const rides = new XMLHttpRequest();
             rides.onreadystatechange = function() {
@@ -678,6 +718,9 @@ PageFlickable {
                                     if (!root.activeBike)
                                         return "";
                                     var total = root.activeBike.activityCount;
+                                    // A remembered Magene before its first Sync this session.
+                                    if (total < 0)
+                                        return qsTr("Bluetooth · Sync reads its rides");
                                     // "new" now means genuinely-new: unsyncedBikeCount matches each
                                     // device file's timestamp against the whole library, so rides
                                     // already imported (e.g. via intervals.icu) aren't counted
@@ -738,8 +781,7 @@ PageFlickable {
                                 // + the ride list); Edge/Karoo pull over MTP. Both land in the same
                                 // library via the shared bikeImportFinished/Error signals.
                                 if (root.activeBike && root.activeBike.kind === "c406")
-                                    ActivityService.importFromMagene(
-                                        root.activeBike.address, root.activeBike.files || []);
+                                    root.syncMagene(root.activeBike);
                                 else
                                     ActivityService.importFromBikeComputers();
                             }

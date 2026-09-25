@@ -14,6 +14,17 @@ import { TrackPreview } from '../components/TrackPreview';
 import { SortBar } from '../components/ui/SortBar';
 import { getViewMode, setViewMode as persistViewMode, sortItems, sortKeysFor, SortKey, ViewMode } from '../services/ListViewPrefs';
 import { ViewModeToggle } from '../components/ui/ViewModeToggle';
+import { detectBryton } from '../services/BrytonUsb';
+import { sendRouteToBryton } from '../services/BrytonTrack';
+import { getKnownMagene, type KnownMagene } from '../services/MageneStore';
+import { sendRoute as sendRouteToMagene } from '../services/MageneRoute';
+
+// The imported route as a minimal GPX, for the bike-computer encoders (MageneRoute/BrytonTrack
+// both take GPX text, like their desktop tools).
+function pendingToGpx(r: PendingRoute): string {
+  const pts = r.points.map(p => `<trkpt lat="${p.lat}" lon="${p.lon}">${p.alt != null ? `<ele>${p.alt}</ele>` : ''}</trkpt>`);
+  return `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="Sommet"><trk><name>${r.name}</name><trkseg>${pts.join('')}</trkseg></trk></gpx>`;
+}
 
 // v3.0 UI port (2026-08-09, "re do routes... to match entirely desktop") - real structural
 // rebuild matching desktop's own RoutesPage.qml: an "Import a route" card with a real
@@ -36,6 +47,29 @@ export default function RouteScreen() {
   const styles = createStyles(theme);
 
   const [pending, setPending] = useState<PendingRoute | null>(null);
+  // Bike computers around (desktop RoutesPage parity: "Send to Bryton" / "Send to Magene").
+  const [brytonPlugged, setBrytonPlugged] = useState(false);
+  const [magene, setMagene] = useState<KnownMagene | null>(null);
+  const [bikeBusy, setBikeBusy] = useState('');
+  const [bikeMsg, setBikeMsg] = useState('');
+  useFocusEffect(useCallback(() => {
+    detectBryton().then(d => setBrytonPlugged(d.plugged && d.granted)).catch(() => {});
+    getKnownMagene().then(setMagene).catch(() => {});
+  }, []));
+  async function sendToBike(target: 'bryton' | 'magene') {
+    if (!pending || bikeBusy) return;
+    setBikeBusy(target); setBikeMsg('');
+    try {
+      const gpx = pendingToGpx(pending);
+      if (target === 'bryton') {
+        const r = await sendRouteToBryton(gpx, pending.name);
+        setBikeMsg(`“${r.name}” installed on the Bryton ✓ — Follow Track after unplugging.`);
+      } else {
+        const r = await sendRouteToMagene(magene!.address, gpx);
+        setBikeMsg(r.ok ? `Sent to the Magene C406 ✓ (it keeps one route)` : (r.error || 'Send failed'));
+      }
+    } catch (e: any) { setBikeMsg(String(e?.message ?? e)); } finally { setBikeBusy(''); }
+  }
   const [picking, setPicking] = useState(false);
   const [plannerOpen, setPlannerOpen] = useState(false);   // route-planner help dialog
   // Anchor the dialog just below the "i" (like desktop) rather than centering it. We measure the
@@ -213,6 +247,15 @@ export default function RouteScreen() {
               <Button label={t.routeUploadBtn} variant="filled" loading={sendBusy} disabled={sendBusy} onPress={handleUpload} />
               <Button label={t.routeDiscardBtn} variant="text" grow={false} disabled={sendBusy} onPress={() => setPending(null)} />
             </View>
+            {(brytonPlugged || magene) && (
+              <View style={styles.row}>
+                {brytonPlugged && <Button label={bikeBusy === 'bryton' ? 'Sending…' : 'Send to Bryton'} variant="text" grow={false}
+                  disabled={!!bikeBusy} onPress={() => sendToBike('bryton')} />}
+                {magene && <Button label={bikeBusy === 'magene' ? 'Sending…' : 'Send to Magene'} variant="text" grow={false}
+                  disabled={!!bikeBusy} onPress={() => sendToBike('magene')} />}
+              </View>
+            )}
+            {bikeMsg ? <StatusLine text={bikeMsg} tone={bikeMsg.includes('✓') ? 'muted' : 'alert'} /> : null}
             {sendBusy && <StatusLine text={sendState.phase === 'connecting' ? t.connecting : t.routeWritingMsg} />}
           </View>
         )}

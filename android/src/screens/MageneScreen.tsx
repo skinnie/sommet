@@ -11,7 +11,7 @@ import {
 import { sendRoute } from '../services/MageneRoute';
 import { readPages, writePages, FIELD_GROUPS, FIELD_NAMES, MAX_FIELDS, MIN_FIELDS, MAX_PAGES } from '../services/MagenePages';
 import { pickFile } from '../services/CatalogService';
-import { base64ToBytes } from '../services/Base64';
+import { base64ToBytes, bytesToUtf8 } from '../services/Base64';
 import { getKnownMagene, type KnownMagene } from '../services/MageneStore';
 import { diffProfile, fmtProfile, PROFILE_LABELS, TWO_WAY, type ProfileField } from '../services/MageneProfileSync';
 
@@ -140,7 +140,7 @@ export default function MageneScreen() {
     try {
       const f = await pickFile();
       setBusy('route'); setMsg('');
-      const gpx = String.fromCharCode(...base64ToBytes(f.base64));
+      const gpx = bytesToUtf8(base64ToBytes(f.base64));
       const r = await sendRoute(magene.address, gpx);
       setMsg(r.ok ? `Route “${f.name}” sent (${r.points} points) ✓` : (r.error || 'Route send failed'));
     } catch (e: any) {

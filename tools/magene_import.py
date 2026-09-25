@@ -33,9 +33,11 @@ Commands used here (2-byte opcode, little-endian multi-byte fields):
   40 49 <cursor u32>        -> 40 49 <status> <count u8> <more u8> [<ride_id u32> x count]
                                 Ride IDs are the ride's UTC start time as a raw Unix timestamp
                                 (confirmed: matches the FIT file's own session start_time).
-                                cursor 0 = first page. Pagination (more != 0) is INFERRED from
-                                OpenBikeCompanion's docs, not hardware-tested (only ever saw one
-                                ride on the test unit): the next cursor is the last ride_id seen.
+                                cursor 0 = first page. Pagination confirmed from the OneLap APK
+                                (BikeComputerRecordUpload.handler_read_next_page +
+                                BikeComputerReUploadRecordsProduct): byte 4 != 0 = more pages, next
+                                request = 40 49 <last ride_id of the page>; the app reads the ids
+                                from byte 5 to the end of the packet (not by the count byte).
   40 4a <ride_id u32>        -> 40 4a <status>, then the FIT file streamed as CC03 notifications.
 
 CC03 chunk framing (found here, hardware-confirmed via CRC on 2026-09-24):
@@ -162,8 +164,9 @@ async def _ride_list(client):
 
         if len(msg) < 5 or msg[2] != 0:
             break
-        count, more = msg[3], msg[4]
-        page_ids = [int.from_bytes(msg[5 + 4 * i:9 + 4 * i], "little") for i in range(count)]
+        more = msg[4]
+        # Like the OneLap app: every 4-byte id from byte 5 to the end of the packet.
+        page_ids = [int.from_bytes(msg[i:i + 4], "little") for i in range(5, len(msg) - 3, 4)]
         rides.extend(page_ids)
         if not more or not page_ids:
             break
