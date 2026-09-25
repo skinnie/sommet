@@ -112,7 +112,18 @@ export async function deleteIntervalsIcuActivity(activityId: string): Promise<bo
 export interface AthleteThresholds {
   ftp?: number; lthr?: number; maxHr?: number;
   weight?: number; height?: number; gender?: number; // read-only extras
+  age?: number; // from icu_date_of_birth (read-only; the Magene C406 stores an age)
   rideGroupId?: number;
+}
+
+// Whole years from a "YYYY-MM-DD" birth date (tools/intervals_athlete.py does the same).
+function ageFrom(dob?: string): number | undefined {
+  if (!dob) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dob));
+  if (!m) return undefined;
+  const now = new Date();
+  const y = +m[1], mo = +m[2], d = +m[3];
+  return now.getFullYear() - y - ((now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) ? 1 : 0);
 }
 
 function authHeader(apiKey: string): string { return 'Basic ' + btoa(`API_KEY:${apiKey}`); }
@@ -136,6 +147,7 @@ export async function getAthleteThresholds(): Promise<AthleteThresholds | null> 
     weight: weight ? Math.round(weight * 10) / 10 : undefined,
     height: prof.height ? Math.round(prof.height * 100) : undefined,
     gender: prof.sex === 'M' ? 1 : prof.sex === 'F' ? 0 : undefined,
+    age: ageFrom(prof.icu_date_of_birth ?? prof.date_of_birth),
     rideGroupId: ride.id,
   };
 }

@@ -32,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
           add(PolarSleepPackage())
           add(AmbitCatalogPackage())
           add(BrytonUsbPackage())
+          add(com.ambitsyncmodern.magene.MagenePackage())
         },
     )
   }

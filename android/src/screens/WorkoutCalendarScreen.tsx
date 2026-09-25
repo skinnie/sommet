@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Linking,
+  View, Text, ScrollView, TextInput, TouchableOpacity, Pressable, StyleSheet, ActivityIndicator, Alert, Linking,
 } from 'react-native';
+import { useRoute } from '@react-navigation/native';
 import { Card } from '../components/ui/Card';
 import { useV3Theme } from '../theme/v3';
 import { t } from '../i18n';
@@ -13,7 +14,18 @@ import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
+import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
+import { ActionMenu } from '../components/ui/ActionMenu';
+import {
+  WorkoutStepsEditor, StepRow, PlanDevice, DEVICE_LABELS, defaultSteps, fromSchema, toWorkout,
+  repeatsBalanced, fitsDevice,
+} from '../components/WorkoutStepsEditor';
 
+// One plan for every device (André, 2026-09-25 - desktop Training Program parity): an entry is
+// made FOR a device (the step editor offers only what that device takes), and a long press on a
+// plan row opens Edit / Send to <connected bike computer> / Compile for watch / Remove. Home
+// passes which devices are around; opened without params it behaves as before (watch only).
+type PlanEntry = CalendarPlanEntry & { device?: PlanDevice };
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
 // region entirely (assets/Firmware/re-out/training_program_CONCLUSION.md on desktop has the
@@ -29,6 +41,20 @@ import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 export default function WorkoutCalendarScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
+  const route = useRoute<any>();
+  const params: { watch?: boolean; bryton?: boolean; magene?: string | null } = route.params ?? { watch: true };
+  const available: PlanDevice[] = [
+    ...(params.watch ? ['suunto' as const] : []),
+    ...(params.bryton ? ['bryton' as const] : []),
+    ...(params.magene ? ['magene' as const] : []),
+  ];
+  const [device, setDevice] = useState<PlanDevice>(available[0] ?? '');
+  const [rows, setRows] = useState<StepRow[]>(defaultSteps());
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [menuIndex, setMenuIndex] = useState<number | null>(null);
+  const [sendMsg, setSendMsg] = useState('');
+  const [sending, setSending] = useState(false);
+  const isBike = device === 'bryton' || device === 'magene';
 
   const [date, setDate] = useState(todayIso());
   const [modes, setModes] = useState<ExerciseMode[] | null>(null);
@@ -36,11 +62,6 @@ export default function WorkoutCalendarScreen() {
   const [mode, setMode] = useState<string | null>(null);
 
   const [name, setName] = useState('My workout');
-  const [warmup, setWarmup] = useState('10');
-  const [reps, setReps] = useState('5');
-  const [work, setWork] = useState('3');
-  const [rest, setRest] = useState('2');
-  const [cooldown, setCooldown] = useState('5');
 
   const [generatedJson, setGeneratedJson] = useState<string | null>(null);
   const [compiledPending, setCompiledPending] = useState<CompiledApp | null>(null);
@@ -51,14 +72,14 @@ export default function WorkoutCalendarScreen() {
   const [importing, setImporting] = useState(false);
   const [compileTarget, setCompileTarget] = useState<number | null>(null);
 
-  const [plan, setPlan] = useState<CalendarPlanEntry[]>([]);
+  const [plan, setPlan] = useState<PlanEntry[]>([]);
   const [brytonBusy, setBrytonBusy] = useState(false);
   const [brytonMsg, setBrytonMsg] = useState('');
 
   // Send the plan's intervals.icu-imported workouts (those carrying a workout schema) to a plugged
   // Bryton Aero 60 as native .fit, converted with the device's own thresholds (BrytonUsb).
   async function sendToBryton() {
-    const withWorkout = plan.filter((e: any) => e.workout);
+    const withWorkout = plan.filter((e: any) => e.workout && e.device !== 'magene');
     if (withWorkout.length === 0) { setBrytonMsg('No intervals.icu workouts in the plan to send.'); return; }
     setBrytonBusy(true); setBrytonMsg('');
     try {
@@ -76,29 +97,72 @@ export default function WorkoutCalendarScreen() {
     }
   }
 
+  // Send one plan entry (or all of them) to a bike computer - the long-press menu's "Send to …".
+  async function sendEntry(target: 'bryton' | 'magene', e: PlanEntry): Promise<boolean> {
+    if (!e.workout) return false;
+    if (target === 'bryton') {
+      await connectBryton();
+      await sendSchemaWorkout({ name: e.workoutName, ...(e.workout as any) });
+      return true;
+    }
+    const r = await sendMageneWorkout(params.magene!, e.workout, e.workoutName);
+    if (!r.ok) throw new Error(r.error || 'send failed');
+    return true;
+  }
+  async function sendOne(target: 'bryton' | 'magene', e: PlanEntry) {
+    setSending(true); setSendMsg(`Sending “${e.workoutName}” to ${DEVICE_LABELS[target]}…`);
+    try { await sendEntry(target, e); setSendMsg(`Sent “${e.workoutName}” to ${DEVICE_LABELS[target]} ✓`); }
+    catch (err: any) { setSendMsg(`${DEVICE_LABELS[target]}: ${String(err?.message ?? err)}`); }
+    finally { setSending(false); }
+  }
+  async function sendAllToMagene() {
+    const list = plan.filter(e => e.workout && e.device !== 'bryton' && e.date >= todayIso());
+    if (!list.length) { setSendMsg('No upcoming workouts in the plan for the Magene.'); return; }
+    // The C406 keeps the workouts it's sent; send the upcoming ones, oldest first.
+    setSending(true);
+    let ok = 0, fail = 0;
+    for (const e of [...list].sort((a, b) => a.date.localeCompare(b.date))) {
+      try { await sendEntry('magene', e); ok++; } catch { fail++; }
+    }
+    setSending(false);
+    setSendMsg(`Sent ${ok} to Magene C406${fail ? `, ${fail} failed` : ''}.`);
+  }
+
+  // The creator: a workout for `device` on `date`. Bike computers take it straight away (no
+  // compile step); the watch still goes through the community compiler below.
+  function addBikeEntry(sendNow: boolean) {
+    const workout = toWorkout(name, rows);
+    const entry: PlanEntry = { date, mode: '', workoutName: workout.name!, workout, device };
+    setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
+    setEditIndex(null);
+    if (sendNow && isBike) sendOne(device as 'bryton' | 'magene', entry);
+  }
+
+  function editEntry(i: number) {
+    const e = plan[i];
+    setEditIndex(i);
+    setDate(e.date);
+    setName(e.workoutName);
+    setDevice(e.device ?? (available.includes('suunto') ? 'suunto' : available[0] ?? ''));
+    if (e.workout) setRows(e.workout.steps.map(fromSchema));
+  }
+
+  const editorOk = rows.length > 0 && repeatsBalanced(rows) && fitsDevice(rows, device);
+
   const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [lastSyncWasWrite, setLastSyncWasWrite] = useState(false);
   const syncBusy = syncState != null && syncState.phase !== 'done' && syncState.phase !== 'error' && syncState.phase !== 'idle';
 
   useEffect(() => {
+    if (!params.watch) return; // sport modes live on the watch; bike computers don't need them
     setModesLoading(true);
     readCustomModes(st => { if (st.modes) setModes(st.modes); if (st.phase === 'error') setModesLoading(false); })
       .finally(() => setModesLoading(false));
   }, []);
 
-  function num(v: string): number { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; }
-
   function buildWorkout(): Workout {
-    const w = num(warmup), r = num(reps), wk = num(work), rs = num(rest), cd = num(cooldown);
-    const steps: Workout['steps'] = [];
-    if (w > 0) steps.push({ type: { typeName: 'warmup' }, duration: { durationName: 'time', value: w * 60 }, target: { targetName: 'none' } });
-    steps.push({ type: { typeName: 'repeatStart', value: Math.max(1, r) } });
-    steps.push({ type: { typeName: 'interval' }, duration: { durationName: 'time', value: Math.max(1, wk) * 60 }, target: { targetName: 'none' } });
-    if (rs > 0) steps.push({ type: { typeName: 'recovery' }, duration: { durationName: 'time', value: rs * 60 }, target: { targetName: 'none' } });
-    steps.push({ type: { typeName: 'repeatEnd' } });
-    if (cd > 0) steps.push({ type: { typeName: 'cooldown' }, duration: { durationName: 'time', value: cd * 60 }, target: { targetName: 'none' } });
-    return { name: name.trim() || 'Workout', steps };
+    return toWorkout(name, rows);
   }
 
   // The compiler site's editor just POSTs whatever text is in it as-is (same request shape
@@ -118,10 +182,11 @@ export default function WorkoutCalendarScreen() {
   // Pull the athlete's planned workouts from intervals.icu for the date range and drop them into
   // the plan as pending entries (each carries its structured workout so it can be compiled below).
   async function handleImportFromIntervals() {
-    if (!mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
+    // The sport mode only matters for the watch install; bike computers don't have one.
+    if (params.watch && !mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
     setImporting(true);
     try {
-      const { entries, skipped } = await fetchIntervalsWorkouts(importStart, importEnd, mode);
+      const { entries, skipped } = await fetchIntervalsWorkouts(importStart, importEnd, mode ?? '');
       if (entries.length === 0) {
         Alert.alert(t.experimentalWorkoutCalendar,
           skipped.length ? `${t.workoutCalendarImportNone} (${skipped.length} skipped)` : t.workoutCalendarImportNone);
@@ -172,7 +237,10 @@ export default function WorkoutCalendarScreen() {
     if (!mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
     if (!compiledPending) { Alert.alert(t.error, t.intervalsImportBtn); return; }
     const workoutName = name.trim() || 'Workout';
-    setPlan(p => [...p, { date, mode, workoutName, compiled: compiledPending }]);
+    const workout = buildWorkout();
+    const entry: PlanEntry = { date, mode, workoutName, compiled: compiledPending, workout, device: 'suunto' };
+    setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
+    setEditIndex(null);
     Alert.alert(t.experimentalWorkoutCalendar, t.workoutCalendarAddedMsg);
     setCompiledPending(null);
     setGeneratedJson(null);
@@ -187,7 +255,9 @@ export default function WorkoutCalendarScreen() {
     if (plan.length === 0) { Alert.alert(t.error, t.workoutCalendarEmptyPlanMsg); return; }
     setLastSyncWasWrite(write);
     setSyncResult(null);
-    const result = await syncCalendar(plan, new Date(), write, setSyncState);
+    // Only the watch's entries: bike-computer ones are sent from their own menu.
+    const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene');
+    const result = await syncCalendar(watchPlan, new Date(), write, setSyncState);
     if (result) setSyncResult(result);
   }
 
@@ -205,12 +275,14 @@ export default function WorkoutCalendarScreen() {
           <Field label={t.workoutCalendarImportFrom} value={importStart} onChangeText={setImportStart} s={s} theme={theme} />
           <Field label={t.workoutCalendarImportTo} value={importEnd} onChangeText={setImportEnd} s={s} theme={theme} />
         </Row>
-        <Text style={[s.desc, { marginTop: 8 }]}>
-          {mode ? `${t.workoutCalendarModeLabel}: ${mode}` : t.workoutCalendarPickModeFirst}
-        </Text>
+        {params.watch && (
+          <Text style={[s.desc, { marginTop: 8 }]}>
+            {mode ? `${t.workoutCalendarModeLabel}: ${mode}` : t.workoutCalendarPickModeFirst}
+          </Text>
+        )}
         <TouchableOpacity
-          style={[s.btn, s.primaryBtn, (importing || !mode) && { opacity: 0.5 }]}
-          disabled={importing || !mode}
+          style={[s.btn, s.primaryBtn, (importing || (params.watch && !mode)) && { opacity: 0.5 }]}
+          disabled={importing || (params.watch && !mode)}
           onPress={handleImportFromIntervals}
         >
           {importing
@@ -219,66 +291,92 @@ export default function WorkoutCalendarScreen() {
         </TouchableOpacity>
       </Card>
 
-      {/* ── New calendar entry ── */}
+      {/* ── New calendar entry: a workout FOR one device (its step editor offers only what that
+          device takes - desktop Training Program parity). ── */}
       <Card style={{ width: '100%' }}>
+        {editIndex != null && <Text style={[s.desc, { color: theme.primary, marginTop: 0 }]}>Editing a plan entry</Text>}
+        {available.length > 0 && (
+          <>
+            <Text style={s.fieldLabel}>Create for</Text>
+            <View style={s.chipRow}>
+              {available.map(d => (
+                <TouchableOpacity key={d} style={[s.chip, device === d && s.chipActive]} onPress={() => setDevice(d)}>
+                  <Text style={[s.chipText, device === d && s.chipTextActive]}>{DEVICE_LABELS[d as Exclude<PlanDevice, ''>]}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
         <Row>
           <Field label={t.workoutCalendarDateLabel} value={date} onChangeText={setDate} s={s} theme={theme} />
           <Field label={t.intervalsName} value={name} onChangeText={setName} s={s} theme={theme} />
         </Row>
 
-        <Text style={[s.fieldLabel, { marginTop: 10 }]}>{t.workoutCalendarModeLabel}</Text>
-        {modesLoading && <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 6, alignSelf: 'flex-start' }} />}
-        {!modesLoading && (
-          <View style={s.chipRow}>
-            {(modes ?? []).map((m, i) => (
-              <TouchableOpacity key={i} style={[s.chip, mode === m.settings.name && s.chipActive]} onPress={() => setMode(m.settings.name)}>
-                <Text style={[s.chipText, mode === m.settings.name && s.chipTextActive]}>{m.settings.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {device === 'suunto' && (
+          <>
+            <Text style={[s.fieldLabel, { marginTop: 10 }]}>{t.workoutCalendarModeLabel}</Text>
+            {modesLoading && <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 6, alignSelf: 'flex-start' }} />}
+            {!modesLoading && (
+              <View style={s.chipRow}>
+                {(modes ?? []).map((m, i) => (
+                  <TouchableOpacity key={i} style={[s.chip, mode === m.settings.name && s.chipActive]} onPress={() => setMode(m.settings.name)}>
+                    <Text style={[s.chipText, mode === m.settings.name && s.chipTextActive]}>{m.settings.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </>
         )}
 
-        <Row>
-          <Field label={t.intervalsWarmup} value={warmup} onChangeText={setWarmup} numeric s={s} theme={theme} />
-          <Field label={t.intervalsCooldown} value={cooldown} onChangeText={setCooldown} numeric s={s} theme={theme} />
-        </Row>
-        <Row>
-          <Field label={t.intervalsReps} value={reps} onChangeText={setReps} numeric s={s} theme={theme} />
-          <Field label={t.intervalsWork} value={work} onChangeText={setWork} numeric s={s} theme={theme} />
-          <Field label={t.intervalsRest} value={rest} onChangeText={setRest} numeric s={s} theme={theme} />
-        </Row>
+        <WorkoutStepsEditor rows={rows} device={device} onChange={setRows} />
 
-        <Text style={[s.desc, { marginTop: 12 }]}>{t.intervalsCompilerNote}</Text>
-        <TouchableOpacity style={s.btn} onPress={handleGenerateAndOpen}>
-          <Text style={s.btnText}>{t.intervalsGenerateBtn}</Text>
-        </TouchableOpacity>
-        {generatedJson != null && (
-          <View style={{ marginTop: 10 }}>
-            <Text style={s.fieldLabel}>{t.intervalsSourceLabel}</Text>
-            <TextInput
-              style={[s.input, { minHeight: 120, fontFamily: 'monospace', fontSize: 11 }]}
-              value={generatedJson}
-              editable={false}
-              multiline
-              selectTextOnFocus
-            />
-          </View>
+        {isBike && (
+          <Row>
+            <TouchableOpacity style={[s.btn, { flex: 1 }, !editorOk && { opacity: 0.5 }]} disabled={!editorOk} onPress={() => addBikeEntry(false)}>
+              <Text style={s.btnText}>{editIndex != null ? 'Save' : t.workoutCalendarAddBtn}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, (!editorOk || sending) && { opacity: 0.5 }]}
+              disabled={!editorOk || sending} onPress={() => addBikeEntry(true)}>
+              <Text style={s.primaryBtnText}>{`Save & send to ${DEVICE_LABELS[device as 'bryton' | 'magene']}`}</Text>
+            </TouchableOpacity>
+          </Row>
         )}
-        <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={handleImportCompiled}>
-          <Text style={s.btnText}>{t.intervalsImportBtn}</Text>
-        </TouchableOpacity>
-        {compiledPending != null && (
-          <Text style={[s.desc, { color: theme.primary, marginTop: 6 }]}>
-            {compiledPending.binary.length} B - {t.workoutCalendarAddBtn.toLowerCase()}?
-          </Text>
+
+        {!isBike && (
+          <>
+            <Text style={[s.desc, { marginTop: 12 }]}>{t.intervalsCompilerNote}</Text>
+            <TouchableOpacity style={[s.btn, !editorOk && { opacity: 0.5 }]} disabled={!editorOk} onPress={handleGenerateAndOpen}>
+              <Text style={s.btnText}>{t.intervalsGenerateBtn}</Text>
+            </TouchableOpacity>
+            {generatedJson != null && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={s.fieldLabel}>{t.intervalsSourceLabel}</Text>
+                <TextInput
+                  style={[s.input, { minHeight: 120, fontFamily: 'monospace', fontSize: 11 }]}
+                  value={generatedJson}
+                  editable={false}
+                  multiline
+                  selectTextOnFocus
+                />
+              </View>
+            )}
+            <TouchableOpacity style={[s.btn, { marginTop: 8 }]} onPress={handleImportCompiled}>
+              <Text style={s.btnText}>{t.intervalsImportBtn}</Text>
+            </TouchableOpacity>
+            {compiledPending != null && (
+              <Text style={[s.desc, { color: theme.primary, marginTop: 6 }]}>
+                {compiledPending.binary.length} B - {t.workoutCalendarAddBtn.toLowerCase()}?
+              </Text>
+            )}
+            <TouchableOpacity
+              style={[s.btn, s.primaryBtn, compiledPending == null && { opacity: 0.5 }]}
+              disabled={compiledPending == null}
+              onPress={handleAddToPlan}
+            >
+              <Text style={s.primaryBtnText}>{t.workoutCalendarAddBtn}</Text>
+            </TouchableOpacity>
+          </>
         )}
-        <TouchableOpacity
-          style={[s.btn, s.primaryBtn, compiledPending == null && { opacity: 0.5 }]}
-          disabled={compiledPending == null}
-          onPress={handleAddToPlan}
-        >
-          <Text style={s.primaryBtnText}>{t.workoutCalendarAddBtn}</Text>
-        </TouchableOpacity>
       </Card>
 
       {/* ── Plan ── */}
@@ -290,25 +388,21 @@ export default function WorkoutCalendarScreen() {
           .sort((a, b) => a.e.date.localeCompare(b.e.date))
           .map(({ e, i }) => {
             const isPast = e.date < todayIso();
+            const bike = e.device === 'bryton' || e.device === 'magene';
+            const sub = bike ? DEVICE_LABELS[e.device as 'bryton' | 'magene']
+              : `${e.mode}${!e.compiled ? ` - ${compileTarget === i ? t.workoutCalendarCompilingRow : t.workoutCalendarPending}` : ''}`;
             return (
-              <View key={i} style={s.planRow}>
+              // Long press = the desktop's right-click day menu; the ⋯ opens the same menu.
+              <Pressable key={i} style={s.planRow} onLongPress={() => setMenuIndex(i)} delayLongPress={350}>
                 <Text style={[s.planDate, isPast && { color: theme.error }]}>{e.date}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={s.planName}>{e.workoutName}</Text>
-                  <Text style={s.desc}>{e.mode}{!e.compiled ? ` - ${t.workoutCalendarPending}` : ''}</Text>
+                  <Text style={s.desc}>{sub}</Text>
                 </View>
-                {/* Pending imported entries carry their structured workout, so offer to compile it */}
-                {!e.compiled && e.workout && (
-                  <TouchableOpacity onPress={() => handleCompileEntry(i)}>
-                    <Text style={[s.desc, { color: theme.primary, fontWeight: '700' }]}>
-                      {compileTarget === i ? t.workoutCalendarCompilingRow : t.intervalsGenerateBtn}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={() => removeFromPlan(i)}>
-                  <Text style={[s.desc, { color: theme.error }]}>{t.deleteBtn}</Text>
+                <TouchableOpacity onPress={() => setMenuIndex(i)} hitSlop={10}>
+                  <Text style={[s.planName, { color: theme.mutedText, paddingHorizontal: 6 }]}>⋯</Text>
                 </TouchableOpacity>
-              </View>
+              </Pressable>
             );
           })}
 
@@ -330,20 +424,48 @@ export default function WorkoutCalendarScreen() {
 
         {/* #6 (André, 2026-09-02): single Sync button - dropped the separate Preview step for
             desktop parity. */}
-        <Row>
-          <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, syncBusy && { opacity: 0.5 }]} disabled={syncBusy} onPress={() => doSync(true)}>
-            <Text style={s.primaryBtnText}>{t.workoutCalendarSyncBtn}</Text>
-          </TouchableOpacity>
-        </Row>
+        {params.watch && (
+          <Row>
+            <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, syncBusy && { opacity: 0.5 }]} disabled={syncBusy} onPress={() => doSync(true)}>
+              <Text style={s.primaryBtnText}>{t.workoutCalendarSyncBtn}</Text>
+            </TouchableOpacity>
+          </Row>
+        )}
 
-        {/* Send the same plan to a plugged Bryton Aero 60 (André, 2026-09-24). */}
+        {/* Whole plan to a connected bike computer (one entry: long-press it). */}
+        {plan.length > 0 && <Text style={[s.desc, { marginTop: 8 }]}>Long-press a workout to edit, send or remove it.</Text>}
         {brytonMsg ? <Text style={[s.desc, { marginTop: 8 }]}>{brytonMsg}</Text> : null}
+        {sendMsg ? <Text style={[s.desc, { marginTop: 8 }]}>{sendMsg}</Text> : null}
         <Row>
-          <TouchableOpacity style={[s.btn, { flex: 1 }, brytonBusy && { opacity: 0.5 }]} disabled={brytonBusy} onPress={sendToBryton}>
-            <Text style={s.btnText}>{brytonBusy ? 'Sending…' : 'Send to Bryton'}</Text>
-          </TouchableOpacity>
+          {params.bryton && (
+            <TouchableOpacity style={[s.btn, { flex: 1 }, brytonBusy && { opacity: 0.5 }]} disabled={brytonBusy} onPress={sendToBryton}>
+              <Text style={s.btnText}>{brytonBusy ? 'Sending…' : 'Send all to Bryton'}</Text>
+            </TouchableOpacity>
+          )}
+          {!!params.magene && (
+            <TouchableOpacity style={[s.btn, { flex: 1 }, sending && { opacity: 0.5 }]} disabled={sending} onPress={sendAllToMagene}>
+              <Text style={s.btnText}>{sending ? 'Sending…' : 'Send upcoming to Magene'}</Text>
+            </TouchableOpacity>
+          )}
         </Row>
       </Card>
+
+      <ActionMenu
+        visible={menuIndex != null}
+        title={menuIndex != null && plan[menuIndex] ? `${plan[menuIndex].date} · ${plan[menuIndex].workoutName}` : undefined}
+        onClose={() => setMenuIndex(null)}
+        items={menuIndex == null || !plan[menuIndex] ? [] : (() => {
+          const i = menuIndex, e = plan[i];
+          return [
+            { label: 'Edit', onPress: () => editEntry(i), visible: !!e.workout },
+            { label: 'Send to Bryton', onPress: () => sendOne('bryton', e), visible: !!(params.bryton && e.workout), disabled: sending },
+            { label: 'Send to Magene C406', onPress: () => sendOne('magene', e), visible: !!(params.magene && e.workout), disabled: sending },
+            { label: t.intervalsGenerateBtn, onPress: () => handleCompileEntry(i),
+              visible: !!(params.watch && e.workout && !e.compiled && e.device !== 'bryton' && e.device !== 'magene') },
+            { label: 'Remove workout', onPress: () => removeFromPlan(i), tone: 'alert' as const },
+          ];
+        })()}
+      />
     </ScrollView>
   );
 }
