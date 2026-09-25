@@ -833,7 +833,7 @@ void ActivityService::dedupeActivities()
     // WINDOW instead (André, 2026-09-04: "huge chance some rides are already in our library").
     // Rules:
     //   * A duplicate is kept once, as its highest-priority source (direct device beats the
-    //     intervals aggregator). watch > garmin > edge > karoo > suunto > etrex > intervals.
+    //     intervals aggregator). watch > garmin > edge > karoo > bryton > c406 > suunto > etrex > intervals.
     //   * Two DIFFERENT physical watches recording at the same time are NOT duplicates (a Peak
     //     and a Sport on one ride) - both kept, keyed by device.
     //   * Two rides that start close together but have very different durations are treated as
@@ -843,6 +843,8 @@ void ActivityService::dedupeActivities()
         if (src == QStringLiteral("garmin")) return 80;
         if (src == QStringLiteral("edge")) return 76;      // direct-from-Edge (USB/MTP)
         if (src == QStringLiteral("karoo")) return 75;     // direct-from-Karoo (USB/MTP)
+        if (src == QStringLiteral("bryton")) return 74;    // direct-from-Bryton (USB mass storage)
+        if (src == QStringLiteral("c406")) return 73;      // direct-from-Magene C406 (BLE)
         if (src == QStringLiteral("suunto")) return 70;
         if (src == QStringLiteral("etrex")) return 60;
         if (src == QStringLiteral("intervals")) return 20;
@@ -1467,6 +1469,20 @@ int ActivityService::unsyncedBikeCount(const QString &kind, const QStringList &f
         const int slash = base.lastIndexOf(QLatin1Char('/'));
         if (slash >= 0) base = base.mid(slash + 1);
         if (base.endsWith(QStringLiteral(".fit"), Qt::CaseInsensitive)) base.chop(4);
+        // Bryton Aero: yyMMddHHmmss.fit (12 bare digits, e.g. 260924112533 -> 2026-09-24 11:25:33).
+        // Rewrite it into the dashed form below, pinning the century to 2000 (Qt's `yy` pivot is
+        // version-dependent), so ONE parse serves both devices and the "N new" badge stays
+        // accurate (André, 2026-09-24). Local-time interpretation like the Garmin/Karoo names;
+        // the whole-hour arm in alreadyHave() absorbs any tz/DST offset vs the library.
+        if (base.size() == 12) {
+            bool allDigits = true;
+            for (const QChar c : base) { if (!c.isDigit()) { allDigits = false; break; } }
+            if (allDigits)
+                base = QStringLiteral("20%1-%2-%3-%4-%5-%6")
+                           .arg(base.mid(0, 2), base.mid(2, 2), base.mid(4, 2),
+                                base.mid(6, 2), base.mid(8, 2), base.mid(10, 2));
+        }
+        // Garmin/Hammerhead: yyyy-MM-dd-HH-mm-ss.fit (and the rewritten Bryton name above).
         const QDateTime dt = QDateTime::fromString(base, QStringLiteral("yyyy-MM-dd-HH-mm-ss"));
         return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
     };
@@ -1772,13 +1788,15 @@ void ActivityService::exportToIntervals()
         return;
     }
     // Activities with a FIT we haven't already uploaded: the watch's own moves, plus bike
-    // computers (Edge/Karoo/Magene) whose device FIT we now keep. Rows that came FROM a cloud -
+    // computers (Edge/Karoo/Magene/Bryton) whose device FIT we now keep - uploaded verbatim so
+    // intervals reads sport/sub_sport straight from the device (Cycling vs Indoor Cycling etc.).
+    // Rows that came FROM a cloud -
     // source='intervals' (this very service) or 'garmin' - are never pushed back; whitelisting
     // the push-able sources (rather than excluding intervals) keeps that safe by construction.
     QList<QPair<int, QByteArray>> items;
     QSqlQuery q(QStringLiteral(
         "SELECT idx, fit_base64 FROM activities "
-        "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406')) "
+        "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406','bryton')) "
         "AND fit_base64 IS NOT NULL AND fit_base64 <> '' "
         "AND (exported IS NULL OR exported = 0)"), m_db);
     while (q.next()) {

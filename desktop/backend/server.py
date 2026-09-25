@@ -786,7 +786,8 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
     NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
-                     "intervals_athlete.py"}
+                     "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
+                     "magene_device.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     if lock is not None:
         lock.acquire()
@@ -1139,6 +1140,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_devices()
         elif self.path == "/api/mtp/import" or self.path.startswith("/api/mtp/import?"):
             self._handle_mtp_import()
+        elif self.path == "/api/bryton/info":
+            self._handle_bryton_info()
         elif self.path == "/api/magene/devices":
             self._handle_magene_devices()
         elif self.path.startswith("/api/magene/rides"):
@@ -1363,8 +1366,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_workout(body)
         elif self.path == "/api/bryton/workout/native":
             self._handle_bryton_workout_native(body)
+        elif self.path == "/api/bryton/route":
+            self._handle_bryton_route(body)
         elif self.path == "/api/magene/import":
             self._handle_magene_import(body)
+        elif self.path == "/api/magene/device":
+            self._handle_magene_device(body)
         elif self.path == "/api/time/sync":
             self._handle_time_sync(body)
         elif self.path == "/api/demo":
@@ -1776,6 +1783,21 @@ class Handler(BaseHTTPRequestHandler):
                 return dev["mount"]
         return None
 
+    def _handle_bryton_info(self):
+        """GET /api/bryton/info - the connected Bryton's identity, firmware versions and lifetime
+        totals, read from its on-disk System/*.ini (tools/bryton_info.py). Read-only; 404 when no
+        Bryton is mounted. Same _bryton_mount() discovery as the profile/workout handlers."""
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        code, out, err = run_tool("bryton_info.py", ["read", mount])
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            payload = {"ok": False, "error": "bryton_info.py produced no JSON", "stderr": err}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
     def _handle_bryton_profile_compare(self, body):
         """POST /api/bryton/profile/compare {athlete_id?, api_key?}. Returns the device profile,
         the intervals.icu thresholds (when creds are given), and the list of fields that differ."""
@@ -1860,6 +1882,44 @@ class Handler(BaseHTTPRequestHandler):
         safe = "".join(c for c in (name or "Workout") if c.isalnum() or c in " -_").strip()[:40]
         folder = os.path.join(mount, "System", "Plan", "Cycling")
         return os.path.join(folder, (safe or "Workout") + ".fit")
+
+    def _handle_bryton_route(self, body):
+        """POST /api/bryton/route {gpx, name?}. Install a route into the connected Bryton's
+        "Follow Track" list by writing the device's own binary track trio into <mount>/Tracks:
+        <name>.track + <name>.smy + empty <name>.tinfo (tools/bryton_track.py). Reverse-engineered
+        and HARDWARE-CONFIRMED on an Aero 60 (2026-09-24) - a raw GPX in PlanTrip does NOT register;
+        the device reads Tracks/*.track for Follow Track. Sibling of /api/bryton/workout (same
+        _bryton_mount discovery), read-only elsewhere on the device."""
+        body = body or {}
+        gpx = body.get("gpx")
+        if not gpx or "<gpx" not in gpx or ("<trkpt" not in gpx and "<rtept" not in gpx):
+            self._send_json(400, {"ok": False, "error": "a GPX with track/route points is required"})
+            return
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        name = body.get("name") or "Route"
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False, encoding="utf-8") as tf:
+            tf.write(gpx)
+            tmp = tf.name
+        try:
+            code, out, err = run_tool("bryton_track.py",
+                                      [tmp, "--out-dir", os.path.join(mount, "Tracks"),
+                                       "--name", str(name)])
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": err.strip() or "could not build track"})
+            return
+        # bryton_track.py sanitises the name the same way, so echo the file it wrote.
+        safe = "".join(c for c in name if c.isalnum() or c in " -_").strip()[:40] or "Route"
+        self._send_json(200, {"ok": True, "file": safe + ".track",
+                              "detail": out.strip(),
+                              "note": "power-cycle the Aero 60, then find it under Follow Track"})
 
     def _handle_bryton_workout(self, body):
         """POST /api/bryton/workout {workout, name?}. Convert one workout in the project schema
@@ -2031,6 +2091,30 @@ class Handler(BaseHTTPRequestHandler):
                     "fit": fit_b64,                  # the device's own FIT, for intervals.icu upload
                 })
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
+
+    def _handle_magene_device(self, body):
+        """POST /api/magene/device {"action","address", ...params} - device control over BLE
+        (battery/info/set-time/set-timezone/altitude/read-profile/set-profile), decoded from the
+        OneLap app. tools/magene_device.py. Params map to the tool's flags (set-profile takes
+        sex/age/height/maxHr/lthr/ftp/weight/bikeWeight; set-timezone takes offsetSeconds)."""
+        action = (body or {}).get("action")
+        address = (body or {}).get("address")
+        if not action or not address:
+            self._send_json(400, {"ok": False, "error": "action and address required"})
+            return
+        args = [action, "--address", address]
+        flagmap = {"offsetSeconds": "--offset-seconds", "sex": "--sex", "age": "--age",
+                   "height": "--height", "maxHr": "--max-hr", "lthr": "--lthr", "ftp": "--ftp",
+                   "weight": "--weight", "bikeWeight": "--bike-weight"}
+        for key, flag in flagmap.items():
+            if body.get(key) is not None:
+                args += [flag, str(body[key])]
+        code, out, err = run_tool("magene_device.py", args, timeout=90)
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            payload = {"ok": False, "error": "magene_device.py produced no JSON", "stderr": err}
+        self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_activities_legacy(self):
         """The Ambit1/2 path for GET /api/activities - tools/legacy_link.py's `logs`

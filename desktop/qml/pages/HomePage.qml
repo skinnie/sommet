@@ -102,6 +102,31 @@ PageFlickable {
         xhr.send();
     }
 
+    // Bryton Aero 60 identity + firmware + lifetime odometer, read from its on-disk System/*.ini
+    // (backend /api/bryton/info -> tools/bryton_info.py). Read-only; shown as a small line on the
+    // device card. Fetched whenever a Bryton becomes the active device.
+    property var brytonInfo: null
+    function fetchBrytonInfo() {
+        if (!root.activeBike || root.activeBike.kind !== "bryton") {
+            root.brytonInfo = null;
+            return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            try {
+                const r = JSON.parse(xhr.responseText);
+                root.brytonInfo = (r && r.ok) ? r : null;
+            } catch (e) {
+                root.brytonInfo = null;
+            }
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/bryton/info");
+        xhr.send();
+    }
+    onActiveBikeChanged: fetchBrytonInfo()
+
     // On-demand Bluetooth scan for a Magene C406 (a ~6s BLE scan; the button below triggers it).
     // Two steps: find the device, then list its rides (both need the BLE radio, so this is not on
     // the 8s poll). A found device is added to mageneDevices, joining the unified switcher/hero.
@@ -537,6 +562,22 @@ PageFlickable {
                                         : qsTr("%1 rides · all in your library").arg(total);
                                 }
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                            }
+                            Text {
+                                // Bryton only: identity + firmware + lifetime odometer, read from
+                                // the device's own System/*.ini (root.fetchBrytonInfo). e.g.
+                                // "Aero 60 · OS R035 · 12,345 km".
+                                visible: root.brytonInfo !== null
+                                text: {
+                                    if (!root.brytonInfo) return "";
+                                    var parts = [];
+                                    if (root.brytonInfo.model) parts.push(root.brytonInfo.model);
+                                    if (root.brytonInfo.osVersion) parts.push("OS " + root.brytonInfo.osVersion);
+                                    if (typeof root.brytonInfo.odometerKm === "number")
+                                        parts.push(Math.round(root.brytonInfo.odometerKm).toLocaleString(Qt.locale(), "f", 0) + " km");
+                                    return parts.join(" · ");
+                                }
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             }
                         }
                     }
