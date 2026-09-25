@@ -28,6 +28,26 @@ PageFlickable {
     // Same store Home's one-time ProfileSyncPrompt answers into ("auto" / "manual").
     Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
 
+    // Magene: settings + data screens read in ONE Bluetooth connection (magene_device.py
+    // "read-config") and shared with both panels - each connection shows on the C406 as a drop.
+    property var mageneConfig: null
+    function loadMageneConfig() {
+        root.mageneConfig = null
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            let r = {}
+            try { r = JSON.parse(xhr.responseText) } catch (e) { r = { ok: false } }
+            root.mageneConfig = r
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/magene/device")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        const body = { action: "read-config" }
+        if (root.mageneAddress.length > 0) body.address = root.mageneAddress
+        xhr.send(JSON.stringify(body))
+    }
+    Component.onCompleted: if (root.isMagene) root.loadMageneConfig()
+
     property bool altBusy: false
     property string altMsg: ""
     function calibrateAltitude() {
@@ -103,7 +123,7 @@ PageFlickable {
             }
         }
         Component { id: brytonScreens; BrytonScreensPanel { } }
-        Component { id: mageneScreens; MageneScreensPanel { address: root.mageneAddress } }
+        Component { id: mageneScreens; MageneScreensPanel { address: root.mageneAddress; shared: true; preloaded: root.mageneConfig } }
 
         // ---- Magene only: device settings + altitude ----
         Card {
@@ -118,7 +138,8 @@ PageFlickable {
                         text: qsTr("Device settings")
                         color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
                     }
-                    MageneSettingsPanel { width: parent.width; address: root.mageneAddress }
+                    MageneSettingsPanel { width: parent.width; address: root.mageneAddress; shared: true
+                                          preloaded: root.mageneConfig }
                 }
             }
         }

@@ -51,18 +51,25 @@ Column {
         xhr.send(JSON.stringify(body))
     }
 
-    Component.onCompleted: root.load()
+    // shared: the GPS settings page reads settings + screens in ONE connection ("read-config") and
+    // hands the result here via `preloaded`; standalone the panel reads on its own.
+    property bool shared: false
+    property var preloaded: null
+    onPreloadedChanged: if (preloaded) root.take(preloaded)
+    Component.onCompleted: if (!root.shared) root.load()
+    function take(r) {
+        root.loading = false
+        if (!r.ok || !r.settings) {
+            root.error = r.error || qsTr("Could not read the C406 settings.")
+            return
+        }
+        root.error = ""
+        root.original = r.settings
+        root.edited = Object.assign({}, r.settings)
+    }
     function load() {
         root.loading = true; root.error = ""; root.msg = ""
-        root.post({ action: "read-settings" }, function (r) {
-            root.loading = false
-            if (!r.ok || !r.settings) {
-                root.error = r.error || qsTr("Could not read the C406 settings.")
-                return
-            }
-            root.original = r.settings
-            root.edited = Object.assign({}, r.settings)
-        })
+        root.post({ action: "read-settings" }, root.take)
     }
 
     function apply() {

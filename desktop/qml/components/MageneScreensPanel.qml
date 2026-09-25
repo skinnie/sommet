@@ -42,21 +42,33 @@ Column {
         root.original = JSON.stringify(root.pages)
     }
 
+    // shared: the GPS settings page reads screens + settings in ONE connection ("read-config") and
+    // hands the result here via `preloaded`; standalone the panel reads on its own.
+    property bool shared: false
+    property var preloaded: null
+    onPreloadedChanged: if (preloaded && root.fieldCodes.length > 0) root.takePages(preloaded)
+    function takePages(r) {
+        root.loading = false
+        if (!r.ok || !r.pages) { root.error = r.pagesError || r.error || qsTr("Could not read the C406 screens."); return }
+        root.error = ""
+        root.setPages(r.pages)
+    }
     Component.onCompleted: root.load()
     function load() {
         root.loading = true; root.error = ""; root.msg = ""
+        // The field catalogue is local (no Bluetooth); the screens come from the device.
         root.api("GET", "/api/magene/fields", null, function (f) {
             const codes = [], names = []
             for (const g of (f.groups || []))
                 for (const x of g.fields) { codes.push(x.code); names.push(g.group === "Empty" ? x.name : g.group + " · " + x.name) }
             root.fieldCodes = codes; root.fieldNames = names
+            if (root.shared) {
+                if (root.preloaded) root.takePages(root.preloaded)
+                return
+            }
             const body = { action: "read-pages" }
             if (root.address.length > 0) body.address = root.address
-            root.api("POST", "/api/magene/device", body, function (r) {
-                root.loading = false
-                if (!r.ok) { root.error = r.error || qsTr("Could not read the C406 screens."); return }
-                root.setPages(r.pages)
-            })
+            root.api("POST", "/api/magene/device", body, root.takePages)
         })
     }
 

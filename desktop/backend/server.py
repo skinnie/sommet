@@ -2219,17 +2219,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_magene_profile_compare(self, body):
         """POST /api/magene/profile/compare {address?, athlete_id?, api_key?} - same response
-        shape as /api/bryton/profile/compare: {device, intervals, diff}."""
+        shape as /api/bryton/profile/compare: {device, intervals, diff}. `device_profile` (the
+        profile the client already read in its one-connection `hello`) skips the BLE read - every
+        extra connection shows on the C406 as a drop/reconnect (André, 2026-09-25)."""
         body = body or {}
-        address = self._magene_address(body)
-        if not address:
-            self._magene_no_device()
-            return
-        read = self._magene_run("magene_device.py", ["read-profile", "--address", address])
-        prof = read.get("profile")
-        if not read.get("ok") or not prof:
-            self._send_json(502, {"ok": False, "error": "could not read the Magene profile"})
-            return
+        prof = body.get("device_profile")
+        address = body.get("address")
+        if not prof:
+            address = self._magene_address(body)
+            if not address:
+                self._magene_no_device()
+                return
+            read = self._magene_run("magene_device.py", ["read-profile", "--address", address])
+            prof = read.get("profile")
+            if not read.get("ok") or not prof:
+                self._send_json(502, {"ok": False, "error": "could not read the Magene profile"})
+                return
         device = {common: prof.get(mk) for mk, common in self._MAGENE_TO_COMMON.items()}
         intervals = None
         aid, akey = body.get("athlete_id"), body.get("api_key")
