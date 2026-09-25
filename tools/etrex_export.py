@@ -39,6 +39,13 @@ MIN_TURN_DEG = 40.0      # below this a bend is not worth a waypoint
 TURN_GAP_M = 40.0        # two turn waypoints closer than this collapse into the sharper one
 CROSS_M = 15.0           # two passes closer than this are "the track meeting itself"
 CROSS_MIN_ALONG_M = 150.0  # ...provided they are at least this far apart ALONG the track
+CROSS_WPT_OFFSET_M = 18.0  # place each crossing's <wpt> this far past the junction, along THAT
+                            # pass's own outgoing direction - not at the junction itself. Two
+                            # passes through the same spot diverge afterwards, so offsetting each
+                            # one downstream separates the two pins on the map instead of leaving
+                            # them stacked on top of each other (real hardware finding, Andre,
+                            # 2026-09-25: with both pins sitting on the junction, there was no way
+                            # to tell which one applied to "now" without reading the label).
 MAX_WAYPOINTS = 2000     # eTrex 30 stores 2000 waypoints
 
 
@@ -197,11 +204,26 @@ def find_turns(xy: Sequence[Tuple[float, float]], along: Sequence[float],
             for i in taken]
 
 
+def _offset_forward(along: Sequence[float], i: int, offset_m: float) -> int:
+    """The first index at or past `along[i] + offset_m` - i.e. `i` moved forward along THIS
+    pass's own direction of travel (indices only increase in time/along-track order, so this
+    can't accidentally jump onto a different pass through the same spot). Clipped to bounds."""
+    n = len(along)
+    target = along[i] + offset_m
+    j = i
+    while j < n - 1 and along[j] < target:
+        j += 1
+    return j
+
+
 def find_crossings(xy: Sequence[Tuple[float, float]], along: Sequence[float],
-                   cross_m: float = CROSS_M) -> List[dict]:
+                   cross_m: float = CROSS_M, wpt_offset_m: float = CROSS_WPT_OFFSET_M) -> List[dict]:
     """Places where the track comes within `cross_m` of an earlier/later part of itself (>=
     CROSS_MIN_ALONG_M away along the track). Each pass through such a place is one entry:
-    [{i, km, delta, label, event, other_km}] - `event` groups every pass through the same junction."""
+    [{i, wpt_i, km, delta, label, event, other_km}] - `event` groups every pass through the same
+    junction. `i` is the junction itself (used for route via-point placement); `wpt_i` is `i`
+    pushed `wpt_offset_m` forward along that pass's own outgoing branch (used for the <wpt> pin),
+    so two passes through the same physical spot don't render as two pins stacked on each other."""
     n = len(xy)
     cell = max(cross_m, 1.0)
     grid: Dict[Tuple[int, int], List[int]] = {}
@@ -256,7 +278,8 @@ def find_crossings(xy: Sequence[Tuple[float, float]], along: Sequence[float],
             for i in spots:
                 d = _heading_change(xy, a, b) if len(spots) == 1 else (
                     _heading_change(xy, a, a) if i == a else _heading_change(xy, b, b))
-                out.append({"i": i, "km": along[i] / 1000.0, "delta": d, "label": _label(d),
+                out.append({"i": i, "wpt_i": _offset_forward(along, i, wpt_offset_m),
+                            "km": along[i] / 1000.0, "delta": d, "label": _label(d),
                             "event": ev_no + 1,
                             "other_km": [round(k, 1) for k in kms if abs(k - along[a] / 1000.0) > 0.05]})
     out.sort(key=lambda c: c["i"])
@@ -280,7 +303,7 @@ def _wpt(p: dict, name: str, desc: str, sym: str) -> str:
 
 def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
           max_track: int = 10000, max_via: int = 50, min_turn_deg: float = MIN_TURN_DEG,
-          cross_m: float = CROSS_M, reverse: bool = False,
+          cross_m: float = CROSS_M, reverse: bool = False, wpt_offset_m: float = CROSS_WPT_OFFSET_M,
           parts: Optional[Sequence[str]] = None, waypoint_kinds: Optional[Sequence[str]] = None) -> dict:
     """{ok, gpx, stats:{...}} or {ok: False, error}.
 
@@ -314,7 +337,7 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
     sxy, spts, salong = _resample([xy_raw[i] for i in quiet], [pts[i] for i in quiet], STEP_M)
 
     turns = find_turns(sxy, salong, min_turn_deg)
-    crossings = find_crossings(sxy, salong, cross_m)
+    crossings = find_crossings(sxy, salong, cross_m, wpt_offset_m)
     # a crossing marker already says what to do there - drop turn markers on top of it
     turns = [t for t in turns if all(abs(salong[t["i"]] - salong[c["i"]]) > TURN_GAP_M for c in crossings)]
 
@@ -386,7 +409,9 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
 
 
 def _wpt_block(spts: Sequence[dict], marks: Sequence[dict]) -> str:
-    return "\n  ".join(_wpt(spts[m["i"]], m["name"], m["desc"], m["sym"]) for m in marks)
+    # crossings carry "wpt_i" (offset past the junction, onto that pass's own branch); turns
+    # don't need it, they're never co-located with another mark, so fall back to "i".
+    return "\n  ".join(_wpt(spts[m.get("wpt_i", m["i"])], m["name"], m["desc"], m["sym"]) for m in marks)
 
 
 def _tolerance_filter(xy: Sequence[Tuple[float, float]], tol: float) -> List[int]:
@@ -474,6 +499,9 @@ def main(argv=None) -> int:
     ap.add_argument("--max-via", type=int, default=50)
     ap.add_argument("--min-turn", type=float, default=MIN_TURN_DEG)
     ap.add_argument("--cross-m", type=float, default=CROSS_M)
+    ap.add_argument("--wpt-offset-m", type=float, default=CROSS_WPT_OFFSET_M,
+                     help="place a crossing's <wpt> this far past the junction, along that pass's "
+                          "own outgoing branch - keeps the two passes' pins from overlapping")
     ap.add_argument("--reverse", action="store_true", help="ride the route the other way")
     ap.add_argument("--parts", help="comma list overriding --mode: any of track,route,waypoints "
                                      "(e.g. track,route for a combined file with no waypoint markers)")
@@ -490,7 +518,7 @@ def main(argv=None) -> int:
     parts = args.parts.split(",") if args.parts else None
     waypoint_kinds = args.waypoint_kinds.split(",") if args.waypoint_kinds else None
     res = build(raw, args.mode, args.name, args.max_track, args.max_via, args.min_turn, args.cross_m, args.reverse,
-                parts, waypoint_kinds)
+                args.wpt_offset_m, parts, waypoint_kinds)
     if args.json:
         print(json.dumps(res))
         return 0 if res["ok"] else 2
