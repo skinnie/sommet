@@ -206,6 +206,54 @@ def _route_info(route_id, total_distance, zoom, crc16, num_steps, size, center, 
     return bytes(b)
 
 
+async def negotiate_mtu(client):
+    try:
+        await client._backend._acquire_mtu()
+    except Exception:
+        pass
+    return getattr(client, "mtu_size", 23) or 23
+
+
+async def transfer_file(client, info, packets):
+    """The C406 file-transfer loop, shared by routes and workouts (magene_workout.py): send the
+    info command on CC02, stream `packets` on CC03 paced by the device's 40 8c 00 <n> credit
+    grants (ungated if it never grants any), then TransFormEnd 40 52."""
+    state = {"credit": 0, "error": None, "replies": []}
+
+    def _on02(_, d):
+        b = bytes(d)
+        state["replies"].append(b.hex(" "))
+        if len(b) >= 2 and b[1] == 0x8c:            # next-package credit grant
+            status = b[2] if len(b) > 2 else 0
+            if status != 0:
+                state["error"] = f"device nack (0x8c status {status})"
+                return
+            state["credit"] += (b[3] if len(b) > 3 else 1)
+
+    await client.start_notify(CC02, _on02)
+    await client.write_gatt_char(CC02, info, response=True)
+    await asyncio.sleep(1.5)                      # give the first credit grant a chance
+    ungated = state["credit"] == 0
+    pos = 0
+    stalled = 0.0
+    while pos < len(packets) and state["error"] is None:
+        if ungated or pos < state["credit"]:
+            await client.write_gatt_char(CC03, packets[pos], response=False)
+            pos += 1
+            stalled = 0.0
+            await asyncio.sleep(0.015)
+        else:
+            await asyncio.sleep(0.05)
+            stalled += 0.05
+            if stalled > 8.0:
+                ungated = True                   # stop waiting; just stream the rest
+    await asyncio.sleep(0.3)
+    await client.write_gatt_char(CC02, b"\x40\x52", response=True)
+    await asyncio.sleep(0.6)
+    await client.stop_notify(CC02)
+    return {"error": state["error"], "packetsSent": pos, "replies": state["replies"][-8:]}
+
+
 async def send_route(address, gpx_path, name):
     points = parse_gpx(gpx_path)
     if len(points) < 2:
@@ -215,11 +263,7 @@ async def send_route(address, gpx_path, name):
 
     client = await _connect(address)
     try:
-        try:
-            await client._backend._acquire_mtu()
-        except Exception:
-            pass
-        mtu = getattr(client, "mtu_size", 23) or 23
+        mtu = await negotiate_mtu(client)
         packets = _packets(file_bytes, mtu)
         packet_total = sum(len(p) for p in packets)
         lats = [p[0] for p in points]
@@ -231,57 +275,13 @@ async def send_route(address, gpx_path, name):
         zoom = int(math.log(86400.0 / (lon_span * 256.0)) / math.log(2.0) - 3.0)
         total_distance = sum(_haversine_m(points[i], points[i + 1]) for i in range(len(points) - 1))
         route_id = int(time.time()) & 0x7FFFFFFF
-
-        # Flow control: after the 40 8d handshake, the device grants a credit window via
-        # 40 8c 00 <n> (setRequestNum += n); we may send packets while position < credit, then
-        # wait for the device to grant more. Errors surface as other 40 xx status commands.
-        state = {"credit": 0, "error": None, "replies": []}
-
-        def _on02(_, d):
-            b = bytes(d)
-            state["replies"].append(b.hex(" "))
-            if len(b) >= 2 and b[1] == 0x8c:            # next-package credit grant
-                status = b[2] if len(b) > 2 else 0
-                if status != 0:
-                    state["error"] = f"device nack (0x8c status {status})"
-                    return
-                state["credit"] += (b[3] if len(b) > 3 else 1)
-
-        await client.start_notify(CC02, _on02)
-
-        # 1) route-info handshake
         info = _route_info(route_id, total_distance, zoom, crc16, num_steps,
                            packet_total, center, ne, sw, preview_offset, preview_count)
-        await client.write_gatt_char(CC02, info, response=True)
-
-        # 2) packet stream on CC03. Respect the device's credit window when it grants one
-        # (40 8c); if it never grants credit (non-highSpeed devices just want a stream), fall
-        # back to ungated streaming after a short grace period.
-        await asyncio.sleep(1.5)                      # give the first credit grant a chance
-        ungated = state["credit"] == 0
-        pos = 0
-        stalled = 0.0
-        while pos < len(packets) and state["error"] is None:
-            if ungated or pos < state["credit"]:
-                await client.write_gatt_char(CC03, packets[pos], response=False)
-                pos += 1
-                stalled = 0.0
-                await asyncio.sleep(0.015)
-            else:
-                await asyncio.sleep(0.05)
-                stalled += 0.05
-                if stalled > 8.0:
-                    ungated = True                   # stop waiting; just stream the rest
-
-        # 3) end
-        await asyncio.sleep(0.3)
-        await client.write_gatt_char(CC02, b"\x40\x52", response=True)
-        await asyncio.sleep(0.6)
-        await client.stop_notify(CC02)
-        return {"ok": state["error"] is None, "error": state["error"],
+        res = await transfer_file(client, info, packets)
+        return {"ok": res["error"] is None, "error": res["error"],
                 "points": len(points), "fileBytes": len(file_bytes),
-                "packetsSent": pos, "packets": len(packets), "mtu": mtu,
-                "routeId": route_id, "deviceReplies": state["replies"][-8:]}
+                "packetsSent": res["packetsSent"], "packets": len(packets), "mtu": mtu,
+                "routeId": route_id, "deviceReplies": res["replies"]}
     finally:
         await client.disconnect()
 
