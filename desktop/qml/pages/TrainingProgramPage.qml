@@ -180,10 +180,33 @@ Item {
     // own {mode}, which the guided-workout rotation sync uses.
     // The plan entries with a sport mode guaranteed on each: imported entries already carry one;
     // hand-added ones inherit the mode chosen in the Install card. training_calendar needs it.
+    // The watch sport mode for an intervals.icu sport (André, 2026-09-25: rides go to the cycling
+    // mode, runs to running, ... automatically). Matched by name against the watch's own modes; ""
+    // when the watch has none for that sport (the entry then keeps its mode / the picked one).
+    readonly property var sportWords: ({
+        "Ride": ["cycl", "bike", "ride", "vélo", "velo"], "VirtualRide": ["indoor", "cycl", "bike"],
+        "GravelRide": ["gravel", "cycl", "bike"], "MountainBikeRide": ["mountain", "mtb", "cycl", "bike"],
+        "Run": ["run"], "VirtualRun": ["treadmill", "run"], "TrailRun": ["trail", "run"],
+        "Walk": ["walk"], "Hike": ["hik", "trek", "walk"], "Swim": ["swim"], "Rowing": ["row"],
+        "NordicSki": ["ski"]
+    })
+    function modeForSport(sport) {
+        const words = root.sportWords[sport] || []
+        const names = CustomModesService.modes.map(m => m.name)
+        for (const w of words)
+            for (const n of names)
+                if (n.toLowerCase().indexOf(w) >= 0) return n
+        return ""
+    }
+    // What "Sync to watch" installs: every entry except those made for a bike computer, each in the
+    // sport mode matching its sport when it has one, else its own mode, else the picked one.
     function entriesWithMode(fallbackMode) {
-        return root.entries.map(function (e) {
-            return { date: e.date, mode: e.mode || fallbackMode, workout: e.workout }
-        })
+        return root.entries
+            .filter(e => e.device !== "bryton" && e.device !== "magene")
+            .map(function (e) {
+                return { date: e.date, mode: (e.sport && root.modeForSport(e.sport)) || e.mode || fallbackMode,
+                         workout: e.workout }
+            })
     }
 
     // No duplicates (André, 2026-09-25): an event Sommet itself pushed (external_id "sommet:<uid>")
