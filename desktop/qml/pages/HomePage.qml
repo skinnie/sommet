@@ -188,16 +188,26 @@ PageFlickable {
             if (xhr.readyState !== XMLHttpRequest.DONE)
                 return;
             root.mageneBusy = false;
-            try {
-                const r = JSON.parse(xhr.responseText);
-                root.mageneStatus = (r && r.ok) ? r : null;
-            } catch (e) {
+            var r = null;
+            try { r = JSON.parse(xhr.responseText); } catch (e) { r = null; }
+            if (!r || !r.ok) {
                 root.mageneStatus = null;
+                root.mageneStatusFor = "";      // asleep: try again on the next selection
+                return;
             }
+            root.mageneStatus = r;
+            // The same connection listed the rides: fill the card + Sync (no second connect).
+            if (r.rides && root.mageneDevices.length > 0 && root.mageneDevices[0].address === addr)
+                root.mageneDevices = [Object.assign({}, root.mageneDevices[0],
+                                                    { "activityCount": r.rides.length, "files": r.rides })];
+            root.checkProfileSync();            // now that the profile is known - no extra connect
         };
+        // ONE connection for everything the card needs (tools/magene_device.py "hello"): battery,
+        // firmware, clock + time zone, profile and the ride list. Each connect shows on the C406
+        // as a drop + reconnect, so they're no longer separate (André, 2026-09-25).
         xhr.open("POST", "http://127.0.0.1:8766/api/magene/device");
         xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ action: "status", syncClock: true, address: addr }));
+        xhr.send(JSON.stringify({ action: "hello", address: addr }));
     }
     onActiveBikeChanged: { fetchBrytonInfo(); fetchMageneStatus(); checkProfileSync(); }
 
@@ -227,6 +237,11 @@ PageFlickable {
         }
         if (!ConnectionsService.intervalsIcuConnected)
             return;
+        // The Magene's profile comes from the card's one-connection "hello"; wait for it rather
+        // than opening a connection of our own (fetchMageneStatus calls back here when it lands).
+        if (bike.kind === "c406" && !(root.mageneStatus && root.mageneStatusFor === bike.address
+                                      && root.mageneStatus.profile))
+            return;
         const key = bike.kind + "|" + (bike.address || bike.mount || "");
         if (key === root.profileCheckedFor)
             return;
@@ -255,6 +270,7 @@ PageFlickable {
         const body = { athlete_id: ConnectionsService.intervalsIcuAthleteId,
                        api_key: ConnectionsService.intervalsIcuApiKey() };
         if (bike.address) body.address = bike.address;
+        if (kind === "c406") body.device_profile = root.mageneStatus.profile;
         xhr.open("POST", "http://127.0.0.1:8766/api/" + root.profileApiBase(kind) + "/profile/compare");
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify(body));
@@ -323,29 +339,20 @@ PageFlickable {
             }
             mageneMemory.address = dev.address;
             mageneMemory.name = dev.name || "Magene C406";
-            // Step 2 - list the rides on it (fills the "N rides · M new" line and Sync's list).
-            const rides = new XMLHttpRequest();
-            rides.onreadystatechange = function() {
-                if (rides.readyState !== XMLHttpRequest.DONE)
-                    return;
-                root.mageneScanning = false;
-                var files = [];
-                try {
-                    const rr = JSON.parse(rides.responseText);
-                    if (rr && rr.ok && rr.files) files = rr.files;
-                } catch (e) { files = []; }
-                root.mageneDevices = [{
-                    "kind": "c406",
-                    "name": dev.name || "Magene C406",
-                    "address": dev.address,
-                    "activityCount": files.length,
-                    "files": files
-                }];
-                root.mageneMsg = qsTr("Found %1").arg(dev.name || "Magene C406");
-            };
-            rides.open("GET", "http://127.0.0.1:8766/api/magene/rides?address="
-                       + encodeURIComponent(dev.address));
-            rides.send();
+            // Found: remember it and select it. Selecting runs the card's one-connection "hello"
+            // (battery, clock, profile, ride list) - no separate ride-list connection here.
+            root.mageneScanning = false;
+            root.mageneStatusFor = "";
+            root.mageneDevices = [{
+                "kind": "c406",
+                "name": dev.name || "Magene C406",
+                "address": dev.address,
+                "activityCount": -1,
+                "files": null
+            }];
+            root.mageneMsg = qsTr("Found %1").arg(dev.name || "Magene C406");
+            DeviceService.selectBikeComputer("c406");
+            root.fetchMageneStatus();
         };
         scan.open("GET", "http://127.0.0.1:8766/api/magene/devices");
         scan.send();
@@ -770,10 +777,14 @@ PageFlickable {
                         RoundedButton {
                             // Greyed out when there's nothing new to pull (André, 2026-09-12):
                             // the sync history already covers every ride on the device.
-                            enabled: !ActivityService.loading && root.activeBikeUnsynced > 0
+                            // A Magene whose ride list isn't known yet (asleep when selected) can still
+                            // Sync: it reads the list first (syncMagene).
+                            readonly property bool listUnknown: root.activeBike !== null
+                                && root.activeBike.kind === "c406" && !root.activeBike.files
+                            enabled: !ActivityService.loading && (root.activeBikeUnsynced > 0 || listUnknown)
                             text: ActivityService.loading
                                 ? qsTr("Syncing…")
-                                : (root.activeBikeUnsynced > 0 ? qsTr("Sync rides")
+                                : (root.activeBikeUnsynced > 0 || listUnknown ? qsTr("Sync rides")
                                                                : qsTr("Up to date"))
                             onClicked: {
                                 root.bikeSyncMsg = "";
@@ -785,6 +796,16 @@ PageFlickable {
                                 else
                                     ActivityService.importFromBikeComputers();
                             }
+                        }
+                        // Pair over Bluetooth, on the same row as Sync (the watch's Bluetooth row
+                        // below hides while a bike computer is selected).
+                        RoundedButton {
+                            visible: DeviceService.bleExperimentEnabled && !DeviceService.demoMode
+                            text: DeviceService.bleAttempting
+                                ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
+                                : root.mageneScanning ? qsTr("Searching…") : qsTr("Pair over Bluetooth")
+                            enabled: !DeviceService.bleAttempting && !root.mageneScanning
+                            onClicked: pairDialog.open()
                         }
                         // Profile, data screens, device settings and altitude calibration live
                         // on the GPS settings page, workouts in the Training Program - both in the
@@ -834,6 +855,9 @@ PageFlickable {
                     Row {
                         width: parent.width
                         spacing: Theme.spacingMedium
+                        // With a bike computer selected, Pair sits next to Sync rides instead
+                        // (one row of actions - André, 2026-09-25).
+                        visible: !DeviceService.bikeActive
 
                         RoundedButton {
                             // Reflects whichever flow is mid-connect so the one button still gives
@@ -844,7 +868,7 @@ PageFlickable {
                                 : root.mageneScanning ? qsTr("Searching…")
                                                       : qsTr("Pair over Bluetooth")
                             enabled: !DeviceService.bleAttempting && !root.mageneScanning
-                            onClicked: pairMenu.popup()
+                            onClicked: pairDialog.open()
                         }
                         RoundedButton {
                             visible: !DeviceService.bikeActive      // a watch action only
@@ -853,20 +877,62 @@ PageFlickable {
                         }
                     }
 
-                    // Menu behind the single Pair button: one entry per wireless device kind.
-                    ThemedMenu {
-                        id: pairMenu
-                        ThemedMenuItem {
-                            // A connected watch is already talking over its cable/BLE, so pairing
-                            // it again is pointless - offer it only when there's no watch yet.
-                            text: qsTr("Suunto watch")
-                            enabled: !HomeViewModel.connected
-                            onTriggered: DeviceService.connectBle(false)
-                        }
-                        ThemedMenuItem {
-                            text: qsTr("Magene C406")
-                            enabled: !root.mageneScanning
-                            onTriggered: root.scanMagene()
+                    // Behind the single Pair button: a centered dialog on the dimmed page, like the
+                    // app's other pop-ups (André, 2026-09-25), one choice per wireless device kind.
+                    ThemedDialog {
+                        id: pairDialog
+                        title: qsTr("Pair over Bluetooth")
+                        standardButtons: Dialog.Cancel
+                        width: 420
+                        contentItem: Column {
+                            spacing: Theme.spacingSmall
+                            Repeater {
+                                model: [
+                                    { kind: "watch", label: qsTr("Suunto watch"),
+                                      hint: qsTr("Start “Pair Mobile App” or “Sync now” on the watch"),
+                                      enabled: !HomeViewModel.connected },
+                                    { kind: "c406", label: qsTr("Magene C406"),
+                                      hint: qsTr("Wake the C406 (any button) and keep it close"),
+                                      enabled: !root.mageneScanning }
+                                ]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    width: 388; height: 64
+                                    radius: Theme.radiusSmall
+                                    color: choiceHover.hovered && modelData.enabled ? Theme.cardNested : "transparent"
+                                    border.width: 1; border.color: Theme.border
+                                    opacity: modelData.enabled ? 1 : 0.45
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        x: Theme.spacingMedium
+                                        spacing: Theme.spacingMedium
+                                        Item {
+                                            width: 32; height: 32
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Icon { anchors.centerIn: parent; visible: modelData.kind === "watch"
+                                                   glyph: Icons.watch; size: 28; color: Theme.text }
+                                            BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind === "c406"
+                                                               kind: "c406"; size: 30 }
+                                        }
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Text { text: modelData.label; color: Theme.text
+                                                   font.pixelSize: Theme.fontSizeBody; font.bold: true }
+                                            Text { text: modelData.hint; color: Theme.mutedText
+                                                   font.pixelSize: Theme.fontSizeCaption }
+                                        }
+                                    }
+                                    HoverHandler { id: choiceHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler {
+                                        enabled: modelData.enabled
+                                        onTapped: {
+                                            pairDialog.close();
+                                            if (modelData.kind === "watch") DeviceService.connectBle(false);
+                                            else root.scanMagene();
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

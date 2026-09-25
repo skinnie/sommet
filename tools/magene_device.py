@@ -37,7 +37,7 @@ import struct
 import sys
 import time
 
-from magene_import import _connect, CC02
+from magene_import import _connect, CC02, _ride_list, _name_for
 import magene_pages
 
 BATTERY_CHAR = "00002a19-0000-1000-8000-00805f9b34fb"
@@ -280,6 +280,30 @@ async def run(args):
                                    merged["maxHr"], merged["lthr"], merged["ftp"],
                                    merged["weight"], merged["bikeWeight"])
             return {"ok": ok, "profile": merged}
+        if args.action == "hello":
+            # Everything the app needs when the C406 is found / selected, in ONE connection (each
+            # connect shows on the device as a drop + reconnect - André, 2026-09-25): identity,
+            # battery, clock + time zone, profile and the ride list.
+            out = {"ok": True, "batteryPercent": await read_battery(client),
+                   "info": await read_info(client)}
+            out["clockSet"] = await set_time(client)
+            out["timezoneSet"] = await set_timezone(client, _local_offset_seconds())
+            out["profile"] = await read_profile(client)
+            out["rides"] = [_name_for(r) for r in await _ride_list(client)]
+            return out
+        if args.action == "read-config":
+            # GPS settings page: device settings + data screens in one connection.
+            out = {"ok": True, "settings": None, "pages": None}
+            raw = await read_settings_raw(client)
+            if raw is not None:
+                out["settings"] = decode_settings(raw)
+            pr = await _cmd_once(client, b"\x40\x42", expect_prefix=b"\x40\x42")
+            if pr and len(pr) >= 3 and pr[2] == 0:
+                try:
+                    out["pages"] = magene_pages.describe(magene_pages.decode_pages(pr[3:]))
+                except ValueError as exc:
+                    out["pagesError"] = f"unrecognised pages layout ({exc})"
+            return out
         if args.action == "read-pages":
             raw = await _cmd_once(client, b"\x40\x42", expect_prefix=b"\x40\x42")
             if not raw or len(raw) < 3 or raw[2] != 0:
@@ -350,7 +374,7 @@ def main():
     ap.add_argument("action", choices=["battery", "info", "status", "set-time", "set-timezone",
                                         "altitude", "read-profile", "set-profile",
                                         "read-settings", "set-settings",
-                                        "read-pages", "write-pages"])
+                                        "read-pages", "write-pages", "hello", "read-config"])
     ap.add_argument("--address", required=True)
     ap.add_argument("--sync-clock", action="store_true", help="with status: also set time + tz")
     ap.add_argument("--offset-seconds", type=int, default=None)
