@@ -113,7 +113,26 @@ export interface AthleteThresholds {
   ftp?: number; lthr?: number; maxHr?: number;
   weight?: number; height?: number; gender?: number; // read-only extras
   age?: number; // from icu_date_of_birth (read-only; the Magene C406 stores an age)
+  map?: number; mapSource?: string; // Bryton MAP, estimated (estimateMap) - intervals.icu has none
   rideGroupId?: number;
+}
+
+// Maximal Aerobic Power for the Bryton's profile (tools/intervals_athlete.estimate_map): best
+// 5-minute power from the Ride power curve over the last 90 days; FTP / 0.75 when there's none.
+async function estimateMap(athleteId: string, apiKey: string, ftp?: number): Promise<{ map?: number; mapSource?: string }> {
+  try {
+    const r = await fetch(`${API_BASE}/athlete/${encodeURIComponent(athleteId)}/power-curves?type=Ride&curves=90d`, {
+      headers: { Authorization: authHeader(apiKey), 'User-Agent': 'Sommet/1.0' },
+    });
+    if (r.ok) {
+      const d: any = await r.json();
+      const cur = (Array.isArray(d) ? d : d.list)?.[0];
+      const i = cur?.secs?.indexOf(300) ?? -1;
+      const w = i >= 0 ? cur.watts[i] : null;
+      if (w) return { map: Math.round(w), mapSource: 'best 5-min power, last 90 days' };
+    }
+  } catch { /* fall back */ }
+  return ftp ? { map: Math.round(ftp / 0.75), mapSource: 'FTP / 0.75 (no power data)' } : {};
 }
 
 // Whole years from a "YYYY-MM-DD" birth date (tools/intervals_athlete.py does the same).
@@ -148,6 +167,7 @@ export async function getAthleteThresholds(): Promise<AthleteThresholds | null> 
     height: prof.height ? Math.round(prof.height * 100) : undefined,
     gender: prof.sex === 'M' ? 1 : prof.sex === 'F' ? 0 : undefined,
     age: ageFrom(prof.icu_date_of_birth ?? prof.date_of_birth),
+    ...(await estimateMap(creds.athleteId, creds.apiKey, ride.ftp)),
     rideGroupId: ride.id,
   };
 }

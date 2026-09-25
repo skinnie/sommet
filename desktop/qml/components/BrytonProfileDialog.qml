@@ -50,8 +50,11 @@ ThemedDialog {
     readonly property var labels: ({
         "ftp": qsTr("FTP (W)"), "lthr": qsTr("LTHR (bpm)"), "max_hr": qsTr("Max HR (bpm)"),
         "weight": qsTr("Weight (kg)"), "height": qsTr("Height (cm)"), "gender": qsTr("Gender"),
-        "age": qsTr("Age")
+        "age": qsTr("Age"), "map": qsTr("MAP (W)")
     })
+    // Only intervals.icu -> device: intervals.icu doesn't take these back (MAP is estimated from
+    // its power curve, see intervals_athlete.estimate_map), so the device side can't be picked.
+    readonly property var oneWay: ["map", "gender", "height", "age"]
 
     ListModel { id: diffModel }
 
@@ -74,7 +77,8 @@ ThemedDialog {
                 var remembered = prefs.value("src_" + d.field, "")
                 diffModel.append({
                     field: d.field, deviceVal: d.device, intervalsVal: d.intervals,
-                    choice: remembered === "device" || remembered === "intervals" ? remembered : "intervals"
+                    choice: root.oneWay.indexOf(d.field) >= 0 ? "intervals"
+                            : (remembered === "device" || remembered === "intervals" ? remembered : "intervals")
                 })
             }
         }
@@ -180,10 +184,22 @@ ThemedDialog {
                                 font.pixelSize: Theme.fontSizeBody; font.bold: true
                             }
                         }
-                        TapHandler { onTapped: diffModel.setProperty(rowIndex, "choice", modelData.src) }
+                        opacity: modelData.src === "device" && root.oneWay.indexOf(field) >= 0 ? 0.45 : 1
+                        TapHandler {
+                            enabled: !(modelData.src === "device" && root.oneWay.indexOf(field) >= 0)
+                            onTapped: diffModel.setProperty(rowIndex, "choice", modelData.src)
+                        }
                     }
                 }
             }
+        }
+
+        Text {
+            visible: diffModel.count > 0 && root.intervals !== null && !!root.intervals.map_source
+                     && root.intervals.map !== undefined
+            width: parent.width; wrapMode: Text.WordWrap
+            text: root.intervals ? qsTr("MAP from intervals.icu: %1").arg(root.intervals.map_source) : ""
+            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
         }
 
         Row {

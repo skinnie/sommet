@@ -17,9 +17,11 @@ import type { BrytonProfile } from '../services/BrytonProfile';
 // reconciles its FTP/LTHR/Max HR/weight against intervals.icu, and links to the Workout Builder.
 // Responsive: a single centred column that stays readable on a phone and doesn't sprawl on a tablet.
 
-type Field = 'ftp' | 'lthr' | 'maxHr' | 'weight';
-const FIELDS: Field[] = ['ftp', 'lthr', 'maxHr', 'weight'];
-const LABELS: Record<Field, string> = { ftp: 'FTP (W)', lthr: 'LTHR (bpm)', maxHr: 'Max HR (bpm)', weight: 'Weight (kg)' };
+type Field = 'ftp' | 'lthr' | 'maxHr' | 'map' | 'weight';
+const FIELDS: Field[] = ['ftp', 'lthr', 'maxHr', 'map', 'weight'];
+const LABELS: Record<Field, string> = { ftp: 'FTP (W)', lthr: 'LTHR (bpm)', maxHr: 'Max HR (bpm)', map: 'MAP (W)', weight: 'Weight (kg)' };
+// MAP only goes intervals.icu -> device (estimated from its power curve; intervals.icu has no MAP).
+const ONE_WAY: Field[] = ['map'];
 const PREF_KEY = 'brytonProfileSource';
 
 export default function BrytonScreen() {
@@ -31,8 +33,9 @@ export default function BrytonScreen() {
   const [deviceName, setDeviceName] = useState('');
   const [device, setDevice] = useState<BrytonProfile | null>(null);
   const [intervals, setIntervals] = useState<Record<Field, number | undefined> | null>(null);
+  const [mapSource, setMapSource] = useState('');
   const [choice, setChoice] = useState<Record<Field, 'device' | 'intervals'>>({
-    ftp: 'intervals', lthr: 'intervals', maxHr: 'intervals', weight: 'intervals',
+    ftp: 'intervals', lthr: 'intervals', maxHr: 'intervals', map: 'intervals', weight: 'intervals',
   });
   const [remember, setRemember] = useState(true);
   const [applying, setApplying] = useState(false);
@@ -53,7 +56,8 @@ export default function BrytonScreen() {
       try { const g = await readGrid(); setGrid(g); setEditGrid(JSON.parse(JSON.stringify(g))); } catch { setGrid(null); }
       setDevice(dev);
       const icu = await getAthleteThresholds();
-      setIntervals(icu ? { ftp: icu.ftp, lthr: icu.lthr, maxHr: icu.maxHr, weight: icu.weight } : null);
+      setIntervals(icu ? { ftp: icu.ftp, lthr: icu.lthr, maxHr: icu.maxHr, map: icu.map, weight: icu.weight } : null);
+      setMapSource(icu?.mapSource ?? '');
       // restore remembered per-field sources
       try {
         const raw = await AsyncStorage.getItem(PREF_KEY);
@@ -81,7 +85,7 @@ export default function BrytonScreen() {
     const toDevice: Partial<BrytonProfile> = {};
     const toIntervals: { ftp?: number; lthr?: number; maxHr?: number; weight?: number } = {};
     for (const f of diffs) {
-      if (choice[f] === 'intervals') (toDevice as any)[f] = intervals[f];
+      if (choice[f] === 'intervals' || ONE_WAY.includes(f)) (toDevice as any)[f] = intervals[f];
       else (toIntervals as any)[f] = device[f];
     }
     try {
@@ -156,10 +160,11 @@ export default function BrytonScreen() {
                     <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '600', marginBottom: 6 }}>{LABELS[f]}</Text>
                     <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
                       {(['device', 'intervals'] as const).map(src => {
-                        const sel = choice[f] === src;
+                        const locked = src === 'device' && ONE_WAY.includes(f);
+                        const sel = locked ? false : (ONE_WAY.includes(f) ? src === 'intervals' : choice[f] === src);
                         const val = src === 'device' ? device[f] : intervals[f];
                         return (
-                          <TouchableOpacity key={src} activeOpacity={0.8}
+                          <TouchableOpacity key={src} activeOpacity={0.8} disabled={locked}
                             onPress={() => setChoice(c => ({ ...c, [f]: src }))}
                             style={{
                               flex: 1, padding: v3Spacing.small, borderRadius: v3Radius.small,
@@ -177,6 +182,9 @@ export default function BrytonScreen() {
                   </View>
                 ))}
 
+                {diffs.includes('map') && !!mapSource && (
+                  <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginBottom: v3Spacing.small }}>MAP from intervals.icu: {mapSource}</Text>
+                )}
                 <View style={{ marginBottom: v3Spacing.medium }}>
                   <Toggle value={remember} onValueChange={setRemember} />
                   <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>Remember these choices</Text>

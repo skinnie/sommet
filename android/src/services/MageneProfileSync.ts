@@ -6,11 +6,12 @@ import type { MageneProfile } from './MageneDevice';
 // FTP/LTHR/Max HR/weight can go either way, gender/height/age only onto the device (intervals.icu
 // doesn't take them through this API).
 
-export type ProfileField = 'ftp' | 'lthr' | 'maxHr' | 'weight' | 'height' | 'sex' | 'age';
-export const PROFILE_FIELDS: ProfileField[] = ['ftp', 'lthr', 'maxHr', 'weight', 'height', 'sex', 'age'];
+export type ProfileField = 'ftp' | 'lthr' | 'maxHr' | 'map' | 'weight' | 'height' | 'sex' | 'age';
+// map: Bryton only (the Magene profile has none, so it's skipped there); one-way like height/age.
+export const PROFILE_FIELDS: ProfileField[] = ['ftp', 'lthr', 'maxHr', 'map', 'weight', 'height', 'sex', 'age'];
 export const TWO_WAY: ProfileField[] = ['ftp', 'lthr', 'maxHr', 'weight'];
 export const PROFILE_LABELS: Record<ProfileField, string> = {
-  ftp: 'FTP (W)', lthr: 'LTHR (bpm)', maxHr: 'Max HR (bpm)', weight: 'Weight (kg)',
+  ftp: 'FTP (W)', lthr: 'LTHR (bpm)', maxHr: 'Max HR (bpm)', map: 'MAP (W)', weight: 'Weight (kg)',
   height: 'Height (cm)', sex: 'Gender', age: 'Age',
 };
 
