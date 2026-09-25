@@ -824,13 +824,12 @@ PageFlickable {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    // Watch Bluetooth - hidden while a USB bike computer (Bryton/Edge/Karoo) is the
-                    // selected device (André, 2026-09-25: "that is ambit stuff"). With the Magene
-                    // selected, Pair stays (it's how the C406 is found) but Forget-watch hides.
+                    // Pair over Bluetooth stays whatever device is selected - it's also how the
+                    // Magene is found, even with the Bryton selected (André, 2026-09-25: "I don't
+                    // have the pair button"). Forget-watch hides for bike computers (its own
+                    // visible rule below: "that is ambit stuff").
                     visible: DeviceService.bleExperimentEnabled && !HomeViewModel.isGarmin
                              && !DeviceService.demoMode
-                             && (!DeviceService.bikeActive
-                                 || (root.activeBike !== null && root.activeBike.kind === "c406"))
 
                     Row {
                         width: parent.width
