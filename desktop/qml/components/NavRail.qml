@@ -116,11 +116,9 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Kailash excluded (a travel/adventure watch with no route-following) - gated on
-                // the CAPABILITY, not the model. Also needs a watch connected (#1a, 2026-09-02):
-                // supportsRoutes is true with no watch (model is empty, not Kailash), so without
-                // anyDevice this would show a watch-only page on an empty app.
-                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && DeviceCapabilities.supportsRoutes
+                // Always shown (André, 2026-09-25): Routes is where ANY device gets a route - a watch,
+                // an eTrex, the Bryton or the Magene - and a GPX can be imported and looked at with
+                // nothing connected. The page itself hides the watch parts when there's no watch.
                 glyph: Icons.routes
                 label: qsTr("Routes")
                 selected: root.currentPage === "routes"

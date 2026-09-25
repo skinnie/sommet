@@ -8,16 +8,13 @@ import { getAthleteThresholds, putAthleteThresholds, type AthleteThresholds } fr
 import {
   withMagene, readProfile, setProfile, readSettings, writeSettings, altitudeCorrect, type MageneProfile,
 } from '../services/MageneDevice';
-import { sendRoute } from '../services/MageneRoute';
 import { readPages, writePages, FIELD_GROUPS, FIELD_NAMES, MAX_FIELDS, MIN_FIELDS, MAX_PAGES } from '../services/MagenePages';
-import { pickFile } from '../services/CatalogService';
-import { base64ToBytes, bytesToUtf8 } from '../services/Base64';
 import { getKnownMagene, type KnownMagene } from '../services/MageneStore';
 import { diffProfile, fmtProfile, PROFILE_LABELS, TWO_WAY, type ProfileField } from '../services/MageneProfileSync';
 
 // Magene C406 hub - the Android counterpart of the desktop Home Magene card's Sync profile
-// (BrytonProfileDialog in Magene mode), Device settings (MageneSettingsDialog) and Routes
-// "Send to Magene". Same layout as BrytonScreen: one centred column, max 640 wide. Every action
+// (profile sync), Device settings, Data screens and altitude calibration. Routes are sent from the
+// Routes screen, like every device's. Same layout as BrytonScreen: one centred column, max 640 wide. Every action
 // is its own short BLE connection (the C406 sleeps; a held link drains it and blocks other apps).
 
 const PREF_KEY = 'mageneProfileSource';
@@ -135,19 +132,6 @@ export default function MageneScreen() {
     } catch (e: any) { setMsg(String(e?.message ?? e)); } finally { setBusy(''); }
   };
 
-  const doRoute = async () => {
-    if (!magene) return;
-    try {
-      const f = await pickFile();
-      setBusy('route'); setMsg('');
-      const gpx = bytesToUtf8(base64ToBytes(f.base64));
-      const r = await sendRoute(magene.address, gpx);
-      setMsg(r.ok ? `Route “${f.name}” sent (${r.points} points) ✓` : (r.error || 'Route send failed'));
-    } catch (e: any) {
-      if (e?.message !== 'CANCELLED' && e?.code !== 'CANCELLED') setMsg(String(e?.message ?? e));
-    } finally { setBusy(''); }
-  };
-
   const doAltitude = async () => {
     if (!magene) return;
     setBusy('alt'); setMsg('');
@@ -189,7 +173,6 @@ export default function MageneScreen() {
                 Device profile: FTP {device.ftp} W · LTHR {device.lthr} · Max HR {device.maxHr} · {device.weight} kg · age {device.age}
               </Text>}
               <View style={{ flexDirection: 'row', gap: v3Spacing.small, marginTop: v3Spacing.medium, flexWrap: 'wrap' }}>
-                <Button label={busy === 'route' ? 'Sending…' : 'Send route (GPX)'} icon="route" onPress={doRoute} disabled={!!busy} grow={false} />
                 <Button label={busy === 'alt' ? 'Calibrating…' : 'Calibrate altitude'} onPress={doAltitude} disabled={!!busy} variant="text" grow={false} />
               </View>
               {msg ? <StatusLine text={msg} tone={msg.includes('✓') ? 'muted' : 'alert'} /> : null}

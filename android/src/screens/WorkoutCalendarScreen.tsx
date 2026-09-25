@@ -17,6 +17,7 @@ import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
 import { ActionMenu } from '../components/ui/ActionMenu';
 import { loadPlan, savePlan } from '../services/WorkoutPlanStore';
+import { pushEntry, deleteEvent, newUid } from '../services/IntervalsEvents';
 import {
   WorkoutStepsEditor, StepRow, PlanDevice, DEVICE_LABELS, defaultSteps, fromSchema, toWorkout,
   repeatsBalanced, fitsDevice,
@@ -26,7 +27,9 @@ import {
 // made FOR a device (the step editor offers only what that device takes), and a long press on a
 // plan row opens Edit / Send to <connected bike computer> / Compile for watch / Remove. Home
 // passes which devices are around; opened without params it behaves as before (watch only).
-type PlanEntry = CalendarPlanEntry & { device?: PlanDevice };
+// uid = permanent identity; icuEventId = its intervals.icu event; icuOwned = made in Sommet (only
+// those are pushed / deleted on intervals.icu - imported ones are never deleted there).
+type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEventId?: number; icuOwned?: boolean };
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
 // region entirely (assets/Firmware/re-out/training_program_CONCLUSION.md on desktop has the
@@ -101,6 +104,29 @@ export default function WorkoutCalendarScreen() {
     }
   }
 
+  // intervals.icu calendar mirror (IntervalsEvents.ts = tools/intervals_events.py). Local first:
+  // without intervals.icu these are no-ops. First push stores the event id; later edits update it.
+  const [mirrorMsg, setMirrorMsg] = useState('');
+  async function mirror(entry: PlanEntry) {
+    if (!entry.icuOwned || !entry.uid || !entry.workout) return;
+    try {
+      const id = await pushEntry({ uid: entry.uid, date: entry.date, workout: entry.workout,
+        device: entry.device, mode: entry.mode, icuEventId: entry.icuEventId });
+      setMirrorMsg('');
+      if (id && id !== entry.icuEventId) setPlan(p => p.map(e => (e.uid === entry.uid ? { ...e, icuEventId: id } : e)));
+    } catch (e: any) { setMirrorMsg(`intervals.icu: ${e?.message ?? e}`); }
+  }
+  async function unmirror(entry?: PlanEntry) {
+    if (!entry?.icuOwned || !entry.icuEventId) return;
+    try { await deleteEvent(entry.icuEventId); setMirrorMsg(''); }
+    catch (e: any) { setMirrorMsg(`intervals.icu: ${e?.message ?? e}`); }
+  }
+  // The entry's identity survives an edit (same uid + event -> update, never a second event).
+  function identityFor(prev?: PlanEntry) {
+    return { uid: prev?.uid ?? newUid(), icuOwned: prev ? prev.icuOwned !== false : true,
+             ...(prev?.icuEventId ? { icuEventId: prev.icuEventId } : {}) };
+  }
+
   // Send one plan entry (or all of them) to a bike computer - the long-press menu's "Send to …".
   async function sendEntry(target: 'bryton' | 'magene', e: PlanEntry): Promise<boolean> {
     if (!e.workout) return false;
@@ -136,9 +162,11 @@ export default function WorkoutCalendarScreen() {
   // compile step); the watch still goes through the community compiler below.
   function addBikeEntry(sendNow: boolean) {
     const workout = toWorkout(name, rows);
-    const entry: PlanEntry = { date, mode: '', workoutName: workout.name!, workout, device };
+    const prev = editIndex != null ? plan[editIndex] : undefined;
+    const entry: PlanEntry = { date, mode: '', workoutName: workout.name!, workout, device, ...identityFor(prev) };
     setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
     setEditIndex(null);
+    mirror(entry);
     if (sendNow && isBike) sendOne(device as 'bryton' | 'magene', entry);
   }
 
@@ -195,7 +223,22 @@ export default function WorkoutCalendarScreen() {
         Alert.alert(t.experimentalWorkoutCalendar,
           skipped.length ? `${t.workoutCalendarImportNone} (${skipped.length} skipped)` : t.workoutCalendarImportNone);
       } else {
-        setPlan(p => [...p, ...entries.map(e => ({ date: e.date, mode: e.mode, workoutName: e.name, workout: e.workout }))]);
+        // No duplicates: skip Sommet's own events (external_id "sommet:<uid>"), update an entry
+        // already holding that intervals.icu event, and never add the same day+name twice.
+        setPlan(p => {
+          const next = [...p];
+          const own = new Set(next.map(e => e.uid).filter(Boolean));
+          for (const e of entries) {
+            if (e.externalId?.startsWith('sommet:') && own.has(e.externalId.slice(7))) continue;
+            const imported: PlanEntry = { date: e.date, mode: e.mode, workoutName: e.name, workout: e.workout,
+              uid: newUid(), icuEventId: e.eventId, icuOwned: false };
+            const same = next.findIndex(x => (e.eventId && x.icuEventId === e.eventId)
+              || (x.date === e.date && x.workoutName === e.name));
+            if (same >= 0) { if (!next[same].icuOwned) next[same] = { ...imported, uid: next[same].uid ?? imported.uid, compiled: next[same].compiled }; }
+            else next.push(imported);
+          }
+          return next;
+        });
         Alert.alert(t.experimentalWorkoutCalendar,
           `${t.workoutCalendarImportedPrefix} ${entries.length}${skipped.length ? ` (+${skipped.length} skipped)` : ''}. ${t.workoutCalendarImportCompileHint}`);
       }
@@ -242,9 +285,11 @@ export default function WorkoutCalendarScreen() {
     if (!compiledPending) { Alert.alert(t.error, t.intervalsImportBtn); return; }
     const workoutName = name.trim() || 'Workout';
     const workout = buildWorkout();
-    const entry: PlanEntry = { date, mode, workoutName, compiled: compiledPending, workout, device: 'suunto' };
+    const prev = editIndex != null ? plan[editIndex] : undefined;
+    const entry: PlanEntry = { date, mode, workoutName, compiled: compiledPending, workout, device: 'suunto', ...identityFor(prev) };
     setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
     setEditIndex(null);
+    mirror(entry);
     Alert.alert(t.experimentalWorkoutCalendar, t.workoutCalendarAddedMsg);
     setCompiledPending(null);
     setGeneratedJson(null);
@@ -252,7 +297,9 @@ export default function WorkoutCalendarScreen() {
   }
 
   function removeFromPlan(i: number) {
+    const gone = plan[i];
     setPlan(p => p.filter((_, idx) => idx !== i));
+    unmirror(gone);
   }
 
   async function doSync(write: boolean) {
@@ -440,6 +487,7 @@ export default function WorkoutCalendarScreen() {
         {plan.length > 0 && <Text style={[s.desc, { marginTop: 8 }]}>Long-press a workout to edit, send or remove it.</Text>}
         {brytonMsg ? <Text style={[s.desc, { marginTop: 8 }]}>{brytonMsg}</Text> : null}
         {sendMsg ? <Text style={[s.desc, { marginTop: 8 }]}>{sendMsg}</Text> : null}
+        {mirrorMsg ? <Text style={[s.desc, { marginTop: 8, color: theme.warning }]}>{mirrorMsg}</Text> : null}
         <Row>
           {params.bryton && (
             <TouchableOpacity style={[s.btn, { flex: 1 }, brytonBusy && { opacity: 0.5 }]} disabled={brytonBusy} onPress={sendToBryton}>

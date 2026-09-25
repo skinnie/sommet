@@ -982,17 +982,21 @@ export default function HomeScreen() {
     { id: 'planRoute', label: 'Route', icon: 'route', onPress: () => navigation.navigate('RouteWeather') },
     // Offline maps lives in Settings > Maps (desktop parity — moved out of the main menu,
     // André 2026-09-24), not as a top-level item.
-    ...(!connected ? [] : deviceType === 'garmin'
+    // Routes is always there (André, 2026-09-25): it's where any device gets a route (watch, Bryton,
+    // Magene) and a GPX can be imported with nothing connected. eTrex keeps its own routes screen;
+    // the watch parts of Route only show with a route-capable watch. POIs stay watch-only.
+    ...(connected && deviceType === 'garmin'
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
           { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => garminInfo && navigation.navigate('GarminPoi', { info: garminInfo }), group: 'watch' as const },
         ]
-      : !isKailash(ambitInfo)
-        ? [
-            { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => navigation.navigate('Route'), group: 'watch' as const },
-            { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const },
-          ]
-        : []),
+      : [
+          { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const,
+            onPress: () => navigation.navigate('Route', { watch: connected && deviceType === 'ambit' && !isKailash(ambitInfo) }), group: 'watch' as const },
+          ...(connected && !isKailash(ambitInfo)
+            ? [{ id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const }]
+            : []),
+        ]),
     // Backup & restore lives in Settings (desktop parity — moved out of the menu with Offline
     // maps, André 2026-08-31 / ported 2026-09-25), not as a top-level item.
     ...(connected && deviceType === 'ambit' && !isKailash(ambitInfo)
