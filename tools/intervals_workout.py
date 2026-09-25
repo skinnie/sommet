@@ -140,6 +140,19 @@ def convert_target(step: dict, hr_resolve=None) -> dict:
         if lo > hi:
             lo, hi = hi, lo
         return {"targetName": target_name, "valueRange": {"min": lo, "max": hi}}
+    # A band already in absolute units (e.g. written by Sommet itself - tools/intervals_events.py
+    # - or typed as watts/bpm/rpm) carries no resolved `_x` copy: take it as is.
+    for key, target_name, units in (("power", "power", "w"), ("hr", "hr", "bpm"),
+                                    ("cadence", "cadence", "rpm")):
+        band = step.get(key)
+        if isinstance(band, dict) and band.get("units") == units \
+                and band.get("start") is not None:
+            lo = float(band["start"])
+            hi = float(band["end"]) if band.get("end") is not None else lo
+            if target_name == "hr" and hr_resolve is not None:
+                lo, hi = hr_resolve(lo), hr_resolve(hi)
+            lo, hi = sorted((round(lo), round(hi)))
+            return {"targetName": target_name, "valueRange": {"min": lo, "max": hi}}
     return {"targetName": "none"}
 
 
@@ -441,7 +454,10 @@ def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
         except (ValueError, NotImplementedError) as e:
             skipped.append({"date": date, "name": name, "reason": str(e)})
             continue
-        entries.append({"date": date, "mode": mode, "workout": workout})
+        # eventId / externalId let the calendar recognise events it already has (its own ones carry
+        # external_id "sommet:<uid>", see intervals_events.py) - no duplicate on re-import.
+        entries.append({"date": date, "mode": mode, "workout": workout,
+                        "eventId": ev.get("id"), "externalId": ev.get("external_id")})
     return entries, skipped
 
 

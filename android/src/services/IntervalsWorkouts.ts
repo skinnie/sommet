@@ -27,7 +27,9 @@ const TEXT_TYPE_HINTS: [string[], string][] = [
 ];
 const RESOLVED_TARGETS: [string, string][] = [['_hr', 'hr'], ['_power', 'power'], ['_pace', 'pace']];
 
-export interface PlannedEntry { date: string; mode: string; name: string; workout: Workout }
+// eventId / externalId let the plan recognise events it already has (its own carry external_id
+// "sommet:<uid>" - IntervalsEvents.ts), so re-importing never duplicates.
+export interface PlannedEntry { date: string; mode: string; name: string; workout: Workout; eventId?: number; externalId?: string | null }
 export interface SkippedEntry { date: string; name: string; reason: string }
 export interface ImportResult { entries: PlannedEntry[]; skipped: SkippedEntry[] }
 
@@ -112,6 +114,17 @@ function convertTarget(step: IcuStep, hrResolve?: (bpm: number) => number): Work
     let { start: lo, end: hi } = band as { start: number; end: number };
     if (lo == null || hi == null) continue;
     lo = Number(lo); hi = Number(hi);
+    if (targetName === 'hr' && hrResolve) { lo = hrResolve(lo); hi = hrResolve(hi); }
+    lo = Math.round(lo); hi = Math.round(hi);
+    if (lo > hi) [lo, hi] = [hi, lo];
+    return { targetName, valueRange: { min: lo, max: hi } };
+  }
+  // Already in absolute units (written by Sommet itself, or typed as W/bpm/rpm): take as is -
+  // tools/intervals_workout.convert_target.
+  for (const [key, targetName, units] of [['power', 'power', 'w'], ['hr', 'hr', 'bpm'], ['cadence', 'cadence', 'rpm']] as const) {
+    const band = (step as any)[key];
+    if (!band || typeof band !== 'object' || band.units !== units || band.start == null) continue;
+    let lo = Number(band.start), hi = band.end != null ? Number(band.end) : lo;
     if (targetName === 'hr' && hrResolve) { lo = hrResolve(lo); hi = hrResolve(hi); }
     lo = Math.round(lo); hi = Math.round(hi);
     if (lo > hi) [lo, hi] = [hi, lo];
@@ -217,7 +230,7 @@ export async function fetchIntervalsWorkouts(
     try {
       const workout = convertWorkout({ steps, sportSettings: { max_hr: maxHr ?? undefined } },
         name, watchMaxHr, watchRestHr);
-      entries.push({ date, mode, name, workout });
+      entries.push({ date, mode, name, workout, eventId: ev.id, externalId: ev.external_id ?? null });
     } catch (e: any) {
       skipped.push({ date, name, reason: e?.message ?? String(e) });
     }

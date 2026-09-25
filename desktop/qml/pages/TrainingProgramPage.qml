@@ -149,10 +149,7 @@ Item {
         ThemedMenuItem {
             visible: dayMenu.entry !== null
             text: qsTr("Remove workout")
-            onTriggered: {
-                root.entries = root.entries.filter(e => e.date !== dayMenu.iso)
-                root.dirty = true
-            }
+            onTriggered: root.removeEntry(dayMenu.iso)
         }
         // Empty day: the creator, shaped by what's connected.
         ThemedMenuItem {
@@ -189,14 +186,77 @@ Item {
         })
     }
 
+    // No duplicates (André, 2026-09-25): an event Sommet itself pushed (external_id "sommet:<uid>")
+    // is never re-imported; an event already in the plan (same intervals.icu id) is updated in
+    // place; and a workout made in Sommet is never overwritten by an imported one on its day.
     function mergeImported(imported) {
         const byDate = {}
         for (const e of root.entries) byDate[e.date] = e
+        const ownUids = {}
+        for (const e of root.entries) if (e.uid) ownUids[e.uid] = true
         let added = 0
-        for (const e of imported) { if (!(e.date in byDate)) added++; byDate[e.date] = e }
+        for (const imp of imported) {
+            const ext = imp.externalId || ""
+            if (ext.indexOf("sommet:") === 0 && ownUids[ext.slice(7)]) continue
+            for (const d in byDate)                         // same event moved to another day
+                if (imp.eventId && byDate[d].icuEventId === imp.eventId && d !== imp.date) delete byDate[d]
+            const cur = byDate[imp.date]
+            if (cur && cur.icuOwned && cur.icuEventId !== imp.eventId) continue
+            if (!cur) added++
+            byDate[imp.date] = { date: imp.date, mode: imp.mode, workout: imp.workout,
+                                 uid: cur && cur.uid ? cur.uid : root.newUid(),
+                                 icuEventId: imp.eventId, icuOwned: false }
+        }
         root.entries = Object.keys(byDate).sort().map(d => byDate[d])
         root.dirty = true
         return added
+    }
+
+    // ---- intervals.icu calendar mirror (tools/intervals_events.py via /api/intervals/plan) ------
+    // Local first: without intervals.icu the plan simply stays on this computer. With it, each
+    // workout made here is also a planned workout there; the first push stores the event id, every
+    // later edit updates that same event, and removing a workout made here deletes its event.
+    // Workouts that CAME from intervals.icu (icuOwned false) are never deleted there.
+    function newUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10) }
+    property string mirrorMsg: ""
+    function icuPost(path, extra, done) {
+        if (!ConnectionsService.intervalsIcuConnected) return
+        const body = { athlete_id: ConnectionsService.intervalsIcuAthleteId,
+                       api_key: ConnectionsService.intervalsIcuApiKey() }
+        for (const k in extra) body[k] = extra[k]
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            let r = {}
+            try { r = JSON.parse(xhr.responseText) } catch (e) {}
+            done(r)
+        }
+        xhr.open("POST", "http://127.0.0.1:8766" + path)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify(body))
+    }
+    function mirrorEntry(entry) {
+        if (!entry || !entry.icuOwned) return
+        root.icuPost("/api/intervals/plan/upsert", { entry: entry }, function (r) {
+            if (!r.ok) { root.mirrorMsg = qsTr("intervals.icu: %1").arg(r.error || qsTr("not updated")); return }
+            root.mirrorMsg = ""
+            if (r.eventId && r.eventId !== entry.icuEventId)
+                root.entries = root.entries.map(e => e.uid === entry.uid
+                                                ? Object.assign({}, e, { icuEventId: r.eventId }) : e)
+            root.dirty = true
+        })
+    }
+    function unmirrorEntry(entry) {
+        if (!entry || !entry.icuOwned || !entry.icuEventId) return
+        root.icuPost("/api/intervals/plan/delete", { eventId: entry.icuEventId }, function (r) {
+            root.mirrorMsg = r.ok ? "" : qsTr("intervals.icu: %1").arg(r.error || qsTr("not deleted"))
+        })
+    }
+    function removeEntry(iso) {
+        const gone = root.entryForDate(iso)
+        root.entries = root.entries.filter(e => e.date !== iso)
+        root.dirty = true
+        root.unmirrorEntry(gone)
     }
 
     Connections {
@@ -663,6 +723,14 @@ Item {
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
+                        Text {
+                            visible: root.mirrorMsg.length > 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: root.mirrorMsg
+                            color: Theme.warning
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                     }
                 }
             }
@@ -989,13 +1057,21 @@ Item {
         function save() {
             const workout = { name: editor.workoutName,
                               steps: editor.editSteps.map(editor.toSchema) }
-            const entry = { date: editor.editDate, workout: workout }
+            // Keep the entry's identity across edits (uid + its intervals.icu event), so an edit
+            // updates the same event instead of creating a second one.
+            const prev = root.entryForDate(editor.editDate)
+            const entry = { date: editor.editDate, workout: workout,
+                            uid: prev && prev.uid ? prev.uid : root.newUid(),
+                            icuOwned: prev ? prev.icuOwned !== false : true }
+            if (prev && prev.icuEventId) entry.icuEventId = prev.icuEventId
+            if (prev && prev.mode) entry.mode = prev.mode
             if (editor.device) entry.device = editor.device
             const next = root.entries.filter(e => e.date !== editor.editDate)
             next.push(entry)
             next.sort((a, b) => a.date < b.date ? -1 : 1)
             root.entries = next
             root.dirty = true
+            root.mirrorEntry(entry)
             return entry
         }
 
@@ -1149,8 +1225,7 @@ Item {
                     text: qsTr("Remove workout")
                     visible: root.entryForDate(editor.editDate) !== null
                     onClicked: {
-                        root.entries = root.entries.filter(e => e.date !== editor.editDate)
-                        root.dirty = true
+                        root.removeEntry(editor.editDate)
                         editor.close()
                     }
                 }

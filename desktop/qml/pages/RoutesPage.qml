@@ -13,11 +13,15 @@ PageFlickable {
     contentHeight: column.height + Theme.spacingLarge * 2
     clip: true
 
+    // A watch/eTrex is connected (the page is always in the nav now - André, 2026-09-25 - so the
+    // watch parts must not show, or try to read a watch, when there isn't one).
+    readonly property bool watchHere: HomeViewModel.anyDevice
+
     Component.onCompleted: {
         // Real, 2026-08-22: Ambit1/2 predate the SBEM nav database RouteService reads -
         // calling it against a connected Ambit1 got a real "ok: false" (correct - that
         // family doesn't have this mechanism), same fix as Watch Settings/Sport Modes.
-        if (DeviceCapabilities.supportsRoutes)
+        if (root.watchHere && DeviceCapabilities.supportsRoutes)
             RouteService.refresh()
         GarminService.refreshDeviceGpx()
         checkBryton()
@@ -84,7 +88,9 @@ PageFlickable {
         }
         xhr.open("POST", "http://127.0.0.1:8766/api/magene/route")
         xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.send(JSON.stringify({ name: RouteService.pendingRoute.name || "route", gpx: gpx }))
+        const mbody = { name: RouteService.pendingRoute.name || "route", gpx: gpx }
+        if (BikeDevices.magene && BikeDevices.magene.address) mbody.address = BikeDevices.magene.address
+        xhr.send(JSON.stringify(mbody))
     }
 
     // Which on-watch route the last "Export" tap was for - the backend response
@@ -251,7 +257,7 @@ PageFlickable {
                 // reading and exporting their legacy routes works, writing one back does not.
                 // Say so rather than offering a button that cannot succeed.
                 Text {
-                    visible: RouteService.pendingRoute.name !== undefined
+                    visible: root.watchHere && RouteService.pendingRoute.name !== undefined
                              && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRouteWrite
                     width: parent.width
                     wrapMode: Text.WordWrap
@@ -264,7 +270,7 @@ PageFlickable {
                 }
 
                 Row {
-                    visible: RouteService.pendingRoute.name !== undefined
+                    visible: root.watchHere && RouteService.pendingRoute.name !== undefined
                              && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRouteWrite)
                     spacing: Theme.spacingSmall
 
@@ -289,7 +295,7 @@ PageFlickable {
                 // Magene C406 over BLE shares the row (Experimental Bluetooth only).
                 Row {
                     visible: RouteService.pendingRoute.name !== undefined
-                             && (root.brytonConnected || DeviceService.bleExperimentEnabled)
+                             && (root.brytonConnected || BikeDevices.magene !== null)
                     spacing: Theme.spacingSmall
                     RoundedButton {
                         visible: root.brytonConnected
@@ -297,7 +303,8 @@ PageFlickable {
                         onClicked: root.sendPendingToBryton()
                     }
                     RoundedButton {
-                        visible: DeviceService.bleExperimentEnabled
+                        // Shown once a Magene is known (found or remembered - BikeDevices).
+                        visible: BikeDevices.magene !== null
                         enabled: !root.mageneSending
                         text: root.mageneSending ? qsTr("Sending…") : qsTr("Send to Magene")
                         onClicked: root.sendPendingToMagene()
@@ -364,7 +371,7 @@ PageFlickable {
         Card {
             id: legacyRoutesCard
             width: 560
-            visible: HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
+            visible: root.watchHere && HomeViewModel.connected && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRoutes
 
             property bool loading: false
             property string error: ""
@@ -448,7 +455,7 @@ PageFlickable {
 
         Card {
             id: onDeviceCard
-            visible: HomeViewModel.isGarmin || DeviceCapabilities.supportsRoutes
+            visible: root.watchHere && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRoutes)
             width: parent.width
             readonly property bool loading:
                 HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : RouteService.loading

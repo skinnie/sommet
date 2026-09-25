@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable, Linking, useWindowDimensions } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import {
   pickAndParseRoute, uploadRoute, readOnWatchNavigation, getCachedNavigation, exportSingleRouteToGpx,
   PendingRoute, SendRouteState,
@@ -46,6 +46,9 @@ export default function RouteScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
 
+  // Routes is always in the menu now (André, 2026-09-25): the watch parts show only when Home
+  // says a watch is connected; a GPX can be imported and sent to a Bryton / Magene without one.
+  const watchHere: boolean = (useRoute<any>().params?.watch) ?? true;
   const [pending, setPending] = useState<PendingRoute | null>(null);
   // Bike computers around (desktop RoutesPage parity: "Send to Bryton" / "Send to Magene").
   const [brytonPlugged, setBrytonPlugged] = useState(false);
@@ -134,7 +137,7 @@ export default function RouteScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { loadOnWatch(); }, [loadOnWatch]));
+  useFocusEffect(useCallback(() => { if (watchHere) loadOnWatch(); }, [loadOnWatch, watchHere]));
 
   async function handlePick() {
     if (picking || sendBusy) return;
@@ -244,7 +247,7 @@ export default function RouteScreen() {
               {t.routeStats(formatDist(pending.distanceM), pending.points.length, pending.ascentM, pending.descentM)}
             </Text>
             <View style={styles.row}>
-              <Button label={t.routeUploadBtn} variant="filled" loading={sendBusy} disabled={sendBusy} onPress={handleUpload} />
+              {watchHere && <Button label={t.routeUploadBtn} variant="filled" loading={sendBusy} disabled={sendBusy} onPress={handleUpload} />}
               <Button label={t.routeDiscardBtn} variant="text" grow={false} disabled={sendBusy} onPress={() => setPending(null)} />
             </View>
             {(brytonPlugged || magene) && (
@@ -261,6 +264,7 @@ export default function RouteScreen() {
         )}
       </Card>
 
+      {watchHere && (<>
       {/* ── On the watch ── */}
       <Card style={{ width: '100%' }}>
         {/* Title + map/list view dropdown, right after the title on the left (moved here from
@@ -311,6 +315,7 @@ export default function RouteScreen() {
           </View>
         ))}
       </Card>
+      </>)}
 
     </ScrollView>
   );

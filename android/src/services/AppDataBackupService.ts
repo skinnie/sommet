@@ -43,11 +43,12 @@ export interface AppDataBundle {
   tables: Record<string, any[]>;
   files: BundleFile[];
   // Optional (older bundles don't have it): app data kept in AsyncStorage rather than SQLite -
-  // the Workout Calendar plan (WorkoutPlanStore). Only these known keys, never everything.
+  // the Workout Calendar plan (WorkoutPlanStore) and the bike-import "seen" list (BikeImportDedup).
+  // Only these known keys, never everything.
   extras?: Record<string, string>;
 }
 
-const EXTRA_KEYS = ['workoutCalendarPlan.v1'];
+const EXTRA_KEYS = ['workoutCalendarPlan.v1', 'bikeImportSeen.v1'];
 
 // ─── Pure core (unit-tested; no IO) ─────────────────────────────────────────
 

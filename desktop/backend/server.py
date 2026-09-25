@@ -789,7 +789,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
-                     "magene_pages.py", "bryton_grid.py"}
+                     "magene_pages.py", "bryton_grid.py", "intervals_events.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1359,6 +1359,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_stats_to_watch(body)
         elif self.path == "/api/intervals/upload":
             self._handle_intervals_upload(body)
+        elif self.path == "/api/intervals/plan/upsert":
+            self._handle_intervals_plan("upsert", body)
+        elif self.path == "/api/intervals/plan/delete":
+            self._handle_intervals_plan("delete", body)
         elif self.path == "/api/intervals/workouts":
             self._handle_intervals_workouts(body)
         elif self.path == "/api/ember/log":
@@ -4444,6 +4448,28 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": ("stats_to_watch produced no JSON: "
                                    + (err or out or "")).strip()[:200]})
             return
+        self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_intervals_plan(self, action, body):
+        """POST /api/intervals/plan/upsert {athlete_id, api_key, entry:{uid, date, workout, device?,
+        mode?, icuEventId?}} -> {ok, eventId}: create or update the entry's planned workout on the
+        athlete's intervals.icu calendar (external_id "sommet:<uid>"; update when icuEventId is
+        known, so never a duplicate). POST /api/intervals/plan/delete {athlete_id, api_key,
+        eventId}. tools/intervals_events.py."""
+        body = body or {}
+        aid, akey = body.get("athlete_id"), body.get("api_key")
+        if not aid or not akey:
+            self._send_json(400, {"ok": False, "error": "intervals.icu not connected"})
+            return
+        if action == "upsert":
+            args = ["upsert", str(aid), str(akey), json.dumps(body.get("entry") or {})]
+        else:
+            if not body.get("eventId"):
+                self._send_json(400, {"ok": False, "error": "no eventId"})
+                return
+            args = ["delete", str(aid), str(akey), str(body["eventId"])]
+        code, out, err = run_tool("intervals_events.py", args)
+        info = self._parse_last_json_line(out) or {"ok": False, "error": (err or "no output").strip()[:200]}
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_intervals_workouts(self, body):
