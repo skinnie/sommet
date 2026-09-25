@@ -537,9 +537,37 @@ Item {
             function(status, res) {
                 if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("Export failed"); return }
                 exportGpxText = res.gpx
+                saveDayDialog.title = qsTr("Export day as GPX")
                 saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
                 saveDayDialog.open()
             })
+    }
+
+    // Garmin eTrex 30/30x/32x: a track has no turn guidance and a route holds only ~50 points, so
+    // build either the full track + named turn/crossing waypoints, or a <=50-point route whose via
+    // points sit at the turns (tools/etrex_export.py). Saved through the same dialog as a day export.
+    function exportForEtrex(mode) {
+        if (!plannedGpx) return
+        var name = (routeName || "route").replace(/\.gpx$/i, "")
+        statusMsg = qsTr("Preparing eTrex file…")
+        api("POST", "/api/route/etrex", { gpx: plannedGpx, mode: mode, name: name, reverse: reversed },
+            function(status, res) {
+                if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("eTrex export failed"); return }
+                var st = res.stats || {}
+                statusMsg = mode === "track"
+                    ? qsTr("eTrex track: %1 turns, %2 crossings marked").arg(st.turns).arg(st.crossings)
+                    : qsTr("eTrex route: %1 via points").arg(st.points_out)
+                exportGpxText = res.gpx
+                saveDayDialog.title = qsTr("Export for eTrex")
+                saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/"
+                    + (name + (mode === "track" ? " - eTrex track" : " - eTrex route")).replace(/[^\w -]/g, "_") + ".gpx"
+                saveDayDialog.open()
+            })
+    }
+    ThemedMenu {
+        id: etrexMenu
+        ThemedMenuItem { text: qsTr("Track + turn & crossing waypoints"); onTriggered: root.exportForEtrex("track") }
+        ThemedMenuItem { text: qsTr("Route (max 50 via points, with directions)"); onTriggered: root.exportForEtrex("route") }
     }
 
     // --- layout: map on the left, controls + results on the right ----------------------
@@ -741,6 +769,13 @@ Item {
                                                 : qsTr("⇄ Reverse direction")
                             enabled: !root.busy && !root.weatherBusy
                             onClicked: root.toggleReverse()
+                        }
+                        RoundedButton {
+                            width: parent.width
+                            visible: root.plannedGpx.length > 0
+                            text: qsTr("Export for Garmin eTrex…")
+                            enabled: !root.busy
+                            onClicked: etrexMenu.popup()
                         }
                         // POIs and weather share the map and can crowd each other: one switch hides every POI.
                         RoundedCheckBox { text: qsTr("Show POIs")
