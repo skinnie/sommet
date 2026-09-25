@@ -157,6 +157,13 @@ const WORDING: Record<string, string> = {
   L: 'Turn left', R: 'Turn right', SL: 'Bear left', SR: 'Bear right',
   SHL: 'Sharp left', SHR: 'Sharp right', U: 'U-turn', STR: 'Go straight',
 };
+// Spelled out, not the raw L/R/SL/SR code - a rider glancing at the map has no legend and the
+// fuller desc text isn't reliably shown by the eTrex UI (confirmed on hardware, 2026-09-25: only
+// the <name> is visible while navigating), so the visible name has to be self-explanatory alone.
+const NAME_WORD: Record<string, string> = {
+  L: 'Left', R: 'Right', SL: 'Bear left', SR: 'Bear right',
+  SHL: 'Sharp left', SHR: 'Sharp right', U: 'U-turn', STR: 'Straight',
+};
 
 function findTurns(xy: XY[], along: number[], minDeg: number) {
   const n = xy.length;
@@ -254,13 +261,13 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   for (const t of turns) {
     const next = turns.find(u => u.km > t.km);
     marks.push({
-      ...t, kind: 'turn', name: `${t.label} ${t.km.toFixed(1)}`, sym: 'Flag, Blue',
+      ...t, kind: 'turn', name: `${NAME_WORD[t.label]} ${t.km.toFixed(1)}`, sym: 'Flag, Blue',
       desc: `${WORDING[t.label]} at ${t.km.toFixed(1)} km${next ? `; next turn in ${(next.km - t.km).toFixed(1)} km` : `; then to the end (${totalKm.toFixed(1)} km)`}`,
     });
   }
   for (const c of crossings) {
     marks.push({
-      ...c, kind: 'crossing', name: `X ${c.label} ${c.km.toFixed(1)}`, sym: 'Flag, Red',
+      ...c, kind: 'crossing', name: `Cross ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`, sym: 'Flag, Red',
       desc: `Track crosses itself here (also at km ${c.otherKm.join(', ') || '-'}): ${WORDING[c.label].toLowerCase()} at ${c.km.toFixed(1)} km`,
     });
   }

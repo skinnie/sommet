@@ -6,9 +6,10 @@ cannot tell which way to go. A route has directions but only ~50 via points, whi
 into a road route on its own map (straight lines / detours if the points are badly placed). So:
 
   track mode  the full geometry (thinned only past `max_track` points, default 10 000) PLUS named
-              waypoints: one at every real turn ("R 12.4", "SL 30.1", "U 41.0") and at every place the
-              track meets itself ("X STR 3.2" = cross straight, "X L 3.2" = turn left there). The
-              waypoint labels are what tell you which way to go on the device.
+              waypoints: one at every real turn ("Right 12.4", "Bear left 30.1", "U-turn 41.0")
+              and at every place the track meets itself ("Cross Straight 3.2", "Cross Left 3.2").
+              Names are spelled out, not coded, since the eTrex doesn't reliably show <desc> while
+              navigating (confirmed on hardware) - the visible name has to stand on its own.
   route mode  <= `max_via` (default 50) via points, chosen where they matter: start/end, both sides of
               every crossing, the sharpest turns first, then the remaining budget spread by
               Douglas-Peucker importance. The device's routable map then calculates the guidance.
@@ -163,6 +164,15 @@ def _wording(label: str) -> str:
             "SHL": "Sharp left", "SHR": "Sharp right", "U": "U-turn", "STR": "Go straight"}[label]
 
 
+# Spelled out, not the raw L/R/SL/SR code - a rider glancing at the map has no legend and the
+# fuller <desc> text isn't reliably shown by the eTrex UI (confirmed on hardware, 2026-09-25:
+# only the <name> is visible while navigating), so the visible name has to be self-explanatory
+# on its own. Still short enough for a Garmin name field (well under the ~30-char limit).
+def _name_word(label: str) -> str:
+    return {"L": "Left", "R": "Right", "SL": "Bear left", "SR": "Bear right",
+            "SHL": "Sharp left", "SHR": "Sharp right", "U": "U-turn", "STR": "Straight"}[label]
+
+
 # --- detection ----------------------------------------------------------------------------
 
 def find_turns(xy: Sequence[Tuple[float, float]], along: Sequence[float],
@@ -312,13 +322,13 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
     marks: List[dict] = []
     for t in turns:
         nxt = next((u["km"] for u in turns if u["km"] > t["km"]), None)
-        marks.append({**t, "name": "%s %.1f" % (t["label"], t["km"]), "sym": "Flag, Blue",
+        marks.append({**t, "name": "%s %.1f" % (_name_word(t["label"]), t["km"]), "sym": "Flag, Blue",
                       "desc": "%s at %.1f km%s" % (_wording(t["label"]), t["km"],
                                                    "; next turn in %.1f km" % (nxt - t["km"]) if nxt else "; then to the end (%.1f km)" % total_km),
                       "kind": "turn"})
     for c in crossings:
         others = ", ".join("%.1f" % k for k in c["other_km"])
-        marks.append({**c, "name": "X %s %.1f" % (c["label"], c["km"]), "sym": "Flag, Red", "kind": "crossing",
+        marks.append({**c, "name": "Cross %s %.1f" % (_name_word(c["label"]), c["km"]), "sym": "Flag, Red", "kind": "crossing",
                       "desc": "Track crosses itself here (also at km %s): %s at %.1f km" % (
                           others or "-", _wording(c["label"]).lower(), c["km"])})
     marks.sort(key=lambda m: m["i"])
@@ -431,16 +441,16 @@ def _selftest() -> int:
     # 1) an L: 500 m north then 500 m east -> exactly one right turn near 0.5 km
     r = build(_synthetic(_densify([(0, 0), (0, 500), (500, 500)])), "track")
     assert r["ok"] and r["stats"]["turns"] == 1, r
-    m = re.search(r"<name>(R) (\d+\.\d)</name>", r["gpx"])
-    assert m and abs(float(m.group(2)) - 0.5) < 0.05, r["gpx"][:600]
+    m = re.search(r"<name>Right (\d+\.\d)</name>", r["gpx"])
+    assert m and abs(float(m.group(1)) - 0.5) < 0.05, r["gpx"][:600]
     # 2) mirror -> left turn
     r = build(_synthetic(_densify([(0, 0), (0, 500), (-500, 500)])), "track")
-    assert re.search(r"<name>L \d", r["gpx"]), r["gpx"][:400]
+    assert re.search(r"<name>Left \d", r["gpx"]), r["gpx"][:400]
     # 3) a figure-of-eight crossing itself straight at ~(0,0)
     loop = [(-300, -300), (300, 300), (300, 600), (-300, 600), (-300, 300), (300, -300)]
     r = build(_synthetic(_densify(loop)), "track")
     assert r["stats"]["crossings"] == 1, r["stats"]
-    assert "X STR" in r["gpx"] or "X S" in r["gpx"], r["gpx"][:800]
+    assert "Cross Straight" in r["gpx"] or "Cross Bear" in r["gpx"], r["gpx"][:800]
     # 4) route mode obeys the via cap and keeps both ends
     big = _densify([(0, 0), (0, 400), (400, 400), (400, 0), (800, 0), (800, 400), (1200, 400), (1200, 0)], 5.0)
     r = build(_synthetic(big), "route", max_via=12)

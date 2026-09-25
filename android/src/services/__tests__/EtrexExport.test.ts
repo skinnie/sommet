@@ -17,19 +17,19 @@ describe('buildEtrexGpx', () => {
   test('an L-shaped track gets one right-turn waypoint near 0.5 km', () => {
     const r = buildEtrexGpx(gpx([[0, 0], [0, 500], [500, 500]]), { mode: 'track' });
     expect(r.stats.turns).toBe(1);
-    const m = /<name>R (\d+\.\d)<\/name>/.exec(r.gpx);
+    const m = /<name>Right (\d+\.\d)<\/name>/.exec(r.gpx);
     expect(m).not.toBeNull();
     expect(Math.abs(parseFloat(m![1]) - 0.5)).toBeLessThan(0.05);
   });
 
   test('mirror image is a left turn', () => {
-    expect(buildEtrexGpx(gpx([[0, 0], [0, 500], [-500, 500]]), { mode: 'track' }).gpx).toMatch(/<name>L \d/);
+    expect(buildEtrexGpx(gpx([[0, 0], [0, 500], [-500, 500]]), { mode: 'track' }).gpx).toMatch(/<name>Left \d/);
   });
 
   test('a figure of eight is one crossing, crossed straight', () => {
     const r = buildEtrexGpx(gpx([[-300, -300], [300, 300], [300, 600], [-300, 600], [-300, 300], [300, -300]]), { mode: 'track' });
     expect(r.stats.crossings).toBe(1);
-    expect(r.gpx).toMatch(/X S/);
+    expect(r.gpx).toMatch(/Cross (Straight|Bear)/);
   });
 
   test('route mode respects the via-point cap', () => {
