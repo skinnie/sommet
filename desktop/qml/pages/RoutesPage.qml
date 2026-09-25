@@ -20,6 +20,44 @@ PageFlickable {
         if (DeviceCapabilities.supportsRoutes)
             RouteService.refresh()
         GarminService.refreshDeviceGpx()
+        checkBryton()
+    }
+
+    // Bryton Aero 60 (USB mass storage): send the selected route to its PlanTrip folder, the
+    // bike-computer sibling of "Upload to watch" (backend /api/bryton/route). Shown only when a
+    // Bryton is plugged - probed via /api/bryton/info, independent of any watch being connected.
+    property bool brytonConnected: false
+    property string brytonMsg: ""
+    property bool brytonOk: false
+    function checkBryton() {
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            root.brytonConnected = false
+            try {
+                var r = JSON.parse(xhr.responseText)
+                root.brytonConnected = (xhr.status === 200 && r && r.ok === true)
+            } catch (e) {}
+        }
+        xhr.open("GET", "http://127.0.0.1:8766/api/bryton/info")
+        xhr.send()
+    }
+    function sendPendingToBryton() {
+        var gpx = RouteService.pendingRouteGpxText
+        if (!gpx || gpx.length === 0) return
+        root.brytonMsg = qsTr("Sending to Bryton…"); root.brytonOk = false
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            var r = null; try { r = JSON.parse(xhr.responseText) } catch (e) {}
+            root.brytonOk = !!(r && r.ok)
+            root.brytonMsg = root.brytonOk
+                ? qsTr("Sent to Bryton — restart it, then find it under Follow Track")
+                : (r && r.error ? r.error : qsTr("Send to Bryton failed"))
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/bryton/route")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify({ name: RouteService.pendingRoute.name || "route", gpx: gpx }))
     }
 
     // Which on-watch route the last "Export" tap was for - the backend response
@@ -217,6 +255,25 @@ PageFlickable {
                             }
                         }
                     }
+                }
+
+                // Bryton Aero 60 over USB - its own Row so it shows whenever a Bryton is plugged,
+                // even with no watch connected (the Row above is gated on a route-writable watch).
+                Row {
+                    visible: RouteService.pendingRoute.name !== undefined && root.brytonConnected
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: qsTr("Send to Bryton")
+                        onClicked: root.sendPendingToBryton()
+                    }
+                }
+                Text {
+                    visible: root.brytonMsg.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: root.brytonOk ? Theme.success : Theme.error
+                    text: root.brytonMsg
                 }
 
                 Text {
