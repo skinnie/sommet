@@ -203,7 +203,7 @@ Item {
             const cur = byDate[imp.date]
             if (cur && cur.icuOwned && cur.icuEventId !== imp.eventId) continue
             if (!cur) added++
-            byDate[imp.date] = { date: imp.date, mode: imp.mode, workout: imp.workout,
+            byDate[imp.date] = { date: imp.date, mode: imp.mode, workout: imp.workout, sport: imp.sport,
                                  uid: cur && cur.uid ? cur.uid : root.newUid(),
                                  icuEventId: imp.eventId, icuOwned: false }
         }
