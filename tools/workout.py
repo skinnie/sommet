@@ -276,7 +276,12 @@ def generate_source(workout):
             rng = target["valueRange"]
             lines.append(f"\tif ({var} < {rng['min']} || {var} > {rng['max']}) {{")
             lines.append("\t\tif (OUT_OF_RANGE == 0) {")
-            lines.append("\t\t\tSuunto.alarmBeep();")
+            # HR out-of-range beep deliberately silenced (André, 2026-09-22 - "it annoys me,
+            # since the lower limit is too high"): the debounce state (OUT_OF_RANGE) still
+            # tracks correctly, only the beep itself is skipped, so this stays a targeted
+            # HR-only change - pace/speed/vertical-speed/power targets still beep as before.
+            if target_name != "hr":
+                lines.append("\t\t\tSuunto.alarmBeep();")
             lines.append("\t\t\tOUT_OF_RANGE = 1;")
             lines.append("\t\t}")
             lines.append("\t} else {")

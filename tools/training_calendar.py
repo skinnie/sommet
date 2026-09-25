@@ -98,10 +98,25 @@ def rebuild_apps_region(raw_blocks):
 
 def plan_diff(current_apps_bytes, plan_entries, today):
     """Returns (kept_raw_blocks, to_add) — to_add is the subset of plan_entries (date >= today)
-    not already present on the watch under their computed label."""
+    not already present on the watch under their computed label.
+
+    A managed entry is kept only if it's both unexpired AND still present in plan_entries —
+    otherwise it was deliberately removed from the calendar (see TrainingProgramPage.qml's
+    "Remove workout") and this sync should erase it, not just leave it stranded on the watch
+    until its date happens to pass. Unmanaged entries (anything not "dd/mm_"-prefixed — a
+    manually installed guided workout, a generic Suunto App) are never touched, matching the
+    module docstring's standing rule."""
     existing = WI.apps_entries_with_raw_blocks(current_apps_bytes)
+    future_labels = {entry_label(e["date"], e["workout"]["name"]) for e in plan_entries
+                      if datetime.date.fromisoformat(e["date"]) >= today}
+    kept = []
+    for e in existing:
+        if not is_managed(e["name"]):
+            kept.append(e["_raw_block"])
+        elif not is_expired(e["name"], today) and e["name"] in future_labels:
+            kept.append(e["_raw_block"])
+        # else: expired, or managed-but-no-longer-in-the-plan — erased by omission below.
     names_present = {e["name"] for e in existing}
-    kept = [e["_raw_block"] for e in existing if not is_expired(e["name"], today)]
 
     to_add = []
     for e in sorted(plan_entries, key=lambda e: e["date"]):
@@ -123,7 +138,12 @@ def sync(link, plan, today, write, json_out):
 
     kept_blocks, to_add = plan_diff(current_apps, plan["entries"], today)
     existing = WI.apps_entries_with_raw_blocks(current_apps)
-    removed = [e["name"] for e in existing if is_expired(e["name"], today)]
+    kept_block_set = set(kept_blocks)
+    # Everything managed that didn't survive the diff — expired OR removed from the plan
+    # (plan_diff's docstring covers which). Kept as one list, like before the fix; the two
+    # cases aren't split out separately since the UI only ever showed one "erase" line.
+    removed = [e["name"] for e in existing
+               if is_managed(e["name"]) and e["_raw_block"] not in kept_block_set]
 
     lang = GW.read_watch_language(link)
     current_list = [{"_raw_block": b} for b in kept_blocks]
