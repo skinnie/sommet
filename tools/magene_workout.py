@@ -37,6 +37,7 @@ import math
 import struct
 import sys
 import time
+from decimal import Decimal, ROUND_HALF_UP
 
 from bryton_from_intervals import PHASE_TO_INTENSITY, _flatten
 from magene_device import read_profile
@@ -45,6 +46,7 @@ from magene_route import (_pb_int32, _pb_sint32, _pb_msg, _packets, negotiate_mt
                           transfer_file)
 
 INTENSITY_CODE = {"work": 0, "recovery": 1, "warmup": 2, "cooldown": 3}
+POWER_FTP_PCT, POWER_W = 0, 1    # Target.unit for power (type 4)
 
 
 def _warn(msg):
@@ -84,7 +86,31 @@ def to_intervals(workout):
             _warn(f"{tname} target has no C406 equivalent; step sent without a target")
         phase = PHASE_TO_INTENSITY.get(st.get("type", {}).get("typeName"), "work")
         out.append({"seconds": secs, "intensity": INTENSITY_CODE.get(phase, 0),
-                    "watts": _mid(target, "power"), "cadence": _mid(target, "cadence")})
+                    "power": _mid(target, "power"), "powerUnit": POWER_W,
+                    "cadence": _mid(target, "cadence")})
+    return out
+
+
+def from_native(workout):
+    """The workout builder's own payload (the object it posts to /api/bryton/workout/native):
+    {name, unit, interval_mode, steps:[{intensity, duration, low, high}]}. The C406 takes %FTP
+    power natively (the device multiplies by its own FTP, like the Bryton) or cadence; it has no
+    HR/speed target and no distance steps here, so those are refused rather than mis-sent."""
+    if workout.get("interval_mode", "time") != "time":
+        raise ValueError("The Magene C406 takes time-based steps only.")
+    unit = workout.get("unit", "ftp")
+    if unit not in ("ftp", "cadence"):
+        raise ValueError("The Magene C406 takes FTP% or cadence targets only.")
+    out = []
+    for st in workout.get("steps") or []:
+        mid = int(round((float(st.get("low", 0)) + float(st.get("high", st.get("low", 0)))) / 2))
+        out.append({"seconds": int(st["duration"]),
+                    "intensity": INTENSITY_CODE.get(st.get("intensity", "work"), 0),
+                    "power": mid if unit == "ftp" else 0,
+                    "powerUnit": POWER_FTP_PCT if unit == "ftp" else POWER_W,
+                    "cadence": mid if unit == "cadence" else 0})
+    if not out:
+        raise ValueError("workout has no steps")
     return out
 
 
@@ -92,14 +118,14 @@ def encode_workout(intervals):
     secs = [iv["seconds"] for iv in intervals]
     infor = (_pb_int32(1, len(intervals)) + _pb_int32(2, 1)
              + _pb_int32(3, min(secs)) + _pb_int32(4, max(secs))
-             + _pb_sint32(5, 0) + _pb_sint32(6, max(iv["watts"] for iv in intervals))
+             + _pb_sint32(5, 0) + _pb_sint32(6, max(iv["power"] for iv in intervals))
              + _pb_sint32(7, 0) + _pb_sint32(8, max(iv["cadence"] for iv in intervals))
              + _pb_sint32(9, 0) + _pb_sint32(10, 0))
     body = bytearray(_pb_msg(1, infor))
     for iv in intervals:
         duration = (_pb_int32(1, 1) + _pb_int32(2, iv["seconds"])
                     + _pb_int32(3, 1 if iv["seconds"] >= 60 else 0))
-        power = _pb_int32(1, 4) + _pb_int32(2, 1) + _pb_sint32(3, iv["watts"])
+        power = _pb_int32(1, 4) + _pb_int32(2, iv["powerUnit"]) + _pb_sint32(3, iv["power"])
         cadence = _pb_int32(1, 3) + _pb_int32(2, 0) + _pb_sint32(3, iv["cadence"])
         interval = (_pb_msg(1, duration) + _pb_msg(2, power) + _pb_msg(2, cadence)
                     + _pb_int32(3, iv["intensity"]))
@@ -107,14 +133,46 @@ def encode_workout(intervals):
     return bytes(body)
 
 
-def tss(intervals, ftp):
-    if not ftp:
+def _normalized_power(series):
+    """Exact copy of the app's TrainFormulaUtil.getNP_PowerList_Double: the 4th-power mean of
+    30-sample rolling averages (len-30 windows, taken from the end), 4th root, rounded half-up to
+    4 decimals. 0 when the series is 30 s or shorter."""
+    n = len(series) - 30
+    if n <= 0:
         return 0.0
-    return sum(iv["seconds"] * (iv["watts"] / ftp) ** 2 for iv in intervals) / 3600.0 * 100.0
+    pre = [0.0]
+    for v in series:
+        pre.append(pre[-1] + v)
+    total_len = len(series)
+    acc = 0.0
+    for i in range(n):
+        acc += ((pre[total_len - i] - pre[total_len - 30 - i]) / 30.0) ** 4
+    np_ = (acc / n) ** 0.25
+    return float(Decimal(np_).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
+
+def tss(intervals, ftp):
+    """The app's TSS (CourseDetailViewModel): a per-second series of each step's power in watts
+    (FTP% steps -> ftp*pct/100 with integer division, as the app does), then
+    seconds * NP * IF / FTP / 36 with IF = NP / FTP."""
+    ftp = int(ftp or 0)
+    if ftp <= 0:
+        return 0.0
+    series = []
+    for iv in intervals:
+        watts = (ftp * iv["power"]) // 100 if iv["powerUnit"] == POWER_FTP_PCT else iv["power"]
+        series.extend([float(watts)] * iv["seconds"])
+    np_ = _normalized_power(series)
+    return len(series) * np_ * (np_ / ftp) / ftp / 36.0
 
 
 def workout_info(workout_id, tss_value, total_seconds, crc16, name):
-    nb = name.encode("utf-8")[:24]
+    # The app sends the full title; the only limit is the protocol's u8 length byte (the app's
+    # id is its server workout id - any unique number, so a timestamp does the same job).
+    nb = name.encode("utf-8")
+    while len(nb) > 255:
+        name = name[:-1]
+        nb = name.encode("utf-8")
     return (b"\x40\x88" + struct.pack("<IHIHB", workout_id & 0xFFFFFFFF,
                                       int(math.ceil(tss_value * 10)) & 0xFFFF,
                                       total_seconds & 0xFFFFFFFF, crc16 & 0xFFFF, len(nb)) + nb)
@@ -124,15 +182,15 @@ def _load(path):
     return json.load(sys.stdin if path == "-" else open(path, encoding="utf-8"))
 
 
-async def send(address, workout, ftp, name):
-    intervals = to_intervals(workout)
+async def send(address, workout, ftp, name, native=False):
+    intervals = from_native(workout) if native else to_intervals(workout)
     file_bytes = encode_workout(intervals)
     crc16 = _fit_crc16(file_bytes)
     total = sum(iv["seconds"] for iv in intervals)
     client = await _connect(address)
     try:
         if not ftp:
-            # Like the Bryton path: the TSS shown on the device uses the DEVICE'S OWN FTP.
+            # Like the app (and the Bryton path): the TSS shown on the device uses the DEVICE'S OWN FTP.
             prof = await read_profile(client)
             ftp = (prof or {}).get("ftp") or 0
         info = workout_info(int(time.time()) & 0x7FFFFFFF, tss(intervals, ftp), total, crc16,
@@ -155,10 +213,16 @@ def main():
     ap.add_argument("--address")
     ap.add_argument("--ftp", type=float, default=0.0)
     ap.add_argument("--name")
+    ap.add_argument("--native", action="store_true",
+                    help="input is the workout builder's payload (unit/interval_mode/steps)")
     args = ap.parse_args()
     workout = _load(args.workout)
     if args.action == "encode":
-        iv = to_intervals(workout)
+        try:
+            iv = from_native(workout) if args.native else to_intervals(workout)
+        except ValueError as e:
+            print(json.dumps({"ok": False, "error": str(e)}))
+            return 1
         fb = encode_workout(iv)
         print(json.dumps({"ok": True, "intervals": iv, "fileBytes": len(fb),
                           "crc16": hex(_fit_crc16(fb)), "tss": round(tss(iv, args.ftp), 1),
@@ -166,7 +230,11 @@ def main():
         return 0
     if not args.address:
         ap.error("send needs --address")
-    print(json.dumps(asyncio.run(send(args.address, workout, args.ftp, args.name))))
+    try:
+        result = asyncio.run(send(args.address, workout, args.ftp, args.name, args.native))
+    except ValueError as e:
+        result = {"ok": False, "error": str(e)}
+    print(json.dumps(result))
     return 0
 
 

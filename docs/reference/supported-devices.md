@@ -47,22 +47,24 @@ description containing "22x" or "32x" gets the second guide; everything else in 
 
 Head units whose recorded rides Sommet imports into the library (source-tagged per brand) and,
 when the intervals.icu export scope is "all", uploads to intervals.icu as the device's own FIT.
-Import only - Sommet does not configure these devices.
+Import for all of them; the Bryton Aero 60 and Magene C406 Pro are also configured (profile, workouts, routes, and on the Magene its device settings).
 
 | Device | Source tag | Transport | Notes |
 |---|---|---|---|
 | Garmin Edge | `edge` | USB (MTP / gvfs) | `Garmin/Activities/*.fit`; Linux gvfs path (`tools/mtp_import.py`) |
 | Hammerhead Karoo | `karoo` | USB (MTP / gvfs) | `FitFiles/*.fit`; MTP enabled in the Karoo's dev options |
-| Bryton Aero 60 | `bryton` | USB mass storage (mounted drive) | rides at the volume root (`YYMMDDHHMMSS.fit`); also profile sync (`Profile.bin`) + on-device workout builder |
-| Magene C406 Pro | `c406` | **Bluetooth LE** (must bond) | no USB data mode; `tools/magene_import.py`, protocol in [`magene_c406_protocol.md`](magene_c406_protocol.md) |
+| Bryton Aero 60 | `bryton` | USB mass storage (mounted drive) | rides at the volume root (`YYMMDDHHMMSS.fit`); also profile sync (`Profile.bin`), data screens (`Grid.ini`, `tools/bryton_grid.py`), workouts from the Training Program, Follow Track routes |
+| Magene C406 Pro | `c406` | **Bluetooth LE** (must bond) | no USB data mode; rides, profile sync, device settings, data screens, clock/time zone, altitude calibration, route + workout send (desktop and Android); protocol in [`magene_c406_protocol.md`](magene_c406_protocol.md) |
 
 The Edge/Karoo/Bryton import over USB (`tools/mtp_import.py` handles both the gvfs-MTP Garmins
 and the plain mounted-drive Bryton); the Magene is found by an on-demand Bluetooth scan (behind
 the experimental Bluetooth toggle, with the watch's own BLE pairing) and **must be BLE-bonded** or
 it stays on its "please pair" screen - see the protocol doc. Ride sport type (Cycling vs Indoor
-Cycling) comes from the FIT's `sub_sport`, so it matches on intervals.icu by construction. The
-Bryton Aero 60 also carries its own reverse-engineered profile-sync and workout formats beyond
-plain import.
+Cycling) comes from the FIT's `sub_sport`, so it matches on intervals.icu by construction. Workouts
+for both head units are planned in the one Training Program (desktop: right-click a day; Android
+Workout Calendar: long-press a plan row) — the creator offers only the steps and targets the
+chosen device takes. The first time either shows a profile that differs from intervals.icu, the
+app asks once whether to keep it in sync.
 
 ## Not yet in `manualslinks` / not linked in-app
 

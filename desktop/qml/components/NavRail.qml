@@ -188,8 +188,13 @@ Rectangle {
             // Training Program - ON HOLD behind FeatureFlags.trainingProgram.
             NavItem {
                 width: parent.width
-                visible: FeatureFlags.trainingProgram && (HomeViewModel.anyDevice && !DeviceService.bikeActive)
-                         && !HomeViewModel.isGarmin && !HomeViewModel.isKailash
+                // Also for the Bryton / Magene: they take workouts from the same plan (right-click a
+                // day -> Create for / Send to), like the watch (André, 2026-09-25).
+                visible: FeatureFlags.trainingProgram
+                         && ((HomeViewModel.anyDevice && !DeviceService.bikeActive
+                              && !HomeViewModel.isGarmin && !HomeViewModel.isKailash)
+                             || (DeviceService.bikeActive && (DeviceService.activeBikeKind === "bryton"
+                                                              || DeviceService.activeBikeKind === "c406")))
                 glyph: Icons.trainingProgram
                 label: qsTr("Training Program")
                 selected: root.currentPage === "trainingProgram"
@@ -246,6 +251,18 @@ Rectangle {
                 label: qsTr("Watch settings")
                 selected: root.currentPage === "watchSettings"
                 onClicked: root.pageSelected("watchSettings")
+            }
+            // GPS settings - the Bryton's / Magene's own settings (profile, data screens, and on the
+            // Magene device settings + altitude), shown only while one is the active device: the
+            // bike-computer twin of Watch settings (André, 2026-09-25).
+            NavItem {
+                width: parent.width
+                visible: DeviceService.bikeActive && (DeviceService.activeBikeKind === "bryton"
+                                                      || DeviceService.activeBikeKind === "c406")
+                glyph: Icons.settings
+                label: qsTr("GPS settings")
+                selected: root.currentPage === "gpsSettings"
+                onClicked: root.pageSelected("gpsSettings")
             }
             // Firmware - Suunto-only, cable-only (hidden over BLE: a flash write is the one mistake
             // that can brick the watch, and flashing was never ported to BLE).

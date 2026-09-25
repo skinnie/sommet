@@ -188,6 +188,7 @@ _NOMINATIM_LAST = [0.0]
 # own retry (Link.open(), 5 tries/2s) only covers the reconnect-permission race, not two of
 # this backend's own requests overlapping - that needs serializing here instead.
 WATCH_LOCK = threading.Lock()
+MAGENE_LOCK = threading.Lock()   # one BLE connection to the C406 at a time (see run_tool)
 
 # --- USB keep-alive handle (Ambit1/2 "connecting/disconnecting" chime fix) -------------
 # The Ambit1/2 re-presents on the USB bus every time the LAST open HID handle to it closes -
@@ -787,10 +788,18 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
-                     "magene_device.py", "magene_route.py", "magene_workout.py"}
+                     "magene_device.py", "magene_route.py", "magene_workout.py",
+                     "magene_pages.py", "bryton_grid.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
+    # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
+    # the Home status read, the profile dialog and a route/workout send could otherwise race.
+    # Two concurrent connects left a ghost link in the laptop's Broadcom controller (2026-09-25,
+    # dmesg "ACL packet for unknown connection handle") and the C406 went silent - serialize them.
+    if script.startswith("magene_"):
+        lock = MAGENE_LOCK
     if lock is not None:
         lock.acquire()
+    if lock is WATCH_LOCK:
         # Now that we own the bus, let go of any keep-alive handle so this tool can open the
         # watch - critical on a libusb-backend host where a held handle claims the interface
         # exclusively (see drop_keepalive_handles). Safe under the lock: keepalive_sync's
@@ -1140,8 +1149,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_devices()
         elif self.path == "/api/mtp/import" or self.path.startswith("/api/mtp/import?"):
             self._handle_mtp_import()
+        elif self.path == "/api/bryton/grid":
+            self._handle_bryton_grid(None)
         elif self.path == "/api/bryton/info":
             self._handle_bryton_info()
+        elif self.path == "/api/magene/fields":
+            self._handle_magene_fields()
         elif self.path == "/api/magene/devices":
             self._handle_magene_devices()
         elif self.path.startswith("/api/magene/rides"):
@@ -1366,6 +1379,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_workout(body)
         elif self.path == "/api/bryton/workout/native":
             self._handle_bryton_workout_native(body)
+        elif self.path == "/api/bryton/grid":
+            self._handle_bryton_grid(body)
         elif self.path == "/api/bryton/route":
             self._handle_bryton_route(body)
         elif self.path == "/api/magene/import":
@@ -1380,6 +1395,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_route(body)
         elif self.path == "/api/magene/workout":
             self._handle_magene_workout(body)
+        elif self.path == "/api/magene/workout/native":
+            self._handle_magene_workout(body, native=True)
         elif self.path == "/api/time/sync":
             self._handle_time_sync(body)
         elif self.path == "/api/demo":
@@ -1776,7 +1793,7 @@ class Handler(BaseHTTPRequestHandler):
     # HW-proven writable). intervals.icu is André's source of truth for FTP/LTHR/MaxHR/weight
     # (tools/intervals_athlete.py). "compare" diffs the two so the UI can ask which side is right;
     # "apply" writes the chosen values to the device and/or back to intervals.icu.
-    _BRYTON_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "weight", "height", "gender")
+    _BRYTON_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "weight", "height", "gender", "age")
 
     def _bryton_mount(self):
         """The mounted Bryton's path right now, or None. Reads the same discovery the device list
@@ -1790,6 +1807,25 @@ class Handler(BaseHTTPRequestHandler):
             if dev.get("kind") == "bryton" and dev.get("mount"):
                 return dev["mount"]
         return None
+
+    def _handle_bryton_grid(self, body):
+        """GET /api/bryton/grid - the Aero 60's data screens (System/Grid.ini) + the field catalogue
+        and layout geometry. POST {"pages": [{page, count?, fields?, enabled?}]} - change them
+        (validated, atomic, one-time Grid.ini.bak). tools/bryton_grid.py."""
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        _c, out, _e = run_tool("bryton_grid.py", ["fields"])
+        cat = self._parse_last_json_line(out) or {}
+        if body is None:
+            code, out, err = run_tool("bryton_grid.py", ["read", mount])
+        else:
+            code, out, err = run_tool("bryton_grid.py", ["write", mount, json.dumps(body.get("pages") or [])])
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_grid.py failed"}
+        payload["groups"] = cat.get("groups", [])
+        payload["gridTable"] = cat.get("gridTable", {})
+        self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_bryton_info(self):
         """GET /api/bryton/info - the connected Bryton's identity, firmware versions and lifetime
@@ -1996,6 +2032,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "file": os.path.basename(out_path)})
 
+    def _handle_magene_fields(self):
+        """GET /api/magene/fields - the C406 data-field catalogue, grouped like the OneLap picker
+        ({group, fields:[{code, name}]}), for the data-screen editor. Pure data, no BLE:
+        tools/magene_pages.py fields."""
+        code, out, err = run_tool("magene_pages.py", ["fields"], timeout=15)
+        try:
+            groups = json.loads(out)
+        except json.JSONDecodeError:
+            self._send_json(502, {"ok": False, "error": err.strip() or "no field catalogue"})
+            return
+        self._send_json(200, {"ok": True, "groups": groups})
+
     def _handle_magene_devices(self):
         """GET /api/magene/devices - Magene C406 (Pro) bike computers advertising over BLE right
         now. tools/magene_import.py --list (a ~6s BLE scan; the C406 has no USB data mode, so BLE
@@ -2126,8 +2174,9 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_magene_device(self, body):
         """POST /api/magene/device {"action", "address"?, ...params} - device control over BLE,
         decoded from the OneLap app (tools/magene_device.py): battery / info / status (+syncClock)
-        / set-time / set-timezone / altitude / read-profile / set-profile. set-profile takes
-        sex/age/height/maxHr/lthr/ftp/weight/bikeWeight and changes only the fields given."""
+        / set-time / set-timezone / altitude / read-profile / set-profile / read-settings /
+        set-settings. set-profile takes sex/age/height/maxHr/lthr/ftp/weight/bikeWeight and changes
+        only the fields given; set-settings takes {"settings": {name: value}} likewise."""
         body = body or {}
         action = body.get("action")
         if not action:
@@ -2146,6 +2195,12 @@ class Handler(BaseHTTPRequestHandler):
         for key, flag in flagmap.items():
             if body.get(key) is not None:
                 args += [flag, str(body[key])]
+        # set-settings: {"settings": {name: value}} - only these change (read-modify-write).
+        for name, value in (body.get("settings") or {}).items():
+            args += ["--set", f"{name}={int(value)}"]
+        # write-pages: {"pages": [[code, ...], ...]} (tools/magene_pages.py validates).
+        if body.get("pages") is not None:
+            args += ["--pages", json.dumps(body["pages"])]
         payload = self._magene_run("magene_device.py", args)
         payload["address"] = address
         self._send_json(200 if payload.get("ok") else 502, payload)
@@ -2238,9 +2293,12 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         self._send_json(200 if payload.get("ok") else 502, payload)
 
-    def _handle_magene_workout(self, body):
-        """POST /api/magene/workout {workout, name?, address?} - same body as /api/bryton/workout;
-        the TSS shown on the C406 uses the device's own FTP (tools/magene_workout.py)."""
+    def _handle_magene_workout(self, body, native=False):
+        """POST /api/magene/workout {workout, name?, address?} - same body as /api/bryton/workout
+        (project schema, watts); the TSS shown on the C406 uses the device's own FTP.
+        POST /api/magene/workout/native - same, but `workout` is the workout builder's own payload
+        (the one it posts to /api/bryton/workout/native): %FTP or cadence, time steps only.
+        tools/magene_workout.py."""
         body = body or {}
         workout = body.get("workout")
         if not workout:
@@ -2255,6 +2313,8 @@ class Handler(BaseHTTPRequestHandler):
             tmp = tf.name
         try:
             args = ["send", tmp, "--address", address]
+            if native:
+                args.append("--native")
             if body.get("name"):
                 args += ["--name", body["name"]]
             payload = self._magene_run("magene_workout.py", args, timeout=300)

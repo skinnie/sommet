@@ -12,6 +12,12 @@ native BLE library `com.onelap.lib_ble` (see assets/onelap-re/NOTES.md), NOT fro
     ./tools/magene_device.py status         --address <addr> [--sync-clock]   # battery+info(+clock)
     ./tools/magene_device.py set-profile    --address <addr> [--ftp 250] [--weight 72] ...
         (only the fields given change; the rest are read back from the device and kept)
+    ./tools/magene_device.py read-pages     --address <addr>            # data screens
+    ./tools/magene_device.py write-pages    --address <addr> --pages '[[16,177,113,48],[64,65]]'
+        (field codes per page - tools/magene_pages.py has the catalogue and the format)
+    ./tools/magene_device.py read-settings  --address <addr>
+    ./tools/magene_device.py set-settings   --address <addr> --set autoPause=5 --set keyTone=0 ...
+        (device "function settings": read-modify-write of the whole block, like the app)
 
 Transport is the same as magene_import.py: the C406 command channel CC02 (write a frame, read the
 ack/data as a notification). Every command is a bare frame `40 <cmd> [payload…]` - no length or
@@ -32,6 +38,7 @@ import sys
 import time
 
 from magene_import import _connect, CC02
+import magene_pages
 
 BATTERY_CHAR = "00002a19-0000-1000-8000-00805f9b34fb"
 DEVINFO = {
@@ -142,6 +149,90 @@ async def set_profile(client, sex, age, height, max_hr, lthr, ftp, weight, bike_
 PROFILE_FIELDS = ("sex", "age", "height", "maxHr", "lthr", "ftp", "weight", "bikeWeight")
 
 
+# ---- function settings (READ_FUNC 0x4c / WRITE_FUNC 0x4d) ---------------------------------------
+# Decoded from OneLap 1.9.3: DecodeProFuncProduct (layout), BikeComputerFuncViewModel (writes),
+# BikeComputerFuncActivity / BackLightActivity / AutoCircleActivity / LocalBikeComputerFuncDataSource
+# (allowed values). Read reply = `40 4c <status> <block…>`; the app keeps block = reply[3:], patches
+# single fields in place and writes back `40 4d <block>` (same length); ack `40 4d <status>`, 0 = ok.
+#
+# The block layout depends on the reply length (the app branches on it the same way):
+#   len > 19  -> tz is a u32 of seconds (read-only here: the time-zone commands 4f/57 set it),
+#               and the auto-backlight + auto-lap groups exist. The C406 Pro replies 24 bytes.
+#   len == 15 -> an older unit with a key-function byte; not supported for writing here.
+# Offsets below are into the FULL reply (the app's getIntValue offsets); block offset = off - 3.
+# Value formats as the app reads them: "B" u8, "H" u16 LE, "I" u32 LE.
+
+def _settings_layout(n):
+    """[(name, reply_offset, fmt)] for a reply of n bytes, or None if unsupported."""
+    if n <= 19:
+        return None
+    lay = [("timezoneOffset", 3, "I"),
+           ("autoBacklight", 7, "B"), ("backlightDuration", 8, "H"), ("backlightLevel", 10, "B"),
+           ("autoOff", 11, "B"), ("autoPause", 12, "B"), ("promptTone", 13, "B"),
+           ("keyTone", 14, "B"), ("startReminder", 15, "B"), ("estimatedPower", 16, "B"),
+           ("hrAlert", 17, "B"), ("powerAlert", 18, "H")]
+    if n >= 24:
+        lay += [("autoLap", 20, "B"), ("autoLapType", 21, "B"), ("autoLapValue", 22, "H")]
+    return lay
+
+
+# Allowed values (what the OneLap UI offers). 0 = off for the alert/auto fields.
+_ONOFF = {0, 1}
+SETTINGS_ALLOWED = {
+    "autoBacklight": _ONOFF,
+    "backlightDuration": {0, 5, 10, 15, 30, 60},        # seconds; 0 = always on
+    "backlightLevel": {0, 1, 2},                        # low / medium / high
+    "autoOff": {0, 5, 10, 15, 20, 30, 40, 60},          # minutes; 0 = off
+    "autoPause": set(range(0, 11)),                     # km/h threshold; 0 = off
+    "promptTone": _ONOFF, "keyTone": _ONOFF, "startReminder": _ONOFF, "estimatedPower": _ONOFF,
+    "hrAlert": {0} | set(range(100, 241)),              # bpm; 0 = off
+    "powerAlert": {0} | set(range(100, 2501)),          # W; 0 = off
+    "autoLap": _ONOFF,
+    "autoLapType": _ONOFF,                              # 0 = distance, 1 = time
+    "autoLapValue": set(range(1, 1001)),                # distance: km x 10; time: minutes
+}
+_FMT_SIZE = {"B": 1, "H": 2, "I": 4}
+
+
+def decode_settings(reply):
+    lay = _settings_layout(len(reply))
+    if lay is None:
+        return None
+    out = {}
+    for name, off, fmt in lay:
+        out[name] = struct.unpack_from("<" + fmt, reply, off)[0]
+    return out
+
+
+async def read_settings_raw(client):
+    ack = await _cmd_once(client, b"\x40\x4c", expect_prefix=b"\x40\x4c")
+    if not ack or len(ack) < 4 or ack[2] != 0:
+        return None
+    return ack
+
+
+def patch_settings(reply, changes):
+    """New write block (reply[3:] with `changes` patched in). Every name, value and offset is
+    checked before a byte is touched; raises ValueError on anything unknown or out of range."""
+    lay = _settings_layout(len(reply))
+    if lay is None:
+        raise ValueError(f"unsupported settings block ({len(reply)}-byte reply)")
+    where = {name: (off, fmt) for name, off, fmt in lay}
+    block = bytearray(reply[3:])
+    for name, value in changes.items():
+        if name not in SETTINGS_ALLOWED or name not in where:
+            raise ValueError(f"{name} is not a writable setting on this device")
+        value = int(value)
+        if value not in SETTINGS_ALLOWED[name]:
+            raise ValueError(f"{name}={value} is outside what the device accepts")
+        off, fmt = where[name]
+        boff = off - 3
+        if boff < 0 or boff + _FMT_SIZE[fmt] > len(block):
+            raise ValueError(f"{name} offset {boff} outside the {len(block)}-byte block")
+        struct.pack_into("<" + fmt, block, boff, value)
+    return bytes(block)
+
+
 def _local_offset_seconds():
     # tm_gmtoff reflects DST actually in effect now (time.daylight only says the zone HAS DST).
     return int(time.localtime().tm_gmtoff)
@@ -189,6 +280,65 @@ async def run(args):
                                    merged["maxHr"], merged["lthr"], merged["ftp"],
                                    merged["weight"], merged["bikeWeight"])
             return {"ok": ok, "profile": merged}
+        if args.action == "read-pages":
+            raw = await _cmd_once(client, b"\x40\x42", expect_prefix=b"\x40\x42")
+            if not raw or len(raw) < 3 or raw[2] != 0:
+                return {"ok": False, "error": "no pages reply"}
+            try:
+                pages = magene_pages.decode_pages(raw[3:])
+            except ValueError as exc:
+                return {"ok": False, "error": f"unrecognised pages layout ({exc})", "raw": raw.hex()}
+            return {"ok": True, "pages": magene_pages.describe(pages), "raw": raw.hex()}
+        if args.action == "write-pages":
+            try:
+                block = magene_pages.encode_pages(json.loads(args.pages or "[]"))
+            except (ValueError, json.JSONDecodeError) as exc:
+                return {"ok": False, "error": str(exc)}
+            # Only write a format we can read back: the current layout must decode first.
+            raw = await _cmd_once(client, b"\x40\x42", expect_prefix=b"\x40\x42")
+            try:
+                magene_pages.decode_pages(raw[3:] if raw and len(raw) > 3 else b"")
+            except ValueError as exc:
+                return {"ok": False, "error": f"device layout not recognised, not writing ({exc})"}
+            ack = await _cmd_once(client, b"\x40\x43" + block, expect_prefix=b"\x40\x43", timeout=8.0)
+            if ack is not None and len(ack) >= 3 and ack[2] == 2:     # 2 = still applying
+                await asyncio.sleep(1.5)
+            # Success = the device now reads back exactly what was written.
+            after = await _cmd_once(client, b"\x40\x42", expect_prefix=b"\x40\x42")
+            ok = after is not None and after[3:] == block
+            pages = None
+            try:
+                pages = magene_pages.describe(magene_pages.decode_pages(after[3:]))
+            except (ValueError, TypeError):
+                pass
+            return {"ok": ok, "pages": pages}
+        if args.action == "read-settings":
+            raw = await read_settings_raw(client)
+            if raw is None:
+                return {"ok": False, "error": "no settings reply"}
+            dec = decode_settings(raw)
+            return {"ok": dec is not None, "settings": dec, "raw": raw.hex(),
+                    **({} if dec else {"error": f"unsupported {len(raw)}-byte settings block"})}
+        if args.action == "set-settings":
+            changes = {}
+            for kv in args.set or []:
+                k, _, v = kv.partition("=")
+                changes[k.strip()] = int(v)
+            if not changes:
+                return {"ok": False, "error": "nothing to set (use --set name=value)"}
+            raw = await read_settings_raw(client)
+            if raw is None:
+                return {"ok": False, "error": "could not read the current settings"}
+            try:
+                block = patch_settings(raw, changes)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            ack = await _cmd_once(client, b"\x40\x4d" + block, expect_prefix=b"\x40\x4d")
+            ok = ack is not None and len(ack) >= 3 and ack[2] == 0
+            after = await read_settings_raw(client)
+            return {"ok": ok, "before": decode_settings(raw),
+                    "settings": decode_settings(after) if after else None,
+                    "raw": after.hex() if after else None}
         return {"ok": False, "error": f"unknown action {args.action}"}
     finally:
         await client.disconnect()
@@ -198,7 +348,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", choices=["battery", "info", "status", "set-time", "set-timezone",
-                                        "altitude", "read-profile", "set-profile"])
+                                        "altitude", "read-profile", "set-profile",
+                                        "read-settings", "set-settings",
+                                        "read-pages", "write-pages"])
     ap.add_argument("--address", required=True)
     ap.add_argument("--sync-clock", action="store_true", help="with status: also set time + tz")
     ap.add_argument("--offset-seconds", type=int, default=None)
@@ -211,6 +363,9 @@ def main():
     ap.add_argument("--ftp", type=int, default=None)
     ap.add_argument("--weight", type=float, default=None)
     ap.add_argument("--bike-weight", type=float, default=None)
+    ap.add_argument("--pages", help="write-pages: JSON list of pages, each a list of field codes")
+    ap.add_argument("--set", action="append", metavar="NAME=VALUE",
+                    help="set-settings: one setting to change (repeatable)")
     args = ap.parse_args()
     print(json.dumps(asyncio.run(run(args))))
     return 0

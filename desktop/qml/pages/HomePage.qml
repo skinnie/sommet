@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 import AmbitApp
 
 // Step 4: real device-hero layout. Step 5 adds real weather. Last Activity made real
@@ -45,6 +46,8 @@ PageFlickable {
     // carries an `address` the MTP ones don't. Once found it joins the SAME unified device model
     // (switcher + hero), and Sync routes to ActivityService.importFromMagene() by kind.
     property var mageneDevices: []
+    // Shared with the Training Program (its "Send to / Create for Magene" menu entries).
+    onMageneDevicesChanged: BikeDevices.magene = mageneDevices.length > 0 ? mageneDevices[0] : null
     // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
     // over Bluetooth. One "active device across watches and bike computers" (André, 2026-09-04).
     readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices)
@@ -125,7 +128,136 @@ PageFlickable {
         xhr.open("GET", "http://127.0.0.1:8766/api/bryton/info");
         xhr.send();
     }
-    onActiveBikeChanged: fetchBrytonInfo()
+
+    // Magene C406: battery + firmware for the device card, and the clock/timezone set on connect
+    // (backend /api/magene/device action "status" + syncClock -> tools/magene_device.py, one BLE
+    // connection). Unlike the Bryton file read this is a Bluetooth connect, and activeBike
+    // re-evaluates on every 8 s MTP poll - so fetch only when the active Magene itself changes.
+    property var mageneStatus: null
+    property string mageneStatusFor: ""
+    property bool mageneBusy: false
+    function fetchMageneStatus() {
+        if (!root.activeBike || root.activeBike.kind !== "c406") {
+            root.mageneStatus = null;
+            root.mageneStatusFor = "";
+            return;
+        }
+        const addr = root.activeBike.address;
+        if (addr === root.mageneStatusFor || root.mageneBusy)
+            return;
+        root.mageneStatusFor = addr;
+        root.mageneBusy = true;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            root.mageneBusy = false;
+            try {
+                const r = JSON.parse(xhr.responseText);
+                root.mageneStatus = (r && r.ok) ? r : null;
+            } catch (e) {
+                root.mageneStatus = null;
+            }
+        };
+        xhr.open("POST", "http://127.0.0.1:8766/api/magene/device");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ action: "status", syncClock: true, address: addr }));
+    }
+    onActiveBikeChanged: { fetchBrytonInfo(); fetchMageneStatus(); checkProfileSync(); }
+
+    // --- Bike computer profile vs intervals.icu (André, 2026-09-25). The first time a Bryton or
+    // Magene shows values that differ from intervals.icu, ask ONCE (ProfileSyncPrompt). "Yes" is
+    // remembered as "auto": every later connect re-syncs silently (the vendor apps can reset the
+    // device's profile) and the manual Sync-profile button hides. "No" = "manual": never asked
+    // again, button stays. Stored per device kind in Sommet.conf [bikeProfileSync].
+    Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
+    property int profileSyncTick: 0          // bumped when a mode changes, for the button binding
+    property string profileCheckedFor: ""    // one check per connected device, not per 8 s poll
+    function profileApiBase(kind) { return kind === "c406" ? "magene" : "bryton" }
+    function profileDeviceName(kind) { return kind === "c406" ? qsTr("Magene") : qsTr("Bryton") }
+    function profileSyncMode(kind) {
+        void root.profileSyncTick;
+        return profileSyncPrefs.value(kind + "_mode", "");
+    }
+    function setProfileSyncMode(kind, mode) {
+        profileSyncPrefs.setValue(kind + "_mode", mode);
+        root.profileSyncTick += 1;
+    }
+    function checkProfileSync() {
+        const bike = root.activeBike;
+        if (!bike || (bike.kind !== "bryton" && bike.kind !== "c406")) {
+            root.profileCheckedFor = "";
+            return;
+        }
+        if (!ConnectionsService.intervalsIcuConnected)
+            return;
+        const key = bike.kind + "|" + (bike.address || bike.mount || "");
+        if (key === root.profileCheckedFor)
+            return;
+        root.profileCheckedFor = key;
+        const mode = root.profileSyncMode(bike.kind);
+        if (mode === "manual")
+            return;
+        const kind = bike.kind;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            var r = {};
+            try { r = JSON.parse(xhr.responseText); } catch (e) { return; }
+            if (!r.ok || !r.diff || r.diff.length === 0)
+                return;
+            if (mode === "auto") {
+                root.applyIntervalsProfile(kind, r.diff);
+            } else {
+                profileSyncPrompt.kind = kind;
+                profileSyncPrompt.deviceName = root.profileDeviceName(kind);
+                profileSyncPrompt.diff = r.diff;
+                profileSyncPrompt.open();
+            }
+        };
+        const body = { athlete_id: ConnectionsService.intervalsIcuAthleteId,
+                       api_key: ConnectionsService.intervalsIcuApiKey() };
+        if (bike.address) body.address = bike.address;
+        xhr.open("POST", "http://127.0.0.1:8766/api/" + root.profileApiBase(kind) + "/profile/compare");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify(body));
+    }
+    // Write the intervals.icu side of every differing field to the device.
+    function applyIntervalsProfile(kind, diff) {
+        var fields = {};
+        for (var i = 0; i < diff.length; i++)
+            fields[diff[i].field] = diff[i].intervals;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            var r = {};
+            try { r = JSON.parse(xhr.responseText); } catch (e) {}
+            root.bikeSyncOk = !!r.ok;
+            root.bikeSyncMsg = r.ok ? qsTr("Profile updated from intervals.icu.")
+                                    : (r.error || qsTr("Profile update failed."));
+        };
+        const body = { direction: "to_device", fields: fields };
+        if (root.activeBike && root.activeBike.address) body.address = root.activeBike.address;
+        xhr.open("POST", "http://127.0.0.1:8766/api/" + root.profileApiBase(kind) + "/profile/apply");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify(body));
+    }
+
+    // One name per bike-computer kind, shared by the hero title and the device-switcher chip. The
+    // chip used to fall through to "Hammerhead Karoo" for any other kind, so a plugged Bryton
+    // showed up as a Karoo (André, 2026-09-25). Unknown kinds show the backend's own name.
+    function bikeDisplayName(bike) {
+        if (!bike) return "";
+        switch (bike.kind) {
+        case "edge":   return qsTr("Garmin Edge");
+        case "karoo":  return qsTr("Hammerhead Karoo");
+        case "c406":   return qsTr("Magene C406 Pro");
+        case "bryton": return qsTr("Bryton Aero 60");
+        default:       return bike.name || bike.kind || "";
+        }
+    }
 
     // On-demand Bluetooth scan for a Magene C406 (a ~6s BLE scan; the button below triggers it).
     // Two steps: find the device, then list its rides (both need the BLE radio, so this is not on
@@ -534,14 +666,7 @@ PageFlickable {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
                             Text {
-                                text: {
-                                if (!root.activeBike) return "";
-                                if (root.activeBike.kind === "edge") return qsTr("Garmin Edge");
-                                if (root.activeBike.kind === "karoo") return qsTr("Hammerhead Karoo");
-                                if (root.activeBike.kind === "c406") return qsTr("Magene C406 Pro");
-                                if (root.activeBike.kind === "bryton") return qsTr("Bryton Aero 60");
-                                return "";
-                            }
+                                text: root.bikeDisplayName(root.activeBike)
                                 font.pixelSize: Theme.fontSizeTitle; font.bold: true
                                 color: Theme.text
                             }
@@ -579,6 +704,22 @@ PageFlickable {
                                 }
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             }
+                            Text {
+                                // Magene only: battery + firmware from the one-connection status
+                                // read (root.fetchMageneStatus), e.g. "Battery 94 % · Firmware 0.411".
+                                visible: root.activeBike !== null && root.activeBike.kind === "c406"
+                                         && (root.mageneStatus !== null || root.mageneBusy)
+                                text: {
+                                    if (!root.mageneStatus) return qsTr("Reading the C406…");
+                                    var parts = [];
+                                    if (typeof root.mageneStatus.batteryPercent === "number")
+                                        parts.push(qsTr("Battery %1 %").arg(root.mageneStatus.batteryPercent));
+                                    var info = root.mageneStatus.info || {};
+                                    if (info.firmware) parts.push(qsTr("Firmware %1").arg(info.firmware));
+                                    return parts.join(" · ");
+                                }
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            }
                         }
                     }
                     Row {
@@ -603,21 +744,10 @@ PageFlickable {
                                     ActivityService.importFromBikeComputers();
                             }
                         }
-                        RoundedButton {
-                            // Bryton only: its FTP/LTHR/Max HR/weight live in Profile.bin and can
-                            // drift from intervals.icu (André's source of truth). Opens the
-                            // reconcile dialog to compare and write the right values both ways.
-                            visible: root.activeBike && root.activeBike.kind === "bryton"
-                            text: qsTr("Sync profile")
-                            onClicked: brytonProfileDialog.open()
-                        }
-                        RoundedButton {
-                            // Bryton only: build a workout on this computer (like the Bryton app)
-                            // and send it to the device's planned-workout list.
-                            visible: root.activeBike && root.activeBike.kind === "bryton"
-                            text: qsTr("Workout Builder")
-                            onClicked: NavBus.navigate("brytonWorkoutBuilder")
-                        }
+                        // Profile, data screens, device settings and altitude calibration live
+                        // on the GPS settings page, workouts in the Training Program - both in the
+                        // nav while this bike computer is selected (André, 2026-09-25: Home keeps
+                        // only Sync rides, like the watch).
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             visible: root.bikeSyncMsg.length > 0
@@ -652,8 +782,13 @@ PageFlickable {
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
+                    // Watch Bluetooth - hidden while a USB bike computer (Bryton/Edge/Karoo) is the
+                    // selected device (André, 2026-09-25: "that is ambit stuff"). With the Magene
+                    // selected, Pair stays (it's how the C406 is found) but Forget-watch hides.
                     visible: DeviceService.bleExperimentEnabled && !HomeViewModel.isGarmin
                              && !DeviceService.demoMode
+                             && (!DeviceService.bikeActive
+                                 || (root.activeBike !== null && root.activeBike.kind === "c406"))
 
                     Row {
                         width: parent.width
@@ -671,6 +806,7 @@ PageFlickable {
                             onClicked: pairMenu.popup()
                         }
                         RoundedButton {
+                            visible: !DeviceService.bikeActive      // a watch action only
                             text: qsTr("Forget this watch (Bluetooth)")
                             onClicked: DeviceService.forgetBle()
                         }
@@ -693,9 +829,15 @@ PageFlickable {
                         }
                     }
 
-                    // Bryton profile <-> intervals.icu reconciliation dialog (opened by "Sync
-                    // profile" on the Bryton device card above).
-                    BrytonProfileDialog { id: brytonProfileDialog }
+                    ProfileSyncPrompt {
+                        id: profileSyncPrompt
+                        property string kind: ""
+                        onAnswered: function(always) {
+                            root.setProfileSyncMode(kind, always ? "auto" : "manual");
+                            if (always)
+                                root.applyIntervalsProfile(kind, diff);
+                        }
+                    }
 
                     // Shared status line for both flows (only one runs at a time).
                     Text {
@@ -725,6 +867,7 @@ PageFlickable {
                         font.pixelSize: Theme.fontSizeLabel
                     }
                     Text {
+                        visible: !DeviceService.bikeActive
                         text: qsTr("Forget drops this computer's Bluetooth pairing with the watch; " +
                                    "pair again from the watch's own menu afterward.")
                         color: Theme.mutedText
@@ -747,8 +890,11 @@ PageFlickable {
                 GridLayout {
                     width: parent.width
                     // 2026-08-13: hidden entirely while disconnected, alongside the name/
-                    // icon row above - same call as that row's own comment.
+                    // icon row above - same call as that row's own comment. Also hidden while a
+                    // bike computer is the selected device, or a plugged-in watch's battery/
+                    // firmware showed under the Bryton (André, 2026-09-25).
                     visible: !HomeViewModel.isGarmin && HomeViewModel.connected
+                             && !DeviceService.bikeActive
                     columns: 4
                     columnSpacing: Theme.spacingSmall
                     // Large, paired with the card Column's Small - see its comment: together
@@ -941,7 +1087,7 @@ PageFlickable {
                 Row {
                     width: parent.width
                     spacing: Theme.spacingLarge
-                    visible: HomeViewModel.isGarmin
+                    visible: HomeViewModel.isGarmin && !DeviceService.bikeActive
 
                     Column {
                         spacing: 2
@@ -1059,9 +1205,7 @@ PageFlickable {
                         model: root.bikeComputers
                         delegate: DeviceChip {
                             required property var modelData
-                            label: modelData.kind === "edge" ? qsTr("Garmin Edge")
-                                 : modelData.kind === "c406" ? qsTr("Magene C406 Pro")
-                                 : qsTr("Hammerhead Karoo")
+                            label: root.bikeDisplayName(modelData)
                             active: DeviceService.activeBikeKind === modelData.kind
                             onPicked: DeviceService.selectBikeComputer(modelData.kind)
                         }
@@ -1352,7 +1496,7 @@ PageFlickable {
         Card {
             width: parent.width
             variant: "flat"   // Kailash history panel - supporting content
-            visible: HomeViewModel.isKailash
+            visible: HomeViewModel.isKailash && !DeviceService.bikeActive
                      && (KailashService.loading || KailashService.historyOk
                          || KailashService.lastError.length > 0)
 

@@ -9,6 +9,9 @@ import AmbitApp
 MenuItem {
     id: root
     implicitHeight: 34
+    // A hidden item (e.g. "Send to Magene" with no Magene around) collapses instead of leaving
+    // a blank row - Menu's ListView otherwise keeps its slot.
+    height: visible ? implicitHeight : 0
 
     contentItem: Text {
         leftPadding: 22   // room for the check indicator

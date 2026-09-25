@@ -60,6 +60,33 @@ PageFlickable {
         xhr.send(JSON.stringify({ name: RouteService.pendingRoute.name || "route", gpx: gpx }))
     }
 
+    // Magene C406 over BLE: send the selected route as its navigation route (backend
+    // /api/magene/route -> tools/magene_route.py; the C406 holds one route, so this replaces it).
+    // No cheap "is it here" probe like the Bryton's mount check - a BLE scan takes seconds - so the
+    // button shows whenever Bluetooth features are on and the backend finds the C406 on send.
+    property bool mageneSending: false
+    property string mageneMsg: ""
+    property bool mageneOk: false
+    function sendPendingToMagene() {
+        var gpx = RouteService.pendingRouteGpxText
+        if (!gpx || gpx.length === 0 || root.mageneSending) return
+        root.mageneSending = true
+        root.mageneMsg = qsTr("Sending to Magene… keep the C406 awake and close by"); root.mageneOk = false
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            root.mageneSending = false
+            var r = null; try { r = JSON.parse(xhr.responseText) } catch (e) {}
+            root.mageneOk = !!(r && r.ok)
+            root.mageneMsg = root.mageneOk
+                ? qsTr("Sent to Magene — it's now the route under Navigation")
+                : (r && r.error ? r.error : qsTr("Send to Magene failed"))
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/magene/route")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify({ name: RouteService.pendingRoute.name || "route", gpx: gpx }))
+    }
+
     // Which on-watch route the last "Export" tap was for - the backend response
     // (exportedGpx) doesn't carry the route's name back, so it's kept here to suggest a
     // real filename in the save dialog below rather than a generic one.
@@ -259,12 +286,21 @@ PageFlickable {
 
                 // Bryton Aero 60 over USB - its own Row so it shows whenever a Bryton is plugged,
                 // even with no watch connected (the Row above is gated on a route-writable watch).
+                // Magene C406 over BLE shares the row (Experimental Bluetooth only).
                 Row {
-                    visible: RouteService.pendingRoute.name !== undefined && root.brytonConnected
+                    visible: RouteService.pendingRoute.name !== undefined
+                             && (root.brytonConnected || DeviceService.bleExperimentEnabled)
                     spacing: Theme.spacingSmall
                     RoundedButton {
+                        visible: root.brytonConnected
                         text: qsTr("Send to Bryton")
                         onClicked: root.sendPendingToBryton()
+                    }
+                    RoundedButton {
+                        visible: DeviceService.bleExperimentEnabled
+                        enabled: !root.mageneSending
+                        text: root.mageneSending ? qsTr("Sending…") : qsTr("Send to Magene")
+                        onClicked: root.sendPendingToMagene()
                     }
                 }
                 Text {
@@ -274,6 +310,15 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeCaption
                     color: root.brytonOk ? Theme.success : Theme.error
                     text: root.brytonMsg
+                }
+                Text {
+                    visible: root.mageneMsg.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontSizeCaption
+                    color: root.mageneSending ? Theme.mutedText
+                                              : (root.mageneOk ? Theme.success : Theme.error)
+                    text: root.mageneMsg
                 }
 
                 Text {
