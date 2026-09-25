@@ -9,8 +9,9 @@ native BLE library `com.onelap.lib_ble` (see assets/onelap-re/NOTES.md), NOT fro
     ./tools/magene_device.py set-timezone   --address <addr> [--offset-seconds N]
     ./tools/magene_device.py altitude       --address <addr>            # trigger baro re-calibrate
     ./tools/magene_device.py read-profile   --address <addr>
-    ./tools/magene_device.py set-profile    --address <addr> --sex 1 --age 38 --height 178 \
-                                            --max-hr 190 --lthr 170 --ftp 250 --weight 72 [--bike-weight 8]
+    ./tools/magene_device.py status         --address <addr> [--sync-clock]   # battery+info(+clock)
+    ./tools/magene_device.py set-profile    --address <addr> [--ftp 250] [--weight 72] ...
+        (only the fields given change; the rest are read back from the device and kept)
 
 Transport is the same as magene_import.py: the C406 command channel CC02 (write a frame, read the
 ack/data as a notification). Every command is a bare frame `40 <cmd> [payload…]` - no length or
@@ -138,6 +139,14 @@ async def set_profile(client, sex, age, height, max_hr, lthr, ftp, weight, bike_
     return ack is not None
 
 
+PROFILE_FIELDS = ("sex", "age", "height", "maxHr", "lthr", "ftp", "weight", "bikeWeight")
+
+
+def _local_offset_seconds():
+    # tm_gmtoff reflects DST actually in effect now (time.daylight only says the zone HAS DST).
+    return int(time.localtime().tm_gmtoff)
+
+
 async def run(args):
     client = await _connect(args.address)
     try:
@@ -146,12 +155,20 @@ async def run(args):
             return {"ok": pct is not None, "batteryPercent": pct}
         if args.action == "info":
             return {"ok": True, "info": await read_info(client)}
+        if args.action == "status":
+            # One connection for the device card: battery + identity, and (on connect) the clock.
+            out = {"ok": True, "batteryPercent": await read_battery(client),
+                   "info": await read_info(client)}
+            if args.sync_clock:
+                out["clockSet"] = await set_time(client)
+                out["timezoneSet"] = await set_timezone(client, _local_offset_seconds())
+            return out
         if args.action == "set-time":
             return {"ok": await set_time(client)}
         if args.action == "set-timezone":
             off = args.offset_seconds
             if off is None:
-                off = -time.timezone if time.daylight == 0 else -time.altzone
+                off = _local_offset_seconds()
             return {"ok": await set_timezone(client, int(off))}
         if args.action == "altitude":
             return {"ok": await altitude_correct(client)}
@@ -159,9 +176,19 @@ async def run(args):
             prof = await read_profile(client)
             return {"ok": prof is not None, "profile": prof}
         if args.action == "set-profile":
-            return {"ok": await set_profile(client, args.sex, args.age, args.height,
-                                            args.max_hr, args.lthr, args.ftp, args.weight,
-                                            args.bike_weight)}
+            # The device stores the whole profile as one struct, so read it and change only the
+            # fields given - never fill the rest with defaults.
+            current = await read_profile(client)
+            if current is None:
+                return {"ok": False, "error": "could not read the current profile"}
+            given = {"sex": args.sex, "age": args.age, "height": args.height,
+                     "maxHr": args.max_hr, "lthr": args.lthr, "ftp": args.ftp,
+                     "weight": args.weight, "bikeWeight": args.bike_weight}
+            merged = {k: (given[k] if given[k] is not None else current[k]) for k in PROFILE_FIELDS}
+            ok = await set_profile(client, merged["sex"], merged["age"], merged["height"],
+                                   merged["maxHr"], merged["lthr"], merged["ftp"],
+                                   merged["weight"], merged["bikeWeight"])
+            return {"ok": ok, "profile": merged}
         return {"ok": False, "error": f"unknown action {args.action}"}
     finally:
         await client.disconnect()
@@ -170,18 +197,20 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["battery", "info", "set-time", "set-timezone",
+    ap.add_argument("action", choices=["battery", "info", "status", "set-time", "set-timezone",
                                         "altitude", "read-profile", "set-profile"])
     ap.add_argument("--address", required=True)
+    ap.add_argument("--sync-clock", action="store_true", help="with status: also set time + tz")
     ap.add_argument("--offset-seconds", type=int, default=None)
-    ap.add_argument("--sex", type=int, default=1)
-    ap.add_argument("--age", type=int, default=30)
-    ap.add_argument("--height", type=int, default=175)
-    ap.add_argument("--max-hr", type=int, default=190)
-    ap.add_argument("--lthr", type=int, default=170)
-    ap.add_argument("--ftp", type=int, default=200)
-    ap.add_argument("--weight", type=float, default=70.0)
-    ap.add_argument("--bike-weight", type=float, default=0.0)
+    # set-profile: only the fields given are changed; the rest are kept from the device.
+    ap.add_argument("--sex", type=int, default=None)
+    ap.add_argument("--age", type=int, default=None)
+    ap.add_argument("--height", type=int, default=None)
+    ap.add_argument("--max-hr", type=int, default=None)
+    ap.add_argument("--lthr", type=int, default=None)
+    ap.add_argument("--ftp", type=int, default=None)
+    ap.add_argument("--weight", type=float, default=None)
+    ap.add_argument("--bike-weight", type=float, default=None)
     args = ap.parse_args()
     print(json.dumps(asyncio.run(run(args))))
     return 0
