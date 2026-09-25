@@ -18,6 +18,7 @@ rest of tools/. `--selftest` is offline.
 
     ./tools/etrex_export.py route.gpx --mode track > etrex_track.gpx
     ./tools/etrex_export.py route.gpx --mode route --max-via 50 > etrex_route.gpx
+    ./tools/etrex_export.py route.gpx --parts track,route --waypoint-kinds crossing > combined.gpx
 """
 
 from __future__ import annotations
@@ -269,10 +270,24 @@ def _wpt(p: dict, name: str, desc: str, sym: str) -> str:
 
 def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
           max_track: int = 10000, max_via: int = 50, min_turn_deg: float = MIN_TURN_DEG,
-          cross_m: float = CROSS_M, reverse: bool = False) -> dict:
-    """{ok, gpx, stats:{...}} or {ok: False, error}. mode: "track" | "route"."""
+          cross_m: float = CROSS_M, reverse: bool = False,
+          parts: Optional[Sequence[str]] = None, waypoint_kinds: Optional[Sequence[str]] = None) -> dict:
+    """{ok, gpx, stats:{...}} or {ok: False, error}.
+
+    `mode` ("track" | "route") is the normal shorthand: "track" = full geometry + all
+    waypoints, "route" = <=max_via via points, no waypoint markers. For a hardware-test
+    package where the two need to be isolated (e.g. "does the original track alone confuse
+    the rider" vs "do ONLY the crossing markers help"), pass `parts` (any of "track",
+    "route", "waypoints") and/or `waypoint_kinds` (any of "turn", "crossing") to override
+    what mode implies - e.g. parts=("track","route"), waypoint_kinds=("crossing",) for a
+    track+route file with only the crossing waypoints, no turn clutter. The route's via
+    points are always placed at every detected turn/crossing regardless of waypoint_kinds -
+    that only filters which marks get their own <wpt>, not routing quality.
+    """
     if mode not in ("track", "route"):
         return {"ok": False, "error": "mode must be 'track' or 'route'"}
+    parts = set(parts) if parts is not None else ({"track", "waypoints"} if mode == "track" else {"route"})
+    waypoint_kinds = set(waypoint_kinds) if waypoint_kinds is not None else {"turn", "crossing"}
     try:
         pts = geo_util.parse_gpx_points(gpx_text)
     except Exception as e:  # malformed XML
@@ -315,17 +330,27 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
     head = ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<gpx version="1.1" creator="Sommet" xmlns="http://www.topografix.com/GPX/1/1">\n')
     body: List[str] = []
-    if mode == "track":
+    n_out = 0
+    shown_marks = [m for m in marks if m["kind"] in waypoint_kinds]
+
+    if "waypoints" in parts and shown_marks:
+        body.append("  " + _wpt_block(spts, shown_marks))
+
+    if "track" in parts:
+        # The untouched original points (geo_util.parse_gpx_points output, reversed if asked) -
+        # never the resample used for turn/crossing analysis. Only thinned if over max_track.
         if len(pts) > max_track:
             idx = _dp_rank(xy_raw, [], max_track - 2)
             outpts = [pts[i] for i in idx]
         else:
             outpts = pts
-        body.append("  " + _wpt_block(spts, marks))
         body.append("  <trk><name>%s</name><trkseg>\n%s\n  </trkseg></trk>"
                     % (_esc(label), "\n".join("    " + _pt("trkpt", p) for p in outpts)))
         n_out = len(outpts)
-    else:
+
+    if "route" in parts:
+        # Via points always land on every detected turn/crossing (not just the shown ones) -
+        # waypoint_kinds only controls which marks get their own <wpt>, not routing quality.
         forced_marks = sorted(marks, key=lambda m: (m["kind"] != "crossing", -abs(m["delta"])))
         room = max(0, max_via - 2)
         chosen = forced_marks[:room]
@@ -337,15 +362,16 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
             m = by_i.get(i)
             rows.append("    " + _pt("rtept", spts[i], "<name>%s</name>" % _esc(m["name"]) if m else ""))
         body.append("  <rte><name>%s</name>\n%s\n  </rte>" % (_esc(label), "\n".join(rows)))
-        n_out = len(idx)
+        if "track" not in parts:
+            n_out = len(idx)
 
     gpx = head + "\n".join(b for b in body if b.strip()) + "\n</gpx>\n"
     return {"ok": True, "gpx": gpx, "stats": {
-        "mode": mode, "km": round(total_km, 2), "points_in": len(pts), "points_out": n_out,
+        "mode": mode, "parts": sorted(parts), "waypoint_kinds": sorted(waypoint_kinds),
+        "km": round(total_km, 2), "points_in": len(pts), "points_out": n_out,
         "turns": sum(1 for m in marks if m["kind"] == "turn"),
         "crossings": len({m["event"] for m in marks if m["kind"] == "crossing"}),
-        "waypoints": len(marks) if mode == "track" else 0,
-        "waypoints_dropped": wp_dropped if mode == "track" else 0,
+        "waypoints_shown": len(shown_marks), "waypoints_dropped": wp_dropped,
     }}
 
 
@@ -439,6 +465,10 @@ def main(argv=None) -> int:
     ap.add_argument("--min-turn", type=float, default=MIN_TURN_DEG)
     ap.add_argument("--cross-m", type=float, default=CROSS_M)
     ap.add_argument("--reverse", action="store_true", help="ride the route the other way")
+    ap.add_argument("--parts", help="comma list overriding --mode: any of track,route,waypoints "
+                                     "(e.g. track,route for a combined file with no waypoint markers)")
+    ap.add_argument("--waypoint-kinds", help="comma list of which marks get a <wpt>: turn,crossing "
+                                              "(default both; e.g. 'crossing' to isolate crossings for a hardware test)")
     ap.add_argument("--json", action="store_true", help="print {ok,gpx,stats} instead of bare GPX")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
@@ -447,7 +477,10 @@ def main(argv=None) -> int:
     if not args.track:
         ap.error("a GPX file is required")
     raw = open(args.track, "r", encoding="utf-8", errors="replace").read()
-    res = build(raw, args.mode, args.name, args.max_track, args.max_via, args.min_turn, args.cross_m, args.reverse)
+    parts = args.parts.split(",") if args.parts else None
+    waypoint_kinds = args.waypoint_kinds.split(",") if args.waypoint_kinds else None
+    res = build(raw, args.mode, args.name, args.max_track, args.max_via, args.min_turn, args.cross_m, args.reverse,
+                parts, waypoint_kinds)
     if args.json:
         print(json.dumps(res))
         return 0 if res["ok"] else 2
