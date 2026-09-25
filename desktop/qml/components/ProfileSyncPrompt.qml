@@ -23,7 +23,7 @@ ThemedDialog {
     readonly property var labels: ({
         "ftp": qsTr("FTP (W)"), "lthr": qsTr("LTHR (bpm)"), "max_hr": qsTr("Max HR (bpm)"),
         "weight": qsTr("Weight (kg)"), "height": qsTr("Height (cm)"), "gender": qsTr("Gender"),
-        "age": qsTr("Age")
+        "age": qsTr("Age"), "map": qsTr("MAP (W)")
     })
     function fmt(field, v) {
         if (field === "gender") return v === 1 ? qsTr("Male") : qsTr("Female")

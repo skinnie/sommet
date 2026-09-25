@@ -50,8 +50,34 @@ def _ride_group(prof: dict) -> dict | None:
     return groups[0] if groups else None
 
 
+MAP_WINDOW = "90d"      # power-curve window for MAP
+MAP_SECS = 300          # MAP = best 5-minute power
+
+
+def estimate_map(athlete_id: str, api_key: str, ftp=None):
+    """Maximal Aerobic Power for the Bryton (its profile has a MAP field; intervals.icu has none).
+    The standard field estimate: MAP ~= best 5-minute power - here from the athlete's Ride power
+    curve over the last 90 days. Falls back to FTP / 0.75 (FTP ~ 75% of MAP) when there's no power
+    data. The Bryton app itself has no formula: MAP is typed in by hand there.
+    Returns (watts or None, source)."""
+    try:
+        d = _req("GET", f"/power-curves?type=Ride&curves={MAP_WINDOW}", athlete_id, api_key)
+        cur = (d.get("list") if isinstance(d, dict) else d)[0]
+        secs, watts = cur.get("secs") or [], cur.get("watts") or []
+        if MAP_SECS in secs:
+            w = watts[secs.index(MAP_SECS)]
+            if w:
+                return int(round(float(w))), f"best 5-min power, last {MAP_WINDOW[:-1]} days"
+    except Exception:                          # noqa: BLE001 - fall back to the FTP estimate
+        pass
+    if ftp:
+        return int(round(float(ftp) / 0.75)), "FTP / 0.75 (no power data)"
+    return None, None
+
+
 def get(athlete_id: str, api_key: str) -> dict:
-    """{ftp, lthr, max_hr, weight, height, gender, age} from intervals.icu (None where unset)."""
+    """{ftp, lthr, max_hr, weight, height, gender, age, map} from intervals.icu (None where unset).
+    `map` is estimated (estimate_map) - intervals.icu doesn't store a MAP."""
     prof = _req("GET", "", athlete_id, api_key)
     if isinstance(prof, list):
         prof = prof[0]
@@ -70,6 +96,7 @@ def get(athlete_id: str, api_key: str) -> dict:
         except ValueError:
             age = None
     sex = prof.get("sex")
+    map_w, map_source = estimate_map(athlete_id, api_key, ride.get("ftp"))
     return {
         "ftp": ride.get("ftp"),
         "lthr": ride.get("lthr"),
@@ -78,6 +105,8 @@ def get(athlete_id: str, api_key: str) -> dict:
         "height": int(round(float(height_m) * 100)) if height_m else None,   # m -> cm
         "gender": (1 if sex == "M" else 0) if sex in ("M", "F") else None,
         "age": age,
+        "map": map_w,
+        "map_source": map_source,
         "_ride_group_id": ride.get("id"),
     }
 

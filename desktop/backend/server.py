@@ -1793,7 +1793,10 @@ class Handler(BaseHTTPRequestHandler):
     # HW-proven writable). intervals.icu is André's source of truth for FTP/LTHR/MaxHR/weight
     # (tools/intervals_athlete.py). "compare" diffs the two so the UI can ask which side is right;
     # "apply" writes the chosen values to the device and/or back to intervals.icu.
-    _BRYTON_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "weight", "height", "gender", "age")
+    # map = Maximal Aerobic Power: Bryton-only, estimated from intervals.icu (intervals_athlete
+    # .estimate_map); one-way (intervals -> device), like gender/height/age. The Magene has no MAP,
+    # so its compare skips it (the device side is missing).
+    _BRYTON_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "map", "weight", "height", "gender", "age")
 
     def _bryton_mount(self):
         """The mounted Bryton's path right now, or None. Reads the same discovery the device list
