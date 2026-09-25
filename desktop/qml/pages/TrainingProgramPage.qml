@@ -76,6 +76,108 @@ Item {
 
     Timer { interval: 4000; running: true; repeat: true; onTriggered: root.pollBryton() }
 
+    // ---- per-day send, to whichever bike computer is connected (André, 2026-09-25) -----------
+    // One screen for every device: right-click (or long-press) a day. The Magene C406 is
+    // Bluetooth-only, so it counts as "connected" once Home's pair scan found it (BikeDevices).
+    readonly property bool mageneConnected: BikeDevices.magene !== null
+    readonly property bool watchConnected: HomeViewModel.anyDevice
+    property string sendMsg: ""
+    property bool sending: false
+
+    readonly property var deviceLabels: ({ "suunto": qsTr("Suunto watch"),
+                                           "bryton": qsTr("Bryton"),
+                                           "magene": qsTr("Magene C406") })
+
+    function sendDay(target, entry) {
+        if (!entry || root.sending) return
+        const nm = entry.workout.name || ("Workout " + entry.date)
+        const body = { workout: entry.workout, name: nm }
+        if (target === "magene" && BikeDevices.magene) body.address = BikeDevices.magene.address
+        root.sending = true
+        root.sendMsg = qsTr("Sending “%1” to %2…").arg(nm).arg(root.deviceLabels[target])
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            root.sending = false
+            let r = {}; try { r = JSON.parse(xhr.responseText) } catch (e) {}
+            root.sendMsg = r.ok ? qsTr("Sent “%1” to %2 ✓").arg(nm).arg(root.deviceLabels[target])
+                                : qsTr("%1: %2").arg(root.deviceLabels[target])
+                                      .arg(r.error || qsTr("send failed"))
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/" + target + "/workout")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify(body))
+    }
+
+    // What each device can take, so the creator only offers steps it can send. The Magene
+    // C406 takes time steps with power/cadence targets (tools/magene_workout.py); the Bryton
+    // Aero 60 time or distance with power/HR/speed/cadence (bryton_from_intervals.py); the
+    // Suunto guided workout everything (workout.py).
+    function capsFor(device) {
+        if (device === "magene")
+            return { durations: ["time_min", "time_s"], targets: ["none", "power", "cadence"] }
+        if (device === "bryton")
+            return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
+                     targets: ["none", "power", "hr", "speed", "cadence"] }
+        return { durations: ["time_min", "time_s", "distance_km", "distance_m", "ascent_m", "lap"],
+                 targets: ["none", "hr", "pace", "speed", "vertical_speed", "power", "cadence"] }
+    }
+
+    ThemedMenu {
+        id: dayMenu
+        property string iso: ""
+        readonly property var entry: iso ? root.entryForDate(iso) : null
+
+        // Planned day: edit / send / remove.
+        ThemedMenuItem {
+            visible: dayMenu.entry !== null
+            text: qsTr("Edit")
+            onTriggered: editor.openFor(dayMenu.iso)
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry !== null && root.brytonConnected
+            enabled: !root.sending
+            text: qsTr("Send to Bryton")
+            onTriggered: root.sendDay("bryton", dayMenu.entry)
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry !== null && root.mageneConnected
+            enabled: !root.sending
+            text: qsTr("Send to Magene C406")
+            onTriggered: root.sendDay("magene", dayMenu.entry)
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry !== null
+            text: qsTr("Remove workout")
+            onTriggered: {
+                root.entries = root.entries.filter(e => e.date !== dayMenu.iso)
+                root.dirty = true
+            }
+        }
+        // Empty day: the creator, shaped by what's connected.
+        ThemedMenuItem {
+            visible: dayMenu.entry === null && root.watchConnected
+            text: qsTr("Create workout for Suunto watch")
+            onTriggered: editor.openFor(dayMenu.iso, "suunto")
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry === null && root.brytonConnected
+            text: qsTr("Create workout for Bryton")
+            onTriggered: editor.openFor(dayMenu.iso, "bryton")
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry === null && root.mageneConnected
+            text: qsTr("Create workout for Magene C406")
+            onTriggered: editor.openFor(dayMenu.iso, "magene")
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry === null
+                     && !root.watchConnected && !root.brytonConnected && !root.mageneConnected
+            text: qsTr("Create workout")
+            onTriggered: editor.openFor(dayMenu.iso, "")
+        }
+    }
+
     // Merge intervals.icu-imported entries into the plan, replacing any existing entry on the
     // same date (dedupe by date) and keeping the list date-sorted. Imported entries carry their
     // own {mode}, which the guided-workout rotation sync uses.
@@ -521,32 +623,45 @@ Item {
                                             HoverHandler {
                                                 cursorShape: Qt.PointingHandCursor
                                             }
+                                            // Left click opens the editor; right click (or a
+                                            // long press, the gesture the Android twin uses) opens
+                                            // the day menu: Edit / Send to <connected device> /
+                                            // Remove on a planned day, "Create workout for
+                                            // <connected device>" on a free one (André, 2026-09-25;
+                                            // replaces the 09-22 right-click-removes shortcut).
                                             TapHandler {
                                                 acceptedButtons: Qt.LeftButton
                                                 onTapped: {
                                                     if (!dayCell.modelData) return
                                                     editor.openFor(dayCell.modelData.iso)
                                                 }
+                                                onLongPressed: {
+                                                    if (!dayCell.modelData) return
+                                                    dayMenu.iso = dayCell.modelData.iso
+                                                    dayMenu.popup()
+                                                }
                                             }
-                                            // Right click on a planned day removes it directly,
-                                            // same effect as opening the editor and clicking
-                                            // "Remove workout" but one step - André, 2026-09-22.
-                                            // Left click still opens the editor either way (also
-                                            // free days, to plan one) - only the remove shortcut
-                                            // needs the day to already be planned.
                                             TapHandler {
                                                 acceptedButtons: Qt.RightButton
-                                                enabled: dayCell.planned
                                                 onTapped: {
-                                                    root.entries = root.entries.filter(
-                                                        e => e.date !== dayCell.modelData.iso)
-                                                    root.dirty = true
+                                                    if (!dayCell.modelData) return
+                                                    dayMenu.iso = dayCell.modelData.iso
+                                                    dayMenu.popup()
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
+                        }
+
+                        Text {
+                            visible: root.sendMsg.length > 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: root.sendMsg
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }
@@ -743,7 +858,8 @@ Item {
     // ---- per-day workout editor ----------------------------------------------------
     ThemedDialog {
         id: editor
-        title: qsTr("Workout for %1").arg(editDate)
+        title: device ? qsTr("Workout for %1 · %2").arg(editDate).arg(root.deviceLabels[device])
+                      : qsTr("Workout for %1").arg(editDate)
         anchors.centerIn: parent
         width: Math.min(parent.width - Theme.spacingLarge * 2, 720)
 
@@ -753,6 +869,21 @@ Item {
         // targetMin, targetMax, repeatCount} - converted to/from workout.py's schema on
         // open/save. Reassigned wholesale after each mutation so the Repeater updates.
         property var editSteps: []
+        // Which device this workout is made for ("suunto" | "bryton" | "magene" | "" = any):
+        // restricts the duration/target pickers to what that device can take (root.capsFor).
+        property string device: ""
+        readonly property var caps: root.capsFor(device)
+        function durationLabel(k) { return durationLabels[durationKinds.indexOf(k)] }
+        function targetLabel(k) { return targetLabels[targetKinds.indexOf(k)] }
+        // Steps the chosen device can't take (e.g. an HR step opened for the Magene).
+        readonly property bool fitsDevice: {
+            for (const row of editSteps) {
+                if (row.stepType === "repeatStart" || row.stepType === "repeatEnd") continue
+                if (caps.durations.indexOf(row.durationKind) < 0) return false
+                if (caps.targets.indexOf(row.targetKind) < 0) return false
+            }
+            return true
+        }
 
         readonly property var stepTypes: ["warmup", "interval", "recovery", "cooldown",
                                           "repeatStart", "repeatEnd"]
@@ -765,14 +896,16 @@ Item {
                                                qsTr("Distance (km)"), qsTr("Distance (m)"),
                                                qsTr("Ascent (m)"), qsTr("Lap press")]
         readonly property var targetKinds: ["none", "hr", "pace", "speed",
-                                            "vertical_speed", "power"]
+                                            "vertical_speed", "power", "cadence"]
         readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate"),
                                              qsTr("Pace"), qsTr("Speed"),
-                                             qsTr("Vertical speed"), qsTr("Power")]
+                                             qsTr("Vertical speed"), qsTr("Power (W)"),
+                                             qsTr("Cadence (rpm)")]
 
-        function openFor(iso) {
+        function openFor(iso, forDevice) {
             editDate = iso
             const entry = root.entryForDate(iso)
+            device = forDevice !== undefined ? forDevice : (entry && entry.device ? entry.device : "")
             workoutName = entry ? entry.workout.name : qsTr("Workout")
             editSteps = entry ? entry.workout.steps.map(editor.fromSchema)
                               : [editor.defaultStep("warmup"),
@@ -853,6 +986,19 @@ Item {
             return depth === 0
         }
 
+        function save() {
+            const workout = { name: editor.workoutName,
+                              steps: editor.editSteps.map(editor.toSchema) }
+            const entry = { date: editor.editDate, workout: workout }
+            if (editor.device) entry.device = editor.device
+            const next = root.entries.filter(e => e.date !== editor.editDate)
+            next.push(entry)
+            next.sort((a, b) => a.date < b.date ? -1 : 1)
+            root.entries = next
+            root.dirty = true
+            return entry
+        }
+
         function mutate(index, patch) {
             const next = editSteps.slice()
             next[index] = Object.assign({}, next[index], patch)
@@ -892,11 +1038,11 @@ Item {
                     RoundedComboBox {
                         visible: !stepRow.isRepeat
                         width: parent.width * 0.19
-                        model: editor.durationLabels
-                        currentIndex: editor.durationKinds.indexOf(
+                        model: editor.caps.durations.map(editor.durationLabel)
+                        currentIndex: editor.caps.durations.indexOf(
                             stepRow.modelData.durationKind)
                         onActivated: (i) => editor.mutate(stepRow.index,
-                                                          { durationKind: editor.durationKinds[i] })
+                                                          { durationKind: editor.caps.durations[i] })
                     }
                     RoundedTextField {
                         visible: !stepRow.isRepeat
@@ -918,11 +1064,11 @@ Item {
                     RoundedComboBox {
                         visible: !stepRow.isRepeat
                         width: parent.width * 0.19
-                        model: editor.targetLabels
-                        currentIndex: editor.targetKinds.indexOf(
+                        model: editor.caps.targets.map(editor.targetLabel)
+                        currentIndex: editor.caps.targets.indexOf(
                             stepRow.modelData.targetKind)
                         onActivated: (i) => editor.mutate(stepRow.index,
-                                                          { targetKind: editor.targetKinds[i] })
+                                                          { targetKind: editor.caps.targets[i] })
                     }
                     RoundedTextField {
                         visible: !stepRow.isRepeat
@@ -970,6 +1116,14 @@ Item {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
+                    visible: editor.repeatsBalanced && !editor.fitsDevice
+                    text: qsTr("Some steps can't go to the %1 — pick a duration and target "
+                               + "it supports").arg(root.deviceLabels[editor.device] || "")
+                    color: Theme.warning
+                    font.pixelSize: Theme.fontSizeCaption
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: !editor.repeatsBalanced
                     text: qsTr("Repeat start/end markers must pair up (no nesting)")
                     color: Theme.mutedText
@@ -1007,15 +1161,23 @@ Item {
                 RoundedButton {
                     text: qsTr("Save workout")
                     enabled: editor.editSteps.length > 0 && editor.repeatsBalanced
+                             && editor.fitsDevice
+                    onClicked: { editor.save(); editor.close() }
+                }
+                RoundedButton {
+                    // Bike computers take a single workout right away; the watch gets the whole
+                    // program through "Sync to watch" below.
+                    readonly property bool canSend:
+                        (editor.device === "bryton" && root.brytonConnected)
+                        || (editor.device === "magene" && root.mageneConnected)
+                    visible: canSend
+                    text: qsTr("Save & send to %1").arg(root.deviceLabels[editor.device] || "")
+                    enabled: editor.editSteps.length > 0 && editor.repeatsBalanced
+                             && editor.fitsDevice && !root.sending
                     onClicked: {
-                        const workout = { name: editor.workoutName,
-                                          steps: editor.editSteps.map(editor.toSchema) }
-                        const next = root.entries.filter(e => e.date !== editor.editDate)
-                        next.push({ date: editor.editDate, workout: workout })
-                        next.sort((a, b) => a.date < b.date ? -1 : 1)
-                        root.entries = next
-                        root.dirty = true
+                        const entry = editor.save()
                         editor.close()
+                        root.sendDay(editor.device, entry)
                     }
                 }
             }

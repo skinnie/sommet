@@ -58,11 +58,15 @@ def get(athlete_id: str, api_key: str) -> dict:
     ride = _ride_group(prof) or {}
     weight = prof.get("icu_weight") or prof.get("weight")
     height_m = prof.get("height")
-    dob = prof.get("date_of_birth")
+    # intervals.icu's field is icu_date_of_birth ("YYYY-MM-DD"); plain date_of_birth doesn't exist,
+    # which silently left age empty for every device sync (André, 2026-09-25).
+    dob = prof.get("icu_date_of_birth") or prof.get("date_of_birth")
     age = None
     if dob:
         try:
-            age = datetime.date.today().year - int(str(dob)[:4])
+            born = datetime.date.fromisoformat(str(dob)[:10])
+            today = datetime.date.today()
+            age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
         except ValueError:
             age = None
     sex = prof.get("sex")

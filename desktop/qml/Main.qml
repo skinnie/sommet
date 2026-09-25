@@ -42,6 +42,7 @@ ApplicationWindow {
         sync: "pages/SyncPage.qml",
         firmware: "pages/FirmwarePage.qml",
         watchSettings: "pages/WatchSettingsPage.qml",
+        gpsSettings: "pages/GpsSettingsPage.qml",
         smartSensor: "pages/SmartSensorPage.qml",
         settings: "pages/SettingsPage.qml",
         sportModes: "pages/SportModesPage.qml",
@@ -56,7 +57,6 @@ ApplicationWindow {
         gpsTrackPod: "pages/GpsTrackPodPage.qml",
         suuntoT6: "pages/SuuntoT6Page.qml",
         trainingProgram: "pages/TrainingProgramPage.qml",
-        brytonWorkoutBuilder: "pages/BrytonWorkoutBuilderPage.qml",
     })
 
     // Optional local-only extension pages (AppExtensions is empty in the public build; see

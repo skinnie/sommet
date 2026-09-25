@@ -108,6 +108,9 @@ set_source_files_properties(qml/TotalsFacts.qml PROPERTIES
 set_source_files_properties(qml/NavBus.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
+set_source_files_properties(qml/BikeDevices.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE true
+)
 set_source_files_properties(qml/DateFormat.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
@@ -165,6 +168,7 @@ qt_add_qml_module(ambitapp
         qml/ActivityMetrics.qml
         qml/TotalsFacts.qml
         qml/NavBus.qml
+        qml/BikeDevices.qml
         qml/DateFormat.qml
         qml/SunTimes.qml
         qml/FunFacts.qml
@@ -202,6 +206,10 @@ qt_add_qml_module(ambitapp
         qml/components/EdgeIcon.qml
         qml/components/KarooIcon.qml
         qml/components/MageneIcon.qml
+        qml/components/ProfileSyncPrompt.qml
+        qml/components/MageneSettingsPanel.qml
+        qml/components/MageneScreensPanel.qml
+        qml/components/BrytonScreensPanel.qml
         qml/components/BrytonIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
@@ -221,6 +229,7 @@ qt_add_qml_module(ambitapp
         qml/pages/SyncPage.qml
         qml/pages/FirmwarePage.qml
         qml/pages/WatchSettingsPage.qml
+        qml/pages/GpsSettingsPage.qml
         qml/pages/SmartSensorPage.qml
         qml/pages/SettingsPage.qml
         qml/pages/SportModesPage.qml
@@ -231,7 +240,6 @@ qt_add_qml_module(ambitapp
         qml/components/MetricChart.qml
         qml/pages/AppZonePage.qml
         qml/pages/TrainingProgramPage.qml
-        qml/pages/BrytonWorkoutBuilderPage.qml
         qml/pages/GpsTrackPodPage.qml
         qml/pages/SuuntoT6Page.qml
     # Step 10+ pages/components get added here as they're built - each spec step should

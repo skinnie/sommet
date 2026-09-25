@@ -11,10 +11,17 @@ import AmbitApp
 // let him pick which side is right, remember that choice for next time, and write the winners to
 // the device and/or back to intervals.icu. Gender/birthday/height reconcile device<->Sommet only
 // (intervals.icu doesn't expose them for write); MAP is device-only and left untouched here.
+//
+// Shared with the Magene C406 (2026-09-25): its backend endpoints return the same {device,
+// intervals, diff} shape, so a Magene instance only sets apiBase/deviceName/address.
 ThemedDialog {
     id: root
 
-    title: qsTr("Sync Bryton profile")
+    property string apiBase: "bryton"            // /api/<apiBase>/profile/{compare,apply}
+    property string deviceName: qsTr("Bryton")
+    property string address: ""                  // BLE address for the Magene; unused by Bryton
+
+    title: qsTr("Sync %1 profile").arg(root.deviceName)
     standardButtons: Dialog.NoButton
     width: 460
 
@@ -23,16 +30,27 @@ ThemedDialog {
     property var device: null
     property var intervals: null
 
+    function endpoint(what) { return "http://127.0.0.1:8766/api/" + root.apiBase + "/profile/" + what }
+    function body(extra) {
+        var b = { athlete_id: ConnectionsService.intervalsIcuAthleteId,
+                  api_key: ConnectionsService.intervalsIcuApiKey() }
+        if (root.address.length > 0) b.address = root.address
+        for (var k in extra) b[k] = extra[k]
+        return JSON.stringify(b)
+    }
+
     // Persisted per-field "remember my choice" source: "intervals" or "device". Lives in the same
     // Sommet.conf as everything else (QSettings), so a remembered field auto-resolves next time.
+    // One category per device ("brytonProfileSync" unchanged for the Bryton).
     Settings {
         id: prefs
-        category: "brytonProfileSync"
+        category: root.apiBase + "ProfileSync"
     }
 
     readonly property var labels: ({
         "ftp": qsTr("FTP (W)"), "lthr": qsTr("LTHR (bpm)"), "max_hr": qsTr("Max HR (bpm)"),
-        "weight": qsTr("Weight (kg)"), "height": qsTr("Height (cm)"), "gender": qsTr("Gender")
+        "weight": qsTr("Weight (kg)"), "height": qsTr("Height (cm)"), "gender": qsTr("Gender"),
+        "age": qsTr("Age")
     })
 
     ListModel { id: diffModel }
@@ -48,7 +66,7 @@ ThemedDialog {
             root.loading = false
             var r = {}
             try { r = JSON.parse(xhr.responseText) } catch (e) { r = { ok: false } }
-            if (!r.ok) { root.error = r.error || qsTr("Could not read the Bryton profile."); return }
+            if (!r.ok) { root.error = r.error || qsTr("Could not read the %1 profile.").arg(root.deviceName); return }
             root.device = r.device; root.intervals = r.intervals
             if (!r.intervals) { root.error = qsTr("Connect intervals.icu in Settings to compare."); return }
             for (var i = 0; i < (r.diff || []).length; i++) {
@@ -60,10 +78,9 @@ ThemedDialog {
                 })
             }
         }
-        xhr.open("POST", "http://127.0.0.1:8766/api/bryton/profile/compare")
+        xhr.open("POST", root.endpoint("compare"))
         xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.send(JSON.stringify({ athlete_id: ConnectionsService.intervalsIcuAthleteId,
-                                  api_key: ConnectionsService.intervalsIcuApiKey() }))
+        xhr.send(root.body({}))
     }
 
     property bool remember: true
@@ -95,11 +112,9 @@ ThemedDialog {
             if (!r.ok) root.applyMsg = r.error || qsTr("Write failed.")
             cb()
         }
-        xhr.open("POST", "http://127.0.0.1:8766/api/bryton/profile/apply")
+        xhr.open("POST", root.endpoint("apply"))
         xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.send(JSON.stringify({ direction: direction, fields: fields,
-                                  athlete_id: ConnectionsService.intervalsIcuAthleteId,
-                                  api_key: ConnectionsService.intervalsIcuApiKey() }))
+        xhr.send(root.body({ direction: direction, fields: fields }))
     }
 
     contentItem: Column {
@@ -154,7 +169,7 @@ ThemedDialog {
                             anchors.centerIn: parent; spacing: 0
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.src === "device" ? qsTr("Bryton") : qsTr("intervals.icu")
+                                text: modelData.src === "device" ? root.deviceName : qsTr("intervals.icu")
                                 color: choice === modelData.src ? Theme.card : Theme.mutedText
                                 font.pixelSize: Theme.fontSizeCaption
                             }
