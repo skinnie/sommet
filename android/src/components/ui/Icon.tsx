@@ -8,7 +8,7 @@ export type IconName =
   | 'sync' | 'satellite' | 'route' | 'poi' | 'backup' | 'settings'
   | 'list' | 'link' | 'map' | 'chart' | 'apps' | 'activity' | 'key' | 'person'
   | 'delete' | 'check' | 'info' | 'battery' | 'warning' | 'mountain'
-  | 'watch' | 'etrex' | 'bryton' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
+  | 'watch' | 'etrex' | 'bryton' | 'magene' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
   | 'cycling' | 'running' | 'walking'
   | 'play' | 'pause' | 'skipBack' | 'skipForward'
   | 'download' | 'upload' | 'calendar' | 'bluetooth'
@@ -384,6 +384,21 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
           <Line x1={19} y1={7.5} x2={20.3} y2={7.5} {...s} />
           <Line x1={19} y1={11.5} x2={20.3} y2={11.5} {...s} />
           <Circle cx={12} cy={19} r={1.4} stroke={color} strokeWidth={1.5} fill="none" />
+        </Svg>
+      );
+    case 'magene':
+      // Magene C406 Pro — softly rounded portrait body, small top key left of centre, screen in
+      // the upper half, four chin keys two-left / two-right (desktop MageneIcon.qml, from André's
+      // front-view drawing 2026-09-25).
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={6.2} y={2} width={11.6} height={20.5} rx={4.6} stroke={color} strokeWidth={1.9} fill="none" />
+          <Line x1={8.6} y1={1.1} x2={10.4} y2={1.1} {...s} />
+          <Rect x={8.2} y={5.3} width={7.6} height={9.4} rx={1} stroke={color} strokeWidth={1.7} fill="none" />
+          <Line x1={8.8} y1={18.6} x2={9.3} y2={18.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={10.6} y1={18.6} x2={11.1} y2={18.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={12.9} y1={18.6} x2={13.4} y2={18.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={14.7} y1={18.6} x2={15.2} y2={18.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
     case 'sun':

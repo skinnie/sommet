@@ -29,7 +29,17 @@ import {
 } from '../native/AmbitBleModule';
 import * as Garmin from '../native/GarminModule';
 import type { GarminConnectResult } from '../native/GarminModule';
-import { detectBryton } from '../services/BrytonUsb';
+import { detectBryton, connectBryton, readProfile as readBrytonProfile, writeProfile as writeBrytonProfile } from '../services/BrytonUsb';
+import { ActionMenu } from '../components/ui/ActionMenu';
+import { isMageneAvailable, scan as scanMagene } from '../services/MageneBle';
+import {
+  withMagene, readBattery, readInfo, setTime, setTimezone, readProfile as readMageneProfile,
+  setProfile as setMageneProfile, type MageneProfile,
+} from '../services/MageneDevice';
+import { syncMageneRides, type MageneSyncState } from '../services/MageneImport';
+import { getKnownMagene, setKnownMagene, getProfileSyncMode, setProfileSyncMode, type KnownMagene } from '../services/MageneStore';
+import { diffProfile, fmtProfile, PROFILE_LABELS } from '../services/MageneProfileSync';
+import { getAthleteThresholds } from '../services/ApiIntervalsIcu';
 import { syncGarminActivities, GarminActivitySyncState } from '../services/GarminActivityService';
 import { kailashDeviceProvider } from '../services/devices/KailashDeviceProvider';
 import { ambitBleDeviceProvider } from '../services/devices/AmbitBleDeviceProvider';
@@ -228,18 +238,138 @@ export default function HomeScreen() {
       const d = await detectBryton();
       if (!alive) return;
       if (d.plugged) {
+        if (d.granted && !brytonProfileChecked.current) { brytonProfileChecked.current = true; checkBrytonProfileRef.current(); }
         // take the hero only when nothing else owns it (never clobber a live watch/Garmin).
         // We set ONLY deviceType, not phase='connected' — the watch/Garmin menu items key off
         // `connected`, and the Bryton must not switch those on. Its own hero + menu items key off
         // deviceType === 'bryton'.
         if (deviceTypeRef.current === 'none') setDeviceType('bryton');
-      } else if (deviceTypeRef.current === 'bryton') {
-        setDeviceType('none');
+      } else {
+        brytonProfileChecked.current = false; // re-check on the next plug
+        if (deviceTypeRef.current === 'bryton') setDeviceType('none');
       }
     };
     tick();
     const id = setInterval(tick, 4000);
     return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  // One-time "sync this bike computer's profile from intervals.icu?" (desktop ProfileSyncPrompt):
+  // asked the first time a device shows values that differ; 'auto' re-syncs silently on every later
+  // connect, 'manual' never asks again (the device's own screen keeps the manual sync).
+  const askProfileSync = useCallback(async (kind: 'magene' | 'bryton', name: string,
+      diff: ReturnType<typeof diffProfile>, apply: () => Promise<void>) => {
+    if (!diff.length) return;
+    const mode = await getProfileSyncMode(kind);
+    if (mode === 'auto') { await apply(); return; }
+    if (mode === 'manual') return;
+    const lines = diff.map(d => `${PROFILE_LABELS[d.field]}: ${fmtProfile(d.field, d.device)} → ${fmtProfile(d.field, d.intervals)}`);
+    Alert.alert(
+      `Sync ${name} profile?`,
+      `Your ${name} has different values than intervals.icu:\n\n${lines.join('\n')}\n\n“Yes” keeps it in sync every time it’s connected. “No” leaves it as it is (you can still sync it by hand).`,
+      [
+        { text: 'No, I’ll do it myself', style: 'cancel', onPress: () => setProfileSyncMode('manual', kind) },
+        { text: 'Yes, keep it in sync', onPress: async () => { await setProfileSyncMode('auto', kind); await apply(); } },
+      ],
+      { cancelable: false },
+    );
+  }, []);
+
+  // Bryton: read Profile.bin only when the USB folder grant already exists (never prompts from
+  // Home; the grant itself happens on the Bryton profile screen the first time).
+  const brytonProfileChecked = useRef(false);
+  const checkBrytonProfile = useCallback(async () => {
+    try {
+      const icu = await getAthleteThresholds().catch(() => null);
+      if (!icu) return;
+      await connectBryton();
+      const dev = await readBrytonProfile();
+      const diff = diffProfile({ ...dev, sex: dev.gender } as any, icu);
+      await askProfileSync('bryton', 'Bryton', diff, async () => {
+        const changes: any = {};
+        for (const d of diff) changes[d.field === 'sex' ? 'gender' : d.field] = d.intervals;
+        await writeBrytonProfile(changes);
+      });
+    } catch { /* not readable right now - the Bryton screen still has the manual sync */ }
+  }, [askProfileSync]);
+  const checkBrytonProfileRef = useRef(checkBrytonProfile);
+  checkBrytonProfileRef.current = checkBrytonProfile;
+
+  // One "Pair via Bluetooth" for every Bluetooth device (desktop parity: the Pair button opens a
+  // menu - Suunto watch / Magene C406 - the two flows share nothing at the BLE layer).
+  const [pairMenuOpen, setPairMenuOpen] = useState(false);
+
+  // Magene C406 (2026-09-25, desktop parity) — Bluetooth-only, so it isn't part of the single USB
+  // hero: it gets its own card once found (Pair via Bluetooth -> Magene C406 scans; the address is remembered and the
+  // Android bond kept, like the desktop's Pair -> Magene). Each action is a short BLE connection.
+  // On every status connect the clock/timezone are set (as the desktop does) and the profile is
+  // compared with intervals.icu: asked ONCE (Yes = keep in sync automatically, No = manual from
+  // the Magene screen) — the desktop ProfileSyncPrompt.
+  const [magene, setMagene] = useState<KnownMagene | null>(null);
+  const [mageneStatus, setMageneStatus] = useState<{ battery: number | null; firmware: string | null } | null>(null);
+  const [mageneBusy, setMageneBusy] = useState('');
+  const [mageneMsg, setMageneMsg] = useState('');
+  const [mageneSync, setMageneSync] = useState<MageneSyncState | null>(null);
+  useEffect(() => { getKnownMagene().then(setMagene); }, []);
+
+  const applyMageneProfile = useCallback(async (m: KnownMagene, changes: Partial<MageneProfile>) => {
+    try {
+      const ok = await withMagene(m.address, () => setMageneProfile(changes));
+      setMageneMsg(ok ? 'Profile synced from intervals.icu ✓' : 'The Magene didn’t accept the profile');
+    } catch (e: any) { setMageneMsg(String(e?.message ?? e)); }
+  }, []);
+
+  const refreshMagene = useCallback(async (m: KnownMagene) => {
+    setMageneBusy('status'); setMageneMsg('');
+    try {
+      const { battery, info, profile } = await withMagene(m.address, async () => {
+        const b = await readBattery();
+        const i = await readInfo();
+        await setTime();
+        await setTimezone();
+        return { battery: b, info: i, profile: await readMageneProfile() };
+      });
+      setMageneStatus({ battery, firmware: info.firmware ?? info.software ?? null });
+      // Profile vs intervals.icu — ask once, then follow the answer.
+      const icu = profile ? await getAthleteThresholds().catch(() => null) : null;
+      if (profile && icu) {
+        const diff = diffProfile(profile, icu);
+        const toDevice = Object.fromEntries(diff.map(d => [d.field, d.intervals])) as Partial<MageneProfile>;
+        await askProfileSync('magene', m.name || 'Magene', diff, () => applyMageneProfile(m, toDevice));
+      }
+    } catch (e: any) {
+      setMageneMsg(`${String(e?.message ?? e)} — wake the C406 and keep it close.`);
+    } finally { setMageneBusy(''); }
+  }, [applyMageneProfile, askProfileSync]);
+
+  const findMagene = useCallback(async () => {
+    if (!isMageneAvailable()) { setMageneMsg('Bluetooth support for the Magene isn’t in this build.'); return; }
+    setMageneBusy('scan'); setMageneMsg('Searching…');
+    try {
+      const found = await scanMagene(6000);
+      if (!found.length) { setMageneMsg('No Magene found — wake it and open its pairing screen.'); return; }
+      const m = { address: found[0].address, name: found[0].name || 'Magene C406' };
+      await setKnownMagene(m);
+      setMagene(m);
+      setMageneBusy('');
+      await refreshMagene(m);
+    } catch (e: any) {
+      setMageneMsg(String(e?.message ?? e));
+    } finally { setMageneBusy(b => (b === 'scan' ? '' : b)); }
+  }, [refreshMagene]);
+
+  const syncMagene = useCallback(async () => {
+    if (!magene) return;
+    setMageneBusy('rides'); setMageneMsg('');
+    const n = await syncMageneRides(magene.address, setMageneSync);
+    setMageneBusy('');
+    getAllActivities().then(setActivities).catch(() => {});
+    setMageneMsg(n > 0 ? `${n} new ride${n === 1 ? '' : 's'} — open Activities to add ${n === 1 ? 'it' : 'them'}.` : '');
+  }, [magene]);
+
+  const forgetMagene = useCallback(async () => {
+    await setKnownMagene(null);
+    setMagene(null); setMageneStatus(null); setMageneMsg(''); setMageneSync(null);
   }, []);
 
   // Locally-synced activities, for the desktop-parity "This year" + "Last Activity" cards
@@ -825,6 +955,10 @@ export default function HomeScreen() {
   // encoded (Kailash's own memory map has no route-following feature or CustomModes region).
   // Device-specific destinations only appear once a watch is connected (nothing to act on
   // otherwise) - Home/Activities/Settings are always reachable.
+  const showWatchCalendar = !!(expFeatures.workoutCalendar && connected && deviceType === 'ambit'
+    && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo));
+  // Which devices the Workout Calendar may create for / send to (its long-press menu).
+  const calendarDevices = { watch: showWatchCalendar, bryton: deviceType === 'bryton', magene: magene?.address ?? null };
   const navItems: NavShellItem[] = [
     { id: 'home', label: t.homeNavHome, icon: 'mountain', onPress: () => {} },
     { id: 'activities', label: t.viewActivities, icon: 'list', onPress: () => navigation.navigate('LogList'), group: 'training' },
@@ -882,8 +1016,8 @@ export default function HomeScreen() {
       : []),
     // Workout Calendar - same Apps/CustomModes mechanism as Intervals (guided-workout binaries
     // in the WORKOUT menu), so it's gated identically: Ambit-only, connected, not Kailash/Traverse.
-    ...(expFeatures.workoutCalendar && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
-      ? [{ id: 'workoutCalendar', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar'), group: 'adv' as const }]
+    ...(showWatchCalendar
+      ? [{ id: 'workoutCalendar', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'adv' as const }]
       : []),
     // Gear tracker (v3): derived from the local gear DB + intervals.icu, so it's always
     // reachable — no connected watch needed, not gated behind Experimental.
@@ -891,10 +1025,16 @@ export default function HomeScreen() {
     // Bryton Aero 60 — its own device-gated items, like the watch's Routes/Sport Modes. Only when
     // the head unit is plugged in. Workouts = the builder; Profile = FTP/LTHR/Max HR reconciliation.
     ...(deviceType === 'bryton'
-      ? [
-          { id: 'brytonWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('BrytonWorkoutBuilder'), group: 'watch' as const },
-          { id: 'brytonProfile', label: 'Bryton profile', icon: 'cycling' as const, onPress: () => navigation.navigate('Bryton'), group: 'watch' as const },
-        ]
+      ? [{ id: 'brytonProfile', label: 'GPS settings', icon: 'settings' as const, onPress: () => navigation.navigate('Bryton'), group: 'watch' as const }]
+      : []),
+    ...(magene
+      ? [{ id: 'magene', label: deviceType === 'bryton' ? 'Magene settings' : 'GPS settings', icon: 'settings' as const, onPress: () => navigation.navigate('Magene'), group: 'watch' as const }]
+      : []),
+    // Bike computers plan workouts in the same Workout Calendar as the watch (desktop parity:
+    // one Training Program screen for every device, long-press a plan row to send). Shown here
+    // only when the experimental watch entry above isn't already there.
+    ...((deviceType === 'bryton' || magene) && !showWatchCalendar
+      ? [{ id: 'bikeWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
       : []),
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
@@ -1022,7 +1162,8 @@ export default function HomeScreen() {
                     grow={false}
                   />
                 ))}
-                <Button label={t.homeBleConnectBtn} onPress={() => handleBleConnectRef.current()} variant="text" grow={false} />
+                <Button label={mageneBusy === 'scan' ? 'Searching…' : t.homeBleConnectBtn} onPress={() => setPairMenuOpen(true)}
+                  disabled={mageneBusy === 'scan'} variant="text" grow={false} />
               </View>
             )}
           </Card>
@@ -1068,12 +1209,49 @@ export default function HomeScreen() {
           <Text style={[styles.deviceSub, v3MutedStyle]}>Workouts and Bryton profile are in the menu.</Text>
           {/* Bluetooth is a separate transport from the USB Bryton (André, 2026-09-24): you can
               still pair an Ambit watch over BLE while the head unit is plugged in. */}
-          {!bleConnected && (
+          {(!bleConnected || !magene) && (
             <View style={styles.heroButtons}>
-              <Button label={t.homeBleConnectBtn} onPress={() => handleBleConnectRef.current()}
-                variant="text" grow={false} />
+              <Button label={mageneBusy === 'scan' ? 'Searching…' : t.homeBleConnectBtn} onPress={() => setPairMenuOpen(true)}
+                disabled={mageneBusy === 'scan'} variant="text" grow={false} />
             </View>
           )}
+        </Card>
+      )}
+      <ActionMenu
+        visible={pairMenuOpen}
+        title={t.homeBleConnectBtn}
+        onClose={() => setPairMenuOpen(false)}
+        items={[
+          { label: 'Suunto watch', onPress: () => handleBleConnectRef.current() },
+          { label: magene ? 'Magene C406 (search again)' : 'Magene C406', onPress: findMagene,
+            visible: isMageneAvailable(), disabled: !!mageneBusy },
+        ]}
+      />
+      {magene && (
+        <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
+          <Icon name="magene" size={36} color={theme.text} />
+          <Text style={[styles.deviceName, v3TextStyle]}>{magene.name || 'Magene C406'}</Text>
+          <Text style={[styles.deviceSub, v3MutedStyle]}>
+            {mageneStatus
+              ? [mageneStatus.battery != null ? `Battery ${mageneStatus.battery}%` : null,
+                 mageneStatus.firmware ? `Firmware ${mageneStatus.firmware}` : null].filter(Boolean).join(' · ') || 'Bluetooth'
+              : 'Bluetooth · wake it to connect'}
+          </Text>
+          {mageneSync && mageneBusy === 'rides' && (
+            <Text style={[styles.deviceSub, v3MutedStyle]}>
+              {mageneSync.phase === 'writing' && mageneSync.total > 0
+                ? `Importing ${mageneSync.current}/${mageneSync.total}…`
+                : mageneSync.phase === 'reading' ? 'Reading rides…' : 'Connecting…'}
+            </Text>
+          )}
+          {mageneMsg ? <StatusLine text={mageneMsg} tone={mageneSync?.phase === 'error' ? 'alert' : 'muted'} /> : null}
+          <View style={styles.heroButtons}>
+            <Button label={mageneBusy === 'rides' ? 'Syncing…' : 'Sync rides'} icon="sync" onPress={syncMagene}
+              disabled={!!mageneBusy} grow={false} />
+            <Button label={mageneBusy === 'status' ? 'Connecting…' : 'Connect'} onPress={() => refreshMagene(magene)}
+              disabled={!!mageneBusy} variant="text" grow={false} />
+            <Button label="Forget" onPress={forgetMagene} disabled={!!mageneBusy} variant="text" grow={false} />
+          </View>
         </Card>
       )}
       {deviceType === 'ambit' && ambitInfo && (
@@ -1114,7 +1292,7 @@ export default function HomeScreen() {
             })}
             <TouchableOpacity
               key="__pair"
-              onPress={() => handleBleConnectRef.current()}
+              onPress={() => setPairMenuOpen(true)}
               activeOpacity={0.75}
               style={[styles.watchChip, styles.watchChipAction, { borderColor: theme.mutedText }]}
             >

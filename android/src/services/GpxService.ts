@@ -38,6 +38,12 @@ export async function writeFitFile(id: string, base64: string, overwrite = false
   return path;
 }
 
+/** Whether an activity with this id is already in the library (checked before a slow device
+ *  download, e.g. a Magene ride over BLE). */
+export async function activityExists(id: string): Promise<boolean> {
+  return RNFS.exists(`${ACTIVITIES_DIR}/${id}.gpx`);
+}
+
 /** The <id>.fit path for an activity's <id>.gpx path, if that FIT file exists on disk. */
 export async function fitPathForGpx(gpxPath: string): Promise<string | null> {
   const path = gpxPath.replace(/\.gpx$/, '.fit');

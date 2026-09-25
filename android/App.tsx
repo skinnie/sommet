@@ -31,7 +31,7 @@ import WatchSettingsScreen from './src/screens/WatchSettingsScreen';
 import IntervalsScreen from './src/screens/IntervalsScreen';
 import WorkoutCalendarScreen from './src/screens/WorkoutCalendarScreen';
 import BrytonScreen from './src/screens/BrytonScreen';
-import BrytonWorkoutBuilderScreen from './src/screens/BrytonWorkoutBuilderScreen';
+import MageneScreen from './src/screens/MageneScreen';
 import GearScreen from './src/screens/GearScreen';
 // Weight/Health - desktop parity (2026-08-26). Both read intervals.icu's wellness feed via
 // src/services/WellnessService.ts; see that file for what Android can and cannot reach.
@@ -52,7 +52,7 @@ import { t, dateLocale } from './src/i18n';
 export type RootStackParamList = {
   Home: undefined;
   Bryton: undefined;
-  BrytonWorkoutBuilder: undefined;
+  Magene: undefined;
   LogList: undefined;
   Map: { activity: ActivityRecord };
   Settings: undefined;
@@ -100,7 +100,8 @@ export type RootStackParamList = {
   // The Calendar feature (2026-08-21) - dated native guided workouts in the WORKOUT menu,
   // named "dd/mm_name". "WorkoutCalendar" (not "Calendar") deliberately - that route name is
   // already the activity-history month grid above; this is a different feature entirely.
-  WorkoutCalendar: undefined;
+  // Optional: which devices the plan can create for / send to (Home passes what's connected).
+  WorkoutCalendar: { watch?: boolean; bryton?: boolean; magene?: string | null } | undefined;
   // Gear tracker (v3): bikes/shoes + components (parts) + service reminders, local-first and
   // mirrored two-way to intervals.icu. Derived from the local gear DB, no device needed.
   Gear: undefined;
@@ -315,12 +316,12 @@ function AppShell() {
           <Stack.Screen
             name="Bryton"
             component={BrytonScreen}
-            options={{ title: 'Bryton Aero 60' }}
+            options={{ title: 'Bryton Aero 60 settings' }}
           />
           <Stack.Screen
-            name="BrytonWorkoutBuilder"
-            component={BrytonWorkoutBuilderScreen}
-            options={{ title: 'Workout Builder' }}
+            name="Magene"
+            component={MageneScreen}
+            options={{ title: 'Magene C406' }}
           />
           <Stack.Screen
             name="Gear"

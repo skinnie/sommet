@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Pressable } from 'react-native';
+import { readGrid, writeGrid, GRID_GROUPS, FIELD_NAME, type GridPage, type GridChange } from '../services/BrytonGrid';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useV3Theme, v3Spacing, v3Radius, v3Type } from '../theme/v3';
@@ -36,6 +37,12 @@ export default function BrytonScreen() {
   const [remember, setRemember] = useState(true);
   const [applying, setApplying] = useState(false);
   const [applyMsg, setApplyMsg] = useState('');
+  // Data screens (System/Grid.ini) - desktop BrytonScreensDialog parity.
+  const [grid, setGrid] = useState<GridPage[] | null>(null);
+  const [editGrid, setEditGrid] = useState<GridPage[]>([]);
+  const [cellPick, setCellPick] = useState<{ page: number; cell: number } | null>(null);
+  const [gridBusy, setGridBusy] = useState(false);
+  const [gridMsg, setGridMsg] = useState('');
 
   const connect = useCallback(async () => {
     setStatus('connecting'); setError(''); setApplyMsg('');
@@ -43,6 +50,7 @@ export default function BrytonScreen() {
       const res = await connectBryton();
       setDeviceName(res.name || 'Bryton Aero 60');
       const dev = await readProfile();
+      try { const g = await readGrid(); setGrid(g); setEditGrid(JSON.parse(JSON.stringify(g))); } catch { setGrid(null); }
       setDevice(dev);
       const icu = await getAthleteThresholds();
       setIntervals(icu ? { ftp: icu.ftp, lthr: icu.lthr, maxHr: icu.maxHr, weight: icu.weight } : null);
@@ -179,9 +187,109 @@ export default function BrytonScreen() {
                   onPress={apply} disabled={applying} />
               </Card>
             )}
+            {grid && (
+              <Card>
+                <Text style={{ color: t.text, fontSize: v3Type.heading, fontWeight: '700' }}>Data screens</Text>
+                <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: 2 }}>
+                  Tap a field to change it. Unplug the Bryton to see the new screens.
+                </Text>
+                {editGrid.map((pg, pi) => {
+                  const cells = pg.layouts[String(pg.count)] ?? [];
+                  const edit = (fn: (p: GridPage) => void) => setEditGrid(cur => {
+                    const n: GridPage[] = JSON.parse(JSON.stringify(cur)); fn(n[pi]); return n;
+                  });
+                  return (
+                    <View key={pg.page} style={{
+                      marginTop: v3Spacing.medium, padding: v3Spacing.small, borderRadius: v3Radius.small,
+                      borderWidth: 1, borderColor: t.border, opacity: pg.enabled === 0 ? 0.6 : 1,
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '700', flex: 1 }}>{pg.title}</Text>
+                        {pg.fixed
+                          ? <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>always shown</Text>
+                          : <Toggle value={pg.enabled > 0} onValueChange={v => edit(p => { p.enabled = v ? 1 : 0; })} />}
+                      </View>
+                      {pg.sizes.length > 1 && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                          {pg.sizes.map(n => (
+                            <Chip key={n} t={t} label={`${n}`} selected={pg.count === n} onPress={() => edit(p => { p.count = n; })} />
+                          ))}
+                          <Text style={{ color: t.mutedText, fontSize: v3Type.caption, alignSelf: 'center' }}>fields</Text>
+                        </View>
+                      )}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        {cells.map((id, ci) => (
+                          <Chip key={ci} t={t} selected={false} label={FIELD_NAME[id] ?? String(id)}
+                            onPress={() => setCellPick({ page: pi, cell: ci })} />
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
+                {gridMsg ? <StatusLine text={gridMsg} tone={gridMsg.includes('✓') ? 'muted' : 'alert'} /> : null}
+                <View style={{ marginTop: v3Spacing.medium }}>
+                  <Button label={gridBusy ? 'Saving…' : 'Save to Bryton'} icon="check" disabled={gridBusy || JSON.stringify(grid) === JSON.stringify(editGrid)}
+                    onPress={async () => {
+                      const changes: GridChange[] = [];
+                      editGrid.forEach((p, i) => {
+                        const b = grid[i]; const ch: GridChange = { page: p.page };
+                        if (p.enabled !== b.enabled) ch.enabled = p.enabled;
+                        if (p.count !== b.count || JSON.stringify(p.layouts[String(p.count)]) !== JSON.stringify(b.layouts[String(p.count)])) {
+                          ch.count = p.count; ch.fields = p.layouts[String(p.count)];
+                        }
+                        if (Object.keys(ch).length > 1) changes.push(ch);
+                      });
+                      setGridBusy(true); setGridMsg('');
+                      try {
+                        const g = await writeGrid(changes);
+                        setGrid(g); setEditGrid(JSON.parse(JSON.stringify(g)));
+                        setGridMsg('Saved to the Bryton ✓ — unplug it to see the new screens.');
+                      } catch (e: any) { setGridMsg(String(e?.message ?? e)); } finally { setGridBusy(false); }
+                    }} />
+                </View>
+              </Card>
+            )}
           </>
         )}
       </View>
+      <Modal visible={cellPick != null} transparent animationType="fade" onRequestClose={() => setCellPick(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: '#00000066', justifyContent: 'center', padding: 24 }} onPress={() => setCellPick(null)}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: t.card, borderRadius: 16, borderWidth: 1, borderColor: t.border, maxHeight: '80%', overflow: 'hidden' }}>
+            <ScrollView contentContainerStyle={{ padding: v3Spacing.medium }}>
+              {GRID_GROUPS.map(g => (
+                <View key={g.group} style={{ marginBottom: v3Spacing.small }}>
+                  <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginBottom: 4 }}>{g.group}</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {g.fields.map(f => (
+                      <Chip key={f.id} t={t} label={f.name} selected={false}
+                        onPress={() => {
+                          if (cellPick) setEditGrid(cur => {
+                            const n: GridPage[] = JSON.parse(JSON.stringify(cur));
+                            const p = n[cellPick.page]; p.layouts[String(p.count)][cellPick.cell] = f.id; return n;
+                          });
+                          setCellPick(null);
+                        }} />
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
+  );
+}
+
+// Module-scope (Fabric paints inline-defined components unreliably - see BrytonWorkoutBuilder note).
+function Chip({ t, selected, label, onPress }: { t: any; selected: boolean; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8}
+      style={{
+        paddingVertical: 6, paddingHorizontal: 10, borderRadius: v3Radius.small, borderWidth: 1,
+        borderColor: selected ? t.primary : t.border, backgroundColor: selected ? t.primary : t.card,
+      }}>
+      <Text style={{ color: selected ? t.card : t.text, fontSize: v3Type.caption, fontWeight: '600' }}>{label}</Text>
+    </TouchableOpacity>
   );
 }
