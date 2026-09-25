@@ -302,12 +302,27 @@ export default function WorkoutCalendarScreen() {
     unmirror(gone);
   }
 
+  // The watch sport mode for an intervals.icu sport - same table as the desktop's modeForSport.
+  function modeForSport(sport: string): string {
+    const words: Record<string, string[]> = {
+      Ride: ['cycl', 'bike', 'ride', 'vélo', 'velo'], VirtualRide: ['indoor', 'cycl', 'bike'],
+      GravelRide: ['gravel', 'cycl', 'bike'], MountainBikeRide: ['mountain', 'mtb', 'cycl', 'bike'],
+      Run: ['run'], VirtualRun: ['treadmill', 'run'], TrailRun: ['trail', 'run'],
+      Walk: ['walk'], Hike: ['hik', 'trek', 'walk'], Swim: ['swim'], Rowing: ['row'], NordicSki: ['ski'],
+    };
+    const names = (modes ?? []).map(m => m.settings.name);
+    for (const w of words[sport] ?? []) for (const n of names) if (n.toLowerCase().includes(w)) return n;
+    return '';
+  }
+
   async function doSync(write: boolean) {
     if (plan.length === 0) { Alert.alert(t.error, t.workoutCalendarEmptyPlanMsg); return; }
     setLastSyncWasWrite(write);
     setSyncResult(null);
     // Only the watch's entries: bike-computer ones are sent from their own menu.
-    const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene');
+    // Each in the watch sport mode matching its sport (desktop modeForSport), else its own mode.
+    const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene')
+      .map(e => ({ ...e, mode: (e.sport && modeForSport(e.sport)) || e.mode }));
     const result = await syncCalendar(watchPlan, new Date(), write, setSyncState);
     if (result) setSyncResult(result);
   }
