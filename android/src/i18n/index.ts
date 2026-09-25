@@ -593,6 +593,11 @@ const fr = {
   garminRouteSendDesc: 'Envoie un fichier GPX (route) sur la carte SD de l\'appareil.',
   garminRouteSendBtn:  'Choisir un fichier GPX',
   garminRouteSendDone: 'Fichier envoyé sur la carte SD.',
+  garminEtrexSection:  'Envoyer avec indications de virage (eTrex)',
+  garminEtrexDesc:     'L\'eTrex 30 n\'affiche aucune direction sur une trace, et une route est limitée à 50 points. « Trace + waypoints » garde toute la trace et ajoute des waypoints nommés à chaque virage et à chaque croisement (« R 12.4 », « X STR 3.2 »). « Route » crée une route de 50 points maximum, placés aux virages, que l\'appareil calcule sur sa carte routable.',
+  garminEtrexTrackBtn: 'Trace + waypoints de virage',
+  garminEtrexRouteBtn: 'Route (50 points max)',
+  garminEtrexDone:     (file: string, turns: number, crossings: number) => `${file} envoyé — ${turns} virages, ${crossings} croisements marqués.`,
   garminRouteExportSection: 'Exporter les routes',
   garminRouteExportDesc:
     "Lit les fichiers GPX enregistrés sur l'appareil (mémoire interne et carte SD) et les " +
@@ -1420,6 +1425,11 @@ const en: typeof fr = {
   garminRouteSendDesc: "Sends a GPX file (route) to the device's SD card.",
   garminRouteSendBtn:  'Choose a GPX file',
   garminRouteSendDone: 'File sent to the SD card.',
+  garminEtrexSection:  'Send with turn guidance (eTrex)',
+  garminEtrexDesc:     "The eTrex 30 shows no directions on a track, and a route is capped at 50 points. \"Track + waypoints\" keeps the whole track and adds named waypoints at every turn and every crossing (\"R 12.4\", \"X STR 3.2\"). \"Route\" builds a route of at most 50 points, placed at the turns, that the device calculates on its routable map.",
+  garminEtrexTrackBtn: 'Track + turn waypoints',
+  garminEtrexRouteBtn: 'Route (max 50 points)',
+  garminEtrexDone:     (file: string, turns: number, crossings: number) => `${file} sent — ${turns} turns, ${crossings} crossings marked.`,
   garminRouteExportSection: 'Export routes',
   garminRouteExportDesc:
     'Reads GPX files saved on the device (internal memory and SD card) and saves them to Downloads.',

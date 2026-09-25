@@ -13,6 +13,7 @@ import type { RootStackParamList } from '../../App';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Button, ExportedFileRow, Section, StatusLine, WarningNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
+import { buildEtrexGpx } from '../services/EtrexExport';
 
 /*
  * v2.3.2 beta — mirrors the Ambit RouteScreen's structure (send / export),
@@ -34,6 +35,7 @@ export default function GarminRouteScreen() {
 
   const [sendState, setSendState] = useState<SendState>('idle');
   const [sendError, setSendError] = useState<string | undefined>();
+  const [etrexDone, setEtrexDone] = useState<string | undefined>();
 
   const [exportState, setExportState] = useState<GarminGpxExportState>({ phase: 'idle' });
   const [exportedFiles, setExportedFiles] = useState<GarminGpxExportResult[]>([]);
@@ -96,6 +98,30 @@ export default function GarminRouteScreen() {
     }
   }
 
+  // eTrex 30/30x/32x: no turn guidance on tracks, 50-point cap on routes - convert the picked GPX
+  // (services/EtrexExport.ts) and write it to the SD card next to any plain route.
+  async function handleSendEtrex(mode: 'track' | 'route') {
+    if (busy || !sdCardVolume) return;
+    setSendState('picking');
+    setSendError(undefined);
+    setEtrexDone(undefined);
+    try {
+      const localPath = await pickGpxFile();
+      setSendState('uploading');
+      const content = await RNFS.readFile(localPath, 'utf8');
+      const base = (localPath.split('/').pop() ?? 'route.gpx').replace(/\.gpx$/i, '');
+      const { gpx, stats } = buildEtrexGpx(content, { mode });
+      const fileName = `${base}_etrex_${mode}.gpx`;
+      await Garmin.writeGpxToSdCard(sdCardVolume.volumeIndex, fileName, gpx);
+      setEtrexDone(t.garminEtrexDone(fileName, stats.turns, stats.crossings));
+      setSendState('idle');
+    } catch (e: any) {
+      if (e?.code === 'GPX_PICK_CANCELLED') { setSendState('idle'); return; }
+      setSendState('error');
+      setSendError(`${e?.code ?? ''} ${e?.message ?? t.unknownError}`.trim());
+    }
+  }
+
   async function handleExportRoutes() {
     if (busy) return;
     setExportedFiles([]);
@@ -123,6 +149,17 @@ export default function GarminRouteScreen() {
         {!sdCardVolume && <StatusLine text={t.garminNoSdCardMsg} tone="alert" />}
         {sendState === 'done' && <StatusLine text={t.garminRouteSendDone} />}
         {sendState === 'error' && <StatusLine text={sendError ?? t.error} tone="alert" />}
+      </Section>
+
+      {/* ── eTrex: convert a GPX so the unit can actually guide you (turn waypoints / smart route) ── */}
+      <Section title={t.garminEtrexSection} description={t.garminEtrexDesc}>
+        <View style={styles.row}>
+          <Button label={t.garminEtrexTrackBtn} variant="filled" disabled={busy || !sdCardVolume}
+            onPress={() => handleSendEtrex('track')} />
+          <Button label={t.garminEtrexRouteBtn} variant="outline" disabled={busy || !sdCardVolume}
+            onPress={() => handleSendEtrex('route')} />
+        </View>
+        {etrexDone && <StatusLine text={etrexDone} />}
       </Section>
 
       {/* ── Export routes/tracks from the device to Downloads ── */}

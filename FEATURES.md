@@ -128,6 +128,13 @@ Kailash — plus Garmin eTrex 10/20/30 handheld GPS units.
 - **Download activities** from the device.
 - **Import and export POIs.**
 - **Import and export routes.**
+- **Turn guidance for tracks** — the eTrex 30 shows no directions on a track and caps routes at 50 points, so Sommet can convert a GPX into a full track plus named turn/crossing waypoints ("R 12.4", "X STR 3.2"), or a route of ≤50 via points placed at the turns. Available from the Garmin route screen (Android) and the Route page's "Export for Garmin eTrex…" (desktop).
+
+### Bike computers (import your rides)
+- **Garmin Edge** and **Hammerhead Karoo** — plug in over USB and Sommet pulls the recorded rides straight off the device into your library.
+- **Bryton Aero 60** — plug it in (it shows up as a plain USB drive) and Sommet imports its rides. It also **syncs your rider profile** (FTP, LTHR, Max HR, weight) with intervals.icu, and lets you **build workouts** for the head unit.
+- **Magene C406 Pro** — has no USB data mode, so Sommet connects to it over **Bluetooth** (from "Pair over Bluetooth → Magene C406"), pairs once, and syncs its rides. It stays paired afterwards.
+- Rides land in your library with the right sport (outdoor → **Cycling**, trainer → **Indoor Cycling**), and — when your intervals.icu export is set to "everything" — upload to **intervals.icu** as the device's own file, so the type matches there too.
 
 ### Experimental (no test hardware yet)
 - **Suunto GPS Pod** support.
