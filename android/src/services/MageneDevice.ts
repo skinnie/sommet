@@ -43,9 +43,11 @@ export async function rideList(): Promise<number[]> {
     seen.add(cursor);
     const msg = await Ble.command(new Uint8Array([0x40, 0x49, ...le32(cursor)]), [0x40, 0x49], 10000);
     if (!msg || msg.length < 5 || msg[2] !== 0) break;
-    const count = msg[3], more = msg[4];
+    const more = msg[4];
+    // Like the OneLap app: every 4-byte id from byte 5 to the end of the packet; byte 4 != 0 = more
+    // pages, next cursor = the page's last id (BikeComputerRecordUpload.handler_read_next_page).
     const ids: number[] = [];
-    for (let i = 0; i < count; i++) ids.push(u32(msg, 5 + 4 * i));
+    for (let i = 5; i + 4 <= msg.length; i += 4) ids.push(u32(msg, i));
     rides.push(...ids);
     if (!more || ids.length === 0) break;
     cursor = ids[ids.length - 1];

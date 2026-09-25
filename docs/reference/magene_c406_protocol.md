@@ -70,8 +70,9 @@ remove`) sends the device back to the pair screen.
 - **Ride IDs are the ride's UTC start time as a raw Unix timestamp** (confirmed: matches the FIT's
   own `session.start_time`). Import files are named `YYYY-MM-DD-HH-MM-SS.fit` from it, the same
   convention as the MTP importer, so both share one sync-history / dedup path.
-- `cursor 0` = first page; pagination (`more != 0`, next cursor = last ride id) is inferred from
-  OpenBikeCompanion's docs, **not** hardware-tested (test unit only ever held a couple of rides).
+- `cursor 0` = first page; pagination confirmed from the OneLap APK: byte 4 ≠ 0 means more
+  pages, and the next request's cursor is the page's last ride id. Ride ids are read from byte 5 to
+  the end of the packet, as the app does.
 - Battery and identity use the standard GATT Battery (`0x2A19`) and Device Information
   (`0x180A`) characteristics, not Magene commands.
 - Route and workout file formats (protobuf, sint32 zigzag coordinates, the A5 5A 5A A5 packet

@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Pressable } from 'react-native';
 import { readGrid, writeGrid, GRID_GROUPS, FIELD_NAME, type GridPage, type GridChange } from '../services/BrytonGrid';
+import { sendRouteToBryton } from '../services/BrytonTrack';
+import { pickFile } from '../services/CatalogService';
+import { base64ToBytes, bytesToUtf8 } from '../services/Base64';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useV3Theme, v3Spacing, v3Radius, v3Type } from '../theme/v3';
@@ -46,6 +49,20 @@ export default function BrytonScreen() {
   const [cellPick, setCellPick] = useState<{ page: number; cell: number } | null>(null);
   const [gridBusy, setGridBusy] = useState(false);
   const [gridMsg, setGridMsg] = useState('');
+  const [routeMsg, setRouteMsg] = useState('');
+  const [routeBusy, setRouteBusy] = useState(false);
+  // Follow Track route from a GPX file (desktop Routes "Send to Bryton"; tools/bryton_track.py).
+  const sendRoute = async () => {
+    try {
+      const f = await pickFile();
+      setRouteBusy(true); setRouteMsg('');
+      const gpx = bytesToUtf8(base64ToBytes(f.base64));
+      const r = await sendRouteToBryton(gpx, f.name.replace(/\.gpx$/i, ''));
+      setRouteMsg(`Route “${r.name}” installed (${r.points} points) ✓ — it's in Follow Track after unplugging.`);
+    } catch (e: any) {
+      if (e?.message !== 'CANCELLED' && e?.code !== 'CANCELLED') setRouteMsg(String(e?.message ?? e));
+    } finally { setRouteBusy(false); }
+  };
 
   const connect = useCallback(async () => {
     setStatus('connecting'); setError(''); setApplyMsg('');
@@ -195,6 +212,15 @@ export default function BrytonScreen() {
                   onPress={apply} disabled={applying} />
               </Card>
             )}
+            <Card>
+              <Text style={{ color: t.text, fontSize: v3Type.heading, fontWeight: '700' }}>Routes</Text>
+              <Text style={{ color: t.mutedText, fontSize: v3Type.body, marginTop: 2, marginBottom: v3Spacing.small }}>
+                Install a GPX as a Follow Track route.
+              </Text>
+              {routeMsg ? <StatusLine text={routeMsg} tone={routeMsg.includes('✓') ? 'muted' : 'alert'} /> : null}
+              <Button label={routeBusy ? 'Installing…' : 'Send route (GPX)'} icon="route" onPress={sendRoute} disabled={routeBusy} grow={false} />
+            </Card>
+
             {grid && (
               <Card>
                 <Text style={{ color: t.text, fontSize: v3Type.heading, fontWeight: '700' }}>Data screens</Text>

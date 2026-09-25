@@ -16,6 +16,7 @@ import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
 import { ActionMenu } from '../components/ui/ActionMenu';
+import { loadPlan, savePlan } from '../services/WorkoutPlanStore';
 import {
   WorkoutStepsEditor, StepRow, PlanDevice, DEVICE_LABELS, defaultSteps, fromSchema, toWorkout,
   repeatsBalanced, fitsDevice,
@@ -35,8 +36,7 @@ type PlanEntry = CalendarPlanEntry & { device?: PlanDevice };
 // Flow: build a workout -> "Generate & open compiler" shows its JSON and opens the community
 // compiler site -> paste the JSON there, compile, download the result -> "Import compiled
 // workout" -> pick a date + sport mode -> "Add to Calendar". The Plan below is this screen's
-// own state only (not persisted across app restarts - a real gap vs the desktop tool's
-// localStorage-backed plan, acceptable for a first pass). "Sync to Watch" reads what's
+// own state, saved on the phone (WorkoutPlanStore) so it survives restarts. "Sync to Watch" reads what's
 // actually on the watch, erases anything dated before today, and installs whatever's next.
 export default function WorkoutCalendarScreen() {
   const theme = useV3Theme();
@@ -73,6 +73,10 @@ export default function WorkoutCalendarScreen() {
   const [compileTarget, setCompileTarget] = useState<number | null>(null);
 
   const [plan, setPlan] = useState<PlanEntry[]>([]);
+  // Kept on the phone across restarts (WorkoutPlanStore); saved on every change once loaded.
+  const [planLoaded, setPlanLoaded] = useState(false);
+  useEffect(() => { loadPlan<PlanEntry>().then(p => { setPlan(p); setPlanLoaded(true); }); }, []);
+  useEffect(() => { if (planLoaded) savePlan(plan); }, [plan, planLoaded]);
   const [brytonBusy, setBrytonBusy] = useState(false);
   const [brytonMsg, setBrytonMsg] = useState('');
 

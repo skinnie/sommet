@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDb } from '../database/db';
 import { saveFileAs, pickGpxFile } from '../native/AmbitUsbModule';
 
@@ -41,7 +42,12 @@ export interface AppDataBundle {
   createdAt: number;            // ms
   tables: Record<string, any[]>;
   files: BundleFile[];
+  // Optional (older bundles don't have it): app data kept in AsyncStorage rather than SQLite -
+  // the Workout Calendar plan (WorkoutPlanStore). Only these known keys, never everything.
+  extras?: Record<string, string>;
 }
+
+const EXTRA_KEYS = ['workoutCalendarPlan.v1'];
 
 // ─── Pure core (unit-tested; no IO) ─────────────────────────────────────────
 
@@ -123,7 +129,12 @@ export async function buildAppDataBundle(): Promise<AppDataBundle> {
     }
   }
 
-  return { format: BUNDLE_FORMAT, version: BUNDLE_VERSION, createdAt: Date.now(), tables, files };
+  const extras: Record<string, string> = {};
+  for (const k of EXTRA_KEYS) {
+    try { const v = await AsyncStorage.getItem(k); if (v != null) extras[k] = v; } catch { /* skip */ }
+  }
+
+  return { format: BUNDLE_FORMAT, version: BUNDLE_VERSION, createdAt: Date.now(), tables, files, extras };
 }
 
 export interface BackupResult { activities: number; gear: number; files: number }
@@ -160,6 +171,9 @@ export async function applyAppDataBundle(bundle: AppDataBundle): Promise<Restore
     throw new Error('This file is not a Sommet app-data backup.');
   }
   const db = await getDb();  // ensures every table exists before we insert
+  for (const [k, v] of Object.entries(bundle.extras ?? {})) {
+    if (EXTRA_KEYS.includes(k) && typeof v === 'string') await AsyncStorage.setItem(k, v);
+  }
 
   if (!(await RNFS.exists(ACTIVITIES_DIR))) await RNFS.mkdir(ACTIVITIES_DIR);
   let fileCount = 0;

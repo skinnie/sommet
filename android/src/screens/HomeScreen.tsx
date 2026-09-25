@@ -37,6 +37,7 @@ import {
   setProfile as setMageneProfile, type MageneProfile,
 } from '../services/MageneDevice';
 import { syncMageneRides, type MageneSyncState } from '../services/MageneImport';
+import { syncBrytonRides, type BrytonRideSync } from '../services/BrytonRides';
 import { getKnownMagene, setKnownMagene, getProfileSyncMode, setProfileSyncMode, type KnownMagene } from '../services/MageneStore';
 import { diffProfile, fmtProfile, PROFILE_LABELS } from '../services/MageneProfileSync';
 import { getAthleteThresholds } from '../services/ApiIntervalsIcu';
@@ -298,6 +299,14 @@ export default function HomeScreen() {
   // One "Pair via Bluetooth" for every Bluetooth device (desktop parity: the Pair button opens a
   // menu - Suunto watch / Magene C406 - the two flows share nothing at the BLE layer).
   const [pairMenuOpen, setPairMenuOpen] = useState(false);
+
+  // Bryton rides over USB (desktop parity: its card has Sync rides like every bike computer).
+  const [brytonSync, setBrytonSync] = useState<BrytonRideSync | null>(null);
+  const brytonSyncing = !!brytonSync && (brytonSync.phase === 'reading' || brytonSync.phase === 'writing');
+  const syncBryton = useCallback(async () => {
+    await syncBrytonRides(setBrytonSync);
+    getAllActivities().then(setActivities).catch(() => {});
+  }, []);
 
   // Magene C406 (2026-09-25, desktop parity) — Bluetooth-only, so it isn't part of the single USB
   // hero: it gets its own card once found (Pair via Bluetooth -> Magene C406 scans; the address is remembered and the
@@ -1206,7 +1215,19 @@ export default function HomeScreen() {
             <Text style={[styles.deviceSub, v3MutedStyle]}>Connected over USB</Text>
             <Chip icon="check" label={t.homeDeviceConnectedStatus} />
           </View>
-          <Text style={[styles.deviceSub, v3MutedStyle]}>Workouts and Bryton profile are in the menu.</Text>
+          <Text style={[styles.deviceSub, v3MutedStyle]}>GPS settings and Workouts are in the menu.</Text>
+          {brytonSync && (
+            <StatusLine
+              tone={brytonSync.phase === 'error' ? 'alert' : 'muted'}
+              text={brytonSync.phase === 'error' ? (brytonSync.error ?? 'Sync failed')
+                : brytonSync.phase === 'reading' ? 'Reading rides…'
+                : brytonSync.phase === 'writing' ? `Importing ${brytonSync.current + 1}/${brytonSync.total}…`
+                : brytonSync.newCount > 0 ? `${brytonSync.newCount} new ride${brytonSync.newCount === 1 ? '' : 's'} — open Activities to see ${brytonSync.newCount === 1 ? 'it' : 'them'}.`
+                : 'All rides are already in your library.'} />
+          )}
+          <View style={styles.heroButtons}>
+            <Button label={brytonSyncing ? 'Syncing…' : 'Sync rides'} icon="sync" onPress={syncBryton} disabled={brytonSyncing} grow={false} />
+          </View>
           {/* Bluetooth is a separate transport from the USB Bryton (André, 2026-09-24): you can
               still pair an Ambit watch over BLE while the head unit is plugged in. */}
           {(!bleConnected || !magene) && (

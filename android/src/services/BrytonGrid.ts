@@ -1,5 +1,5 @@
 import { NativeModules } from 'react-native';
-import { base64ToBytes, bytesToBase64 } from './Base64';
+import { base64ToBytes, bytesToUtf8, bytesToBase64 } from './Base64';
 
 // Bryton Aero 60 data screens (System/Grid.ini over USB) - the TypeScript port of
 // tools/bryton_grid.py: same parsing, same in-place key edits (line order and the trailing NUL
@@ -30,7 +30,7 @@ const KEY = /^(\d+)-(\d+)$/;
 function split(bytes: Uint8Array): { lines: string[]; tail: Uint8Array } {
   let end = bytes.length;
   while (end > 0 && bytes[end - 1] === 0) end--;
-  const text = decodeURIComponent(escape(String.fromCharCode(...bytes.subarray(0, end))));
+  const text = bytesToUtf8(bytes.subarray(0, end));
   return { lines: text.split('\n'), tail: bytes.slice(end) };
 }
 
