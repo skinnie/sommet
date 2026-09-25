@@ -29,7 +29,7 @@ import {
 // passes which devices are around; opened without params it behaves as before (watch only).
 // uid = permanent identity; icuEventId = its intervals.icu event; icuOwned = made in Sommet (only
 // those are pushed / deleted on intervals.icu - imported ones are never deleted there).
-type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEventId?: number; icuOwned?: boolean };
+type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEventId?: number; icuOwned?: boolean; sport?: string };
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
 // region entirely (assets/Firmware/re-out/training_program_CONCLUSION.md on desktop has the
@@ -231,7 +231,7 @@ export default function WorkoutCalendarScreen() {
           for (const e of entries) {
             if (e.externalId?.startsWith('sommet:') && own.has(e.externalId.slice(7))) continue;
             const imported: PlanEntry = { date: e.date, mode: e.mode, workoutName: e.name, workout: e.workout,
-              uid: newUid(), icuEventId: e.eventId, icuOwned: false };
+              uid: newUid(), icuEventId: e.eventId, icuOwned: false, sport: e.sport };
             const same = next.findIndex(x => (e.eventId && x.icuEventId === e.eventId)
               || (x.date === e.date && x.workoutName === e.name));
             if (same >= 0) { if (!next[same].icuOwned) next[same] = { ...imported, uid: next[same].uid ?? imported.uid, compiled: next[same].compiled }; }
@@ -441,6 +441,7 @@ export default function WorkoutCalendarScreen() {
             const isPast = e.date < todayIso();
             const bike = e.device === 'bryton' || e.device === 'magene';
             const sub = bike ? DEVICE_LABELS[e.device as 'bryton' | 'magene']
+              : e.sport && !/run/i.test(e.sport) ? `${e.sport} · from intervals.icu`
               : `${e.mode}${!e.compiled ? ` - ${compileTarget === i ? t.workoutCalendarCompilingRow : t.workoutCalendarPending}` : ''}`;
             return (
               // Long press = the desktop's right-click day menu; the ⋯ opens the same menu.

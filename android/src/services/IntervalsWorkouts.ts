@@ -29,7 +29,7 @@ const RESOLVED_TARGETS: [string, string][] = [['_hr', 'hr'], ['_power', 'power']
 
 // eventId / externalId let the plan recognise events it already has (its own carry external_id
 // "sommet:<uid>" - IntervalsEvents.ts), so re-importing never duplicates.
-export interface PlannedEntry { date: string; mode: string; name: string; workout: Workout; eventId?: number; externalId?: string | null }
+export interface PlannedEntry { date: string; mode: string; name: string; workout: Workout; sport?: string; eventId?: number; externalId?: string | null }
 export interface SkippedEntry { date: string; name: string; reason: string }
 export interface ImportResult { entries: PlannedEntry[]; skipped: SkippedEntry[] }
 
@@ -209,7 +209,8 @@ export async function fetchIntervalsWorkouts(
 
   let athlete = await icuGet('', athleteId, apiKey);
   if (Array.isArray(athlete)) athlete = athlete[0];
-  const { hrZones, lthr, maxHr } = athleteHrZones(athlete ?? {});
+  // Every sport (André, 2026-09-25): the calendar plans for the watch AND the bike computers.
+  // HR zones come per event from that sport's own settings (tools/intervals_workout.py).
 
   const events = await icuGet('/events', athleteId, apiKey,
     `oldest=${start}&newest=${end}&category=WORKOUT`);
@@ -219,18 +220,15 @@ export async function fetchIntervalsWorkouts(
   for (const ev of (Array.isArray(events) ? events : [])) {
     const date = (ev.start_date_local ?? '').slice(0, 10);
     const name = ev.name || 'Workout';
-    if (ev.type && !RUN_TYPES.includes(ev.type)) {
-      skipped.push({ date, name, reason: `activity ${ev.type} not a run` });
-      continue;
-    }
     const doc = ev.workout_doc ?? {};
     const steps: IcuStep[] | undefined = doc.steps;
     if (!steps || !steps.length) { skipped.push({ date, name, reason: 'no steps' }); continue; }
+    const { hrZones, lthr, maxHr } = athleteHrZones(athlete ?? {}, ev.type ? [ev.type] : RUN_TYPES);
     if (hrZones) resolveZonesIntoHr(steps, hrZones, lthr, maxHr);
     try {
       const workout = convertWorkout({ steps, sportSettings: { max_hr: maxHr ?? undefined } },
         name, watchMaxHr, watchRestHr);
-      entries.push({ date, mode, name, workout, eventId: ev.id, externalId: ev.external_id ?? null });
+      entries.push({ date, mode, name, workout, sport: ev.type, eventId: ev.id, externalId: ev.external_id ?? null });
     } catch (e: any) {
       skipped.push({ date, name, reason: e?.message ?? String(e) });
     }

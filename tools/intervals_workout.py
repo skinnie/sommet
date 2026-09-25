@@ -416,7 +416,7 @@ def athlete_hr_zones(athlete_info, activity_types=("Run", "VirtualRun", "TrailRu
 
 
 def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
-                             activity_types=("Run", "VirtualRun", "TrailRun"),
+                             activity_types=None,
                              watch_max_hr=None, watch_rest_hr=None):
     """Pull planned workouts from intervals.icu in [start, end] (ISO dates) and convert each into a
     calendar plan entry {date, mode, workout} (workout = this project's schema, ready for
@@ -428,7 +428,9 @@ def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
     athlete = IS._get("", athlete_id, api_key)
     if isinstance(athlete, list):
         athlete = athlete[0]
-    hr_zones, lthr, max_hr = athlete_hr_zones(athlete, activity_types)
+    # activity_types=None = every sport (André, 2026-09-25: the calendar plans for the watch AND the
+    # bike computers, so rides, runs, etc. all come in). HR zones are then taken per event from
+    # THAT sport's settings (cycling zones for a ride, running zones for a run).
 
     events = IS._get("/events", athlete_id, api_key,
                      f"oldest={start}&newest={end}&category=WORKOUT")
@@ -445,6 +447,8 @@ def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
         if not steps:
             skipped.append({"date": date, "name": name, "reason": "no steps"})
             continue
+        hr_zones, lthr, max_hr = athlete_hr_zones(athlete, (ev.get("type"),) if ev.get("type")
+                                                  else ("Run", "VirtualRun", "TrailRun"))
         if hr_zones:
             resolve_zones_into_hr(steps, hr_zones, lthr, max_hr)
         icu = {"steps": steps, "duration": doc.get("duration"),
@@ -456,7 +460,7 @@ def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
             continue
         # eventId / externalId let the calendar recognise events it already has (its own ones carry
         # external_id "sommet:<uid>", see intervals_events.py) - no duplicate on re-import.
-        entries.append({"date": date, "mode": mode, "workout": workout,
+        entries.append({"date": date, "mode": mode, "workout": workout, "sport": ev.get("type"),
                         "eventId": ev.get("id"), "externalId": ev.get("external_id")})
     return entries, skipped
 
