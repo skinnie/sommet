@@ -13,12 +13,16 @@ const MIN_TURN_DEG = 40;
 const TURN_GAP_M = 40;
 const CROSS_M = 15;
 const CROSS_MIN_ALONG_M = 150;
+const CROSS_WPT_OFFSET_M = 18; // place a crossing's <wpt> this far past the junction, along
+// THAT pass's own outgoing branch - not at the junction itself. Two passes through the same
+// spot diverge afterwards, so offsetting each downstream separates the two pins on the map
+// instead of leaving them stacked (real hardware finding, Andre, 2026-09-25).
 const MAX_WAYPOINTS = 2000;
 
 type XY = [number, number];
 interface Pt { lat: number; lon: number; ele: number | null }
 interface Mark {
-  i: number; km: number; delta: number; label: string; kind: 'turn' | 'crossing';
+  i: number; wptI?: number; km: number; delta: number; label: string; kind: 'turn' | 'crossing';
   name: string; desc: string; sym: string; event?: number; otherKm?: number[];
 }
 
@@ -181,7 +185,17 @@ function findTurns(xy: XY[], along: number[], minDeg: number) {
   return taken.map(i => ({ i, km: along[i] / 1000, delta: dl[i], label: label(dl[i]) }));
 }
 
-function findCrossings(xy: XY[], along: number[], crossM: number) {
+/** The first index at or past `along[i] + offsetM` - i.e. `i` moved forward along THIS pass's
+ *  own direction of travel (indices only increase in time/along-track order, so this can't
+ *  accidentally jump onto a different pass through the same spot). Clipped to bounds. */
+function offsetForward(along: number[], i: number, offsetM: number): number {
+  const target = along[i] + offsetM;
+  let j = i;
+  while (j < along.length - 1 && along[j] < target) j++;
+  return j;
+}
+
+function findCrossings(xy: XY[], along: number[], crossM: number, wptOffsetM: number = CROSS_WPT_OFFSET_M) {
   const cell = Math.max(crossM, 1);
   const grid = new Map<string, number[]>();
   xy.forEach(([x, y], i) => {
@@ -213,7 +227,7 @@ function findCrossings(xy: XY[], along: number[], crossM: number) {
   const events = new Map<number, number[]>();
   runs.forEach((_, r) => { const f = find(r); const l = events.get(f); if (l) l.push(r); else events.set(f, [r]); });
   const ordered = [...events.values()].sort((a, b) => runs[a[0]][0] - runs[b[0]][0]);
-  const out: { i: number; km: number; delta: number; label: string; event: number; otherKm: number[] }[] = [];
+  const out: { i: number; wptI: number; km: number; delta: number; label: string; event: number; otherKm: number[] }[] = [];
   ordered.forEach((rs, evNo) => {
     const kms = rs.map(r => along[runs[r][0]] / 1000);
     for (const r of rs) {
@@ -222,7 +236,7 @@ function findCrossings(xy: XY[], along: number[], crossM: number) {
       for (const i of spots) {
         const d = spots.length === 1 ? headingChange(xy, a, b) : headingChange(xy, i, i);
         out.push({
-          i, km: along[i] / 1000, delta: d, label: label(d), event: evNo + 1,
+          i, wptI: offsetForward(along, i, wptOffsetM), km: along[i] / 1000, delta: d, label: label(d), event: evNo + 1,
           otherKm: kms.filter(k => Math.abs(k - along[a] / 1000) > 0.05).map(k => Math.round(k * 10) / 10),
         });
       }
@@ -237,12 +251,13 @@ const pt = (tag: string, p: Pt, inner = '') => `<${tag} lat="${p.lat.toFixed(6)}
 
 export interface EtrexOptions {
   mode: 'track' | 'route'; name?: string; maxTrack?: number; maxVia?: number;
-  minTurnDeg?: number; crossM?: number;
+  minTurnDeg?: number; crossM?: number; wptOffsetM?: number;
 }
 
 /** Throws on unreadable / point-less GPX (callers surface the message). */
 export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
-  const { mode, maxTrack = 10000, maxVia = 50, minTurnDeg = MIN_TURN_DEG, crossM = CROSS_M } = opts;
+  const { mode, maxTrack = 10000, maxVia = 50, minTurnDeg = MIN_TURN_DEG, crossM = CROSS_M,
+          wptOffsetM = CROSS_WPT_OFFSET_M } = opts;
   const parsed = parseRouteGpx(gpxXml, opts.name ?? 'eTrex route');
   const pts: Pt[] = parsed.points.map(p => ({ lat: p.latitude, lon: p.longitude, ele: p.elevation }));
   if (pts.length < 2) throw new Error('No track points found in this GPX');
@@ -252,7 +267,7 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   const quiet = toleranceFilter(raw, 2);
   const s = resample(quiet.map(i => raw[i]), quiet.map(i => pts[i]), STEP_M);
 
-  const crossings = findCrossings(s.xy, s.along, crossM);
+  const crossings = findCrossings(s.xy, s.along, crossM, wptOffsetM);
   const turns = findTurns(s.xy, s.along, minTurnDeg)
     .filter(t => crossings.every(c => Math.abs(s.along[t.i] - s.along[c.i]) > TURN_GAP_M));
   const totalKm = s.along[s.along.length - 1] / 1000;
@@ -283,7 +298,9 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   let body: string; let pointsOut: number;
   if (mode === 'track') {
     const idx = pts.length > maxTrack ? dpRank(raw, [], maxTrack - 2) : pts.map((_, i) => i);
-    const wpts = marks.map(m => `  ${pt('wpt', s.pts[m.i], `<name>${esc(m.name)}</name><desc>${esc(m.desc)}</desc><sym>${esc(m.sym)}</sym>`)}`).join('\n');
+    // crossings carry wptI (offset past the junction, onto that pass's own branch); turns don't
+    // need it, they're never co-located with another mark, so fall back to i.
+    const wpts = marks.map(m => `  ${pt('wpt', s.pts[m.wptI ?? m.i], `<name>${esc(m.name)}</name><desc>${esc(m.desc)}</desc><sym>${esc(m.sym)}</sym>`)}`).join('\n');
     body = `${wpts}\n  <trk><name>${esc(label0)}</name><trkseg>\n${idx.map(i => `    ${pt('trkpt', pts[i])}`).join('\n')}\n  </trkseg></trk>`;
     pointsOut = idx.length;
   } else {
