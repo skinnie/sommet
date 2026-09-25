@@ -25,8 +25,8 @@ A5 5A 5A A5 packets on CC03 paced by 40 8c credit grants, then 40 52. Only the p
     Field types were read from the protobuf-lite info strings (the check that would have caught
     the route's sint32 coordinates up front).
   * intensity: 0 ride/work, 1 recovery, 2 warm-up, 3 cool-down (same order as the Bryton's).
-Power goes over as watts (unit 1), so no FTP is needed to encode; --ftp only feeds the TSS shown
-on the device. The schema's power range is sent as its midpoint (the C406 takes one value).
+Power goes over as watts (unit 1), so no FTP is needed to encode; FTP only feeds the TSS shown
+on the device (--ftp, else the device's own FTP read from its profile on send). The schema's power range is sent as its midpoint (the C406 takes one value).
 Time-based steps only; HR targets have no C406 equivalent here and are sent as no target.
 """
 
@@ -39,6 +39,7 @@ import sys
 import time
 
 from bryton_from_intervals import PHASE_TO_INTENSITY, _flatten
+from magene_device import read_profile
 from magene_import import _connect, _fit_crc16
 from magene_route import (_pb_int32, _pb_sint32, _pb_msg, _packets, negotiate_mtu,
                           transfer_file)
@@ -128,10 +129,14 @@ async def send(address, workout, ftp, name):
     file_bytes = encode_workout(intervals)
     crc16 = _fit_crc16(file_bytes)
     total = sum(iv["seconds"] for iv in intervals)
-    info = workout_info(int(time.time()) & 0x7FFFFFFF, tss(intervals, ftp), total, crc16,
-                        name or workout.get("name") or "Workout")
     client = await _connect(address)
     try:
+        if not ftp:
+            # Like the Bryton path: the TSS shown on the device uses the DEVICE'S OWN FTP.
+            prof = await read_profile(client)
+            ftp = (prof or {}).get("ftp") or 0
+        info = workout_info(int(time.time()) & 0x7FFFFFFF, tss(intervals, ftp), total, crc16,
+                            name or workout.get("name") or "Workout")
         mtu = await negotiate_mtu(client)
         packets = _packets(file_bytes, mtu)
         res = await transfer_file(client, info, packets)

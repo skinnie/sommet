@@ -787,7 +787,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
-                     "magene_device.py"}
+                     "magene_device.py", "magene_route.py", "magene_workout.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     if lock is not None:
         lock.acquire()
@@ -1372,6 +1372,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_import(body)
         elif self.path == "/api/magene/device":
             self._handle_magene_device(body)
+        elif self.path == "/api/magene/profile/compare":
+            self._handle_magene_profile_compare(body)
+        elif self.path == "/api/magene/profile/apply":
+            self._handle_magene_profile_apply(body)
+        elif self.path == "/api/magene/route":
+            self._handle_magene_route(body)
+        elif self.path == "/api/magene/workout":
+            self._handle_magene_workout(body)
         elif self.path == "/api/time/sync":
             self._handle_time_sync(body)
         elif self.path == "/api/demo":
@@ -2092,28 +2100,169 @@ class Handler(BaseHTTPRequestHandler):
                 })
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
+    def _magene_address(self, body):
+        """The C406's BLE address: the one the client passes (it scanned already), else a fresh
+        scan picks the first C406 in range. None when nothing is advertising."""
+        addr = (body or {}).get("address")
+        if addr:
+            return addr
+        _code, out, _err = run_tool("magene_import.py", ["--list"], timeout=30)
+        info = self._parse_last_json_line(out) or {}
+        devices = info.get("devices") or []
+        return devices[0]["address"] if devices else None
+
+    def _magene_run(self, script, args, timeout=90):
+        code, out, err = run_tool(script, args, timeout=timeout)
+        payload = self._parse_last_json_line(out)
+        if payload is None:
+            payload = {"ok": False, "error": f"{script} produced no JSON",
+                       "stderr": (err or "")[-400:]}
+        return payload
+
+    def _magene_no_device(self):
+        self._send_json(404, {"ok": False, "error": "No Magene found - wake the C406 and keep it "
+                                                    "close (it must not be connected to a phone)."})
+
     def _handle_magene_device(self, body):
-        """POST /api/magene/device {"action","address", ...params} - device control over BLE
-        (battery/info/set-time/set-timezone/altitude/read-profile/set-profile), decoded from the
-        OneLap app. tools/magene_device.py. Params map to the tool's flags (set-profile takes
-        sex/age/height/maxHr/lthr/ftp/weight/bikeWeight; set-timezone takes offsetSeconds)."""
-        action = (body or {}).get("action")
-        address = (body or {}).get("address")
-        if not action or not address:
-            self._send_json(400, {"ok": False, "error": "action and address required"})
+        """POST /api/magene/device {"action", "address"?, ...params} - device control over BLE,
+        decoded from the OneLap app (tools/magene_device.py): battery / info / status (+syncClock)
+        / set-time / set-timezone / altitude / read-profile / set-profile. set-profile takes
+        sex/age/height/maxHr/lthr/ftp/weight/bikeWeight and changes only the fields given."""
+        body = body or {}
+        action = body.get("action")
+        if not action:
+            self._send_json(400, {"ok": False, "error": "action required"})
+            return
+        address = self._magene_address(body)
+        if not address:
+            self._magene_no_device()
             return
         args = [action, "--address", address]
+        if body.get("syncClock"):
+            args.append("--sync-clock")
         flagmap = {"offsetSeconds": "--offset-seconds", "sex": "--sex", "age": "--age",
                    "height": "--height", "maxHr": "--max-hr", "lthr": "--lthr", "ftp": "--ftp",
                    "weight": "--weight", "bikeWeight": "--bike-weight"}
         for key, flag in flagmap.items():
             if body.get(key) is not None:
                 args += [flag, str(body[key])]
-        code, out, err = run_tool("magene_device.py", args, timeout=90)
+        payload = self._magene_run("magene_device.py", args)
+        payload["address"] = address
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    # Magene profile -> the Bryton dialog's field names, so BrytonProfileDialog is reused as-is
+    # (same 1 = male / 0 = female gender encoding on both devices and intervals_athlete.py).
+    _MAGENE_TO_COMMON = {"sex": "gender", "age": "age", "height": "height", "maxHr": "max_hr",
+                         "lthr": "lthr", "ftp": "ftp", "weight": "weight"}
+
+    def _handle_magene_profile_compare(self, body):
+        """POST /api/magene/profile/compare {address?, athlete_id?, api_key?} - same response
+        shape as /api/bryton/profile/compare: {device, intervals, diff}."""
+        body = body or {}
+        address = self._magene_address(body)
+        if not address:
+            self._magene_no_device()
+            return
+        read = self._magene_run("magene_device.py", ["read-profile", "--address", address])
+        prof = read.get("profile")
+        if not read.get("ok") or not prof:
+            self._send_json(502, {"ok": False, "error": "could not read the Magene profile"})
+            return
+        device = {common: prof.get(mk) for mk, common in self._MAGENE_TO_COMMON.items()}
+        intervals = None
+        aid, akey = body.get("athlete_id"), body.get("api_key")
+        if aid and akey:
+            c2, o2, _e2 = run_tool("intervals_athlete.py", ["get", str(aid), str(akey)])
+            if c2 == 0:
+                intervals = json.loads(o2)
+        diff = []
+        if intervals:
+            for f in self._BRYTON_COMPARE_FIELDS:
+                dv, iv = device.get(f), intervals.get(f)
+                if dv is None or iv is None:
+                    continue
+                same = abs(dv - iv) < 0.5 if f == "weight" else dv == iv
+                if not same:
+                    diff.append({"field": f, "device": dv, "intervals": iv})
+        self._send_json(200, {"ok": True, "address": address, "device": device,
+                              "intervals": intervals, "diff": diff})
+
+    def _handle_magene_profile_apply(self, body):
+        """POST /api/magene/profile/apply {direction, fields, address?, athlete_id?, api_key?} -
+        same contract as the Bryton one. 'to_device' writes only the given fields to the C406;
+        'to_intervals' is device-independent, so it reuses the Bryton handler's branch."""
+        body = body or {}
+        fields = body.get("fields") or {}
+        if not fields:
+            self._send_json(400, {"ok": False, "error": "no fields to apply"})
+            return
+        if body.get("direction") != "to_device":
+            self._handle_bryton_profile_apply(body)
+            return
+        address = self._magene_address(body)
+        if not address:
+            self._magene_no_device()
+            return
+        args = ["set-profile", "--address", address]
+        flag = {"gender": "--sex", "age": "--age", "height": "--height", "max_hr": "--max-hr",
+                "lthr": "--lthr", "ftp": "--ftp", "weight": "--weight"}
+        for name, value in fields.items():
+            if name in flag and value is not None:
+                args += [flag[name], str(value)]
+        payload = self._magene_run("magene_device.py", args)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_magene_route(self, body):
+        """POST /api/magene/route {gpx, name?, address?} - send a GPX to the C406 as its (single)
+        navigation route (tools/magene_route.py; replaces whatever route it held)."""
+        body = body or {}
+        gpx = body.get("gpx")
+        if not gpx:
+            self._send_json(400, {"ok": False, "error": "no gpx"})
+            return
+        address = self._magene_address(body)
+        if not address:
+            self._magene_no_device()
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as tf:
+            tf.write(gpx)
+            tmp = tf.name
         try:
-            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
-        except (json.JSONDecodeError, IndexError):
-            payload = {"ok": False, "error": "magene_device.py produced no JSON", "stderr": err}
+            payload = self._magene_run("magene_route.py",
+                                       ["send", "--address", address, "--gpx", tmp,
+                                        "--name", body.get("name") or "Route"], timeout=600)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_magene_workout(self, body):
+        """POST /api/magene/workout {workout, name?, address?} - same body as /api/bryton/workout;
+        the TSS shown on the C406 uses the device's own FTP (tools/magene_workout.py)."""
+        body = body or {}
+        workout = body.get("workout")
+        if not workout:
+            self._send_json(400, {"ok": False, "error": "no workout"})
+            return
+        address = self._magene_address(body)
+        if not address:
+            self._magene_no_device()
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+            json.dump(workout, tf)
+            tmp = tf.name
+        try:
+            args = ["send", tmp, "--address", address]
+            if body.get("name"):
+                args += ["--name", body["name"]]
+            payload = self._magene_run("magene_workout.py", args, timeout=300)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_activities_legacy(self):
