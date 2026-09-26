@@ -15,7 +15,9 @@ function gpx(corners: [number, number][], step = 5): string {
 
 describe('buildEtrexGpx', () => {
   test('an L-shaped track gets one right-turn waypoint near 0.5 km', () => {
-    const r = buildEtrexGpx(gpx([[0, 0], [0, 500], [500, 500]]), { mode: 'track' });
+    // Turn waypoints are off by default now (the track line under you already shows an ordinary
+    // turn), so ask for them explicitly to check the label itself is still computed right.
+    const r = buildEtrexGpx(gpx([[0, 0], [0, 500], [500, 500]]), { mode: 'track', waypointKinds: ['turn'] });
     expect(r.stats.turns).toBe(1);
     const m = /<name>Right (\d+\.\d)<\/name>/.exec(r.gpx);
     expect(m).not.toBeNull();
@@ -23,13 +25,16 @@ describe('buildEtrexGpx', () => {
   });
 
   test('mirror image is a left turn', () => {
-    expect(buildEtrexGpx(gpx([[0, 0], [0, 500], [-500, 500]]), { mode: 'track' }).gpx).toMatch(/<name>Left \d/);
+    expect(buildEtrexGpx(gpx([[0, 0], [0, 500], [-500, 500]]), { mode: 'track', waypointKinds: ['turn'] }).gpx).toMatch(/<name>Left \d/);
   });
 
-  test('a figure of eight is one crossing, crossed straight', () => {
+  test('a figure of eight is one crossing, identified by pass not direction', () => {
+    // Crossings are on by default, identity first ("1st time"/"2nd time"), not a compass
+    // direction - the direction claim isn't reliable inside a curvy loop (confirmed on a real
+    // singletrack flow trail, Andre, 2026-09-26).
     const r = buildEtrexGpx(gpx([[-300, -300], [300, 300], [300, 600], [-300, 600], [-300, 300], [300, -300]]), { mode: 'track' });
     expect(r.stats.crossings).toBe(1);
-    expect(r.gpx).toMatch(/\d(st|nd|rd|th) (Straight|Slight)/);
+    expect(r.gpx).toMatch(/\d(st|nd|rd|th) time \d/);
   });
 
   test('a dead-end out-and-back is a retrace, not a fork', () => {

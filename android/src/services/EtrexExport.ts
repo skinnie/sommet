@@ -305,12 +305,17 @@ const pt = (tag: string, p: Pt, inner = '') => `<${tag} lat="${p.lat.toFixed(6)}
 export interface EtrexOptions {
   mode: 'track' | 'route'; name?: string; maxTrack?: number; maxVia?: number;
   minTurnDeg?: number; crossM?: number; wptOffsetM?: number;
+  /** Which marks get a visible <wpt>: 'turn' | 'crossing'. Default crossing-only (Andre,
+   *  hardware test, 2026-09-26) - the track line already shows every ordinary turn, a waypoint
+   *  only earns its place where the track alone can't tell you what to do. Route via-point
+   *  placement always uses every detected turn/crossing regardless of this option. */
+  waypointKinds?: ('turn' | 'crossing')[];
 }
 
 /** Throws on unreadable / point-less GPX (callers surface the message). */
 export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   const { mode, maxTrack = 10000, maxVia = 50, minTurnDeg = MIN_TURN_DEG, crossM = CROSS_M,
-          wptOffsetM = CROSS_WPT_OFFSET_M } = opts;
+          wptOffsetM = CROSS_WPT_OFFSET_M, waypointKinds = ['crossing'] } = opts;
   const parsed = parseRouteGpx(gpxXml, opts.name ?? 'eTrex route');
   const pts: Pt[] = parsed.points.map(p => ({ lat: p.latitude, lon: p.longitude, ele: p.elevation }));
   if (pts.length < 2) throw new Error('No track points found in this GPX');
@@ -344,10 +349,15 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
       });
       continue;
     }
+    // Identity first, not a compass direction (Andre, hardware test, 2026-09-26): on a real
+    // crossing inside a curvy singletrack loop, the "turn" here is just an artifact of the GPS
+    // heading over a continuous bend, not a fork a rider actually chooses at - the track line
+    // under them already shows the correct curve. What's reliable is that this is pass N
+    // through this exact spot; the direction goes in desc only, hedged, not asserted.
     marks.push({
-      ...c, kind: 'crossing', name: `${ordinal} ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`,
+      ...c, kind: 'crossing', name: `${ordinal} time ${c.km.toFixed(1)}`,
       sym: PASS_SYM[(c.passNo - 1) % PASS_SYM.length],
-      desc: `Track crosses itself here (also at km ${c.otherKm.join(', ') || '-'}) - this is the ${ordinal} time: ${WORDING[c.label].toLowerCase()} at ${c.km.toFixed(1)} km`,
+      desc: `Same spot as km ${c.otherKm.join(', ') || '-'} (${ordinal} time here) - follow the track line, not this label, to be sure; roughly: ${WORDING[c.label]}`,
     });
   }
   marks.sort((a, b) => a.i - b.i);
@@ -359,12 +369,13 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   }
 
   const head = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Sommet" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  // crossings carry wptI (offset past the junction, onto that pass's own branch); turns don't
+  // need it, they're never co-located with another mark, so fall back to i.
+  const shownMarks = marks.filter(m => waypointKinds.includes(m.kind));
   let body: string; let pointsOut: number;
   if (mode === 'track') {
     const idx = pts.length > maxTrack ? dpRank(raw, [], maxTrack - 2) : pts.map((_, i) => i);
-    // crossings carry wptI (offset past the junction, onto that pass's own branch); turns don't
-    // need it, they're never co-located with another mark, so fall back to i.
-    const wpts = marks.map(m => `  ${pt('wpt', s.pts[m.wptI ?? m.i], `<name>${esc(m.name)}</name><desc>${esc(m.desc)}</desc><sym>${esc(m.sym)}</sym>`)}`).join('\n');
+    const wpts = shownMarks.map(m => `  ${pt('wpt', s.pts[m.wptI ?? m.i], `<name>${esc(m.name)}</name><desc>${esc(m.desc)}</desc><sym>${esc(m.sym)}</sym>`)}`).join('\n');
     body = `${wpts}\n  <trk><name>${esc(label0)}</name><trkseg>\n${idx.map(i => `    ${pt('trkpt', pts[i])}`).join('\n')}\n  </trkseg></trk>`;
     pointsOut = idx.length;
   } else {
@@ -381,7 +392,7 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
       mode, km: Math.round(totalKm * 100) / 100, pointsIn: pts.length, pointsOut,
       turns: marks.filter(m => m.kind === 'turn').length,
       crossings: new Set(marks.filter(m => m.kind === 'crossing').map(m => m.event)).size,
-      waypoints: mode === 'track' ? marks.length : 0, waypointsDropped: mode === 'track' ? dropped : 0,
+      waypoints: mode === 'track' ? shownMarks.length : 0, waypointsDropped: mode === 'track' ? dropped : 0,
     },
   };
 }

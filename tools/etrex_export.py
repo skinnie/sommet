@@ -367,7 +367,11 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
     if mode not in ("track", "route"):
         return {"ok": False, "error": "mode must be 'track' or 'route'"}
     parts = set(parts) if parts is not None else ({"track", "waypoints"} if mode == "track" else {"route"})
-    waypoint_kinds = set(waypoint_kinds) if waypoint_kinds is not None else {"turn", "crossing"}
+    # Default to crossings only, not ordinary turns (Andre, hardware test, 2026-09-26): the track
+    # line underneath already shows every ordinary turn - a waypoint only earns its place where
+    # the track alone can't tell you what to do, i.e. a spot you pass more than once. Pass
+    # waypoint_kinds=("turn","crossing") explicitly to get the old fully-annotated behaviour back.
+    waypoint_kinds = set(waypoint_kinds) if waypoint_kinds is not None else {"crossing"}
     try:
         pts = geo_util.parse_gpx_points(gpx_text)
     except Exception as e:  # malformed XML
@@ -408,9 +412,15 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
                                   "- %s time it %s at %.1f km" % (others or "-", ordinal, c["edge"], c["km"])})
             continue
         sym = PASS_SYM[(c["pass_no"] - 1) % len(PASS_SYM)]
-        marks.append({**c, "name": "%s %s %.1f" % (ordinal, _name_word(c["label"]), c["km"]), "sym": sym, "kind": "crossing",
-                      "desc": "Track crosses itself here (also at km %s) - this is the %s time: %s at %.1f km" % (
-                          others or "-", ordinal, _wording(c["label"]).lower(), c["km"])})
+        # Identity first, not a compass direction (Andre, hardware test, 2026-09-26): on a real
+        # crossing inside a curvy singletrack loop, the "turn" here is just an artifact of the
+        # GPS heading over a continuous bend, not a fork a rider actually chooses at - the track
+        # line under them already shows the correct curve. What's reliable is that this is pass
+        # N through this exact spot; the direction goes in <desc> only, hedged, not asserted.
+        marks.append({**c, "name": "%s time %.1f" % (ordinal, c["km"]), "sym": sym, "kind": "crossing",
+                      "desc": "Same spot as km %s (%s time here) - follow the track line, not this "
+                              "label, to be sure; roughly: %s" % (
+                          others or "-", ordinal, _wording(c["label"]))})
     marks.sort(key=lambda m: m["i"])
     wp_dropped = max(0, len(marks) - MAX_WAYPOINTS)
     if wp_dropped:
@@ -520,19 +530,23 @@ def _densify(corners: Sequence[Tuple[float, float]], step: float = 5.0) -> List[
 
 def _selftest() -> int:
     import re
-    # 1) an L: 500 m north then 500 m east -> exactly one right turn near 0.5 km
-    r = build(_synthetic(_densify([(0, 0), (0, 500), (500, 500)])), "track")
+    # 1) an L: 500 m north then 500 m east -> exactly one right turn near 0.5 km. Turn waypoints
+    # are off by default now (the track line under you already shows an ordinary turn), so ask
+    # for them explicitly to check the label itself is still computed right.
+    r = build(_synthetic(_densify([(0, 0), (0, 500), (500, 500)])), "track", waypoint_kinds=("turn",))
     assert r["ok"] and r["stats"]["turns"] == 1, r
     m = re.search(r"<name>Right (\d+\.\d)</name>", r["gpx"])
     assert m and abs(float(m.group(1)) - 0.5) < 0.05, r["gpx"][:600]
     # 2) mirror -> left turn
-    r = build(_synthetic(_densify([(0, 0), (0, 500), (-500, 500)])), "track")
+    r = build(_synthetic(_densify([(0, 0), (0, 500), (-500, 500)])), "track", waypoint_kinds=("turn",))
     assert re.search(r"<name>Left \d", r["gpx"]), r["gpx"][:400]
-    # 3) a figure-of-eight crossing itself straight at ~(0,0)
+    # 3) a figure-of-eight crossing itself straight at ~(0,0) - crossings are on by default,
+    # identity first ("1st time"/"2nd time"), not a compass direction (the direction claim isn't
+    # reliable inside a curvy loop - confirmed on a real singletrack flow trail, Andre, 2026-09-26).
     loop = [(-300, -300), (300, 300), (300, 600), (-300, 600), (-300, 300), (300, -300)]
     r = build(_synthetic(_densify(loop)), "track")
     assert r["stats"]["crossings"] == 1, r["stats"]
-    assert re.search(r"\d(st|nd|rd|th) (Straight|Bear)", r["gpx"]), r["gpx"][:800]
+    assert re.search(r"\d(st|nd|rd|th) time \d", r["gpx"]), r["gpx"][:800]
     # 4) route mode obeys the via cap and keeps both ends
     big = _densify([(0, 0), (0, 400), (400, 400), (400, 0), (800, 0), (800, 400), (1200, 400), (1200, 0)], 5.0)
     r = build(_synthetic(big), "route", max_via=12)
