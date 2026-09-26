@@ -94,5 +94,23 @@ class BuilderMenuFull(unittest.TestCase):
         self.assertEqual(GW.native_names(entries), ["M0", "M1", "M3", "M4"])
 
 
+class ModeActivityId(unittest.TestCase):
+    """Each sport's WORKOUT menu lists only workouts carrying its ActivityID (HW 2026-09-26)."""
+
+    def test_real_sport_modes(self):
+        import glob
+        import pathlib
+        import custom_modes as cm
+        import guided_workout as GW
+        hits = sorted(glob.glob(str(pathlib.Path(__file__).parent / "backups" / "CustomModes_*.bin")))
+        if not hits:
+            self.skipTest("no local CustomModes backup (gitignored)")
+        decoded = cm.decode(open(hits[-1], "rb").read())
+        names = [m["Settings"]["Name"] for m in decoded["exercise_modes"]]
+        for mode, activity in (("Running", 3), ("Cycling", 4), ("Pool swimming", 6)):
+            if mode in names:
+                self.assertEqual(GW.mode_activity_id(decoded, mode), activity)
+
+
 if __name__ == "__main__":
     unittest.main()

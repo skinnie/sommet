@@ -22,6 +22,13 @@ export const WORKOUT_MENU_MAX = 5;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
 /** Case-insensitive sport-mode lookup by name, same as guided_workout.py's find_mode_index. */
+/** The sport mode's ActivityID. Each sport's WORKOUT menu lists only native workouts whose
+ * Apps-entry activityId matches it (HW-confirmed 2026-09-26; guided_workout.py mode_activity_id).
+ * The compiled binary doesn't depend on it - only the entry header does. */
+export function modeActivityId(decoded: DecodedRegion, name: string): number {
+  return decoded.exercise_modes[findModeIndex(decoded, name)].Settings.ActivityID;
+}
+
 export function findModeIndex(decoded: DecodedRegion, name: string): number {
   const idx = decoded.exercise_modes.findIndex(
     (m) => (m.Settings.Name || '').toLowerCase() === name.toLowerCase());

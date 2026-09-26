@@ -3,7 +3,7 @@ import { base64ToBytes, bytesToBase64 } from './Base64';
 import { decode as decodeCM, encodeRegion } from './SportModeCodec';
 import { decodeApps, buildAppsRegion, CompiledApp, AppEntry } from './AppsCodec';
 import { resolveRegion } from './MemoryMap';
-import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE, withLights } from './GuidedWorkoutCore';
+import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE, modeActivityId, withLights } from './GuidedWorkoutCore';
 import { entryLabel, isManaged, planDiff, rebuildAppsRegion, CalendarEntry } from './TrainingCalendarCore';
 
 // Orchestration for the Calendar feature (native I/O) - the Android counterpart to
@@ -120,6 +120,7 @@ export async function syncCalendar(
     const pendingCompile = toAdd.filter((e) => !(e as CalendarPlanEntry).compiled)
       .map((e) => entryLabel(e.date, e.workoutName));
 
+    let cmDecoded = decodeCM(base64ToBytes(await readCustomModesRaw()));
     let currentList = keptRawBlocks.map((b) => ({ rawBlock: b }));
     let newAppsBytes: Uint8Array | null = null;
     const added: string[] = [];
@@ -127,7 +128,10 @@ export async function syncCalendar(
       const label = entryLabel(e.date, e.workoutName);
       // Backlight flashes from the workout's per-step ticks - the compiler emits only beeps.
       const [binary] = e.workout ? withLights(e.compiled!.binary, e.workout) : [e.compiled!.binary];
-      const compiled: CompiledApp = { ...e.compiled!, binary, name: label };
+      // Listed under this sport's WORKOUT menu only with its ActivityID (a ride must not keep
+      // the converter's default Running id).
+      const compiled: CompiledApp = { ...e.compiled!, binary, name: label,
+                                      activityId: modeActivityId(cmDecoded, e.mode) };
       newAppsBytes = buildAppsRegion(currentList.map((x) => x.rawBlock), compiled, GUIDANCE_ENTRY_TYPE);
       currentList = decodeApps(newAppsBytes).map((x) => ({ rawBlock: x.rawBlock }));
       added.push(label);
@@ -139,7 +143,6 @@ export async function syncCalendar(
     }
 
     // Ensure every mode named by a kept-or-added entry has the guidance display.
-    let cmDecoded = decodeCM(base64ToBytes(await readCustomModesRaw()));
     const modesNeeded = new Set<string>();
     for (const e of plan) if (e.date >= isoDate(today)) modesNeeded.add(e.mode);
     for (const e of ready as CalendarPlanEntry[]) modesNeeded.add(e.mode);

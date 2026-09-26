@@ -145,6 +145,7 @@ def sync(link, plan, today, write, json_out):
                if is_managed(e["name"]) and e["_raw_block"] not in kept_block_set
                and e["name"] not in waiting]
 
+    decoded = cm.decode(current_cm)
     lang = GW.read_watch_language(link)
     current_list = [{"_raw_block": b} for b in kept_blocks]
     added_names = []
@@ -153,11 +154,15 @@ def sync(link, plan, today, write, json_out):
     for e in to_add:
         label = entry_label(e["date"], e["workout"]["name"])
         try:
+            # Each sport's WORKOUT menu lists only workouts with its ActivityID - a ride from
+            # intervals.icu must carry Cycling's, not the converter's default Running (3).
+            activity_id = GW.mode_activity_id(decoded, e["mode"])
             compiled = GW.compile_workout(e["workout"], lang)
         except SystemExit as err:
             failed.append((label, str(err)))
             continue
         compiled["name"] = label
+        compiled["activityId"] = activity_id
         new_apps_bytes = WI.build_apps_region(current_list, compiled, entry_type=GW.GUIDANCE_ENTRY_TYPE)
         current_list = WI.apps_entries_with_raw_blocks(new_apps_bytes)
         added_names.append(compiled["name"])
@@ -166,7 +171,6 @@ def sync(link, plan, today, write, json_out):
 
     # Ensure every mode named by a kept-or-added entry has the guidance display so its
     # WORKOUT menu is surfaced at all (harmless no-op if it's already there).
-    decoded = cm.decode(current_cm)
     modes_needed = {e["mode"] for e in plan["entries"] if e["date"] >= str(today)} | \
                    {e.get("mode") for e in to_add}
     modes_touched = []

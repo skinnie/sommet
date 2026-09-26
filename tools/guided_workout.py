@@ -291,6 +291,14 @@ def guidance_display():
             "Type": GUIDANCE_DISP_TYPE, "Fields": []}
 
 
+def mode_activity_id(decoded, mode_name):
+    """The sport mode's ActivityID. Each sport's WORKOUT menu lists only the native workouts
+    whose Apps-entry activityId matches it (of the first WORKOUT_MENU_MAX on the watch) -
+    HW-confirmed 2026-09-26: Bike (4) and Swim (6) tests showed up only under Cycling / Pool
+    swimming. The compiled binary doesn't depend on it; only the entry header does."""
+    return decoded["exercise_modes"][find_mode_index(decoded, mode_name)]["Settings"]["ActivityID"]
+
+
 def find_mode_index(decoded, name):
     for i, m in enumerate(decoded["exercise_modes"]):
         if (m.get("Settings", {}).get("Name") or "").lower() == name.lower():
@@ -300,7 +308,7 @@ def find_mode_index(decoded, name):
 
 
 def build_regions(current_custom_modes, current_apps, workout, mode_name, append=False, lang=None,
-                  replace=None):
+                  replace=None, ignore_menu_limit=False):
     """Returns (new_apps_bytes, new_custom_modes_bytes). Adds ONE guidance workout: the compiled
     binary into the Apps region (byte0=1) and a guidance display into the sport mode (no RULE -
     see the note below on why).
@@ -317,12 +325,14 @@ def build_regions(current_custom_modes, current_apps, workout, mode_name, append
     existing = WI.apps_entries_with_raw_blocks(current_apps) if append else []
     if replace:
         existing = without_native(existing, replace)
-    if append and len(native_names(existing)) >= WORKOUT_MENU_MAX:
+    if append and not ignore_menu_limit and len(native_names(existing)) >= WORKOUT_MENU_MAX:
         raise MenuFull(native_names(existing))
+    decoded = cm.decode(current_custom_modes)
+    activity_id = mode_activity_id(decoded, mode_name)  # before the compile: fail fast on a bad mode
     compiled = compile_workout(workout, lang)
+    compiled["activityId"] = activity_id  # listed under THIS sport's WORKOUT menu
     new_apps = WI.build_apps_region(existing, compiled, entry_type=GUIDANCE_ENTRY_TYPE)
 
-    decoded = cm.decode(current_custom_modes)
     mode_index = find_mode_index(decoded, mode_name)
     mode = decoded["exercise_modes"][mode_index]
     has_guidance_display = any(d.get("Template") == GUIDANCE_TEMPLATE
@@ -356,6 +366,8 @@ def main():
                          "(default: reset the Apps region to just this one workout)")
     ap.add_argument("--replace", metavar="NAME",
                     help="with --append: take this native workout out first (when the menu is full)")
+    ap.add_argument("--ignore-menu-limit", action="store_true",
+                    help="hardware experiments only: install past the 5 workouts the menu shows")
     ap.add_argument("--json", action="store_true", help="print a one-line JSON result (for the GUI)")
     ap.add_argument("--compile-only", action="store_true",
                     help="just compile the workout JSON and report the binary (no watch needed)")
@@ -423,7 +435,7 @@ def main():
     try:
         new_apps, new_cm, wk_name, mode_name = build_regions(
             current_cm, current_apps, workout, args.mode, append=args.append, lang=lang,
-            replace=args.replace)
+            replace=args.replace, ignore_menu_limit=args.ignore_menu_limit)
     except (MenuFull, ValueError) as err:
         full = isinstance(err, MenuFull)
         if args.json:
