@@ -208,6 +208,7 @@ qt_add_qml_module(ambitapp
         qml/components/MageneIcon.qml
         qml/components/ProfileSyncPrompt.qml
         qml/components/MageneSettingsPanel.qml
+        qml/components/BrytonBleSettingsPanel.qml
         qml/components/MageneScreensPanel.qml
         qml/components/BrytonScreensPanel.qml
         qml/components/RouteLibraryView.qml

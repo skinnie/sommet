@@ -7,6 +7,8 @@ decompile (bleplugin/NewSettingUtil + ParserUtil) and was checked live against h
     ./tools/bryton_ble.py hello --address ADDR          -> {ok, batteryBars, batteryOf, profile, settings}
     ./tools/bryton_ble.py set-profile --address ADDR [--ftp W] [--lthr B] [--max-hr B] [--map W]
                                       [--weight KG] [--height CM]
+    ./tools/bryton_ble.py set-settings --address ADDR  < {"backlight": 6, "autoPause": 1, ...}
+                                                        -> {ok, written, settings}
     ./tools/bryton_ble.py rides --address ADDR          -> {ok, rides:[{name, fileId, seconds, sport}]}
     ./tools/bryton_ble.py pull --address ADDR --dest DIR [--only-stdin]
                                                         -> {ok, copied:[{kind, name, path}]}
@@ -259,6 +261,38 @@ async def read_all(link):
     return out
 
 
+# Device settings the app writes as a plain [cmd, 1, value] on the Aero 60 (version-0 encodings;
+# NewSettingUtil.setBacklight/setGps/setAutoPause/setKeyTone/setSound/setUnit), with the values the
+# app's own menus allow (BackLightMenuUtil default menu, GpsMenuUtil default menu).
+SETTINGS = {
+    "backlight": (CMD_BACKLIGHT, range(0, 7)),   # 0 5s, 1 15s, 2 30s, 3 1min, 4 2min, 5 never, 6 auto
+    "gpsMode": (CMD_GPS, range(0, 5)),           # 0 off, 1 GPS+Gal+QZ, 2 power save, 3 GPS+GLONASS, 4 GPS+BeiDou
+    "autoPause": (CMD_AUTO_PAUSE, range(0, 2)),
+    "keytone": (CMD_KEYTONE, range(0, 2)),
+    "sound": (CMD_SOUND, range(0, 2)),
+    "unit": (CMD_UNIT, range(0, 2)),             # 0 metric, 1 imperial
+}
+
+
+def check_settings(changes):
+    for name, value in changes.items():
+        if name not in SETTINGS:
+            raise ValueError(f"unknown setting {name}")
+        if int(value) not in SETTINGS[name][1]:
+            raise ValueError(f"{name}={value} not allowed")
+
+
+async def set_settings(link, changes):
+    check_settings(changes)
+    done = []
+    for name, value in changes.items():
+        cmd = SETTINGS[name][0]
+        if await link.request(_frame(cmd, 1, int(value))) is None:
+            raise RuntimeError(f"no answer writing {name}")
+        done.append(name)
+    return done
+
+
 async def set_profile(link, fields):
     for name, value in fields.items():
         lo, hi = BOUNDS[name]
@@ -299,6 +333,13 @@ async def run(args):
 
     if not args.address:
         raise ValueError("--address is required")
+    # Validate writes BEFORE connecting, so a bad request never reaches the device.
+    changes = None
+    if args.action == "set-settings":
+        changes = json.loads(sys.stdin.read() or "{}")
+        if not changes:
+            raise ValueError("nothing to set")
+        check_settings(changes)
     async with BleakClient(args.address, timeout=20) as client:
         link = Link(client)
         await link.start()
@@ -334,6 +375,10 @@ async def run(args):
             except Exception as exc:  # noqa: BLE001 - the card still works without the ride list
                 out["ridesError"] = str(exc)
             return out
+        if args.action == "set-settings":
+            written = await set_settings(link, changes)
+            after = await read_all(link)
+            return {"ok": True, "written": written, "settings": after["settings"]}
         if args.action == "set-profile":
             fields = {k: v for k, v in (("ftp", args.ftp), ("lthr", args.lthr), ("max_hr", args.max_hr),
                                         ("map", args.map), ("weight", args.weight),
@@ -348,7 +393,7 @@ async def run(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("action", choices=["scan", "hello", "set-profile", "rides", "pull"])
+    ap.add_argument("action", choices=["scan", "hello", "set-profile", "set-settings", "rides", "pull"])
     ap.add_argument("--dest")
     ap.add_argument("--only-stdin", action="store_true")
     ap.add_argument("--address")
