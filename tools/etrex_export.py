@@ -39,6 +39,12 @@ MIN_TURN_DEG = 40.0      # below this a bend is not worth a waypoint
 TURN_GAP_M = 40.0        # two turn waypoints closer than this collapse into the sharper one
 CROSS_M = 15.0           # two passes closer than this are "the track meeting itself"
 CROSS_MIN_ALONG_M = 150.0  # ...provided they are at least this far apart ALONG the track
+# Distinct per-pass symbol - a cue that survives GPS drift and screen zoom, unlike relying on
+# the offset position alone (untested assumption: whether the eTrex actually renders these
+# Garmin symbol names as visually distinct icons - confirm on hardware). Cycles for a 3rd+ pass
+# through the same spot (rare - only a real triple self-crossing would hit it).
+PASS_SYM = ["Flag, Green", "Flag, Yellow", "Flag, Red", "Flag, Blue"]
+
 CROSS_WPT_OFFSET_M = 18.0  # place each crossing's <wpt> this far past the junction, along THAT
                             # pass's own outgoing direction - not at the junction itself. Two
                             # passes through the same spot diverge afterwards, so offsetting each
@@ -271,7 +277,11 @@ def find_crossings(xy: Sequence[Tuple[float, float]], along: Sequence[float],
     out: List[dict] = []
     for ev_no, (_, rs) in enumerate(sorted(events.items(), key=lambda kv: runs[kv[1][0]][0])):
         kms = [along[runs[r][0]] / 1000.0 for r in rs]
-        for r in rs:
+        # Passes in the order you'd actually ride through them - lets the 1st/2nd/3rd pass
+        # through this same spot get a visibly different marker (see PASS_SYM below), a cue
+        # that survives GPS drift and screen zoom, unlike relying on the offset position alone.
+        rs_in_order = sorted(rs, key=lambda r: runs[r][0])
+        for pass_no, r in enumerate(rs_in_order, start=1):
             a, b = runs[r][0], runs[r][-1]
             length = along[b] - along[a]
             spots = [(a + b) // 2] if length <= 60.0 else [a, b]
@@ -280,7 +290,7 @@ def find_crossings(xy: Sequence[Tuple[float, float]], along: Sequence[float],
                     _heading_change(xy, a, a) if i == a else _heading_change(xy, b, b))
                 out.append({"i": i, "wpt_i": _offset_forward(along, i, wpt_offset_m),
                             "km": along[i] / 1000.0, "delta": d, "label": _label(d),
-                            "event": ev_no + 1,
+                            "event": ev_no + 1, "pass_no": pass_no,
                             "other_km": [round(k, 1) for k in kms if abs(k - along[a] / 1000.0) > 0.05]})
     out.sort(key=lambda c: c["i"])
     return out
@@ -351,7 +361,8 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
                       "kind": "turn"})
     for c in crossings:
         others = ", ".join("%.1f" % k for k in c["other_km"])
-        marks.append({**c, "name": "Cross %s %.1f" % (_name_word(c["label"]), c["km"]), "sym": "Flag, Red", "kind": "crossing",
+        sym = PASS_SYM[(c["pass_no"] - 1) % len(PASS_SYM)]
+        marks.append({**c, "name": "Cross %s %.1f" % (_name_word(c["label"]), c["km"]), "sym": sym, "kind": "crossing",
                       "desc": "Track crosses itself here (also at km %s): %s at %.1f km" % (
                           others or "-", _wording(c["label"]).lower(), c["km"])})
     marks.sort(key=lambda m: m["i"])
