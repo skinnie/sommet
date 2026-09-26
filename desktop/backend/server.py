@@ -823,7 +823,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # holding the watch lock across a multi-minute ride pull needlessly blocked every watch poll
     # behind it, which surfaced as "server didn't reply" with several devices plugged (André,
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
-    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py", "bt_bonds.py",
+    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py", "bt_bonds.py", "bryton_ble.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
@@ -1200,6 +1200,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_fields()
         elif self.path == "/api/magene/devices":
             self._handle_magene_devices()
+        elif self.path == "/api/brytonble/devices":
+            self._handle_brytonble_devices()
         elif self.path == "/api/bt/paired":
             self._handle_bt_paired()
         elif self.path.startswith("/api/magene/rides"):
@@ -1442,6 +1444,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_route(body)
         elif self.path == "/api/magene/import":
             self._handle_magene_import(body)
+        elif self.path == "/api/brytonble/device":
+            self._handle_brytonble_device(body)
+        elif self.path == "/api/brytonble/profile/compare":
+            self._handle_brytonble_profile_compare(body)
+        elif self.path == "/api/brytonble/profile/apply":
+            self._handle_brytonble_profile_apply(body)
         elif self.path == "/api/magene/device":
             self._handle_magene_device(body)
         elif self.path == "/api/magene/profile/compare":
@@ -2379,6 +2387,78 @@ class Handler(BaseHTTPRequestHandler):
             if name in flag and value is not None:
                 args += [flag[name], str(value)]
         payload = self._magene_run("magene_device.py", args)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    # --- Bryton Aero 60 over Bluetooth (tools/bryton_ble.py; André, 2026-09-26). Same shapes as
+    # the Magene endpoints so Home's profile-sync flow is shared. The device only advertises
+    # while it isn't connected to the phone app.
+    def _handle_brytonble_devices(self):
+        """GET /api/brytonble/devices - Aero 60s advertising now (~8 s scan)."""
+        payload = self._magene_run("bryton_ble.py", ["scan"], timeout=40)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_brytonble_device(self, body):
+        """POST /api/brytonble/device {action: "hello", address} - ONE connection: battery,
+        profile (height/weight/birthday/FTP/MHR/LTHR/MAP) and settings."""
+        body = body or {}
+        address = body.get("address")
+        if body.get("action") != "hello" or not address:
+            self._send_json(400, {"ok": False, "error": "need action \"hello\" and an address"})
+            return
+        payload = self._magene_run("bryton_ble.py", ["hello", "--address", address], timeout=90)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    _BRYTONBLE_FIELDS = ("ftp", "lthr", "max_hr", "map", "weight", "height")
+
+    def _handle_brytonble_profile_compare(self, body):
+        """POST /api/brytonble/profile/compare {address, device_profile, athlete_id, api_key} -
+        {device, intervals, diff} like the Magene/Bryton ones. `device_profile` is the profile the
+        card's hello already read (no second connection). Age/gender aren't compared: the Aero 60
+        stores a birthday, and writing it isn't wired yet."""
+        body = body or {}
+        prof = body.get("device_profile") or {}
+        device = {f: prof.get(f) for f in self._BRYTONBLE_FIELDS}
+        intervals = None
+        aid, akey = body.get("athlete_id"), body.get("api_key")
+        if aid and akey:
+            c2, o2, _e2 = run_tool("intervals_athlete.py", ["get", str(aid), str(akey)])
+            if c2 == 0:
+                intervals = json.loads(o2)
+        diff = []
+        if intervals:
+            for f in self._BRYTONBLE_FIELDS:
+                dv, iv = device.get(f), intervals.get(f)
+                if dv is None or iv is None:
+                    continue
+                same = abs(dv - iv) < 0.5 if f in ("weight", "height") else dv == iv
+                if not same:
+                    diff.append({"field": f, "device": dv, "intervals": iv})
+        self._send_json(200, {"ok": True, "address": body.get("address"), "device": device,
+                              "intervals": intervals, "diff": diff})
+
+    def _handle_brytonble_profile_apply(self, body):
+        """POST /api/brytonble/profile/apply {direction, fields, address} - 'to_device' writes the
+        given fields over Bluetooth (bounds-checked in the tool); 'to_intervals' reuses the
+        device-independent Bryton branch."""
+        body = body or {}
+        fields = body.get("fields") or {}
+        if not fields:
+            self._send_json(400, {"ok": False, "error": "no fields to apply"})
+            return
+        if body.get("direction") != "to_device":
+            self._handle_bryton_profile_apply(body)
+            return
+        address = body.get("address")
+        if not address:
+            self._send_json(400, {"ok": False, "error": "no Bryton address"})
+            return
+        args = ["set-profile", "--address", address]
+        flag = {"ftp": "--ftp", "lthr": "--lthr", "max_hr": "--max-hr", "map": "--map",
+                "weight": "--weight", "height": "--height"}
+        for name, value in fields.items():
+            if name in flag and value is not None:
+                args += [flag[name], str(int(round(value)) if name in ("ftp", "lthr", "max_hr", "map") else value)]
+        payload = self._magene_run("bryton_ble.py", args, timeout=90)
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_magene_route(self, body):
