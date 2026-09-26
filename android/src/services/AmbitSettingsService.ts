@@ -119,6 +119,26 @@ export interface WriteSettingState {
  * itself). `fields` must be the same table readAmbitSettings() returned in its own state -
  * the caller (SettingsScreen.tsx) already has it from the read that produced the row being
  * edited, so no extra device-detection round trip happens here. */
+/** The connected watch's own MaxHR/RestHR, for resolving intervals.icu HR zones the way the watch
+ *  does (desktop tools/intervals_workout.read_watch_hr): the Karvonen rescale and the walk floor
+ *  (= resting HR) need them. Best-effort - nulls if no watch answers, and the import then keeps
+ *  intervals.icu's own bands, exactly like the desktop. */
+export function readWatchMaxRestHr(): Promise<{ maxHr: number | null; restHr: number | null }> {
+  return new Promise(resolve => {
+    readAmbitSettings(s => {
+      if (s.phase === 'done') {
+        const get = (key: string) => {
+          const v = s.settings?.find(x => x.key === key)?.value;
+          return typeof v === 'number' && v > 0 ? v : null;
+        };
+        resolve({ maxHr: get('max_hr'), restHr: get('rest_hr') });
+      } else if (s.phase === 'error') {
+        resolve({ maxHr: null, restHr: null });
+      }
+    }).catch(() => resolve({ maxHr: null, restHr: null }));
+  });
+}
+
 export async function writeAmbitSetting(
   key: string,
   value: number,
