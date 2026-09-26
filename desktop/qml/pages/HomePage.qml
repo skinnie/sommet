@@ -92,14 +92,17 @@ PageFlickable {
     // The remembered Magene only counts as connected while it actually answers (its last
     // connection worked). Asleep/off, it stays selectable but reads "asleep" and isn't counted
     // (André, 2026-09-26: "c406 shows connected and the device is off").
-    // Reachable = it answered within the last 10 minutes (it sleeps; a BLE scan to check costs
-    // seconds, so the last real answer is the signal).
-    property real mageneSeenAt: 0
-    property bool mageneReachable: false
-    function mageneAnswered(ok) { root.mageneSeenAt = ok ? Date.now() : 0; root.mageneReachable = ok }
-    Timer { interval: 60000; running: true; repeat: true
-            onTriggered: if (root.mageneReachable && Date.now() - root.mageneSeenAt > 600000) root.mageneReachable = false }
-    function isReachable(bike) { return bike.kind !== "c406" || root.mageneReachable }
+    // Reachability lives in BikeDevices (shared with Routes/the planner, kept fresh by its scan).
+    function mageneAnswered(ok) { BikeDevices.mageneAnswered(ok) }
+    function isReachable(bike) { return BikeDevices.isReachable(bike) }
+    // The C406 came into range while it's the active device and the card hasn't read it yet.
+    Connections {
+        target: BikeDevices
+        function onMageneReachableChanged() {
+            if (BikeDevices.mageneReachable && root.activeBike && root.activeBike.kind === "c406" && !root.mageneStatus)
+                root.fetchMageneStatus()
+        }
+    }
     readonly property int reachableCount: DeviceService.connectedWatches.length
         + bikeComputers.filter(b => root.isReachable(b)).length + (GarminService.connected ? 1 : 0)
     property string bikeSyncMsg: ""
@@ -200,6 +203,7 @@ PageFlickable {
     property var mageneStatus: null
     property string mageneStatusFor: ""
     property bool mageneBusy: false
+    onMageneBusyChanged: BikeDevices.mageneConnecting = mageneBusy
     function fetchMageneStatus() {
         if (!root.activeBike || root.activeBike.kind !== "c406") {
             root.mageneStatus = null;

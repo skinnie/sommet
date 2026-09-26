@@ -244,14 +244,16 @@ Item {
     function probeBryton() {
         api("GET", "/api/bryton/info", null, function(status, res) { root.brytonHere = !!(res && res.ok) })
     }
-    readonly property bool watchCanTakeRoute: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+    // Only a C406 that's actually on (BikeDevices' scan / last answer), not just remembered.
+    readonly property bool mageneHere: BikeDevices.magene !== null && BikeDevices.mageneReachable
+    readonly property bool watchCanTakeRoute: HomeViewModel.connected && DeviceCapabilities.supportsRouteWrite
                                               && DeviceCapabilities.supportsRouteWrite
     function cleanName() { return (routeName || "Sommet route").replace(/\.gpx$/i, "") }
     function sendToBryton() {
         busy = true; statusMsg = qsTr("Sending to the Bryton…")
         api("POST", "/api/bryton/route", { name: cleanName(), gpx: plannedGpx }, function(status, res) {
             busy = false
-            statusMsg = (res && res.ok) ? qsTr("On the Bryton — in Follow Track after unplugging.")
+            statusMsg = (res && res.ok) ? qsTr("Sent to the Bryton — it shows up once you unplug it.")
                                         : (res && res.error ? res.error : qsTr("Send to Bryton failed"))
         })
     }
@@ -259,8 +261,11 @@ Item {
         busy = true; statusMsg = qsTr("Sending to the Magene… keep the C406 awake and close")
         const body = { name: cleanName(), gpx: plannedGpx }
         if (BikeDevices.magene && BikeDevices.magene.address) body.address = BikeDevices.magene.address
+        BikeDevices.mageneConnecting = true
         api("POST", "/api/magene/route", body, function(status, res) {
             busy = false
+            BikeDevices.mageneConnecting = false
+            BikeDevices.mageneAnswered(!!(res && res.ok))
             if (res && res.ok) {
                 statusMsg = qsTr("On the Magene — it's the route under Navigation.")
                 mageneRoute.name = cleanName(); mageneRoute.libraryId = root.libraryId
@@ -622,8 +627,8 @@ Item {
         id: sendMenu
         onAboutToShow: root.probeBryton()
         ThemedMenuItem { text: qsTr("Watch"); visible: root.watchCanTakeRoute; onTriggered: sendDialog.open() }
-        ThemedMenuItem { text: qsTr("Bryton (Follow Track)"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
-        ThemedMenuItem { text: qsTr("Magene C406"); visible: BikeDevices.magene !== null; onTriggered: root.sendToMagene() }
+        ThemedMenuItem { text: qsTr("Bryton"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
+        ThemedMenuItem { text: qsTr("Magene C406"); visible: root.mageneHere; onTriggered: root.sendToMagene() }
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
         // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
         ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")
@@ -633,7 +638,7 @@ Item {
                          visible: GarminService.connected && GarminService.hasSdCard
                          onTriggered: root.exportForEtrex("route", true) }
         ThemedMenuItem { text: qsTr("No device connected"); enabled: false
-                         visible: !root.watchCanTakeRoute && !root.brytonHere && BikeDevices.magene === null
+                         visible: !root.watchCanTakeRoute && !root.brytonHere && !root.mageneHere
                                   && !(GarminService.connected && GarminService.hasSdCard) }
     }
 
