@@ -33,7 +33,7 @@ ApplicationWindow {
     readonly property var pageSources: ({
         home: "pages/HomePage.qml",
         activities: "pages/ActivitiesPage.qml",
-        routes: "pages/RoutesPage.qml",
+        routes: "pages/PlanRoutePage.qml",      // merged into Routes (2026-09-26)
         planRoute: "pages/PlanRoutePage.qml",
         racePlan: "pages/RacePlanPage.qml",
         pois: "pages/PoisPage.qml",
