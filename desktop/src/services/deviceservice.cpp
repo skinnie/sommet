@@ -280,6 +280,8 @@ void DeviceService::refreshDevices()
                 {QStringLiteral("productId"), w.value(QStringLiteral("productId")).toInt()},
                 {QStringLiteral("name"), w.value(QStringLiteral("name")).toString()},
                 {QStringLiteral("codename"), w.value(QStringLiteral("codename")).toString()},
+                // Tells two watches of the same model apart (send a route to THIS Peak).
+                {QStringLiteral("serial"), w.value(QStringLiteral("serial")).toString()},
             });
         }
         m_connectedWatches = watches;

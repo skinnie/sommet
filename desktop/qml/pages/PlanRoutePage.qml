@@ -246,7 +246,9 @@ Item {
     }
     // Only a C406 that's actually on (BikeDevices' scan / last answer), not just remembered.
     readonly property bool mageneHere: BikeDevices.magene !== null && BikeDevices.mageneReachable
-    readonly property bool watchCanTakeRoute: HomeViewModel.connected && DeviceCapabilities.supportsRouteWrite
+    readonly property bool watchCanTakeRoute: HomeViewModel.routeWatches.length > 0
+    // The watch picked in "Send to…" (one row per plugged watch); the send dialog confirms it.
+    property var sendWatch: null
                                               && DeviceCapabilities.supportsRouteWrite
     function cleanName() { return (routeName || "Sommet route").replace(/\.gpx$/i, "") }
     function sendToBryton() {
@@ -456,13 +458,16 @@ Item {
     function doSend() {
         if (!plannedGpx) return
         busy = true
-        statusMsg = qsTr("Sending to watch…")
-        api("POST", "/api/routes",
-            { name: (routeName || "Sommet plan").replace(/\.gpx$/i, ""), gpx: plannedGpx, confirm: true },
+        const w = sendWatch
+        const label = w ? w.label : qsTr("watch")
+        statusMsg = qsTr("Sending to %1…").arg(label)
+        const body = { name: (routeName || "Sommet plan").replace(/\.gpx$/i, ""), gpx: plannedGpx, confirm: true }
+        if (w && w.productId >= 0) { body.productId = w.productId; if (w.serial) body.serial = w.serial }
+        api("POST", "/api/routes", body,
             function(status, res) {
                 busy = false
                 statusMsg = (res && res.ok)
-                    ? qsTr("Sent to watch — %1 existing route(s) kept").arg(res.routes_kept || 0)
+                    ? qsTr("Sent to %1 — %2 existing route(s) kept").arg(label).arg(res.routes_kept || 0)
                     : (res && res.stderr ? res.stderr.trim()
                                          : (res && res.error ? res.error : qsTr("Send failed")))
             })
@@ -626,7 +631,17 @@ Item {
     ThemedMenu {
         id: sendMenu
         onAboutToShow: root.probeBryton()
-        ThemedMenuItem { text: qsTr("Watch"); visible: root.watchCanTakeRoute; onTriggered: sendDialog.open() }
+        // One row per plugged watch, named (three Peaks -> three rows, told apart by serial).
+        Instantiator {
+            model: HomeViewModel.routeWatches
+            delegate: ThemedMenuItem {
+                required property var modelData
+                text: modelData.label
+                onTriggered: { root.sendWatch = modelData; sendDialog.open() }
+            }
+            onObjectAdded: (i, item) => sendMenu.insertItem(i, item)
+            onObjectRemoved: (i, item) => sendMenu.removeItem(item)
+        }
         ThemedMenuItem { text: qsTr("Bryton"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
         ThemedMenuItem { text: qsTr("Magene C406"); visible: root.mageneHere; onTriggered: root.sendToMagene() }
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
@@ -1694,7 +1709,8 @@ Item {
                 wrapMode: Text.WordWrap
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeBody
-                text: qsTr("Send this route to the connected watch? Your existing routes are kept.")
+                text: qsTr("Send this route to %1? Your existing routes are kept.")
+                      .arg(root.sendWatch ? root.sendWatch.label : qsTr("the connected watch"))
             }
             Text {
                 width: parent.width

@@ -241,14 +241,19 @@ PageFlickable {
     // straight away; several -> a menu to pick.
     readonly property var sendTargets: {
         const out = []
-        if (root.watchHere && DeviceCapabilities.supportsRouteWrite) out.push({ key: "watch", label: HomeViewModel.deviceDisplayName || qsTr("Watch") })
+        HomeViewModel.routeWatches.forEach((w, i) => out.push({ key: "watch:" + i, label: w.label }))
         if (root.etrexHere && GarminService.hasSdCard) out.push({ key: "etrex", label: qsTr("eTrex (SD card)") })
         if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("Bryton") })
         if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("Magene") })
         return out
     }
     function sendPendingTo(key) {
-        if (key === "watch") RouteService.uploadPendingRoute(true)
+        if (key.startsWith("watch:")) {
+            const w = HomeViewModel.routeWatches[parseInt(key.substring(6))]
+            if (!w) return
+            if (w.productId < 0) RouteService.uploadPendingRoute(true)      // the Bluetooth watch
+            else RouteService.uploadPendingRouteTo(w.productId, w.serial)
+        }
         else if (key === "etrex") GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
                                                                  RouteService.pendingRouteGpxText)
         else if (key === "bryton") root.sendPendingToBryton()
@@ -256,7 +261,18 @@ PageFlickable {
     }
     ThemedMenu {
         id: sendMenu
-        ThemedMenuItem { text: qsTr("Watch"); visible: root.sendTargets.some(t => t.key === "watch"); onTriggered: root.sendPendingTo("watch") }
+        // One row per plugged watch, named (three Peaks -> three rows).
+        Instantiator {
+            model: HomeViewModel.routeWatches
+            delegate: ThemedMenuItem {
+                required property var modelData
+                required property int index
+                text: modelData.label
+                onTriggered: root.sendPendingTo("watch:" + index)
+            }
+            onObjectAdded: (i, item) => sendMenu.insertItem(i, item)
+            onObjectRemoved: (i, item) => sendMenu.removeItem(item)
+        }
         ThemedMenuItem { text: qsTr("eTrex (SD card)"); visible: root.sendTargets.some(t => t.key === "etrex"); onTriggered: root.sendPendingTo("etrex") }
         ThemedMenuItem { text: qsTr("Bryton"); visible: root.sendTargets.some(t => t.key === "bryton"); onTriggered: root.sendPendingTo("bryton") }
         ThemedMenuItem { text: qsTr("Magene"); visible: root.sendTargets.some(t => t.key === "magene"); onTriggered: root.sendPendingTo("magene") }

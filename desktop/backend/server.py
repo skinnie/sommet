@@ -3342,21 +3342,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"gpx\" (GPX file text)"})
             return
         confirm = bool(body.get("confirm", False))
+        # Optional target (2026-09-26, "imagine I have 3 suunto watches plugged"): one specific
+        # USB watch, for this write only - product id + serial, so two Ambit3 Peaks are told
+        # apart. The read-back of its existing routes uses the SAME pin, so they're that watch's.
+        pid = body.get("productId")
+        pid = int(pid) if isinstance(pid, int) or (isinstance(pid, str) and pid.isdigit()) else None
+        serial = (body.get("serial") or "").strip() or None
+        targeted = pid is not None or serial is not None
 
         with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
             f.write(gpx_text)
             gpx_path = f.name
         existing_paths = []
         try:
-            if ble_bridge.bridge.status().get("handshake_done"):
+            if not targeted and ble_bridge.bridge.status().get("handshake_done"):
                 self._handle_route_write_ble(gpx_path, confirm)
                 return
             if confirm:
-                existing_paths = self._existing_route_gpx_paths()
+                try:
+                    existing_paths = self._existing_route_gpx_paths(pid, serial)
+                except RuntimeError as exc:
+                    self._send_json(502, {"ok": False, "error": str(exc), "stderr": str(exc)})
+                    return
             args = ["route", *existing_paths, gpx_path]
             if confirm:
                 args.append("--write")
-            code, out, err = run_tool("write_nav.py", args)
+            code, out, err = run_tool("write_nav.py", args, product_id=pid, serial=serial)
         finally:
             Path(gpx_path).unlink(missing_ok=True)
             for p in existing_paths:
@@ -3367,27 +3378,37 @@ class Handler(BaseHTTPRequestHandler):
             "routes_kept": len(existing_paths),
             "raw_output": out, "stderr": err})
 
-    def _existing_route_gpx_paths(self):
+    def _existing_route_gpx_paths(self, product_id=None, serial=None):
         """Every route currently on the watch, each exported to its own temp GPX file -
         the USB-path counterpart to `write_nav.existing_routes_as_gpx()` (BLE calls that
         directly; USB's own architecture is subprocess-per-tool, so this shells out to the
         same already-tested `nav --route-gpx`/`--json` CLI surface `/api/routes/export`
         already uses, once per existing route, rather than importing write_nav.py's
         internals here). Caller is responsible for deleting the returned paths."""
-        code, out, err = run_tool("write_nav.py", ["nav", "--json"])
+        code, out, err = run_tool("write_nav.py", ["nav", "--json"], product_id=product_id, serial=serial)
         summary = self._parse_last_json_line(out)
-        route_count = len(summary.get("routes", [])) if summary else 0
+        # A failed read must NOT look like "no routes": the write rebuilds the whole Routes
+        # region from these paths, so an empty list here would wipe every existing route.
+        if code != 0 or not isinstance(summary, dict) or "routes" not in summary:
+            raise RuntimeError("couldn't read the watch's existing routes - nothing was written "
+                               "(they'd have been lost). Check the watch is on the time screen "
+                               "and try again.")
+        route_count = len(summary.get("routes", []))
         paths = []
         for index in range(route_count):
             with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
                 gpx_path = f.name
             code, out, err = run_tool(
                 "write_nav.py", ["nav", "--route-gpx", str(index),
-                                 "--route-gpx-out", gpx_path])
+                                 "--route-gpx-out", gpx_path], product_id=product_id, serial=serial)
             if code == 0 and Path(gpx_path).stat().st_size > 0:
                 paths.append(gpx_path)
             else:
                 Path(gpx_path).unlink(missing_ok=True)
+                for p in paths:
+                    Path(p).unlink(missing_ok=True)
+                raise RuntimeError(f"couldn't read existing route {index + 1} of {route_count} off "
+                                   "the watch - nothing was written (it would have been lost).")
         return paths
 
     def _handle_route_write_ble(self, gpx_path, confirm):
@@ -4910,7 +4931,11 @@ class Handler(BaseHTTPRequestHandler):
         with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
             f.write(gpx_text)
             gpx_path = f.name
-        existing = self._existing_route_gpx_paths()
+        try:
+            existing = self._existing_route_gpx_paths()
+        except RuntimeError as exc:
+            Path(gpx_path).unlink(missing_ok=True)
+            return {"ok": False, "error": str(exc)}
         try:
             code, out, err = run_tool("write_nav.py", ["route", *existing, gpx_path, "--write"])
         finally:

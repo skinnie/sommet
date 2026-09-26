@@ -39,7 +39,7 @@ import geo_util
 # red-vs-green). Retune freely - it's just a list.
 DEFAULT_BUCKETS = [
     {"key": "descent",    "label": "descent",       "upper": -3.0, "color": "#4575b4"},
-    {"key": "flat",       "label": "flat",          "upper": 3.0,  "color": "#66bd63"},
+    {"key": "flat",       "label": "flat",          "upper": 3.0,  "color": "#2E6A57"},  # = Theme.mapAccent, the Routes track green (André, 2026-09-26)
     {"key": "gentle",     "label": "3-6 % gentle",  "upper": 6.0,  "color": "#fee08b"},
     {"key": "moderate",   "label": "6-9 % moderate", "upper": 9.0, "color": "#fdae61"},
     {"key": "steep",      "label": "9-12 % steep",  "upper": 12.0, "color": "#f46d43"},
