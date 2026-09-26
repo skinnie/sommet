@@ -1592,8 +1592,25 @@ void ActivityService::importFromBikeComputers()
 
 void ActivityService::importFromMagene(const QString &address, const QStringList &files)
 {
+    importFromBleBike(QStringLiteral("c406"), QStringLiteral("/api/magene/import"),
+                      tr("Magene"), address, files);
+}
+
+void ActivityService::importFromBrytonBle(const QString &address, const QStringList &files)
+{
+    importFromBleBike(QStringLiteral("bryton"), QStringLiteral("/api/brytonble/import"),
+                      tr("Bryton"), address, files);
+}
+
+// A Bluetooth bike computer: pull only the listed files not yet in the sync history (bike_seen,
+// keyed "<tag>|<file name>" - shared with the cable import), decode, insert with the library's
+// start-time dedup. tag = library source tag, endpoint = the backend's import route.
+void ActivityService::importFromBleBike(const QString &tag, const QString &endpoint,
+                                        const QString &deviceName, const QString &address,
+                                        const QStringList &files)
+{
     if (address.isEmpty()) {
-        emit bikeImportError(tr("No Magene device selected."));
+        emit bikeImportError(tr("No %1 device selected.").arg(deviceName));
         return;
     }
     setLoading(true);
@@ -1607,9 +1624,9 @@ void ActivityService::importFromMagene(const QString &address, const QStringList
             seen.insert(q.value(0).toString());
     }
     QJsonArray toPull;      // {name} of files not yet handled
-    QStringList allKeys;    // "c406|name" of every file currently on the device
+    QStringList allKeys;    // "<tag>|name" of every file currently on the device
     for (const QString &name : files) {
-        const QString key = QStringLiteral("c406|") + name;
+        const QString key = tag + QLatin1Char('|') + name;
         allKeys << key;
         if (!seen.contains(key)) {
             QJsonObject f;
@@ -1625,11 +1642,11 @@ void ActivityService::importFromMagene(const QString &address, const QStringList
     QJsonObject payload;
     payload.insert(QStringLiteral("address"), address);
     payload.insert(QStringLiteral("files"), toPull);
-    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/magene/import")));
+    QNetworkRequest req(QUrl(kBackendBase + endpoint));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setTransferTimeout(600000);        // a BLE pull + decode is slow; plenty of headroom
     QNetworkReply *imp = m_network.post(req, QJsonDocument(payload).toJson());
-    connect(imp, &QNetworkReply::finished, this, [this, imp, allKeys]() {
+    connect(imp, &QNetworkReply::finished, this, [this, imp, allKeys, deviceName]() {
         imp->deleteLater();
         setLoading(false);
         if (imp->error() != QNetworkReply::NoError) {
@@ -1639,7 +1656,7 @@ void ActivityService::importFromMagene(const QString &address, const QStringList
         const auto o = QJsonDocument::fromJson(imp->readAll()).object();
         if (!o.value(QStringLiteral("ok")).toBool(false)) {
             emit bikeImportError(o.value(QStringLiteral("error"))
-                                 .toString(tr("Import from the Magene failed.")));
+                                 .toString(tr("Import from the %1 failed.").arg(deviceName)));
             return;
         }
         importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());

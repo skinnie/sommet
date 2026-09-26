@@ -1202,6 +1202,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_devices()
         elif self.path == "/api/brytonble/devices":
             self._handle_brytonble_devices()
+        elif self.path.startswith("/api/brytonble/rides"):
+            self._handle_brytonble_rides()
         elif self.path == "/api/bt/paired":
             self._handle_bt_paired()
         elif self.path.startswith("/api/magene/rides"):
@@ -1446,6 +1448,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_import(body)
         elif self.path == "/api/brytonble/device":
             self._handle_brytonble_device(body)
+        elif self.path == "/api/brytonble/import":
+            self._handle_brytonble_import(body)
         elif self.path == "/api/brytonble/profile/compare":
             self._handle_brytonble_profile_compare(body)
         elif self.path == "/api/brytonble/profile/apply":
@@ -2196,6 +2200,84 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if payload.get("ok") else 502,
                         {"ok": payload.get("ok", False), "files": files})
 
+    def _bike_activities_from_fits(self, pulled, kind):
+        """Decode pulled ride .fit files ({name, path}) into the library's bike-activity shape
+        (summary + GPX track + the FIT itself), tagged `kind`. Shared by the Bluetooth bike
+        computers (Magene C406, Bryton Aero 60)."""
+        activities = []
+        for item in pulled:
+            fit_path = item["path"]
+            gpx_path = fit_path + ".gpx"
+            dcode, dout, _derr = run_tool("fit_decode.py", [fit_path, "--gpx", gpx_path])
+            if dcode != 0 or not dout.strip():
+                continue
+            try:
+                summary = json.loads(dout.strip().splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                continue
+            gpx_text = ""
+            if summary.get("trackPoints"):
+                try:
+                    with open(gpx_path) as fh:
+                        gpx_text = fh.read()
+                except OSError:
+                    pass
+            try:
+                with open(fit_path, "rb") as fh:
+                    fit_b64 = base64.b64encode(fh.read()).decode("ascii")
+            except OSError:
+                fit_b64 = ""
+            activities.append({
+                "kind": kind,                     # the library source tag
+                "external_id": item["name"],      # the .fit filename, unique per ride
+                "sport": summary.get("sport"),
+                "subSportCode": summary.get("subSportCode"),
+                "startTime": summary.get("startTime"),
+                "durationSeconds": summary.get("durationSeconds"),
+                "distanceMeters": summary.get("distanceMeters"),
+                "ascentMeters": summary.get("ascentMeters"),
+                "energyKcal": summary.get("energyKcal"),
+                "gpx": gpx_text,                   # empty for indoor/no-GPS rides
+                "fit": fit_b64,                    # the device's own FIT, for intervals.icu upload
+            })
+        return activities
+
+    def _handle_brytonble_rides(self):
+        """GET /api/brytonble/rides?address=ADDR - rides on the Aero 60 the phone hasn't synced
+        yet, as {ok, files:[yyMMddHHmmss.fit]} - the same names a cable import uses."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        address = query.get("address", [None])[0]
+        if not address:
+            self._send_json(400, {"ok": False, "error": "address required"})
+            return
+        payload = self._magene_run("bryton_ble.py", ["rides", "--address", address], timeout=90)
+        files = [r.get("name") for r in payload.get("rides", []) if r.get("name")]
+        self._send_json(200 if payload.get("ok") else 502,
+                        {"ok": payload.get("ok", False), "files": files, "error": payload.get("error")})
+
+    def _handle_brytonble_import(self, body=None):
+        """POST /api/brytonble/import {address, files:[{name}]} - pull those rides over Bluetooth
+        and decode them (tagged "bryton", like a cable import, so each ride is imported once)."""
+        body = body or {}
+        address = body.get("address")
+        if not address:
+            self._send_json(400, {"ok": False, "error": "address required"})
+            return
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = ["pull", "--address", address, "--dest", tmpdir]
+            stdin = None
+            if isinstance(body.get("files"), list):
+                args.append("--only-stdin")
+                stdin = json.dumps({"files": body["files"]})
+            code, out, err = run_tool("bryton_ble.py", args, timeout=600, stdin=stdin)
+            res = self._parse_last_json_line(out) or {}
+            if not res.get("ok"):
+                self._send_json(502, {"ok": False, "error": res.get("error") or "Bryton pull failed",
+                                       "stderr": (err or "")[-400:]})
+                return
+            activities = self._bike_activities_from_fits(res.get("copied", []), "bryton")
+            self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
+
     def _handle_magene_import(self, body=None):
         """Pull ride .fit files off a Magene C406 over BLE and decode each to a summary + GPX
         track (tools/magene_import.py + fit_decode.py). Same activity shape and source tag
@@ -2227,42 +2309,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(502, {"ok": False, "error": "Magene pull failed",
                                        "raw_output": out, "stderr": err})
                 return
-            activities = []
-            for item in pulled:
-                fit_path = item["path"]
-                gpx_path = fit_path + ".gpx"
-                dcode, dout, _derr = run_tool("fit_decode.py", [fit_path, "--gpx", gpx_path])
-                if dcode != 0 or not dout.strip():
-                    continue
-                try:
-                    summary = json.loads(dout.strip().splitlines()[-1])
-                except (json.JSONDecodeError, IndexError):
-                    continue
-                gpx_text = ""
-                if summary.get("trackPoints"):
-                    try:
-                        with open(gpx_path) as fh:
-                            gpx_text = fh.read()
-                    except OSError:
-                        pass
-                try:
-                    with open(fit_path, "rb") as fh:
-                        fit_b64 = base64.b64encode(fh.read()).decode("ascii")
-                except OSError:
-                    fit_b64 = ""
-                activities.append({
-                    "kind": "c406",                 # the library source tag (Magene C406 Pro)
-                    "external_id": item["name"],    # the .fit filename, unique per ride
-                    "sport": summary.get("sport"),
-                    "subSportCode": summary.get("subSportCode"),
-                    "startTime": summary.get("startTime"),
-                    "durationSeconds": summary.get("durationSeconds"),
-                    "distanceMeters": summary.get("distanceMeters"),
-                    "ascentMeters": summary.get("ascentMeters"),
-                    "energyKcal": summary.get("energyKcal"),
-                    "gpx": gpx_text,                 # empty for indoor/no-GPS rides
-                    "fit": fit_b64,                  # the device's own FIT, for intervals.icu upload
-                })
+            activities = self._bike_activities_from_fits(pulled, "c406")
             self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
     def _magene_address(self, body):
