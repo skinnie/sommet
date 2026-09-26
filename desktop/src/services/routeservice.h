@@ -71,6 +71,9 @@ public:
     // "Upload" - confirm=false rehearses (real dry-run through write_nav.py, nothing sent),
     // confirm=true actually writes. Matches backend/server.py's own safety default.
     Q_INVOKABLE void uploadPendingRoute(bool confirm);
+    // Same, to one specific plugged watch (Routes' "Send to device" lists each one) - pinned by
+    // USB product id + serial for this write only, so two Ambit3 Peaks can be told apart.
+    Q_INVOKABLE void uploadPendingRouteTo(int productId, const QString &serial);
 
     // Fetches on-watch route `index`'s full-point GPX (read-only, 0x0b17 same as refresh())
     // into exportedGpx - the caller (RoutesPage.qml) then hands that text straight to
@@ -87,6 +90,7 @@ signals:
     void exportingChanged();
 
 private:
+    void uploadPending(bool confirm, int productId, const QString &serial);
     QNetworkAccessManager m_network;
     bool m_loading = false;
     QVariantList m_onWatchRoutes;

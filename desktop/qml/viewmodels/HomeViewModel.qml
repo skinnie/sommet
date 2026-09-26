@@ -93,6 +93,26 @@ QtObject {
             ? (_modelNames[DeviceService.model] || DeviceService.model)
             : qsTr("Suunto Ambit 3 Peak")  // static fallback - this project's one reference watch
 
+    // Every plugged watch a route can be written to, each named (André, 2026-09-26: "instead of
+    // watch can we say which watch is it? imagine I have 3 suunto watches plugged") -
+    // {productId, serial, label}. Same-model watches get the serial's last 4 digits so they can
+    // be told apart; the send pins that exact watch (RouteService.uploadPendingRouteTo). Ambit1/2
+    // and Kailash can't take routes. With no USB watch but one on Bluetooth, that one watch
+    // (productId -1 = the backend's current, BLE, connection).
+    readonly property var routeWatches: {
+        const ws = DeviceService.connectedWatches || []
+        const noRoutes = ["Bluebird", "Duck", "Colibri", "Greentit", "Hoopoe"]
+        if (ws.length === 0)
+            return connected && DeviceCapabilities.supportsRouteWrite
+                ? [{ productId: -1, serial: "", label: deviceDisplayName }] : []
+        return ws.filter(w => noRoutes.indexOf(w.codename) < 0).map(w => {
+            const name = displayNameForModel(w.codename) || w.name
+            const twin = ws.filter(x => x.codename === w.codename).length > 1
+            return { productId: w.productId, serial: w.serial || "",
+                     label: twin && w.serial ? name + " · " + w.serial.slice(-4) : name }
+        })
+    }
+
     // Real, 2026-08-11 (André: "correlation between the devices we support and their manual
     // link"). One official Suunto user-guide PDF per codename, from `manualslinks` at the repo
     // root (Suunto's own ns.suunto.com Userguides paths, one per model page) - keyed the same

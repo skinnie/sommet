@@ -180,6 +180,16 @@ void RouteService::loadGpxFile(const QUrl &fileUrl)
 
 void RouteService::uploadPendingRoute(bool confirm)
 {
+    uploadPending(confirm, -1, QString());
+}
+
+void RouteService::uploadPendingRouteTo(int productId, const QString &serial)
+{
+    uploadPending(true, productId, serial);
+}
+
+void RouteService::uploadPending(bool confirm, int productId, const QString &serial)
+{
     if (m_pendingRouteGpxText.isEmpty()) {
         setLastError(QStringLiteral("No GPX file loaded - use Import GPX first"));
         return;
@@ -189,6 +199,10 @@ void RouteService::uploadPendingRoute(bool confirm)
     body[QStringLiteral("name")] = m_pendingRoute.value(QStringLiteral("name")).toString();
     body[QStringLiteral("gpx")] = m_pendingRouteGpxText;
     body[QStringLiteral("confirm")] = confirm;
+    if (productId >= 0)
+        body[QStringLiteral("productId")] = productId;
+    if (!serial.isEmpty())
+        body[QStringLiteral("serial")] = serial;
 
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/routes")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
