@@ -83,6 +83,12 @@ ApplicationWindow {
         property: "demoRoot"
         value: DeviceService.demoGarminRoot
     }
+    // An eTrex picked in Home's switcher stops being the pick once it's unplugged, so plugging
+    // it back in later doesn't silently take over from the watch.
+    Connections {
+        target: GarminService
+        function onDeviceChanged() { if (!GarminService.connected) HomeViewModel.garminPicked = false }
+    }
 
     // Auto-export eTrex activities to intervals.icu when the export scope opts in (etrex/all).
     // Fires whenever GarminService finishes a device scan; exportActivitiesToIntervals() dedups

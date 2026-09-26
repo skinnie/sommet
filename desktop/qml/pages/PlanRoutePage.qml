@@ -627,14 +627,14 @@ Item {
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
         // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
         ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")
-                         visible: HomeViewModel.isGarmin && GarminService.hasSdCard
+                         visible: GarminService.connected && GarminService.hasSdCard
                          onTriggered: root.exportForEtrex("track", true) }
         ThemedMenuItem { text: qsTr("eTrex — route (max 50 via points)")
-                         visible: HomeViewModel.isGarmin && GarminService.hasSdCard
+                         visible: GarminService.connected && GarminService.hasSdCard
                          onTriggered: root.exportForEtrex("route", true) }
         ThemedMenuItem { text: qsTr("No device connected"); enabled: false
                          visible: !root.watchCanTakeRoute && !root.brytonHere && BikeDevices.magene === null
-                                  && !(HomeViewModel.isGarmin && GarminService.hasSdCard) }
+                                  && !(GarminService.connected && GarminService.hasSdCard) }
     }
 
     // Routes opens on the old Routes screen (RouteLibraryView: upload a GPX and send it, or browse

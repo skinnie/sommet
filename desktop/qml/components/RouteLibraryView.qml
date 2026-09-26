@@ -25,11 +25,12 @@ PageFlickable {
     property string busyKey: ""
     property string msg: ""
     property string sortKey: "name"
-    readonly property bool watchHere: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+    readonly property bool watchHere: HomeViewModel.connected
                                       && DeviceCapabilities.supportsRoutes
-    readonly property bool legacyWatch: HomeViewModel.connected && !HomeViewModel.isGarmin
+    readonly property bool legacyWatch: HomeViewModel.connected
                                         && !DeviceCapabilities.supportsRoutes
-    readonly property bool etrexHere: HomeViewModel.isGarmin
+    // An eTrex PLUGGED (not only when it's the active device - the watch can be active too).
+    readonly property bool etrexHere: GarminService.connected
 
     // The list card's source drop-down: connected devices, then the Library (always there).
     readonly property var sources: {
@@ -42,8 +43,12 @@ PageFlickable {
         return out
     }
     property string sourceKey: ""
-    readonly property string source: root.sources.some(x => x.key === root.sourceKey)
-                                     ? root.sourceKey : root.sources[0].key
+    // Until one is picked, open on the active device (Home's switcher), else the first listed.
+    readonly property string activeKey: HomeViewModel.isGarmin && !DeviceService.bikeActive ? "etrex"
+        : DeviceService.activeBikeKind === "bryton" ? "bryton"
+        : DeviceService.activeBikeKind === "c406" ? "magene" : ""
+    readonly property string source: root.sources.some(x => x.key === root.sourceKey) ? root.sourceKey
+        : root.sources.some(x => x.key === root.activeKey) ? root.activeKey : root.sources[0].key
     readonly property var sourceItems: root.source === "watch" ? root.watchItems
         : root.source === "etrex" ? root.etrexItems
         : root.source === "bryton" ? root.brytonItems
@@ -75,6 +80,16 @@ PageFlickable {
             root.api("GET", "/api/legacy/settings", null, r => root.legacyRoutes = r.ok ? (r.routes || []) : [])
     }
     Component.onCompleted: refresh()
+    // Re-read just the chosen source when the drop-down changes (the watch's is a USB round
+    // trip, so only on an explicit pick, never on every source).
+    function refreshSource(key) {
+        if (key === "saved" || key === "library")
+            root.api("GET", "/api/library", null, r => root.saved = r.ok ? r.routes : [])
+        else if (key === "bryton")
+            root.api("GET", "/api/bryton/tracks", null, r => root.bryton = r.ok ? r.routes : null)
+        else if (key === "etrex")
+            GarminService.refreshDeviceGpx()
+    }
 
     function sorted(list) {
         const l = (list || []).slice()
@@ -249,6 +264,8 @@ PageFlickable {
             text: deleteDialog.item
                   ? (deleteDialog.item.src === "bryton"
                      ? qsTr("Delete “%1” from the Bryton?").arg(deleteDialog.item.name)
+                     : deleteDialog.item.src === "etrex"
+                     ? qsTr("Delete “%1” (%2) from the eTrex's SD card?").arg(deleteDialog.item.name).arg(deleteDialog.item.fileName)
                      : qsTr("Delete “%1” from your saved routes?").arg(deleteDialog.item.name))
                   : ""
         }
@@ -258,6 +275,8 @@ PageFlickable {
                 root.api("POST", "/api/library/delete", { id: item.id }, r => r.ok ? root.refresh() : root.msg = r.error)
             else if (item.src === "bryton")
                 root.api("POST", "/api/bryton/tracks/delete", { name: item.name }, r => r.ok ? root.refresh() : root.msg = r.error)
+            else if (item.src === "etrex")
+                root.msg = GarminService.deleteRouteFromSdCard(item.fileName)   // SD card only; "" = done
         }
     }
 
@@ -268,7 +287,9 @@ PageFlickable {
 
         ThemedMenuItem { text: qsTr("Rename…"); visible: itemMenu.item.src === "saved" || itemMenu.item.src === "bryton"
                          onTriggered: { renameDialog.item = itemMenu.item; renameDialog.open() } }
+        // eTrex: only files on the SD card (never internal memory - GARMIN_USB_IMPORT_SPEC.md).
         ThemedMenuItem { text: qsTr("Delete…"); visible: itemMenu.item.src === "saved" || itemMenu.item.src === "bryton"
+                                                         || (itemMenu.item.src === "etrex" && itemMenu.item.onSdCard === true)
                          onTriggered: { deleteDialog.item = itemMenu.item; deleteDialog.open() } }
     }
 
@@ -317,8 +338,8 @@ PageFlickable {
                         readonly property string stats: [
                             route.distanceMeters ? RouteViewModel.formatDistance(route.distanceMeters) : "",
                             route.pointCount ? qsTr("%1 points").arg(route.pointCount) : "",
-                            route.ascentMeters !== undefined ? qsTr("ascent %1 m").arg(route.ascentMeters) : "",
-                            route.descentMeters !== undefined ? qsTr("descent %1 m").arg(route.descentMeters) : ""
+                            route.ascentMeters !== undefined ? qsTr("ascent %1 m").arg(Math.round(route.ascentMeters)) : "",
+                            route.descentMeters !== undefined ? qsTr("descent %1 m").arg(Math.round(route.descentMeters)) : ""
                         ].filter(x => x.length > 0).join(" · ")
                         width: parent.width
                         height: listMode ? 44 : mapCol.implicitHeight
@@ -491,7 +512,7 @@ PageFlickable {
                 }
                 // Garmin: SD card only (GARMIN_USB_IMPORT_SPEC.md - never internal memory).
                 Text {
-                    visible: HomeViewModel.isGarmin
+                    visible: root.etrexHere && root.hasPending
                     width: parent.width; wrapMode: Text.WordWrap
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                     text: GarminService.hasSdCard
@@ -512,16 +533,16 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        visible: HomeViewModel.anyDevice && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRouteWrite)
-                        text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Upload to watch")
-                        enabled: !HomeViewModel.isGarmin || GarminService.hasSdCard
-                        onClicked: {
-                            if (HomeViewModel.isGarmin)
-                                GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
-                                                               RouteService.pendingRouteGpxText)
-                            else
-                                RouteService.uploadPendingRoute(true)
-                        }
+                        visible: root.watchHere && DeviceCapabilities.supportsRouteWrite
+                        text: qsTr("Upload to watch")
+                        onClicked: RouteService.uploadPendingRoute(true)
+                    }
+                    RoundedButton {
+                        visible: root.etrexHere
+                        text: qsTr("Send to eTrex (SD card)")
+                        enabled: GarminService.hasSdCard
+                        onClicked: GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
+                                                                  RouteService.pendingRouteGpxText)
                     }
                     RoundedButton { visible: root.bryton !== null; text: qsTr("Send to Bryton"); onClicked: root.sendPendingToBryton() }
                     RoundedButton {
@@ -536,12 +557,12 @@ PageFlickable {
                 Text { visible: root.mageneMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
                        font.pixelSize: Theme.fontSizeCaption
                        color: root.mageneSending ? Theme.mutedText : (root.mageneOk ? Theme.success : Theme.error); text: root.mageneMsg }
-                Text { visible: !HomeViewModel.isGarmin && RouteService.uploadResultText.length > 0; width: parent.width
+                Text { visible: RouteService.uploadResultText.length > 0; width: parent.width
                        wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption
                        color: RouteService.uploadOk ? Theme.success : Theme.error; text: RouteService.uploadResultText }
-                Text { visible: HomeViewModel.isGarmin && GarminService.writeError.length > 0; width: parent.width
+                Text { visible: root.etrexHere && GarminService.writeError.length > 0; width: parent.width
                        wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption; color: Theme.error; text: GarminService.writeError }
-                Text { visible: HomeViewModel.isGarmin && GarminService.writeOk && GarminService.writeError.length === 0
+                Text { visible: root.etrexHere && GarminService.writeOk && GarminService.writeError.length === 0
                        text: qsTr("Sent to the SD card."); color: Theme.success; font.pixelSize: Theme.fontSizeCaption }
             }
         }
@@ -560,7 +581,11 @@ PageFlickable {
                         width: 240
                         model: root.sources.map(x => x.label)
                         currentIndex: root.sources.findIndex(x => x.key === root.source)
-                        onActivated: (i) => { root.sourceKey = root.sources[i].key; root.msg = "" }
+                        // A new model (a device's list arriving late) resets the index to 0 and
+                        // drops the binding - label read "On the watch" over the Bryton's list.
+                        onModelChanged: Qt.callLater(() => sourceBox.currentIndex = Qt.binding(
+                                            () => root.sources.findIndex(x => x.key === root.source)))
+                        onActivated: (i) => { root.sourceKey = root.sources[i].key; root.msg = ""; root.refreshSource(root.sourceKey) }
                     }
                     ViewModeToggle {
                         anchors.verticalCenter: parent.verticalCenter

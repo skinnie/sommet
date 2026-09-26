@@ -101,7 +101,7 @@ PageFlickable {
             onTriggered: if (root.mageneReachable && Date.now() - root.mageneSeenAt > 600000) root.mageneReachable = false }
     function isReachable(bike) { return bike.kind !== "c406" || root.mageneReachable }
     readonly property int reachableCount: DeviceService.connectedWatches.length
-        + bikeComputers.filter(b => root.isReachable(b)).length
+        + bikeComputers.filter(b => root.isReachable(b)).length + (GarminService.connected ? 1 : 0)
     property string bikeSyncMsg: ""
     property bool bikeSyncOk: false
     // Magene BLE scan state (the button in the experimental section drives these).
@@ -134,12 +134,22 @@ PageFlickable {
     function reconcileActiveDevice() {
         if (DeviceService.bikeActive && !activeBike)
             DeviceService.selectBikeComputer("");
-        else if (!DeviceService.bikeActive && !HomeViewModel.connected) {
+        else if (!DeviceService.bikeActive && !HomeViewModel.connected && !HomeViewModel.garminPicked) {
             // prefer a plugged one over a remembered Magene that may be asleep
             const live = bikeComputers.filter(b => b.kind !== "c406")
             if (live.length > 0) DeviceService.selectBikeComputer(live[0].kind)
-            else if (bikeComputers.length > 0) DeviceService.selectBikeComputer(bikeComputers[0].kind)
+            // The remembered Magene is known at once, before the USB list and the watch have
+            // answered - picking it straight away beat every plugged device (André, 2026-09-26).
+            // Fall back to it only if nothing else has turned up a few seconds later.
+            else if (bikeComputers.length > 0 && !GarminService.connected) mageneFallback.restart()
         }
+    }
+    Timer {
+        id: mageneFallback
+        interval: 5000
+        onTriggered: if (!DeviceService.bikeActive && !HomeViewModel.connected && !GarminService.connected
+                         && root.bikeComputers.length > 0)
+                         DeviceService.selectBikeComputer(root.bikeComputers[0].kind)
     }
     onBikeComputersChanged: reconcileActiveDevice()
 
@@ -1298,7 +1308,8 @@ PageFlickable {
             // Unified device switcher (André, 2026-09-04): EVERY plugged device - watches AND bike
             // computers - as one "tap to switch" strip, so you pick the one active device rather
             // than seeing watch + GPS at once. Shown when there's more than one to choose from.
-            visible: (DeviceService.connectedWatches.length + root.bikeComputers.length) > 1
+            visible: (DeviceService.connectedWatches.length + root.bikeComputers.length
+                      + (GarminService.connected ? 1 : 0)) > 1
 
             Column {
                 width: parent.width
@@ -1322,11 +1333,21 @@ PageFlickable {
                             label: modelData.name
                             // Active only when no bike computer has taken over, and this is the
                             // pinned watch (or the connected one when nothing is explicitly pinned).
-                            active: !DeviceService.bikeActive
+                            active: !DeviceService.bikeActive && !HomeViewModel.isGarmin
                                     && (DeviceService.selectedProductId >= 0
                                         ? modelData.productId === DeviceService.selectedProductId
                                         : DeviceService.model === modelData.codename)
-                            onPicked: DeviceService.selectWatch(modelData.productId)
+                            onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectWatch(modelData.productId) }
+                        }
+                    }
+                    // Garmin eTrex (USB mass storage)
+                    DeviceChip {
+                        visible: GarminService.connected
+                        label: GarminService.model || qsTr("Garmin eTrex")
+                        active: HomeViewModel.isGarmin && !DeviceService.bikeActive
+                        onPicked: {
+                            HomeViewModel.garminPicked = true
+                            if (DeviceService.bikeActive) DeviceService.selectBikeComputer("")
                         }
                     }
                     // Bike computers (Edge / Karoo / Magene C406)
@@ -1337,7 +1358,7 @@ PageFlickable {
                             label: root.bikeDisplayName(modelData)
                                    + (root.isReachable(modelData) ? "" : qsTr(" (asleep)"))
                             active: DeviceService.activeBikeKind === modelData.kind
-                            onPicked: DeviceService.selectBikeComputer(modelData.kind)
+                            onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectBikeComputer(modelData.kind) }
                         }
                     }
                 }
