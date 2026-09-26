@@ -727,6 +727,18 @@ def selected_is_kailash():
     return bool(info) and info.get("model") == "Hoopoe"
 
 
+# Is a Suunto watch on USB right now? Updated by every enumeration (/api/devices, the stale-pin
+# heal) - the app polls /api/devices, so it stays fresh without an extra USB round trip here.
+USB_WATCH_PRESENT = False
+
+
+def use_ble():
+    """Talk to the watch over Bluetooth? Only when a BLE watch is connected AND no watch is on
+    the cable - the cable wins (André, 2026-09-26: a Peak on USB read "no watch" for 30 s while
+    the Bluetooth-paired one dropped in and out, because every endpoint preferred BLE)."""
+    return bool(ble_bridge.bridge.status().get("handshake_done")) and not USB_WATCH_PRESENT
+
+
 def _log_pin(why):
     """One stderr line per change of the pinned watch - two same-model watches make a silent
     re-pin easy to miss and costly (a write lands on the other Peak)."""
@@ -757,6 +769,8 @@ def autopin_if_needed():
         proc = subprocess.run([PYTHON, str(TOOLS_DIR / "list_watches.py")],
                               capture_output=True, text=True, timeout=60)
         watches = json.loads(proc.stdout.strip().splitlines()[-1]).get("watches") or []
+        global USB_WATCH_PRESENT
+        USB_WATCH_PRESENT = bool(watches)
         # Re-check: list_watches takes ~1s, and a /api/device/select (the app's pin) can land
         # meanwhile - several request threads race in here at startup. Only fill an EMPTY pin,
         # never overwrite a real choice (seen live: select 1A00, then autopins after it).
@@ -1527,7 +1541,7 @@ class Handler(BaseHTTPRequestHandler):
         if demo_ambit():
             self._send_json(200, demo_json("nav.json"))
             return
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_nav_ble()
             return
         if selected_is_legacy():
@@ -1702,7 +1716,7 @@ class Handler(BaseHTTPRequestHandler):
                 device_pid = None
         device_serial = (query.get("serial", [None])[0] or "").strip() or None
         if device_pid is None and device_serial is None:
-            if ble_bridge.bridge.status().get("handshake_done"):
+            if use_ble():
                 self._handle_activities_ble(int(known_count), mark_synced=mark_synced)
                 return
             if selected_is_legacy():
@@ -2809,7 +2823,7 @@ class Handler(BaseHTTPRequestHandler):
         if demo_ambit():
             self._send_json(200, demo_json("pois.json"))
             return
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_pois_read_ble()
             return
         if selected_is_legacy():
@@ -3299,7 +3313,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"{lat}, {lon} is not a coordinate on Earth"})
             return
 
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_poi_add_ble(name, lat, lon)
             return
 
@@ -3383,7 +3397,7 @@ class Handler(BaseHTTPRequestHandler):
             gpx_path = f.name
         existing_paths = []
         try:
-            if not targeted and ble_bridge.bridge.status().get("handshake_done"):
+            if not targeted and use_ble():
                 self._handle_route_write_ble(gpx_path, confirm)
                 return
             if confirm:
@@ -3496,7 +3510,7 @@ class Handler(BaseHTTPRequestHandler):
         the once-per-connection auto-update (DeviceService::fetchDeviceInfo(), matching
         syncTime()'s own auto-sync) ran and hit this exact same status read a second time
         via the wrong path. Returns (status_dict, None) or (None, error_message)."""
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             sys.path.insert(0, str(TOOLS_DIR))
             import ble_sgee                                   # noqa: PLC0415
             try:
@@ -3605,7 +3619,7 @@ class Handler(BaseHTTPRequestHandler):
             except urllib.error.URLError as e:
                 return {"wrote": False, "offline": True,
                         "error": f"couldn't reach the orbital data server: {e}"}
-            if ble_bridge.bridge.status().get("handshake_done"):
+            if use_ble():
                 sys.path.insert(0, str(TOOLS_DIR))
                 import ble_sgee                                # noqa: PLC0415
                 try:
@@ -3935,7 +3949,7 @@ class Handler(BaseHTTPRequestHandler):
                 info["name"] = row["productName"]
             self._send_json(200, info)
             return
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_device_ble()
             return
         # Read identity first, enumerate+heal only if that FAILS. The Home page re-reads this
@@ -4013,8 +4027,9 @@ class Handler(BaseHTTPRequestHandler):
         Central to issue #16: a stale pin makes every watch endpoint fail ("no <that watch> on
         the USB bus") until it heals. `watches` = list_watches.py entries (productId, serial) -
         the pinned SERIAL must be present too, not just its model (two Peaks, one unplugged)."""
-        global SELECTED_PRODUCT_ID, SELECTED_SERIAL
+        global SELECTED_PRODUCT_ID, SELECTED_SERIAL, USB_WATCH_PRESENT
         watches = [w if isinstance(w, dict) else {"productId": w} for w in (watches or [])]
+        USB_WATCH_PRESENT = bool(watches)
         present = [(w.get("productId"), w.get("serial") or None) for w in watches]
         if SELECTED_PRODUCT_ID is None:
             return
@@ -4465,7 +4480,7 @@ class Handler(BaseHTTPRequestHandler):
         if demo_ambit():
             self._send_json(200, demo_json("settings.json"))
             return
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_settings_read_ble()
             return
         # Ambit1: same endpoint and same schema, different reader - settings_write.py speaks
@@ -4525,7 +4540,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "activity_class": 6.0, "wrote": False, "demo": True})
             return
         confirm = bool(body.get("confirm", False))
-        if not ble_bridge.bridge.status().get("handshake_done"):
+        if not use_ble():
             # USB: stats_to_watch computes the class AND only writes when it actually differs
             # from the watch (idempotent - safe to fire on every connect).
             args = [str(athlete_id), str(api_key), "--only", "activity_level", "--json"]
@@ -4576,7 +4591,7 @@ class Handler(BaseHTTPRequestHandler):
         if demo_ambit():
             self._send_json(200, {"ok": True, "wrote": False, "demo": True})
             return
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._send_json(501, {"ok": False, "error": "Writing the full profile over Bluetooth "
                                   "isn't supported yet - connect the watch by cable for this. "
                                   "(Activity level does sync over Bluetooth.)"})
@@ -4792,7 +4807,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"key\" or \"value\""})
             return
         confirm = bool(body.get("confirm", False))
-        if ble_bridge.bridge.status().get("handshake_done"):
+        if use_ble():
             self._handle_settings_write_ble(key, value, confirm)
             return
         device = body.get("device")

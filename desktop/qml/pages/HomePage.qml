@@ -1006,15 +1006,6 @@ PageFlickable {
                         color: Theme.error
                         font.pixelSize: Theme.fontSizeLabel
                     }
-                    Text {
-                        visible: !DeviceService.bikeActive
-                        text: qsTr("Forget drops this computer's Bluetooth pairing with the watch; " +
-                                   "pair again from the watch's own menu afterward.")
-                        color: Theme.mutedText
-                        font.pixelSize: Theme.fontSizeLabel
-                        wrapMode: Text.WordWrap
-                        width: parent.width
-                    }
                 }
 
                 // --- Ambit3 info grid - real, 2026-08-11 ("move clock up, and put the
