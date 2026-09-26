@@ -42,26 +42,57 @@ def _write_index(d, items):
     os.replace(tmp, os.path.join(d, INDEX))
 
 
-def _stats(gpx):
-    """(distance m, ascent m) from the GPX's track/route points (haversine; no smoothing)."""
+PREVIEW_POINTS = 200
+
+
+def _points(gpx):
     pts = []
     for m in re.finditer(r'<(?:trk|rte)pt[^>]*\blat="([-\d.]+)"[^>]*\blon="([-\d.]+)"(.*?)(?:</(?:trk|rte)pt>|/>)',
                          gpx, re.DOTALL):
         ele = re.search(r"<ele>([-\d.]+)</ele>", m.group(3) or "")
         pts.append((float(m.group(1)), float(m.group(2)), float(ele.group(1)) if ele else None))
-    dist = asc = 0.0
+    return pts
+
+
+def _stats(gpx):
+    """(distance m, ascent m, descent m, point count, preview track) from the GPX's points
+    (haversine; no smoothing). The preview is <= 200 points, for the Library's map cards."""
+    pts = _points(gpx)
+    dist = asc = desc = 0.0
     for a, b in zip(pts, pts[1:]):
         p1, p2 = math.radians(a[0]), math.radians(b[0])
         x = (math.sin((p2 - p1) / 2) ** 2
              + math.cos(p1) * math.cos(p2) * math.sin(math.radians(b[1] - a[1]) / 2) ** 2)
         dist += 2 * 6371000 * math.asin(min(1.0, math.sqrt(x)))
-        if a[2] is not None and b[2] is not None and b[2] > a[2]:
-            asc += b[2] - a[2]
-    return round(dist), round(asc)
+        if a[2] is not None and b[2] is not None:
+            if b[2] > a[2]:
+                asc += b[2] - a[2]
+            else:
+                desc += a[2] - b[2]
+    step = max(1, len(pts) // PREVIEW_POINTS)
+    track = [{"lat": round(p[0], 5), "lon": round(p[1], 5)} for p in pts[::step]]
+    return round(dist), round(asc), round(desc), len(pts), track
+
+
+def _with_stats(d, r):
+    """Fill in stats/preview for an entry saved before they existed (persisted by the caller)."""
+    if "track" in r:
+        return False
+    try:
+        with open(os.path.join(d, r["id"] + ".gpx"), encoding="utf-8") as f:
+            dist, asc, desc, n, track = _stats(f.read())
+    except OSError:
+        return False
+    r.update({"distanceMeters": dist, "ascentMeters": asc, "descentMeters": desc,
+              "pointCount": n, "track": track})
+    return True
 
 
 def list_routes(d):
-    return sorted(_index(d), key=lambda r: r.get("created", 0), reverse=True)
+    items = _index(d)
+    if any([_with_stats(d, r) for r in items]):
+        _write_index(d, items)
+    return sorted(items, key=lambda r: r.get("created", 0), reverse=True)
 
 
 def save(d, name, gpx):
@@ -75,9 +106,10 @@ def save(d, name, gpx):
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, rid + ".gpx"), "w", encoding="utf-8") as f:
         f.write(gpx)
-    dist, asc = _stats(gpx)
+    dist, asc, desc, n, track = _stats(gpx)
     items.append({"id": rid, "name": name, "created": int(time.time()),
-                  "distanceMeters": dist, "ascentMeters": asc, "sha1": sha})
+                  "distanceMeters": dist, "ascentMeters": asc, "descentMeters": desc,
+                  "pointCount": n, "track": track, "sha1": sha})
     _write_index(d, items)
     return {"ok": True, "id": rid, "existed": False}
 

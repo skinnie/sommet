@@ -48,7 +48,24 @@ def list_tracks(mount):
                 dist = struct.unpack_from("<I", smy, 20)[0]
         except OSError:
             pass
+        # Preview track (<= 200 points) + ascent/descent from the .track itself, for the
+        # Library's map cards (the .smy carries only bbox + distance).
+        track, asc, desc = [], 0, 0
+        try:
+            with open(os.path.join(d, f), "rb") as t:
+                raw = t.read()
+            recs = [struct.unpack_from("<iii", raw, i) for i in range(0, len(raw) - 15, 16)]
+            for a, b in zip(recs, recs[1:]):
+                if b[2] > a[2]:
+                    asc += b[2] - a[2]
+                else:
+                    desc += a[2] - b[2]
+            step = max(1, len(recs) // 200)
+            track = [{"lat": r[0] / 1e6, "lon": r[1] / 1e6} for r in recs[::step]]
+        except OSError:
+            pass
         out.append({"name": name, "distanceMeters": dist, "pointCount": pts,
+                    "ascentMeters": asc, "descentMeters": desc, "track": track,
                     "modified": int(os.path.getmtime(os.path.join(d, f)))})
     return out
 

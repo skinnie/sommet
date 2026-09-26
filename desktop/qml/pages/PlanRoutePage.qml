@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
+import QtCore
 import AmbitApp
 
 // Plan a ride/hike with weather. You bring a GPX (drawn in any online planner, Basecamp,
@@ -262,7 +263,7 @@ Item {
             busy = false
             if (res && res.ok) {
                 statusMsg = qsTr("On the Magene — it's the route under Navigation.")
-                libraryMenu.noteMageneRoute(cleanName(), root.libraryId)
+                mageneRoute.name = cleanName(); mageneRoute.libraryId = root.libraryId
             } else {
                 statusMsg = res && res.error ? res.error : qsTr("Send to Magene failed")
             }
@@ -636,15 +637,27 @@ Item {
                                   && !(HomeViewModel.isGarmin && GarminService.hasSdCard) }
     }
 
-    RouteLibraryMenu {
-        id: libraryMenu
-        onOpenRequested: (name, gpx) => root.openRoute(name, gpx)
-        onExportRequested: (name, gpx) => root.saveGpxFile(name, gpx)
+    // Routes switches COMPLETELY between the Library (the old Routes page: saved routes + each
+    // device's own) and this planner (André, 2026-09-26: "just switch completely"). It opens on the
+    // Library; opening a route there shows the planner; "← Library" goes back.
+    property bool libraryMode: true
+    RouteLibraryView {
+        id: libraryView
+        anchors.fill: parent
+        visible: root.libraryMode
+        onOpenRequested: (name, gpx, libraryId) => {
+            root.openRoute(name, gpx)
+            root.libraryId = libraryId
+            root.libraryMode = false
+        }
     }
+    // The Magene holds one route: the Library shows the last one sent from here.
+    Settings { id: mageneRoute; category: "mageneRoute"; property string name: ""; property string libraryId: "" }
 
     // --- layout: map on the left, controls + results on the right ----------------------
     Row {
         anchors.fill: parent
+        visible: !root.libraryMode
 
         Item {
             id: mapHolder
@@ -796,7 +809,8 @@ Item {
                         }
                         Text {
                             width: parent.width
-                            text: qsTr("Weather, climbs and days for a route — then send it to any device")
+                            text: root.routeName.length > 0 ? root.cleanName()
+                                                            : qsTr("Weather, climbs and days for a route — then send it to any device")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                             elide: Text.ElideRight
@@ -808,24 +822,16 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingSmall
 
-                        // The library menu: pick any saved route or one on a connected device.
-                        RoundedButton {
-                            id: libraryButton
-                            width: parent.width
-                            text: (root.routeName.length > 0 ? root.cleanName() : qsTr("Choose a route")) + "  ▾"
-                            enabled: !root.busy
-                            onClicked: { libraryMenu.parent = libraryButton; libraryMenu.x = 0; libraryMenu.y = height + 4
-                                         libraryMenu.width = libraryButton.width; libraryMenu.open() }
-                        }
+                        // Back to the Library (saved routes + each device's own; Import is there).
                         Row {
                             width: parent.width
                             spacing: Theme.spacingSmall
                             readonly property real cellW: (width - Theme.spacingSmall) / 2
                             RoundedButton {
                                 width: parent.cellW
-                                text: qsTr("Import GPX")
+                                text: qsTr("← Library")
                                 enabled: !root.busy
-                                onClicked: gpxDialog.open()
+                                onClicked: { root.libraryMode = true; libraryView.refresh() }
                             }
                             RoundedButton {
                                 width: parent.cellW
