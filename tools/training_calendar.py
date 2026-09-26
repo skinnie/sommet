@@ -176,8 +176,12 @@ def sync(link, plan, today, write, json_out):
         if not any(d.get("Template") == GW.GUIDANCE_TEMPLATE for d in mode.get("Displays", [])):
             mode.setdefault("Displays", []).append(GW.guidance_display())
             modes_touched.append(mode_name)
+    # Sport modes are written only when a display was actually added, and then only as the used
+    # extent. Writing back the raw 12 KB region read above (the old "unchanged" path) leaves a
+    # closing hash the firmware rejects on the next restart - "Connect to Moveslink" and
+    # factory-default sport modes (André's Peak, 2026-09-26). write_nav.send_plan now refuses it.
     new_cm_bytes = cmw.build_custom_modes_body(decoded, decoded.get("format_type", 2)) \
-        if modes_touched else current_cm
+        if modes_touched else None
 
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],
@@ -208,10 +212,14 @@ def sync(link, plan, today, write, json_out):
     backup = f"backups/CustomModes_pre_calendar_{int(time.time())}.bin"
     pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
     open(backup, "wb").write(current_cm)
-    for name, base, blob in [("Apps", apps_base, new_apps_bytes), ("CustomModes", cm_base, new_cm_bytes)]:
+    writes = [("Apps", apps_base, new_apps_bytes)]
+    if new_cm_bytes is not None:
+        writes.append(("CustomModes", cm_base, new_cm_bytes))
+    for name, base, blob in writes:
         fi = FlashImage(); fi.write(base, blob)
         send_plan(link, fi, [(name, base, blob), ("t", base, None)], commit=False)
     result["written"] = True
+    result["customModesWritten"] = new_cm_bytes is not None
     result["backup"] = backup
     if json_out:
         print(json.dumps(result))

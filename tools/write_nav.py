@@ -985,10 +985,30 @@ def check_memory_map(found):
     return ok
 
 
+def refuse_bad_custom_modes(blob):
+    """Last gate before any CustomModes write reaches a watch. The closing hash covers exactly the
+    bytes written, and the firmware re-hashes only the used extent - a padded region leaves a hash
+    it rejects on the next restart ("Connect to Moveslink" / err:62, then factory-default sport
+    modes). That's what reset André's Peak on 2026-09-26: training_calendar.py wrote back the raw
+    12 KB region it had read. Also enforces the field Type/Shortcut invariant (Finding 54)."""
+    import custom_modes
+    extent = custom_modes.used_extent(blob)
+    if len(blob) != extent:
+        raise ValueError(f"refusing to write CustomModes: {len(blob)} bytes given, {extent} used - "
+                         "write only the used extent (custom_modes.used_extent) or the watch "
+                         "rejects the region after a restart")
+    bad = custom_modes.check_field_type_shortcut_invariant(blob)
+    if bad:
+        raise ValueError(f"refusing to write CustomModes: field Type/Shortcut invariant broken ({bad})")
+
+
 def send_plan(link, flash, layout, commit=True):
     """commit=False for GpsSGEE: confirmed against assets/ambit3 pcap/orbitsync, 2026-08-05
     - its data_write/data_tail_len pair is followed directly by unrelated queries, no
     CMD_NAV_COMMIT, unlike Routes/Waypoints which always need one."""
+    for name, _address, blob in layout:
+        if name == "CustomModes" and blob:
+            refuse_bad_custom_modes(blob)
     for command, address, body in emit_packs(flash, layout):
         if command == CMD_DATA_WRITE:
             head = address.to_bytes(4, "little") + len(body).to_bytes(2, "little") \

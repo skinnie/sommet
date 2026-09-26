@@ -310,6 +310,7 @@ def main():
 
     if args.restore:
         blob = open(args.restore, "rb").read()
+        blob = blob[:cm.used_extent(blob)]   # backups are raw region reads; write only what's used
         print(f"restoring CustomModes from {args.restore} ({len(blob)} bytes)")
         if args.write:
             fi = FlashImage(); fi.write(cm_base, blob)
