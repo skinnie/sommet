@@ -6,7 +6,7 @@ cannot tell which way to go. A route has directions but only ~50 via points, whi
 into a road route on its own map (straight lines / detours if the points are badly placed). So:
 
   track mode  the full geometry (thinned only past `max_track` points, default 10 000) PLUS named
-              waypoints: one at every real turn ("Right 12.4", "Bear left 30.1", "U-turn 41.0")
+              waypoints: one at every real turn ("Right 12.4", "Slight left 30.1", "U-turn 41.0")
               and at every place the track meets itself ("1st Straight 3.2", "2nd Left 3.2" - the ordinal
               says which pass through that spot this is).
               Names are spelled out, not coded, since the eTrex doesn't reliably show <desc> while
@@ -188,7 +188,7 @@ def _ordinal(n: int) -> str:
 
 
 def _wording(label: str) -> str:
-    return {"L": "Turn left", "R": "Turn right", "SL": "Bear left", "SR": "Bear right",
+    return {"L": "Turn left", "R": "Turn right", "SL": "Slight left", "SR": "Slight right",
             "SHL": "Sharp left", "SHR": "Sharp right", "U": "U-turn", "STR": "Go straight"}[label]
 
 
@@ -197,7 +197,7 @@ def _wording(label: str) -> str:
 # only the <name> is visible while navigating), so the visible name has to be self-explanatory
 # on its own. Still short enough for a Garmin name field (well under the ~30-char limit).
 def _name_word(label: str) -> str:
-    return {"L": "Left", "R": "Right", "SL": "Bear left", "SR": "Bear right",
+    return {"L": "Left", "R": "Right", "SL": "Slight left", "SR": "Slight right",
             "SHL": "Sharp left", "SHR": "Sharp right", "U": "U-turn", "STR": "Straight"}[label]
 
 
@@ -402,7 +402,7 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
         if c.get("kind_hint") == "retrace":
             # A genuine out-and-back, not a fork - "bear left/right" would be the wrong
             # vocabulary here, so name it for what it actually is.
-            marks.append({**c, "name": "%s Retrace %s %.1f" % (ordinal, c["edge"], c["km"]),
+            marks.append({**c, "name": "%s Backtrack %s %.1f" % (ordinal, c["edge"], c["km"]),
                           "sym": c["sym"], "kind": "crossing",
                           "desc": "You ride this same stretch again the other way (also at km %s) "
                                   "- %s time it %s at %.1f km" % (others or "-", ordinal, c["edge"], c["km"])})
@@ -547,8 +547,8 @@ def _selftest() -> int:
     # "bear left/right" would be nonsense there, and a Y-junction that merely stays close for a
     # while (not antiparallel) must NOT be flagged as one.
     r = build(_synthetic(_densify([(0, 0), (400, 0), (0, 0)])), "track")
-    assert "1st Retrace starts" in r["gpx"] and "1st Retrace ends" in r["gpx"], r["gpx"][:600]
-    assert "2nd Retrace starts" in r["gpx"] and "2nd Retrace ends" in r["gpx"], r["gpx"][:600]
+    assert "1st Backtrack starts" in r["gpx"] and "1st Backtrack ends" in r["gpx"], r["gpx"][:600]
+    assert "2nd Backtrack starts" in r["gpx"] and "2nd Backtrack ends" in r["gpx"], r["gpx"][:600]
     assert "Bear" not in r["gpx"] and " Left " not in r["gpx"] and " Right " not in r["gpx"], r["gpx"]
     print("etrex_export selftest OK")
     return 0
