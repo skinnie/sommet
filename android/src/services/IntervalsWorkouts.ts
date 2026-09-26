@@ -115,7 +115,12 @@ function convertTarget(step: IcuStep, hrResolve?: (bpm: number) => number): Work
     if (lo == null || hi == null) continue;
     lo = Number(lo); hi = Number(hi);
     if (targetName === 'hr' && hrResolve) { lo = hrResolve(lo); hi = hrResolve(hi); }
-    lo = Math.round(lo); hi = Math.round(hi);
+    if (targetName === 'pace') {
+      // intervals.icu resolves pace to m/s; our workout JSON (like Suunto's SUUNTO_PACE) is decimal
+      // min/km - convert and keep the decimals (6.5 = 6:30); the swap below fixes the order.
+      if (lo <= 0 || hi <= 0) continue;
+      lo = Math.round((1000 / 60 / lo) * 100) / 100; hi = Math.round((1000 / 60 / hi) * 100) / 100;
+    } else { lo = Math.round(lo); hi = Math.round(hi); }
     if (lo > hi) [lo, hi] = [hi, lo];
     return { targetName, valueRange: { min: lo, max: hi } };
   }

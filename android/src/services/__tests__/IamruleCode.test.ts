@@ -5,7 +5,7 @@ import {
   addLights, callBytes, callSites, CALL_BEEP, CALL_LIGHT, guidanceSites, instructions, layout,
   lightIfStep, splice, validate,
 } from '../IamruleCode';
-import { lightChoices, stepSequence, withHrTargetAsBps } from '../GuidedWorkoutCore';
+import { lightChoices, stepSequence, withSiTargets } from '../GuidedWorkoutCore';
 import type { Workout } from '../WorkoutSource';
 
 const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], x => parseInt(x, 16));
@@ -81,9 +81,18 @@ describe('GuidedWorkoutCore light helpers', () => {
     expect(lightChoices(wk)).toEqual({ onStepStart: [1, 2, 3, 4, 5, 6], onLimits: [1, 3, 5], onFinish: true, expectedTotal: 7 });
   });
 
-  test('HR ranges go to the compiler as bpm/60, the stored workout is untouched', () => {
-    const c = withHrTargetAsBps(wk);
+  test('target ranges go to the compiler in SI units, the stored workout is untouched', () => {
+    const c = withSiTargets(wk);
     expect(c.steps[0].target!.valueRange).toEqual({ min: 56 / 60, max: 157 / 60 });
     expect(wk.steps[0].target!.valueRange).toEqual({ min: 56, max: 157 });
+    const t = (targetName: string, min: number, max: number) =>
+      withSiTargets({ steps: [{ type: { typeName: 'interval' }, target: { targetName, valueRange: { min, max } } }] }).steps[0].target!.valueRange!;
+    const near = (r: { min: number; max: number }, min: number, max: number) => {
+      expect(r.min).toBeCloseTo(min, 9); expect(r.max).toBeCloseTo(max, 9);
+    };
+    near(t('pace', 5, 6), 0.3, 0.36);             // min/km -> s/m
+    near(t('speed', 10, 12), 10 / 3.6, 12 / 3.6); // km/h -> m/s
+    near(t('cadence', 80, 90), 80 / 60, 1.5);     // rpm -> rev/s
+    near(t('power', 200, 250), 200, 250);
   });
 });

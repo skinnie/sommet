@@ -130,5 +130,22 @@ class PerStepLights(unittest.TestCase):
             IC.add_lights(FX["guidance_repeat_3x2"], on_step_start=[0], expected_total=4)
 
 
+class TargetUnits(unittest.TestCase):
+    def test_si_factors_match_the_android_port(self):
+        import re
+        import guided_workout as GW
+        ts = (pathlib.Path(__file__).parent.parent / "android/src/services/GuidedWorkoutCore.ts").read_text()
+        body = ts[ts.index("SI_FACTOR"):ts.index("};", ts.index("SI_FACTOR"))]
+        android = {k: eval(v) for k, v in re.findall(r"(\w+): ([\d./ ]+),", body)}
+        self.assertEqual(set(android), set(GW.SI_FACTOR))
+        for k, v in GW.SI_FACTOR.items():
+            self.assertAlmostEqual(android[k], v)
+
+    def test_intervals_pace_arrives_as_decimal_min_per_km(self):
+        import intervals_workout as IW
+        self.assertEqual(IW.convert_target({"_pace": {"start": 2.778, "end": 3.333}}),
+                         {"targetName": "pace", "valueRange": {"min": 5.0, "max": 6.0}})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

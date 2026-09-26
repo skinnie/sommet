@@ -119,24 +119,34 @@ def with_default_labels(workout, lang=None):
     return wk
 
 
-def with_hr_target_as_bps(workout):
-    """Return a copy where every step's "hr" target valueRange is divided by 60 (bpm ->
-    beats-per-second) before it goes to the community compiler.
+# Our workout JSON's target units (the Suunto App-Zone script units - builder, editors, app-based
+# workouts, intervals.icu import) -> the SI units the compiled guidance program compares against.
+# Read from its bytecode (2026-09-26): it converts the live value raw -> display -> SI, e.g.
+# SUUNTO_HR * 1/60, SUUNTO_PACE (raw s/km) * 1/60 * 0.06, SUUNTO_SPEED (raw m/s) * 3.6 / 3.6.
+SI_FACTOR = {
+    "hr": 1 / 60,        # bpm -> beats per second
+    "cadence": 1 / 60,   # rpm -> revolutions per second
+    "speed": 1 / 3.6,    # km/h -> m/s
+    "pace": 0.06,        # min/km (decimal) -> s/m
+    # "power": watts either way
+}
 
-    The compiled guidance program compares `SUUNTO_HR * (1/60)` against the step's min/max (read
-    from its bytecode, 2026-09-26 - see iamrule_code.py), and real captured Suunto workout JSON
-    (marguslt gist) carries HR ranges the same way. Our workout JSON (builder, intervals.icu
-    import) is plain bpm; sent unconverted, the live value was always "below min", so the
-    out-of-range alarm fired all run and the target band showed nonsense (André, 2026-09-26:
-    "134-204" for a 126-157 walk, "255" for a 158-166 jog). Only "hr" is converted."""
+
+def with_si_targets(workout):
+    """Copy with every target range converted to the SI units the compiled guidance program compares
+    against (SI_FACTOR). Sent unconverted, HR went in 60x too high - the live value was always
+    "below min", the alarm fired all run and the band showed nonsense (André, 2026-09-26: "134-204"
+    for a 126-157 walk, "255" for a 158-166 jog); pace, speed and cadence had the same class of bug.
+    Real captured Suunto workout JSON (marguslt gist) carries HR the same way (124 bpm = 2.0667)."""
     import copy
     wk = copy.deepcopy(workout)
     for s in wk.get("steps", []):
         target = s.get("target") or {}
-        if target.get("targetName") == "hr" and "valueRange" in target:
+        factor = SI_FACTOR.get(target.get("targetName"))
+        if factor and "valueRange" in target:
             rng = target["valueRange"]
-            rng["min"] = rng["min"] / 60
-            rng["max"] = rng["max"] / 60
+            rng["min"] = rng["min"] * factor
+            rng["max"] = rng["max"] * factor
     return wk
 
 
@@ -206,7 +216,7 @@ def compile_workout(workout, lang=None):
             "~/.config/ambitapp/compile_key (all gitignored - never commit it).")
     activity_id = workout.get("activityId", 3)
     workout = with_default_labels(workout, lang)  # blank step -> phase word in the watch's language
-    workout = with_hr_target_as_bps(workout)  # bpm -> bpm/60 - see this function's docstring
+    workout = with_si_targets(workout)  # target units -> the SI units the program compares
     req = urllib.request.Request(
         W.COMPILE_URL, data=json.dumps(workout).encode("utf-8"), method="POST",
         headers={"Content-Type": "text/plain", "x-functions-key": W.COMPILE_KEY})
