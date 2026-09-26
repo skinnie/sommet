@@ -121,7 +121,8 @@ Item {
                      targets: ["none", "power", "hr", "speed", "cadence"] }
         // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed
         // targets (2026-09-26), so they're not offered here (app workouts still have them).
-        return { durations: ["time_min", "time_s", "distance_km", "distance_m", "lap"],
+        return { durations: ["time_min", "time_s", "distance_km", "distance_m", "lap",
+                             "energy_kcal", "hr_above", "hr_below"],
                  targets: ["none", "hr", "pace", "speed", "power", "cadence"] }
     }
 
@@ -1025,10 +1026,13 @@ Item {
                                                qsTr("Recovery"), qsTr("Cool down"),
                                                qsTr("Repeat start"), qsTr("Repeat end")]
         readonly property var durationKinds: ["time_min", "time_s", "distance_km",
-                                              "distance_m", "ascent_m", "lap"]
+                                              "distance_m", "ascent_m", "lap",
+                                              "energy_kcal", "hr_above", "hr_below"]
         readonly property var durationLabels: [qsTr("Time (min)"), qsTr("Time (s)"),
                                                qsTr("Distance (km)"), qsTr("Distance (m)"),
-                                               qsTr("Ascent (m)"), qsTr("Lap press")]
+                                               qsTr("Ascent (m)"), qsTr("Lap press"),
+                                               qsTr("Energy (kcal)"), qsTr("Until HR above (bpm)"),
+                                               qsTr("Until HR below (bpm)")]
         readonly property var targetKinds: ["none", "hr", "pace", "speed",
                                             "vertical_speed", "power", "cadence"]
         readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate"),
@@ -1073,6 +1077,11 @@ Item {
                 kind = "ascent_m"
             } else if (s.duration && s.duration.durationName === "lap") {
                 kind = "lap"
+            } else if (s.duration && s.duration.durationName === "energy") {
+                kind = "energy_kcal"
+            } else if (s.duration && (s.duration.durationName === "hr_above"
+                                      || s.duration.durationName === "hr_below")) {
+                kind = s.duration.durationName
             }
             const target = s.target && s.target.targetName ? s.target.targetName : "none"
             return { stepType: type, durationKind: kind, durationValue: value,
@@ -1102,6 +1111,10 @@ Item {
                 step.duration = { durationName: "distance", value: Math.round(v * 1000) }
             else if (row.durationKind === "distance_m")
                 step.duration = { durationName: "distance", value: Math.round(v) }
+            else if (row.durationKind === "energy_kcal")
+                step.duration = { durationName: "energy", value: Math.round(v) }
+            else if (row.durationKind === "hr_above" || row.durationKind === "hr_below")
+                step.duration = { durationName: row.durationKind, value: Math.round(v) }
             else
                 step.duration = { durationName: "ascent", value: Math.round(v) }
             if (row.targetKind !== "none")

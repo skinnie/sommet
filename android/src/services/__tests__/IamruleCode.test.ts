@@ -5,7 +5,7 @@ import {
   addLights, callBytes, callSites, CALL_BEEP, CALL_LIGHT, guidanceSites, instructions, layout,
   lightIfStep, splice, validate,
 } from '../IamruleCode';
-import { lightChoices, stepSequence, withSiTargets } from '../GuidedWorkoutCore';
+import { lightChoices, stepSequence, withSiUnits } from '../GuidedWorkoutCore';
 import type { Workout } from '../WorkoutSource';
 
 const fromHex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], x => parseInt(x, 16));
@@ -82,11 +82,11 @@ describe('GuidedWorkoutCore light helpers', () => {
   });
 
   test('target ranges go to the compiler in SI units, the stored workout is untouched', () => {
-    const c = withSiTargets(wk);
+    const c = withSiUnits(wk);
     expect(c.steps[0].target!.valueRange).toEqual({ min: 56 / 60, max: 157 / 60 });
     expect(wk.steps[0].target!.valueRange).toEqual({ min: 56, max: 157 });
     const t = (targetName: string, min: number, max: number) =>
-      withSiTargets({ steps: [{ type: { typeName: 'interval' }, target: { targetName, valueRange: { min, max } } }] }).steps[0].target!.valueRange!;
+      withSiUnits({ steps: [{ type: { typeName: 'interval' }, target: { targetName, valueRange: { min, max } } }] }).steps[0].target!.valueRange!;
     const near = (r: { min: number; max: number }, min: number, max: number) => {
       expect(r.min).toBeCloseTo(min, 9); expect(r.max).toBeCloseTo(max, 9);
     };
@@ -94,5 +94,11 @@ describe('GuidedWorkoutCore light helpers', () => {
     near(t('speed', 10, 12), 10 / 3.6, 12 / 3.6); // km/h -> m/s
     near(t('cadence', 80, 90), 80 / 60, 1.5);     // rpm -> rev/s
     near(t('power', 200, 250), 200, 250);
+    const d = (durationName: string, value: number) =>
+      withSiUnits({ steps: [{ type: { typeName: 'interval' }, duration: { durationName, value } }] }).steps[0].duration!.value;
+    expect(d('energy', 50)).toBeCloseTo(209200, 6);   // kcal -> J
+    expect(d('hr_above', 150)).toBeCloseTo(2.5, 9);   // bpm -> beats/s
+    expect(d('hr_below', 120)).toBeCloseTo(2.0, 9);
+    expect(d('time', 60)).toBe(60);
   });
 });

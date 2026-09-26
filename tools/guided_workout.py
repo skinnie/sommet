@@ -130,11 +130,18 @@ SI_FACTOR = {
     "pace": 0.06,        # min/km (decimal) -> s/m
     # "power": watts either way
 }
+# Step ends too (same bytecode read): energy compared in joules, HR thresholds per second (the
+# compiler itself negates the value for "hr_below"). Time (s), distance (m), lap: already SI.
+SI_DURATION_FACTOR = {
+    "energy": 4184.0,    # kcal -> J
+    "hr_above": 1 / 60,  # bpm -> beats per second
+    "hr_below": 1 / 60,
+}
 
 
-def with_si_targets(workout):
-    """Copy with every target range converted to the SI units the compiled guidance program compares
-    against (SI_FACTOR). Sent unconverted, HR went in 60x too high - the live value was always
+def with_si_units(workout):
+    """Copy with every target range and step-end value converted to the SI units the compiled
+    guidance program compares against (SI_FACTOR, SI_DURATION_FACTOR). Sent unconverted, HR went in 60x too high - the live value was always
     "below min", the alarm fired all run and the band showed nonsense (André, 2026-09-26: "134-204"
     for a 126-157 walk, "255" for a 158-166 jog); pace, speed and cadence had the same class of bug.
     Real captured Suunto workout JSON (marguslt gist) carries HR the same way (124 bpm = 2.0667)."""
@@ -147,6 +154,10 @@ def with_si_targets(workout):
             rng = target["valueRange"]
             rng["min"] = rng["min"] * factor
             rng["max"] = rng["max"] * factor
+        duration = s.get("duration") or {}
+        dfactor = SI_DURATION_FACTOR.get(duration.get("durationName"))
+        if dfactor and "value" in duration:
+            duration["value"] = duration["value"] * dfactor
     return wk
 
 
@@ -216,7 +227,7 @@ def compile_workout(workout, lang=None):
             "~/.config/ambitapp/compile_key (all gitignored - never commit it).")
     activity_id = workout.get("activityId", 3)
     workout = with_default_labels(workout, lang)  # blank step -> phase word in the watch's language
-    workout = with_si_targets(workout)  # target units -> the SI units the program compares
+    workout = with_si_units(workout)  # target/step-end units -> the SI units the program compares
     req = urllib.request.Request(
         W.COMPILE_URL, data=json.dumps(workout).encode("utf-8"), method="POST",
         headers={"Content-Type": "text/plain", "x-functions-key": W.COMPILE_KEY})

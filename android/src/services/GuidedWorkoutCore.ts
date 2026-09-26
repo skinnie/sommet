@@ -79,16 +79,25 @@ export const SI_FACTOR: Record<string, number> = {
   pace: 0.06,       // min/km (decimal) -> s/m
   // power: watts either way
 };
+// Step ends too: energy compared in joules, HR thresholds per second (the compiler negates
+// hr_below itself) - guided_workout.SI_DURATION_FACTOR. Time (s), distance (m), lap: already SI.
+export const SI_DURATION_FACTOR: Record<string, number> = {
+  energy: 4184,       // kcal -> J
+  hr_above: 1 / 60,   // bpm -> beats per second
+  hr_below: 1 / 60,
+};
 
-/** Copy with every target range in the program's SI units. Apply to the JSON handed to the compiler,
- *  never to the stored plan (guided_workout.with_si_targets). */
-export function withSiTargets(workout: Workout): Workout {
+/** Copy with every target range and step-end value in the program's SI units. Apply to the JSON
+ *  handed to the compiler, never to the stored plan (guided_workout.with_si_units). */
+export function withSiUnits(workout: Workout): Workout {
   const wk = clone(workout);
   for (const s of wk.steps || []) {
     const f = SI_FACTOR[s.target?.targetName ?? ''];
     if (f && s.target?.valueRange) {
       s.target.valueRange = { min: s.target.valueRange.min * f, max: s.target.valueRange.max * f };
     }
+    const df = SI_DURATION_FACTOR[s.duration?.durationName ?? ''];
+    if (df && s.duration) s.duration = { ...s.duration, value: s.duration.value * df };
   }
   return wk;
 }

@@ -21,7 +21,7 @@ export function capsFor(device: PlanDevice) {
   if (device === 'bryton') return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m'], targets: ['none', 'power', 'hr', 'speed', 'cadence'] };
   // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed targets
   // (2026-09-26) - app workouts (Intervals screen) still have them.
-  return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m', 'lap'], targets: ['none', 'hr', 'pace', 'speed', 'power', 'cadence'] };
+  return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m', 'lap', 'energy_kcal', 'hr_above', 'hr_below'], targets: ['none', 'hr', 'pace', 'speed', 'power', 'cadence'] };
 }
 
 const TYPES = ['warmup', 'interval', 'recovery', 'cooldown', 'repeatStart', 'repeatEnd'];
@@ -31,6 +31,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 const DUR_LABEL: Record<string, string> = {
   time_min: 'min', time_s: 's', distance_km: 'km', distance_m: 'm', ascent_m: 'm+', lap: 'lap',
+  energy_kcal: 'kcal', hr_above: 'until HR above (bpm)', hr_below: 'until HR below (bpm)',
 };
 const TGT_LABEL: Record<string, string> = {
   none: 'No target', hr: 'HR', pace: 'Pace min/km', speed: 'Speed km/h', vertical_speed: 'V-speed', power: 'Power W', cadence: 'Cadence',
@@ -64,6 +65,8 @@ export function fromSchema(s: WorkoutStep): StepRow {
   else if (dn === 'distance') { if (value % 1000 === 0) { kind = 'distance_km'; value = value / 1000; } else kind = 'distance_m'; }
   else if (dn === 'ascent') kind = 'ascent_m';
   else if (dn === 'lap') kind = 'lap';
+  else if (dn === 'energy') kind = 'energy_kcal';
+  else if (dn === 'hr_above' || dn === 'hr_below') kind = dn;
   const tn = s.target?.targetName ?? 'none';
   return {
     stepType: type, durationKind: kind, durationValue: value, targetKind: tn,
@@ -82,6 +85,8 @@ export function toSchema(r: StepRow): WorkoutStep {
     : r.durationKind === 'time_s' ? { durationName: 'time', value: Math.round(v) }
     : r.durationKind === 'distance_km' ? { durationName: 'distance', value: Math.round(v * 1000) }
     : r.durationKind === 'distance_m' ? { durationName: 'distance', value: Math.round(v) }
+    : r.durationKind === 'energy_kcal' ? { durationName: 'energy', value: Math.round(v) }
+    : r.durationKind === 'hr_above' || r.durationKind === 'hr_below' ? { durationName: r.durationKind, value: Math.round(v) }
     : { durationName: 'ascent', value: Math.round(v) };
   const step: WorkoutStep = { type: { typeName: r.stepType }, duration };
   step.target = r.targetKind === 'none'

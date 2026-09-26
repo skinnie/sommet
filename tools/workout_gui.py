@@ -282,7 +282,7 @@ let steps = [];
 const TYPE_NAMES = ["warmup", "interval", "recovery", "cooldown"];
 // Native guided workouts only (this builder): the compiler rejects "ascent" steps and
 // "vertical_speed" targets - both are app-workout-only (apps_gui.py) - 2026-09-26.
-const DURATION_NAMES = ["time", "distance", "lap"];
+const DURATION_NAMES = ["time", "distance", "lap", "energy", "hr_above", "hr_below"];
 const TARGET_NAMES = ["none", "hr", "pace", "speed", "power"];
 const TARGET_UNITS = {hr: "bpm", speed: "km/h", power: "W"};
 const TARGET_WORD = {hr: "HR", pace: "pace", speed: "speed", power: "power", cadence: "cadence"};
@@ -295,10 +295,12 @@ const DISTANCE_UNITS = {meters: 1, kilometers: 1000};
 function unitsFor(durationName) {
   if (durationName === "time") return TIME_UNITS;
   if (durationName === "distance" || durationName === "ascent") return DISTANCE_UNITS;
+  if (durationName === "energy") return {kcal: 1};                       // compiled as joules
+  if (durationName === "hr_above" || durationName === "hr_below") return {bpm: 1};  // as per-second
   return null;
 }
 function defaultUnit(durationName) {
-  return durationName === "time" ? "seconds" : "meters";
+  return {time: "seconds", energy: "kcal", hr_above: "bpm", hr_below: "bpm"}[durationName] || "meters";
 }
 
 // SUUNTO_PACE's native unit is decimal minutes/km (SuuntoAppZoneDeveloperManual.pdf) - "6:30"
