@@ -46,6 +46,12 @@ CROSS_MIN_ALONG_M = 150.0  # ...provided they are at least this far apart ALONG 
 # through the same spot (rare - only a real triple self-crossing would hit it).
 PASS_SYM = ["Flag, Green", "Flag, Yellow", "Flag, Red", "Flag, Blue"]
 
+RETRACE_MIN_M = 150.0    # a self-proximity run this long along the track is a genuine out-and-back
+                          # (the same physical road ridden in opposite directions), not a point-like
+                          # junction - "bear left/right" at its edges is the wrong vocabulary.
+RETRACE_ANTIPARALLEL_DEG = 120.0  # the sibling pass has to head close to the opposite way, not just
+                                   # "some other angle", or this is a Y-junction that stays close for
+                                   # a while before diverging, not a real retrace - no marker either way.
 CROSS_WPT_OFFSET_M = 18.0  # place each crossing's <wpt> this far past the junction, along THAT
                             # pass's own outgoing direction - not at the junction itself. Two
                             # passes through the same spot diverge afterwards, so offsetting each
@@ -290,6 +296,28 @@ def find_crossings(xy: Sequence[Tuple[float, float]], along: Sequence[float],
         # through this same spot get a visibly different marker (see PASS_SYM below), a cue
         # that survives GPS drift and screen zoom, unlike relying on the offset position alone.
         rs_in_order = sorted(rs, key=lambda r: runs[r][0])
+        run_length = {r: along[runs[r][-1]] - along[runs[r][0]] for r in rs}
+
+        if any(run_length[r] >= RETRACE_MIN_M for r in rs):
+            # A genuine out-and-back: this isn't "which fork do I take", it's "I'm about to ride a
+            # stretch I've already ridden, the other way". Only flag it where a sibling run really
+            # is heading close to the opposite way - a Y-junction that merely stays close for a
+            # while before diverging isn't a retrace, and gets no marker at all here.
+            run_bearing = {r: _bearing(xy[runs[r][0]], xy[runs[r][-1]]) for r in rs}
+            for pass_no, r in enumerate(rs_in_order, start=1):
+                a, b = runs[r][0], runs[r][-1]
+                opposite = any(r2 != r and abs(_delta(run_bearing[r], run_bearing[r2])) >= RETRACE_ANTIPARALLEL_DEG
+                              for r2 in rs)
+                if not opposite:
+                    continue
+                sym = PASS_SYM[(pass_no - 1) % len(PASS_SYM)]
+                for edge, i in (("starts", a), ("ends", b)):
+                    out.append({"i": i, "wpt_i": i, "km": along[i] / 1000.0, "delta": 0.0,
+                                "label": "RETRACE", "kind_hint": "retrace", "edge": edge, "sym": sym,
+                                "event": ev_no + 1, "pass_no": pass_no,
+                                "other_km": [round(k, 1) for k in kms if abs(k - along[a] / 1000.0) > 0.05]})
+            continue
+
         for pass_no, r in enumerate(rs_in_order, start=1):
             a, b = runs[r][0], runs[r][-1]
             length = along[b] - along[a]
@@ -370,8 +398,16 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
                       "kind": "turn"})
     for c in crossings:
         others = ", ".join("%.1f" % k for k in c["other_km"])
-        sym = PASS_SYM[(c["pass_no"] - 1) % len(PASS_SYM)]
         ordinal = _ordinal(c["pass_no"])
+        if c.get("kind_hint") == "retrace":
+            # A genuine out-and-back, not a fork - "bear left/right" would be the wrong
+            # vocabulary here, so name it for what it actually is.
+            marks.append({**c, "name": "%s Retrace %s %.1f" % (ordinal, c["edge"], c["km"]),
+                          "sym": c["sym"], "kind": "crossing",
+                          "desc": "You ride this same stretch again the other way (also at km %s) "
+                                  "- %s time it %s at %.1f km" % (others or "-", ordinal, c["edge"], c["km"])})
+            continue
+        sym = PASS_SYM[(c["pass_no"] - 1) % len(PASS_SYM)]
         marks.append({**c, "name": "%s %s %.1f" % (ordinal, _name_word(c["label"]), c["km"]), "sym": sym, "kind": "crossing",
                       "desc": "Track crosses itself here (also at km %s) - this is the %s time: %s at %.1f km" % (
                           others or "-", ordinal, _wording(c["label"]).lower(), c["km"])})
@@ -507,6 +543,13 @@ def _selftest() -> int:
     # 6) a straight line has no turns; junk input is a clean error
     assert build(_synthetic(_densify([(0, 0), (0, 2000)])), "track")["stats"]["turns"] == 0
     assert build("<gpx></gpx>")["ok"] is False
+    # 7) a dead-end out-and-back (out 400m, U-turn, same 400m back) is a retrace, not a fork -
+    # "bear left/right" would be nonsense there, and a Y-junction that merely stays close for a
+    # while (not antiparallel) must NOT be flagged as one.
+    r = build(_synthetic(_densify([(0, 0), (400, 0), (0, 0)])), "track")
+    assert "1st Retrace starts" in r["gpx"] and "1st Retrace ends" in r["gpx"], r["gpx"][:600]
+    assert "2nd Retrace starts" in r["gpx"] and "2nd Retrace ends" in r["gpx"], r["gpx"][:600]
+    assert "Bear" not in r["gpx"] and " Left " not in r["gpx"] and " Right " not in r["gpx"], r["gpx"]
     print("etrex_export selftest OK")
     return 0
 
