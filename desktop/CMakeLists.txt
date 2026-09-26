@@ -210,6 +210,7 @@ qt_add_qml_module(ambitapp
         qml/components/MageneSettingsPanel.qml
         qml/components/MageneScreensPanel.qml
         qml/components/BrytonScreensPanel.qml
+        qml/components/RouteLibraryMenu.qml
         qml/components/BrytonIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
@@ -220,7 +221,6 @@ qt_add_qml_module(ambitapp
         qml/viewmodels/RouteViewModel.qml
         qml/pages/HomePage.qml
         qml/pages/ActivitiesPage.qml
-        qml/pages/RoutesPage.qml
         qml/pages/PlanRoutePage.qml
         qml/pages/RacePlanPage.qml
         qml/pages/PoisPage.qml

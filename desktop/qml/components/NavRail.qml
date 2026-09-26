@@ -116,16 +116,6 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Always shown (André, 2026-09-25): Routes is where ANY device gets a route - a watch,
-                // an eTrex, the Bryton or the Magene - and a GPX can be imported and looked at with
-                // nothing connected. The page itself hides the watch parts when there's no watch.
-                glyph: Icons.routes
-                label: qsTr("Routes")
-                selected: root.currentPage === "routes"
-                onClicked: root.pageSelected("routes")
-            }
-            NavItem {
-                width: parent.width
                 visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && DeviceCapabilities.supportsPOIs
                 glyph: Icons.pois
                 label: qsTr("POIs")
@@ -134,11 +124,12 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                // Route = the route workshop (map, GPX cut/edit, weather+climb, POIs). Renamed from
-                // "Plan" (2026-09-19) so the two race screens read by job: Route vs Race plan.
+                // Routes = the one route page (André, 2026-09-26: Routes + Route merged): a library
+                // menu of saved routes and each connected device's own, the planner (map, weather,
+                // climbs, days) and one "Send to…" for every device. Race planner stays its own page.
                 glyph: Icons.routes
-                label: qsTr("Route")
-                selected: root.currentPage === "planRoute"
+                label: qsTr("Routes")
+                selected: root.currentPage === "planRoute" || root.currentPage === "routes"
                 onClicked: root.pageSelected("planRoute")
             }
             NavItem {

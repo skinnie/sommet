@@ -155,7 +155,7 @@ Item {
 
     // Restore whatever was loaded before the page was navigated away from (the Loader destroys
     // it), and write back after every change - see PlanStore's header.
-    Component.onCompleted: restoreFromStore()
+    Component.onCompleted: { restoreFromStore(); probeBryton() }
 
     function restoreFromStore() {
         startTime = PlanStore.startTime; paceText = PlanStore.paceText; planDate = PlanStore.planDate
@@ -213,7 +213,8 @@ Item {
         xhr.send(body ? JSON.stringify(body) : undefined)
     }
 
-    // Read the picked GPX, colour it by climb, and forecast the weather along it.
+    // Read the picked GPX, colour it by climb, and forecast the weather along it. An imported
+    // file is also kept in the saved-route library (same file twice = one entry).
     function loadGpx(fileUrl) {
         var gpx = LocalFileService.readText(fileUrl)
         if (!gpx || gpx.length === 0) {
@@ -221,12 +222,57 @@ Item {
             return
         }
         var s = fileUrl.toString()
-        routeName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
+        openRoute(decodeURIComponent(s.substring(s.lastIndexOf("/") + 1)), gpx)
+        api("POST", "/api/library/save", { name: routeName.replace(/\.gpx$/i, ""), gpx: gpx },
+            function(status, res) { if (res && res.ok) root.libraryId = res.id })
+    }
+    // Open a route (from a file or the library menu - saved, watch, eTrex, Bryton) in the planner.
+    property string libraryId: ""       // the saved-library entry this route is, when it is one
+    function openRoute(name, gpx) {
+        routeName = name
         plannedGpx = gpx
+        libraryId = ""
         PlanStore.pois = null            // new route -> stale services cleared (shared w/ Race Plan)
         clearResults()
         colorTrack()
         forecastWeather()
+    }
+
+    // ---- Send to… any connected device (André, 2026-09-26: one Routes page for every device) --
+    property bool brytonHere: false
+    function probeBryton() {
+        api("GET", "/api/bryton/info", null, function(status, res) { root.brytonHere = !!(res && res.ok) })
+    }
+    readonly property bool watchCanTakeRoute: HomeViewModel.anyDevice && !HomeViewModel.isGarmin
+                                              && DeviceCapabilities.supportsRouteWrite
+    function cleanName() { return (routeName || "Sommet route").replace(/\.gpx$/i, "") }
+    function sendToBryton() {
+        busy = true; statusMsg = qsTr("Sending to the Bryton…")
+        api("POST", "/api/bryton/route", { name: cleanName(), gpx: plannedGpx }, function(status, res) {
+            busy = false
+            statusMsg = (res && res.ok) ? qsTr("On the Bryton — in Follow Track after unplugging.")
+                                        : (res && res.error ? res.error : qsTr("Send to Bryton failed"))
+        })
+    }
+    function sendToMagene() {
+        busy = true; statusMsg = qsTr("Sending to the Magene… keep the C406 awake and close")
+        const body = { name: cleanName(), gpx: plannedGpx }
+        if (BikeDevices.magene && BikeDevices.magene.address) body.address = BikeDevices.magene.address
+        api("POST", "/api/magene/route", body, function(status, res) {
+            busy = false
+            if (res && res.ok) {
+                statusMsg = qsTr("On the Magene — it's the route under Navigation.")
+                libraryMenu.noteMageneRoute(cleanName(), root.libraryId)
+            } else {
+                statusMsg = res && res.error ? res.error : qsTr("Send to Magene failed")
+            }
+        })
+    }
+    function saveGpxFile(name, gpx) {
+        exportGpxText = gpx
+        saveDayDialog.title = qsTr("Save GPX")
+        saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
+        saveDayDialog.open()
     }
 
     // POIs / resupply along the route (Overpass, online). Lives on the Route page (spatial data);
@@ -564,10 +610,26 @@ Item {
                 saveDayDialog.open()
             })
     }
+    // One "Send to…" for every device - only the connected ones show - plus the eTrex / GPX files.
     ThemedMenu {
-        id: etrexMenu
-        ThemedMenuItem { text: qsTr("Track + turn & crossing waypoints"); onTriggered: root.exportForEtrex("track") }
-        ThemedMenuItem { text: qsTr("Route (max 50 via points, with directions)"); onTriggered: root.exportForEtrex("route") }
+        id: sendMenu
+        onAboutToShow: root.probeBryton()
+        ThemedMenuItem { text: qsTr("Watch"); visible: root.watchCanTakeRoute; onTriggered: sendDialog.open() }
+        ThemedMenuItem { text: qsTr("Bryton (Follow Track)"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
+        ThemedMenuItem { text: qsTr("Magene C406"); visible: BikeDevices.magene !== null; onTriggered: root.sendToMagene() }
+        ThemedMenuItem { text: qsTr("Garmin eTrex (on the device)")
+                         visible: HomeViewModel.isGarmin && GarminService.hasSdCard
+                         onTriggered: GarminService.writeGpxToDevice(root.cleanName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx", root.plannedGpx) }
+        MenuSeparator {}
+        ThemedMenuItem { text: qsTr("eTrex file — track + turn & crossing waypoints…"); onTriggered: root.exportForEtrex("track") }
+        ThemedMenuItem { text: qsTr("eTrex file — route (max 50 via points)…"); onTriggered: root.exportForEtrex("route") }
+        ThemedMenuItem { text: qsTr("GPX file…"); onTriggered: root.saveGpxFile(root.cleanName(), root.plannedGpx) }
+    }
+
+    RouteLibraryMenu {
+        id: libraryMenu
+        onOpenRequested: (name, gpx) => root.openRoute(name, gpx)
+        onExportRequested: (name, gpx) => root.saveGpxFile(name, gpx)
     }
 
     // --- layout: map on the left, controls + results on the right ----------------------
@@ -717,15 +779,14 @@ Item {
                         width: parent.width
                         spacing: 2
                         Text {
-                            text: qsTr("Plan route")
+                            text: qsTr("Routes")
                             color: Theme.text
                             font.pixelSize: Theme.fontSizeTitle
                             font.bold: true
                         }
                         Text {
                             width: parent.width
-                            text: root.routeName.length > 0 ? root.routeName
-                                                            : qsTr("Weather + climbs for a GPX you bring")
+                            text: qsTr("Weather, climbs and days for a route — then send it to any device")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                             elide: Text.ElideRight
@@ -737,12 +798,30 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingSmall
 
+                        // The library menu: pick any saved route or one on a connected device.
                         RoundedButton {
+                            id: libraryButton
                             width: parent.width
-                            text: root.plannedGpx.length > 0 ? qsTr("Upload a different GPX")
-                                                             : qsTr("Upload GPX")
+                            text: (root.routeName.length > 0 ? root.cleanName() : qsTr("Choose a route")) + "  ▾"
                             enabled: !root.busy
-                            onClicked: gpxDialog.open()
+                            onClicked: { libraryMenu.x = 0; libraryMenu.y = height + 4; libraryMenu.parent = libraryButton; libraryMenu.open() }
+                        }
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingSmall
+                            readonly property real cellW: (width - Theme.spacingSmall) / 2
+                            RoundedButton {
+                                width: parent.cellW
+                                text: qsTr("Import GPX")
+                                enabled: !root.busy
+                                onClicked: gpxDialog.open()
+                            }
+                            RoundedButton {
+                                width: parent.cellW
+                                text: qsTr("Plan race")
+                                enabled: root.plannedGpx.length > 0
+                                onClicked: NavBus.navigate("racePlan")
+                            }
                         }
                         Row {
                             width: parent.width
@@ -756,10 +835,11 @@ Item {
                                 onClicked: root.clearAll()
                             }
                             RoundedButton {
+                                id: sendButton
                                 width: parent.cellW
-                                text: qsTr("Send to watch")
+                                text: qsTr("Send to…  ▾")
                                 enabled: !root.busy && root.plannedGpx.length > 0
-                                onClicked: sendDialog.open()
+                                onClicked: sendMenu.popup(sendButton, 0, sendButton.height)
                             }
                         }
                         RoundedButton {
@@ -770,13 +850,7 @@ Item {
                             enabled: !root.busy && !root.weatherBusy
                             onClicked: root.toggleReverse()
                         }
-                        RoundedButton {
-                            width: parent.width
-                            visible: root.plannedGpx.length > 0
-                            text: qsTr("Export for Garmin eTrex…")
-                            enabled: !root.busy
-                            onClicked: etrexMenu.popup()
-                        }
+
                         // POIs and weather share the map and can crowd each other: one switch hides every POI.
                         RoundedCheckBox { text: qsTr("Show POIs")
                                           visible: !!PlanStore.pois

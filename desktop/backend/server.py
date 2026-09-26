@@ -789,7 +789,8 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
-                     "magene_pages.py", "bryton_grid.py", "intervals_events.py"}
+                     "magene_pages.py", "bryton_grid.py", "intervals_events.py",
+                     "route_library.py", "bryton_tracks.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1151,6 +1152,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_import()
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(None)
+        elif self.path == "/api/library":
+            self._handle_library("list", {})
+        elif self.path == "/api/bryton/tracks":
+            self._handle_bryton_tracks("list", {})
         elif self.path == "/api/bryton/info":
             self._handle_bryton_info()
         elif self.path == "/api/magene/fields":
@@ -1385,6 +1390,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_workout_native(body)
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(body)
+        elif self.path in ("/api/library/save", "/api/library/get", "/api/library/rename",
+                           "/api/library/delete"):
+            self._handle_library(self.path.rsplit("/", 1)[1], body or {})
+        elif self.path in ("/api/bryton/tracks/gpx", "/api/bryton/tracks/rename",
+                           "/api/bryton/tracks/delete"):
+            self._handle_bryton_tracks(self.path.rsplit("/", 1)[1], body or {})
         elif self.path == "/api/bryton/route":
             self._handle_bryton_route(body)
         elif self.path == "/api/magene/import":
@@ -1814,6 +1825,55 @@ class Handler(BaseHTTPRequestHandler):
             if dev.get("kind") == "bryton" and dev.get("mount"):
                 return dev["mount"]
         return None
+
+    ROUTE_LIBRARY_DIR = str(BACKUP_DIR / "Routes")
+
+    def _handle_library(self, action, body):
+        """The Routes page's saved-route library (tools/route_library.py, ~/AmbitAppBackups/Routes).
+        GET /api/library -> {routes}; POST /api/library/save {name, gpx} -> {id, existed} (same GPX
+        twice = one entry); /get {id} -> {name, gpx}; /rename {id, name}; /delete {id}."""
+        d = self.ROUTE_LIBRARY_DIR
+        tmp = None
+        try:
+            if action == "list":
+                args = ["list", d]
+            elif action == "save":
+                if not body.get("gpx"):
+                    self._send_json(400, {"ok": False, "error": "no gpx"})
+                    return
+                with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False, encoding="utf-8") as tf:
+                    tf.write(body["gpx"])
+                    tmp = tf.name
+                args = ["save", d, str(body.get("name") or "Route"), tmp]
+            elif action == "rename":
+                args = ["rename", d, str(body.get("id") or ""), str(body.get("name") or "")]
+            else:
+                args = [action, d, str(body.get("id") or "")]
+            _c, out, err = run_tool("route_library.py", args)
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        info = self._parse_last_json_line(out) or {"ok": False, "error": (err or "no output").strip()[:200]}
+        self._send_json(200 if info.get("ok") else 400, info)
+
+    def _handle_bryton_tracks(self, action, body):
+        """The Bryton's Follow Track list (tools/bryton_tracks.py): GET /api/bryton/tracks;
+        POST /api/bryton/tracks/gpx {name}; /rename {name, newName}; /delete {name}."""
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        args = [action, mount]
+        if action != "list":
+            args.append(str(body.get("name") or ""))
+        if action == "rename":
+            args.append(str(body.get("newName") or ""))
+        _c, out, err = run_tool("bryton_tracks.py", args)
+        info = self._parse_last_json_line(out) or {"ok": False, "error": (err or "no output").strip()[:200]}
+        self._send_json(200 if info.get("ok") else 400, info)
 
     def _handle_bryton_grid(self, body):
         """GET /api/bryton/grid - the Aero 60's data screens (System/Grid.ini) + the field catalogue
