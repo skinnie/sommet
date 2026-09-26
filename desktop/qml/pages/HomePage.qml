@@ -73,8 +73,10 @@ PageFlickable {
             if (!r.ok) {
                 root.bikeSyncOk = false;
                 root.bikeSyncMsg = qsTr("Magene not in range — wake it (any button) and retry.");
+                root.mageneAnswered(false);
                 return;
             }
+            root.mageneAnswered(true);
             root.bikeSyncMsg = "";
             root.mageneDevices = [Object.assign({}, bike, { "activityCount": r.files.length, "files": r.files })];
             ActivityService.importFromMagene(bike.address, r.files);
@@ -87,6 +89,19 @@ PageFlickable {
     // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
     // over Bluetooth. One "active device across watches and bike computers" (André, 2026-09-04).
     readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices)
+    // The remembered Magene only counts as connected while it actually answers (its last
+    // connection worked). Asleep/off, it stays selectable but reads "asleep" and isn't counted
+    // (André, 2026-09-26: "c406 shows connected and the device is off").
+    // Reachable = it answered within the last 10 minutes (it sleeps; a BLE scan to check costs
+    // seconds, so the last real answer is the signal).
+    property real mageneSeenAt: 0
+    property bool mageneReachable: false
+    function mageneAnswered(ok) { root.mageneSeenAt = ok ? Date.now() : 0; root.mageneReachable = ok }
+    Timer { interval: 60000; running: true; repeat: true
+            onTriggered: if (root.mageneReachable && Date.now() - root.mageneSeenAt > 600000) root.mageneReachable = false }
+    function isReachable(bike) { return bike.kind !== "c406" || root.mageneReachable }
+    readonly property int reachableCount: DeviceService.connectedWatches.length
+        + bikeComputers.filter(b => root.isReachable(b)).length
     property string bikeSyncMsg: ""
     property bool bikeSyncOk: false
     // Magene BLE scan state (the button in the experimental section drives these).
@@ -119,9 +134,12 @@ PageFlickable {
     function reconcileActiveDevice() {
         if (DeviceService.bikeActive && !activeBike)
             DeviceService.selectBikeComputer("");
-        else if (!DeviceService.bikeActive && !HomeViewModel.connected
-                 && bikeComputers.length > 0)
-            DeviceService.selectBikeComputer(bikeComputers[0].kind);
+        else if (!DeviceService.bikeActive && !HomeViewModel.connected) {
+            // prefer a plugged one over a remembered Magene that may be asleep
+            const live = bikeComputers.filter(b => b.kind !== "c406")
+            if (live.length > 0) DeviceService.selectBikeComputer(live[0].kind)
+            else if (bikeComputers.length > 0) DeviceService.selectBikeComputer(bikeComputers[0].kind)
+        }
     }
     onBikeComputersChanged: reconcileActiveDevice()
 
@@ -193,9 +211,11 @@ PageFlickable {
             if (!r || !r.ok) {
                 root.mageneStatus = null;
                 root.mageneStatusFor = "";      // asleep: try again on the next selection
+                root.mageneAnswered(false);
                 return;
             }
             root.mageneStatus = r;
+            root.mageneAnswered(true);
             // The same connection listed the rides: fill the card + Sync (no second connect).
             if (r.rides && root.mageneDevices.length > 0 && root.mageneDevices[0].address === addr)
                 root.mageneDevices = [Object.assign({}, root.mageneDevices[0],
@@ -727,7 +747,8 @@ PageFlickable {
                                     var total = root.activeBike.activityCount;
                                     // A remembered Magene before its first Sync this session.
                                     if (total < 0)
-                                        return qsTr("Bluetooth · Sync reads its rides");
+                                        return root.mageneBusy ? qsTr("Bluetooth · connecting…")
+                                             : qsTr("Bluetooth · asleep or out of range — wake it (any button), then Sync rides");
                                     // "new" now means genuinely-new: unsyncedBikeCount matches each
                                     // device file's timestamp against the whole library, so rides
                                     // already imported (e.g. via intervals.icu) aren't counted
@@ -1282,8 +1303,7 @@ PageFlickable {
                 spacing: Theme.spacingSmall
 
                 Text {
-                    text: qsTr("%1 devices connected — tap to switch:")
-                          .arg(DeviceService.connectedWatches.length + root.bikeComputers.length)
+                    text: qsTr("%1 devices connected — tap to switch:").arg(root.reachableCount)
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
@@ -1313,6 +1333,7 @@ PageFlickable {
                         delegate: DeviceChip {
                             required property var modelData
                             label: root.bikeDisplayName(modelData)
+                                   + (root.isReachable(modelData) ? "" : qsTr(" (asleep)"))
                             active: DeviceService.activeBikeKind === modelData.kind
                             onPicked: DeviceService.selectBikeComputer(modelData.kind)
                         }

@@ -9,7 +9,15 @@ import AmbitApp
 Menu {
     id: root
     padding: 4
-    implicitWidth: 220
+    // Wide enough for the longest item (never cut "…"), at least the old 220 px (2026-09-26).
+    implicitWidth: {
+        let w = 220
+        for (let i = 0; i < count; i++) {
+            const it = itemAt(i)
+            if (it && it.visible) w = Math.max(w, it.implicitWidth)
+        }
+        return w + leftPadding + rightPadding
+    }
 
     background: Rectangle {
         radius: Theme.radiusCard
