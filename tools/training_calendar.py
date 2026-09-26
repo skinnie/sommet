@@ -97,37 +97,36 @@ def rebuild_apps_region(raw_blocks):
     return header + b"".join(raw_blocks)
 
 
-def plan_diff(current_apps_bytes, plan_entries, today):
-    """Returns (kept_raw_blocks, to_add) — to_add is the subset of plan_entries (date >= today)
-    not already present on the watch under their computed label.
+def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_MAX):
+    """Returns (kept_raw_blocks, to_add, waiting).
 
-    A managed entry is kept only if it's both unexpired AND still present in plan_entries —
-    otherwise it was deliberately removed from the calendar (see TrainingProgramPage.qml's
-    "Remove workout") and this sync should erase it, not just leave it stranded on the watch
-    until its date happens to pass. Unmanaged entries (anything not "dd/mm_"-prefixed — a
-    manually installed guided workout, a generic Suunto App) are never touched, matching the
-    module docstring's standing rule."""
+    The WORKOUT menu shows only the first `menu_max` native workouts, so the calendar syncs to
+    the space available (André, 2026-09-26): the manually installed native workouts keep their
+    slots, and the soonest upcoming plan entries fill the rest - earliest first. `waiting` is the
+    labels of the later ones; as past ones are erased, each sync moves the next ones in.
+
+    A managed entry is kept only if it's in that window - so an expired one, one removed from
+    the calendar (TrainingProgramPage.qml's "Remove workout"), and one pushed out of the window
+    are all erased. Unmanaged entries (anything not "dd/mm_"-prefixed — a manually installed
+    guided workout, a generic Suunto App) are never touched, matching the module docstring's
+    standing rule."""
     existing = WI.apps_entries_with_raw_blocks(current_apps_bytes)
-    future_labels = {entry_label(e["date"], e["workout"]["name"]) for e in plan_entries
-                      if datetime.date.fromisoformat(e["date"]) >= today}
-    kept = []
-    for e in existing:
-        if not is_managed(e["name"]):
-            kept.append(e["_raw_block"])
-        elif not is_expired(e["name"], today) and e["name"] in future_labels:
-            kept.append(e["_raw_block"])
-        # else: expired, or managed-but-no-longer-in-the-plan — erased by omission below.
-    names_present = {e["name"] for e in existing}
-
-    to_add = []
+    manual = [e for e in GW.native_names(existing) if not is_managed(e)]
+    slots = max(menu_max - len(manual), 0)
+    upcoming, seen = [], set()
     for e in sorted(plan_entries, key=lambda e: e["date"]):
-        d = datetime.date.fromisoformat(e["date"])
-        if d < today:
-            continue  # already past — never install it, whether or not it was ever installed
         label = entry_label(e["date"], e["workout"]["name"])
-        if label not in names_present:
-            to_add.append(e)
-    return kept, to_add
+        # Already past — never install it, whether or not it was ever installed.
+        if datetime.date.fromisoformat(e["date"]) >= today and label not in seen:
+            seen.add(label)
+            upcoming.append((label, e))
+    window = {label for label, _ in upcoming[:slots]}
+    waiting = [label for label, _ in upcoming[slots:]]
+
+    kept = [e["_raw_block"] for e in existing if not is_managed(e["name"]) or e["name"] in window]
+    names_present = {e["name"] for e in existing}
+    to_add = [e for label, e in upcoming[:slots] if label not in names_present]
+    return kept, to_add, waiting
 
 
 def sync(link, plan, today, write, json_out):
@@ -137,14 +136,14 @@ def sync(link, plan, today, write, json_out):
     current_cm = read_flash(link, cm_base, cm_size, label="CustomModes")
     current_apps = read_flash(link, apps_base, apps_size, label="Apps")
 
-    kept_blocks, to_add = plan_diff(current_apps, plan["entries"], today)
+    kept_blocks, to_add, waiting = plan_diff(current_apps, plan["entries"], today)
     existing = WI.apps_entries_with_raw_blocks(current_apps)
     kept_block_set = set(kept_blocks)
-    # Everything managed that didn't survive the diff — expired OR removed from the plan
-    # (plan_diff's docstring covers which). Kept as one list, like before the fix; the two
-    # cases aren't split out separately since the UI only ever showed one "erase" line.
+    # Everything managed that didn't survive the diff — expired or removed from the plan. One
+    # moved back to waiting for a free slot is erased too, but reported under "waiting".
     removed = [e["name"] for e in existing
-               if is_managed(e["name"]) and e["_raw_block"] not in kept_block_set]
+               if is_managed(e["name"]) and e["_raw_block"] not in kept_block_set
+               and e["name"] not in waiting]
 
     lang = GW.read_watch_language(link)
     current_list = [{"_raw_block": b} for b in kept_blocks]
@@ -186,12 +185,15 @@ def sync(link, plan, today, write, json_out):
 
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],
+              "waiting": waiting, "menuMax": GW.WORKOUT_MENU_MAX,
               "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes)}
 
     if not json_out:
         print(f"sync as of {today}:")
         print(f"  erase: {removed or '(none)'}")
         print(f"  install: {added_names or '(none)'}")
+        if waiting:
+            print(f"  waiting for a free slot (menu shows {GW.WORKOUT_MENU_MAX}): {len(waiting)}")
         if failed:
             print(f"  FAILED to compile (skipped, rest of sync still applied):")
             for n, err in failed:
@@ -231,23 +233,10 @@ def sync(link, plan, today, write, json_out):
 
 def remove_native_entry(current_apps_bytes, name):
     """Apps region with the native guided workout `name` taken out - for a manually installed
-    one the sync never touches (e.g. the Builder's "Light workout").
-
-    Only native entries (byte0 == 1) are removable, and only when no generic Suunto App sits
-    after them: sport-mode App displays point at generic apps by position, so removing an
-    entry in front of one would re-point that display at a different app."""
+    one the sync never touches (e.g. the Builder's "Light workout"). Guarded by
+    guided_workout.without_native (native entries only, never shifting a Suunto App)."""
     existing = WI.apps_entries_with_raw_blocks(current_apps_bytes)
-    idx = next((i for i, e in enumerate(existing) if e.get("name") == name), None)
-    if idx is None:
-        raise ValueError(f"no workout named {name!r} on the watch")
-    if existing[idx].get("reserved") != GW.GUIDANCE_ENTRY_TYPE:
-        raise ValueError(f"{name!r} is a Suunto App, not a native workout - not removed")
-    later_apps = [e.get("name") for e in existing[idx + 1:]
-                  if e.get("reserved") != GW.GUIDANCE_ENTRY_TYPE]
-    if later_apps:
-        raise ValueError(f"Suunto Apps after {name!r} would shift position ({later_apps}) - "
-                         "not removed")
-    return rebuild_apps_region([e["_raw_block"] for i, e in enumerate(existing) if i != idx])
+    return rebuild_apps_region([e["_raw_block"] for e in GW.without_native(existing, name)])
 
 
 def remove(link, name, write, json_out):

@@ -487,6 +487,9 @@ export default function WorkoutCalendarScreen() {
           <View style={{ marginTop: 8 }}>
             <Text style={s.desc}>Erase: {syncResult.removed.length ? syncResult.removed.join(', ') : '-'}</Text>
             <Text style={s.desc}>Install: {syncResult.added.length ? syncResult.added.join(', ') : '-'}</Text>
+            {syncResult.waiting.length > 0 && (
+              <Text style={s.desc}>{t.workoutCalendarWaiting}: {syncResult.waiting.length} - {syncResult.waiting[0]}</Text>
+            )}
             {syncResult.pendingCompile.length > 0 && (
               <Text style={[s.desc, { color: theme.warning }]}>{t.workoutCalendarPending}: {syncResult.pendingCompile.join(', ')}</Text>
             )}

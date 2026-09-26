@@ -15,6 +15,9 @@ import { addLights, LightChoices } from './IamruleCode';
 export const GUIDANCE_TEMPLATE = 295;   // 0x127, PID_RUNNER_GPS_TEMPLATE_GUIDANCE
 export const GUIDANCE_TYPE = 15;        // 0x0f
 export const GUIDANCE_ENTRY_TYPE = 1;   // Apps-entry byte0: 1=guidance, 0=generic
+// The WORKOUT menu lists only the FIRST 5 native workouts (byte0 == 1) in Apps-directory order -
+// HW-confirmed 2026-09-26, the firmware's 5-entry collector (guided_workout.py WORKOUT_MENU_MAX).
+export const WORKOUT_MENU_MAX = 5;
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 

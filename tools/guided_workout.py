@@ -59,6 +59,40 @@ from write_nav import (CMD_DEVICE_INFO, Link, is_ambit12, read_flash, read_memor
 GUIDANCE_TEMPLATE = 295   # 0x127, PID_RUNNER_GPS_TEMPLATE_GUIDANCE
 GUIDANCE_DISP_TYPE = 15   # 0x0f
 GUIDANCE_ENTRY_TYPE = 1   # Apps-entry byte0: 1=guidance, 0=generic
+# The WORKOUT menu lists only the FIRST 5 native workouts (byte0 == 1) in Apps-directory order -
+# HW-confirmed on André's Peak 2026-09-26, matching the firmware's 5-entry collector
+# (FUN_00053c02). A 6th installs fine but can never be picked, so nothing here adds one.
+WORKOUT_MENU_MAX = 5
+
+
+class MenuFull(Exception):
+    """The WORKOUT menu already holds WORKOUT_MENU_MAX native workouts."""
+    def __init__(self, workouts):
+        super().__init__(f"the WORKOUT menu is full ({len(workouts)} of {WORKOUT_MENU_MAX}): "
+                         f"{workouts}")
+        self.workouts = workouts
+
+
+def native_names(entries):
+    """Names of the native workouts among decoded Apps entries, in menu order."""
+    return [e.get("name") for e in entries if e.get("reserved") == GUIDANCE_ENTRY_TYPE]
+
+
+def without_native(entries, name):
+    """`entries` minus the native workout `name`. Only native entries go, and only when no generic
+    Suunto App sits after them: sport-mode App displays point at generic apps by position, so
+    removing an entry in front of one would re-point that display at a different app."""
+    idx = next((i for i, e in enumerate(entries) if e.get("name") == name), None)
+    if idx is None:
+        raise ValueError(f"no workout named {name!r} on the watch")
+    if entries[idx].get("reserved") != GUIDANCE_ENTRY_TYPE:
+        raise ValueError(f"{name!r} is a Suunto App, not a native workout - not removed")
+    later_apps = [e.get("name") for e in entries[idx + 1:]
+                  if e.get("reserved") != GUIDANCE_ENTRY_TYPE]
+    if later_apps:
+        raise ValueError(f"Suunto Apps after {name!r} would shift position ({later_apps}) - "
+                         "not removed")
+    return entries[:idx] + entries[idx + 1:]
 
 # The native guidance screen only prints a step label when the step carries a `text` - a step
 # with no text renders blank (hardware-confirmed 2026-08-20: a no-text workout showed no words).
@@ -265,7 +299,8 @@ def find_mode_index(decoded, name):
     raise SystemExit(f"no sport mode named {name!r}; this watch has: {names}")
 
 
-def build_regions(current_custom_modes, current_apps, workout, mode_name, append=False, lang=None):
+def build_regions(current_custom_modes, current_apps, workout, mode_name, append=False, lang=None,
+                  replace=None):
     """Returns (new_apps_bytes, new_custom_modes_bytes). Adds ONE guidance workout: the compiled
     binary into the Apps region (byte0=1) and a guidance display into the sport mode (no RULE -
     see the note below on why).
@@ -274,9 +309,17 @@ def build_regions(current_custom_modes, current_apps, workout, mode_name, append
     single-install recipe). append=True: keep every app already on the watch and add this workout
     to the end - so several guided workouts stack in the same mode's WORKOUT menu (the firmware
     lists them all) and existing apps survive. In append mode a guidance display that's already
-    on the mode is reused, not duplicated."""
-    compiled = compile_workout(workout, lang)
+    on the mode is reused, not duplicated.
+
+    Append only installs a workout the menu can show: with WORKOUT_MENU_MAX natives already
+    there it raises MenuFull (the caller asks which to replace) - `replace` names the native
+    workout to take out first (without_native's guards apply)."""
     existing = WI.apps_entries_with_raw_blocks(current_apps) if append else []
+    if replace:
+        existing = without_native(existing, replace)
+    if append and len(native_names(existing)) >= WORKOUT_MENU_MAX:
+        raise MenuFull(native_names(existing))
+    compiled = compile_workout(workout, lang)
     new_apps = WI.build_apps_region(existing, compiled, entry_type=GUIDANCE_ENTRY_TYPE)
 
     decoded = cm.decode(current_custom_modes)
@@ -311,6 +354,8 @@ def main():
     ap.add_argument("--append", action="store_true",
                     help="keep existing apps and add this workout to the mode's WORKOUT menu "
                          "(default: reset the Apps region to just this one workout)")
+    ap.add_argument("--replace", metavar="NAME",
+                    help="with --append: take this native workout out first (when the menu is full)")
     ap.add_argument("--json", action="store_true", help="print a one-line JSON result (for the GUI)")
     ap.add_argument("--compile-only", action="store_true",
                     help="just compile the workout JSON and report the binary (no watch needed)")
@@ -375,8 +420,18 @@ def main():
     workout = json.load(open(args.workout))
 
     lang = read_watch_language(link)   # so default step labels match the watch's language
-    new_apps, new_cm, wk_name, mode_name = build_regions(
-        current_cm, current_apps, workout, args.mode, append=args.append, lang=lang)
+    try:
+        new_apps, new_cm, wk_name, mode_name = build_regions(
+            current_cm, current_apps, workout, args.mode, append=args.append, lang=lang,
+            replace=args.replace)
+    except (MenuFull, ValueError) as err:
+        full = isinstance(err, MenuFull)
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(err), "menuFull": full,
+                              "workouts": err.workouts if full else [],
+                              "menuMax": WORKOUT_MENU_MAX}))
+            return 1
+        raise SystemExit(f"{err}" + (" - pass --replace NAME to swap one out" if full else ""))
 
     def emit(ok, **extra):
         if args.json:

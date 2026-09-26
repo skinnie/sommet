@@ -880,6 +880,21 @@ Item {
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
+                        // The watch shows only the first 5 workouts, so the sync installs the
+                        // soonest ones that fit; the rest move in as past ones are erased.
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: (TrainingProgramService.lastInstallResult.waiting || []).length > 0
+                            text: {
+                                const r = TrainingProgramService.lastInstallResult
+                                const w = (r.waiting || [])
+                                return qsTr("Waiting for room (the watch shows %1 workouts): %2 - next: %3")
+                                    .arg(r.menuMax || 5).arg(w.length).arg(w[0] || "")
+                            }
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                         Text {
                             width: parent.width
                             wrapMode: Text.WordWrap
