@@ -116,6 +116,11 @@ public:
     // writeError if no SD card volume is present. fileName should already end in .gpx.
     Q_INVOKABLE void writeGpxToDevice(const QString &fileName, const QString &gpxText);
 
+    // Deletes one route file (onDeviceRoutes' own fileName) from the SD card's Garmin/GPX -
+    // same safety rule as writeGpxToDevice(): a file on the internal-memory volume is refused
+    // here, not just hidden in the UI. Returns "" on success, else the error.
+    Q_INVOKABLE QString deleteRouteFromSdCard(const QString &fileName);
+
     // Copies every real file (not just the parsed subset) from every mounted volume's
     // Garmin/GPX folder into destFolder, one subfolder per volume ("internal"/"sdcard") to
     // avoid name collisions between them - a real file copy, not a database export, matching

@@ -204,6 +204,10 @@ public:
     // POST /api/device/select then re-read: pin every backend tool to this one watch when
     // several share the bus (productId < 0 clears the pin). Mirrors Android's selectWatch().
     Q_INVOKABLE void selectWatch(int productId);
+    // selectWatch() minus the "active device" hand-back: re-pins which watch the backend tools
+    // target without taking the active device away from a bike computer (the heartbeat's own
+    // fallback pin used to, flipping Home from the Bryton to the watch unasked).
+    void pinWatch(int productId);
     // Make a bike computer the active device ("edge"/"karoo"), or "" to hand back to the watch.
     Q_INVOKABLE void selectBikeComputer(const QString &kind);
 

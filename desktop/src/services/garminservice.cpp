@@ -512,6 +512,8 @@ void GarminService::refreshDeviceGpx()
             route[QStringLiteral("waypointCount")] = 0;
             route[QStringLiteral("track")] = track;
             route[QStringLiteral("gpxText")] = gpxText;
+            route[QStringLiteral("fileName")] = fileName;
+            route[QStringLiteral("onSdCard")] = !vol.hasGarminDeviceXml;
             routes.append(route);
         }
     }
@@ -564,6 +566,31 @@ void GarminService::writeGpxToDevice(const QString &fileName, const QString &gpx
     m_writeOk = true;
     emit writeResultChanged();
     refreshDeviceGpx();
+}
+
+QString GarminService::deleteRouteFromSdCard(const QString &fileName)
+{
+    if (fileName.isEmpty() || fileName.contains(QLatin1Char('/')) || fileName.contains(QLatin1Char('\\'))
+        || fileName.startsWith(QLatin1Char('.')) || !fileName.endsWith(QStringLiteral(".gpx"), Qt::CaseInsensitive)
+        || fileName.startsWith(QStringLiteral("waypoints"), Qt::CaseInsensitive))
+        return QStringLiteral("Not a route file: %1").arg(fileName);
+
+    // SD card volumes only (no GarminDevice.xml) - never internal memory.
+    for (const auto &vol : m_volumes) {
+        if (vol.hasGarminDeviceXml)
+            continue;
+        const QString writePath =
+            vol.writePath.isEmpty() ? QStringLiteral("Garmin/GPX") : vol.writePath;
+        QDir dir(vol.rootPath + QLatin1Char('/') + writePath);
+        if (!dir.exists(fileName))
+            continue;
+        if (!dir.remove(fileName))
+            return QStringLiteral("Couldn't delete %1 from the SD card").arg(fileName);
+        refreshDeviceGpx();
+        return QString();
+    }
+    return QStringLiteral("%1 isn't on the SD card - routes in the eTrex's internal memory are never deleted from here.")
+        .arg(fileName);
 }
 
 void GarminService::backupToFolder(const QUrl &destFolder)

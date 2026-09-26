@@ -101,6 +101,17 @@ Dialog {
                 text: qsTr("Close")
                 onClicked: root.reject()
             }
+            // No / Yes too (2026-09-26: a Yes|No confirm drew no buttons at all - nothing to click).
+            RoundedButton {
+                visible: (root.standardButtons & Dialog.No) !== 0
+                text: qsTr("No")
+                onClicked: root.reject()
+            }
+            RoundedButton {
+                visible: (root.standardButtons & Dialog.Yes) !== 0
+                text: qsTr("Yes")
+                onClicked: root.accept()
+            }
             RoundedButton {
                 visible: (root.standardButtons & Dialog.Ok) !== 0
                 text: qsTr("OK")

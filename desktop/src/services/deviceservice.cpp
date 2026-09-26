@@ -299,7 +299,7 @@ void DeviceService::refreshDevices()
                 selectedPresent = true;
         emit connectedWatchesChanged();
         if (!watches.isEmpty() && !selectedPresent)
-            selectWatch(watches.first().toMap().value(QStringLiteral("productId")).toInt());
+            pinWatch(watches.first().toMap().value(QStringLiteral("productId")).toInt());
     });
 }
 
@@ -318,6 +318,11 @@ void DeviceService::selectWatch(int productId)
         m_activeBikeKind.clear();
         emit activeDeviceChanged();
     }
+    pinWatch(productId);
+}
+
+void DeviceService::pinWatch(int productId)
+{
     QNetworkRequest request(backendUrl(QStringLiteral("/api/device/select")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QJsonObject payload;

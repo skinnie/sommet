@@ -14,20 +14,24 @@ QtObject {
     // to merge them into one card. Ambit takes priority if, implausibly, both are connected
     // at once - it's this app's original/primary device, and the two would never really be
     // plugged in together in practice.
-    readonly property bool isGarmin: !connected && GarminService.connected
-    readonly property bool isAmbit: connected && DeviceService.model !== "Hoopoe"
+    // André, 2026-09-26 ("the etrex is plugged but it doesn't appear"): with both plugged, the
+    // eTrex is now a chip in Home's device switcher like any other - garminPicked is that pick
+    // (picking a watch or a bike computer clears it).
+    property bool garminPicked: false
+    readonly property bool isGarmin: GarminService.connected && (garminPicked || !connected)
+    readonly property bool isAmbit: connected && !isGarmin && DeviceService.model !== "Hoopoe"
 
     // Real, 2026-08-08 ("Yes I want to implement it both to desktop and android version").
     // Kailash ("Hoopoe") answers the same 0x0000 identity command every Ambit/Traverse watch
     // does (DeviceService needed no changes for /api/device to already work for it - see
     // write_nav.py's PRODUCT_IDS fix), so `connected` is already true for it; this just picks
     // out which real device is actually plugged in, the same way isGarmin/isAmbit already do.
-    readonly property bool isKailash: connected && DeviceService.model === "Hoopoe"
+    readonly property bool isKailash: connected && !isGarmin && DeviceService.model === "Hoopoe"
     // Traverse (Jabiru) / Traverse Alpha (Loon). Used to hide features these watches don't
     // have - e.g. planned moves: their 0x0b21 memory map declares NO TrainingProgram region
     // (confirmed in the real traverse pcaps), so Intervals must not be offered for them, same
     // as it already isn't for the Kailash. André, 2026-08-18.
-    readonly property bool isTraverse: connected && (DeviceService.model === "Jabiru" || DeviceService.model === "Loon")
+    readonly property bool isTraverse: connected && !isGarmin && (DeviceService.model === "Jabiru" || DeviceService.model === "Loon")
 
     // 2026-08-07: switched from DeviceService.navOk to deviceInfoOk - navOk came from a
     // slow, unnecessary full flash read (see DeviceService's own header comment); a
