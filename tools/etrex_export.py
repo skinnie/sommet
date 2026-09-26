@@ -7,7 +7,8 @@ into a road route on its own map (straight lines / detours if the points are bad
 
   track mode  the full geometry (thinned only past `max_track` points, default 10 000) PLUS named
               waypoints: one at every real turn ("Right 12.4", "Bear left 30.1", "U-turn 41.0")
-              and at every place the track meets itself ("Cross Straight 3.2", "Cross Left 3.2").
+              and at every place the track meets itself ("1st Straight 3.2", "2nd Left 3.2" - the ordinal
+              says which pass through that spot this is).
               Names are spelled out, not coded, since the eTrex doesn't reliably show <desc> while
               navigating (confirmed on hardware) - the visible name has to stand on its own.
   route mode  <= `max_via` (default 50) via points, chosen where they matter: start/end, both sides of
@@ -170,6 +171,14 @@ def _label(delta: float) -> str:
     if d >= 20:
         return "S" + side           # slight
     return "STR"
+
+
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return "%d%s" % (n, suffix)
 
 
 def _wording(label: str) -> str:
@@ -362,9 +371,10 @@ def build(gpx_text: str, mode: str = "track", name: Optional[str] = None,
     for c in crossings:
         others = ", ".join("%.1f" % k for k in c["other_km"])
         sym = PASS_SYM[(c["pass_no"] - 1) % len(PASS_SYM)]
-        marks.append({**c, "name": "Cross %s %.1f" % (_name_word(c["label"]), c["km"]), "sym": sym, "kind": "crossing",
-                      "desc": "Track crosses itself here (also at km %s): %s at %.1f km" % (
-                          others or "-", _wording(c["label"]).lower(), c["km"])})
+        ordinal = _ordinal(c["pass_no"])
+        marks.append({**c, "name": "%s %s %.1f" % (ordinal, _name_word(c["label"]), c["km"]), "sym": sym, "kind": "crossing",
+                      "desc": "Track crosses itself here (also at km %s) - this is the %s time: %s at %.1f km" % (
+                          others or "-", ordinal, _wording(c["label"]).lower(), c["km"])})
     marks.sort(key=lambda m: m["i"])
     wp_dropped = max(0, len(marks) - MAX_WAYPOINTS)
     if wp_dropped:
@@ -486,7 +496,7 @@ def _selftest() -> int:
     loop = [(-300, -300), (300, 300), (300, 600), (-300, 600), (-300, 300), (300, -300)]
     r = build(_synthetic(_densify(loop)), "track")
     assert r["stats"]["crossings"] == 1, r["stats"]
-    assert "Cross Straight" in r["gpx"] or "Cross Bear" in r["gpx"], r["gpx"][:800]
+    assert re.search(r"\d(st|nd|rd|th) (Straight|Bear)", r["gpx"]), r["gpx"][:800]
     # 4) route mode obeys the via cap and keeps both ends
     big = _densify([(0, 0), (0, 400), (400, 400), (400, 0), (800, 0), (800, 400), (1200, 400), (1200, 0)], 5.0)
     r = build(_synthetic(big), "route", max_via=12)

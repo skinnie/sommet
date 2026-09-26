@@ -32,6 +32,11 @@ interface Mark {
 // through the same spot (rare - only a real triple self-crossing would hit it).
 const PASS_SYM = ['Flag, Green', 'Flag, Yellow', 'Flag, Red', 'Flag, Blue'];
 
+function ordinalWord(n: number): string {
+  const suffix = (n % 100 >= 10 && n % 100 <= 20) ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${suffix}`;
+}
+
 export interface EtrexStats {
   mode: 'track' | 'route'; km: number; pointsIn: number; pointsOut: number;
   turns: number; crossings: number; waypoints: number; waypointsDropped: number;
@@ -293,10 +298,11 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
     });
   }
   for (const c of crossings) {
+    const ordinal = ordinalWord(c.passNo);
     marks.push({
-      ...c, kind: 'crossing', name: `Cross ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`,
+      ...c, kind: 'crossing', name: `${ordinal} ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`,
       sym: PASS_SYM[(c.passNo - 1) % PASS_SYM.length],
-      desc: `Track crosses itself here (also at km ${c.otherKm.join(', ') || '-'}): ${WORDING[c.label].toLowerCase()} at ${c.km.toFixed(1)} km`,
+      desc: `Track crosses itself here (also at km ${c.otherKm.join(', ') || '-'}) - this is the ${ordinal} time: ${WORDING[c.label].toLowerCase()} at ${c.km.toFixed(1)} km`,
     });
   }
   marks.sort((a, b) => a.i - b.i);
