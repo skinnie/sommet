@@ -917,8 +917,13 @@ PageFlickable {
                             Repeater {
                                 model: [
                                     { kind: "watch", label: qsTr("Suunto watch"),
-                                      hint: qsTr("Start “Pair Mobile App” or “Sync now” on the watch"),
-                                      enabled: !HomeViewModel.connected },
+                                      hint: DeviceService.bleHandshakeDone
+                                            ? qsTr("A watch is already connected by Bluetooth")
+                                            : qsTr("Start “Pair Mobile App” or “Sync now” on the watch"),
+                                      // Only blocked while a watch is ALREADY connected over
+                                      // Bluetooth - a watch on USB doesn't stop pairing one (André,
+                                      // 2026-09-26: "greyed out even if the watch is in pair mode").
+                                      enabled: !DeviceService.bleHandshakeDone },
                                     { kind: "c406", label: qsTr("Magene C406"),
                                       hint: qsTr("Wake the C406 (any button) and keep it close"),
                                       enabled: !root.mageneScanning }
