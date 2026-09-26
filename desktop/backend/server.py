@@ -352,6 +352,10 @@ def catalog_entry_binary(rule_id):
 # picker; before this, every tool independently grabbed whichever product_id enumerated first,
 # so two plugged watches raced and pages loaded inconsistently).
 SELECTED_PRODUCT_ID = None
+# ...and WHICH physical watch of that model (its USB serial), or None. Product id alone can't
+# tell two Ambit3 Peaks apart (both 0x1b) - André, 2026-09-26, two Peaks plugged: "fix it".
+# run_tool() hands it to every tool as AMBIT_SERIAL (write_nav.Link filters hid.enumerate by it).
+SELECTED_SERIAL = None
 
 # Real, 2026-08-22 (André's Ambit1, serial 1614984607001600): these product IDs speak the
 # older, pre-SBEM PMEM 2.0 protocol - write_nav.py's own SBEM queries (settings 0x1100,
@@ -723,6 +727,13 @@ def selected_is_kailash():
     return bool(info) and info.get("model") == "Hoopoe"
 
 
+def _log_pin(why):
+    """One stderr line per change of the pinned watch - two same-model watches make a silent
+    re-pin easy to miss and costly (a write lands on the other Peak)."""
+    print(f"[pin] {why}: product={SELECTED_PRODUCT_ID} serial={SELECTED_SERIAL}",
+          file=sys.stderr, flush=True)
+
+
 def autopin_if_needed():
     """Pin whichever Suunto watch is actually on the bus, when nothing has pinned one yet.
 
@@ -739,15 +750,24 @@ def autopin_if_needed():
 
     Silent and best-effort: a failure here leaves the pin unset, which is exactly where it was.
     """
-    global SELECTED_PRODUCT_ID
+    global SELECTED_PRODUCT_ID, SELECTED_SERIAL
     if SELECTED_PRODUCT_ID is not None:
         return
     try:
         proc = subprocess.run([PYTHON, str(TOOLS_DIR / "list_watches.py")],
                               capture_output=True, text=True, timeout=60)
         watches = json.loads(proc.stdout.strip().splitlines()[-1]).get("watches") or []
-        if watches:
-            SELECTED_PRODUCT_ID = int(watches[0]["productId"])
+        # Re-check: list_watches takes ~1s, and a /api/device/select (the app's pin) can land
+        # meanwhile - several request threads race in here at startup. Only fill an EMPTY pin,
+        # never overwrite a real choice (seen live: select 1A00, then autopins after it).
+        if watches and SELECTED_PRODUCT_ID is None:
+            # Deterministic: USB enumeration order isn't stable, so "the first one" could be
+            # either of two same-model watches from one call to the next. Lowest serial wins -
+            # the app's own fallback pin (DeviceService) uses the same rule, so they agree.
+            w = sorted(watches, key=lambda x: (x.get("serial") or ""))[0]
+            SELECTED_PRODUCT_ID = int(w["productId"])
+            SELECTED_SERIAL = w.get("serial") or None
+            _log_pin("autopin")
     except Exception:  # noqa: BLE001 - never let auto-pinning break the call it precedes
         pass
 
@@ -771,6 +791,10 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     if script != "list_watches.py" and product_id is None and serial is None:
         autopin_if_needed()
     effective_pid = product_id if product_id is not None else SELECTED_PRODUCT_ID
+    # The pinned serial applies only to a plain pinned call; an explicit product_id without a
+    # serial means "that model, whichever one" (don't narrow it to the pinned watch's serial).
+    if serial is None and product_id is None:
+        serial = SELECTED_SERIAL
     env = os.environ.copy()
     if effective_pid is not None:
         env["AMBIT_PRODUCT_ID"] = hex(effective_pid)
@@ -3920,7 +3944,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 _lc, _lo, _le = run_tool("list_watches.py", [])
                 _ll = _lo.strip().splitlines()[-1] if _lo.strip() else ""
-                self._heal_stale_pin([w.get("productId") for w in json.loads(_ll).get("watches", [])])
+                self._heal_stale_pin(json.loads(_ll).get("watches", []))
             except (json.JSONDecodeError, IndexError, ValueError):
                 pass  # enumeration hiccup - fall through to the retry, which self-reports if it fails
             code, out, err = run_tool("device_info.py", ["--json"])
@@ -3956,37 +3980,53 @@ class Handler(BaseHTTPRequestHandler):
         # switcher, so a swap heals on the next refresh; _handle_device heals too (below) so
         # the model/connected signal the UI's legacy-card visibility depends on never spends
         # a poll cycle reporting "not an Ambit1/2" and blanking Routes/POIs after a swap.
-        self._heal_stale_pin([w.get("productId") for w in info.get("watches", [])])
+        self._heal_stale_pin(info.get("watches", []))
         info["selected"] = SELECTED_PRODUCT_ID
+        info["selectedSerial"] = SELECTED_SERIAL
         self._send_json(200, info)
 
     @staticmethod
-    def _heal_stale_pin(enumerated):
-        """Clear SELECTED_PRODUCT_ID if the pinned watch is no longer on the bus; adopt the
-        sole remaining watch if exactly one is present. Idempotent and cheap when the pin is
-        already valid. Central to issue #16: a stale pin makes every watch endpoint fail
-        ("no <that watch> on the USB bus") until it heals."""
-        global SELECTED_PRODUCT_ID
-        if SELECTED_PRODUCT_ID is not None and SELECTED_PRODUCT_ID not in enumerated:
-            SELECTED_PRODUCT_ID = enumerated[0] if len(enumerated) == 1 else None
+    def _heal_stale_pin(watches):
+        """Clear the pin if the pinned watch is no longer on the bus; adopt the sole remaining
+        watch if exactly one is present. Idempotent and cheap when the pin is already valid.
+        Central to issue #16: a stale pin makes every watch endpoint fail ("no <that watch> on
+        the USB bus") until it heals. `watches` = list_watches.py entries (productId, serial) -
+        the pinned SERIAL must be present too, not just its model (two Peaks, one unplugged)."""
+        global SELECTED_PRODUCT_ID, SELECTED_SERIAL
+        watches = [w if isinstance(w, dict) else {"productId": w} for w in (watches or [])]
+        present = [(w.get("productId"), w.get("serial") or None) for w in watches]
+        if SELECTED_PRODUCT_ID is None:
+            return
+        ok = any(pid == SELECTED_PRODUCT_ID and (SELECTED_SERIAL is None or ser == SELECTED_SERIAL)
+                 for pid, ser in present)
+        if not ok:
+            if len(present) == 1:
+                SELECTED_PRODUCT_ID, SELECTED_SERIAL = present[0]
+            else:
+                SELECTED_PRODUCT_ID, SELECTED_SERIAL = None, None
+            _log_pin(f"heal (bus: {present})")
 
     def _handle_device_select(self, body):
-        """POST /api/device/select {"productId": int|null} - pin which watch every subsequent
-        tool targets when several share the USB bus (or null to go back to "whichever is
-        plugged"). run_tool() hands the choice to the tools via AMBIT_PRODUCT_ID."""
-        global SELECTED_PRODUCT_ID
+        """POST /api/device/select {"productId": int|null, "serial": str?} - pin which watch
+        every subsequent tool targets when several share the USB bus (or null to go back to
+        "whichever is plugged"). run_tool() hands the choice to the tools via AMBIT_PRODUCT_ID
+        and, when given, AMBIT_SERIAL (the one physical watch among same-model ones)."""
+        global SELECTED_PRODUCT_ID, SELECTED_SERIAL
         pid = body.get("productId")
+        serial = (body.get("serial") or "").strip() or None
         if pid is None:
-            SELECTED_PRODUCT_ID = None
-            self._send_json(200, {"ok": True, "selected": None})
+            SELECTED_PRODUCT_ID, SELECTED_SERIAL = None, None
+            self._send_json(200, {"ok": True, "selected": None, "selectedSerial": None})
             return
         try:
             pid = int(pid)
         except (TypeError, ValueError):
             self._send_json(400, {"ok": False, "error": f"productId must be an integer, got {pid!r}"})
             return
-        SELECTED_PRODUCT_ID = pid
-        self._send_json(200, {"ok": True, "selected": pid})
+        SELECTED_PRODUCT_ID, SELECTED_SERIAL = pid, serial
+        _log_pin("select")
+        read_cache_clear()          # a different physical watch: nothing cached belongs to it
+        self._send_json(200, {"ok": True, "selected": pid, "selectedSerial": serial})
 
     def _handle_device_ble(self):
         """The BLE path for /api/device, taken once ble_bridge reports the bootstrap
@@ -7418,11 +7458,18 @@ class Handler(BaseHTTPRequestHandler):
         tool = str(TOOLS_DIR / "firmware_write.py")
         args = ([PYTHON, "--tool", tool] if FROZEN else [PYTHON, tool])
         args += [file, "--expect-model", model, "--commit", "--json"]
+        # Two same-model watches: flash exactly the pinned one, and abort if another opens.
+        if SELECTED_SERIAL:
+            args += ["--expect-serial", SELECTED_SERIAL]
         env = os.environ.copy()
         if SELECTED_PRODUCT_ID is not None:
             env["AMBIT_PRODUCT_ID"] = hex(SELECTED_PRODUCT_ID)
         else:
             env.pop("AMBIT_PRODUCT_ID", None)
+        if SELECTED_SERIAL:
+            env["AMBIT_SERIAL"] = SELECTED_SERIAL
+        else:
+            env.pop("AMBIT_SERIAL", None)
         events = 0
         noise = []
         with WATCH_LOCK:

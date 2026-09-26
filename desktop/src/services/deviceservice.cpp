@@ -287,6 +287,7 @@ void DeviceService::refreshDevices()
         m_connectedWatches = watches;
         const auto sel = obj.value(QStringLiteral("selected"));
         m_selectedProductId = sel.isNull() ? -1 : sel.toInt();
+        m_selectedSerial = obj.value(QStringLiteral("selectedSerial")).toString();
 
         // If the pinned watch isn't actually on the bus - a stale selection carried over
         // from a previous session, or a different watch plugged in since - every tool would
@@ -295,13 +296,55 @@ void DeviceService::refreshDevices()
         // connected. Fall back to a watch that IS present so it just works. selectWatch()
         // re-pins the backend, re-reads identity and re-fetches this list; once the pinned
         // id is in the list this branch is skipped, so it can't loop.
+        // Present = same model AND same serial. A pin without a serial that matches two
+        // same-model watches (two Peaks) is ambiguous - each tool would open whichever
+        // enumerates first - so it's re-pinned to one of them, by serial.
+        int samePid = 0;
         bool selectedPresent = false;
-        for (const auto &w : watches)
-            if (w.toMap().value(QStringLiteral("productId")).toInt() == m_selectedProductId)
+        QVariantMap firstSame;
+        for (const auto &v : watches) {
+            const auto w = v.toMap();
+            if (w.value(QStringLiteral("productId")).toInt() != m_selectedProductId)
+                continue;
+            if (samePid++ == 0 || w.value(QStringLiteral("serial")).toString()
+                                      < firstSame.value(QStringLiteral("serial")).toString())
+                firstSame = w;      // lowest serial, same rule as below
+            if (m_selectedSerial.isEmpty() || w.value(QStringLiteral("serial")).toString() == m_selectedSerial)
                 selectedPresent = true;
+        }
         emit connectedWatchesChanged();
-        if (!watches.isEmpty() && !selectedPresent)
-            pinWatch(watches.first().toMap().value(QStringLiteral("productId")).toInt());
+        // Once per session: the watch last picked on Home wins over whatever the backend
+        // auto-pinned at startup (lowest serial), as soon as that watch is on the bus.
+        if (!m_rememberedPickApplied) {
+            const QString remembered = QSettings().value(QStringLiteral("watch/selectedSerial")).toString();
+            for (const auto &v : watches) {
+                const auto w = v.toMap();
+                if (remembered.isEmpty() || w.value(QStringLiteral("serial")).toString() != remembered)
+                    continue;
+                m_rememberedPickApplied = true;
+                if (remembered != m_selectedSerial) {
+                    pinWatch(w.value(QStringLiteral("productId")).toInt(), remembered);
+                    return;
+                }
+            }
+        }
+        if (!watches.isEmpty() && !selectedPresent) {
+            // Which one: the watch last picked on Home if it's plugged (remembered across
+            // launches), else the lowest serial - never "the first enumerated", whose order
+            // changes between calls and made the pin hop between two Peaks (2026-09-26).
+            const QString remembered = QSettings().value(QStringLiteral("watch/selectedSerial")).toString();
+            QVariantMap pick;
+            for (const auto &v : watches) {
+                const auto w = v.toMap();
+                const QString s = w.value(QStringLiteral("serial")).toString();
+                if (!remembered.isEmpty() && s == remembered) { pick = w; break; }
+                if (pick.isEmpty() || s < pick.value(QStringLiteral("serial")).toString())
+                    pick = w;
+            }
+            pinWatch(pick.value(QStringLiteral("productId")).toInt(), pick.value(QStringLiteral("serial")).toString());
+        } else if (m_selectedSerial.isEmpty() && samePid > 1) {
+            pinWatch(m_selectedProductId, firstSame.value(QStringLiteral("serial")).toString());
+        }
     });
 }
 
@@ -313,27 +356,33 @@ void DeviceService::selectBikeComputer(const QString &kind)
     emit activeDeviceChanged();
 }
 
-void DeviceService::selectWatch(int productId)
+void DeviceService::selectWatch(int productId, const QString &serial)
 {
+    // The user's pick - remembered, so the next launch opens on the same physical watch.
+    if (!serial.isEmpty())
+        QSettings().setValue(QStringLiteral("watch/selectedSerial"), serial);
     // Picking a watch hands the "active device" back from any bike computer.
     if (!m_activeBikeKind.isEmpty()) {
         m_activeBikeKind.clear();
         emit activeDeviceChanged();
     }
-    pinWatch(productId);
+    pinWatch(productId, serial);
 }
 
-void DeviceService::pinWatch(int productId)
+void DeviceService::pinWatch(int productId, const QString &serial)
 {
     QNetworkRequest request(backendUrl(QStringLiteral("/api/device/select")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QJsonObject payload;
     payload.insert(QStringLiteral("productId"),
                    productId < 0 ? QJsonValue() : QJsonValue(productId));
+    if (productId >= 0 && !serial.isEmpty())
+        payload.insert(QStringLiteral("serial"), serial);
     QNetworkReply *reply = m_network.post(request, QJsonDocument(payload).toJson());
-    connect(reply, &QNetworkReply::finished, this, [this, reply, productId] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, productId, serial] {
         reply->deleteLater();
         m_selectedProductId = productId;
+        m_selectedSerial = productId >= 0 ? serial : QString();
         emit connectedWatchesChanged();
         // A different watch is a new connection: re-read identity (which re-arms the
         // once-per-connection auto clock/orbit sync) and refresh the picker's own list.
