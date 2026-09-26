@@ -7,6 +7,25 @@ decompile (bleplugin/NewSettingUtil + ParserUtil) and was checked live against h
     ./tools/bryton_ble.py hello --address ADDR          -> {ok, batteryBars, batteryOf, profile, settings}
     ./tools/bryton_ble.py set-profile --address ADDR [--ftp W] [--lthr B] [--max-hr B] [--map W]
                                       [--weight KG] [--height CM]
+    ./tools/bryton_ble.py rides --address ADDR          -> {ok, rides:[{name, fileId, seconds, sport}]}
+    ./tools/bryton_ble.py pull --address ADDR --dest DIR [--only-stdin]
+                                                        -> {ok, copied:[{kind, name, path}]}
+
+Every connection first says "I'm the new Bryton Active app" (setting 47, `[47, 1, 0]`), as the
+app does; without it the device shows "please use new Active app" and refuses file transfers.
+
+Rides (command + data channels, service 454D7788…): a command is `[cmd, type<<5 | seq<<2, …]`
+(type 0 command / 1 response / 2 action). The device answers `[cmd, 1<<5|seq<<2, status]`
+(2 = OK, 6 = nothing to sync); on OK we send the action "go" (3) and it streams numbered
+packets on the data channel: #0 = [0,0, count u16 BE, last size, cmd, …], #1..count = payload,
+then an end packet whose bytes 3..6 are the payload's byte sum (u32 BE). Every 10th packet is
+acknowledged with action 6 (continue).
+  list  `[11, seq, 0]`  -> 36-byte records: fileId (u32 BE at +1, epoch s; the device's file
+        name is that time as yyMMddHHmmss), seconds (+5), metres (+9), sport (+18). Only rides
+        the phone hasn't synced are listed (the Aero 60 has no "all files" mode).
+  get   `[17, seq, fileId u32 BE, type 1 (FIT), offset u32 BE, size u32 BE]` - size 4 at offset 0
+        returns the file size first, then the file in <= 39600-byte ranges.
+Pulling a ride doesn't mark it synced on the device - the Bryton app still gets it too.
 
 Setting channel (service 50b85566…, characteristic 50B81188…, write + notify):
   request  [cmd, op, (item), …, sum%256]   op 2 = get, 1 = set
@@ -23,11 +42,22 @@ unchanged. Every value is bounds-checked before anything is sent. bleak + stdlib
 import argparse
 import asyncio
 import json
+import os
 import struct
 import sys
 
 SCAN_SERVICE = "00002014-0000-1000-8000-00805f9b34fb"
 SETTING_CHAR = "50b81188-c2de-a994-094d-340090726877"
+COMMAND_CHAR = "454d2288-a122-058d-9b42-9d0f3772af82"
+DATA_CHAR = "454d1188-a122-058d-9b42-9d0f3772af82"
+CMD_NEW_APP = 47
+CMD_FILE_LIST, CMD_FILE_RANGE = 11, 17
+TYPE_COMMAND, TYPE_RESPONSE, TYPE_ACTION = 0, 1, 2
+ACTION_GO, ACTION_CONTINUE = 3, 6
+STATUS_OK, STATUS_NOTHING = 2, 6
+FLOW = 10                       # packets per "continue" ack (BbcpUtil.flowCtrl default)
+RANGE = 39600                   # max bytes per range request (CMD_17_CHUNK_SIZE)
+FIT_TYPE = 1
 
 CMD_BACKLIGHT, CMD_BATTERY, CMD_KEYTONE, CMD_SOUND = 20, 24, 25, 26
 CMD_AUTO_PAUSE, CMD_AUTO_LAP, CMD_UNIT, CMD_USER = 27, 28, 29, 30
@@ -79,6 +109,116 @@ class Link:
 
     async def get(self, *body):
         return await self.request(_frame(body[0], 2, *body[1:]))
+
+    async def new_app(self):
+        """Tell the device this is the new Bryton Active app (it ACKs with [47, 10])."""
+        await self.c.write_gatt_char(SETTING_CHAR, _frame(CMD_NEW_APP, 1, 0), response=True)
+        await asyncio.sleep(1.0)
+
+
+class Files:
+    """The command + data channels: one request at a time, reassembling the data stream."""
+
+    def __init__(self, client):
+        self.c = client
+        self.seq = 0
+        self.status = None
+        self.cur = None
+
+    async def start(self):
+        await self.c.start_notify(COMMAND_CHAR, lambda _h, d: asyncio.ensure_future(self._on_cmd(bytes(d))))
+        await self.c.start_notify(DATA_CHAR, lambda _h, d: asyncio.ensure_future(self._on_data(bytes(d))))
+
+    async def _on_cmd(self, d):
+        if len(d) < 3 or (d[1] >> 5) != TYPE_RESPONSE:
+            return
+        seq = (d[1] >> 2) & 7
+        if d[2] == STATUS_OK:
+            await self.c.write_gatt_char(COMMAND_CHAR, bytes([d[0], (TYPE_ACTION << 5) | (seq << 2), ACTION_GO]),
+                                         response=True)
+        elif self.cur is not None:
+            self.status = d[2]
+            self.cur["ev"].set()
+
+    async def _on_data(self, d):
+        if self.cur is None or len(d) < 2:
+            return
+        idx = struct.unpack(">H", d[:2])[0]
+        if idx == 0:
+            self.cur["count"] = struct.unpack(">H", d[2:4])[0]
+            self.cur["pk"] = {}
+            if self.cur["count"] == 0:
+                self.cur["ev"].set()
+            return
+        if "count" not in self.cur:
+            return
+        if idx > self.cur["count"]:
+            self.cur["sum"] = struct.unpack(">I", d[3:7])[0] if len(d) >= 7 else None
+            self.cur["ev"].set()
+            return
+        self.cur["pk"][idx] = d[2:]
+        if idx % FLOW == FLOW - 1:
+            await self.c.write_gatt_char(COMMAND_CHAR, bytes([self.cur["cmd"], (TYPE_ACTION << 5) | (self.seq << 2),
+                                                              ACTION_CONTINUE]), response=True)
+
+    async def request(self, cmd, payload=b"", raw_seq=False, timeout=60.0):
+        """Send a command, return the reassembled data (b"" = nothing / status != OK)."""
+        self.seq = (self.seq + 1) % 8
+        self.status = None
+        self.cur = {"cmd": cmd, "ev": asyncio.Event()}
+        second = self.seq if raw_seq else (TYPE_COMMAND << 5) | (self.seq << 2)
+        await self.c.write_gatt_char(COMMAND_CHAR, bytes([cmd, second]) + payload, response=True)
+        try:
+            await asyncio.wait_for(self.cur["ev"].wait(), timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"the Bryton didn't answer command {cmd}")
+        cur, self.cur = self.cur, None
+        if self.status is not None and self.status != STATUS_OK:
+            if self.status == STATUS_NOTHING:
+                return b""
+            raise RuntimeError(f"the Bryton refused command {cmd} (status {self.status})")
+        n = cur.get("count", 0)
+        missing = [i for i in range(1, n + 1) if i not in cur.get("pk", {})]
+        if missing:
+            raise RuntimeError(f"{len(missing)} of {n} packets lost")
+        body = b"".join(cur["pk"][i] for i in range(1, n + 1))
+        if cur.get("sum") is not None and sum(body) != cur["sum"]:
+            raise RuntimeError("checksum mismatch")
+        return body
+
+
+def _ride_name(file_id):
+    import datetime
+    return datetime.datetime.fromtimestamp(file_id, datetime.timezone.utc).strftime("%y%m%d%H%M%S") + ".fit"
+
+
+async def list_rides(files):
+    body = await files.request(CMD_FILE_LIST, bytes([0]), raw_seq=True)
+    rides = []
+    for i in range(len(body) // 36):
+        r = body[i * 36:(i + 1) * 36]
+        fid = struct.unpack(">I", r[1:5])[0]
+        rides.append({"name": _ride_name(fid), "fileId": fid,
+                      "seconds": struct.unpack(">I", r[5:9])[0],
+                      "meters": struct.unpack(">I", r[9:13])[0], "sport": r[18]})
+    return rides
+
+
+async def get_ride(files, file_id):
+    head = await files.request(CMD_FILE_RANGE, struct.pack(">IBII", file_id, FIT_TYPE, 0, 4))
+    if len(head) < 4:
+        raise RuntimeError("the Bryton didn't give the file size")
+    total = struct.unpack(">I", head[:4])[0]
+    out = b""
+    while len(out) < total:
+        want = min(RANGE, total - len(out))
+        part = await files.request(CMD_FILE_RANGE, struct.pack(">IBII", file_id, FIT_TYPE, len(out), want))
+        if not part:
+            raise RuntimeError("the Bryton stopped sending")
+        out += part[:want]
+    if out[8:12] != b".FIT":
+        raise RuntimeError("not a FIT file")
+    return out
 
 
 async def read_all(link):
@@ -162,8 +302,38 @@ async def run(args):
     async with BleakClient(args.address, timeout=20) as client:
         link = Link(client)
         await link.start()
+        await link.new_app()
+        if args.action in ("rides", "pull"):
+            files = Files(client)
+            await files.start()
+            rides = await list_rides(files)
+            if args.action == "rides":
+                return {"ok": True, "rides": rides}
+            only = None
+            if args.only_stdin:
+                spec = json.loads(sys.stdin.read() or "{}")
+                only = {f.get("name") for f in spec.get("files", [])}
+            os.makedirs(args.dest, exist_ok=True)
+            copied = []
+            for r in rides:
+                if only is not None and r["name"] not in only:
+                    continue
+                data = await get_ride(files, r["fileId"])
+                path = os.path.join(args.dest, "bryton__" + r["name"])
+                with open(path, "wb") as fh:
+                    fh.write(data)
+                copied.append({"kind": "bryton", "name": r["name"], "path": path})
+            return {"ok": True, "copied": copied}
         if args.action == "hello":
-            return {"ok": True, "address": args.address, **(await read_all(link))}
+            out = {"ok": True, "address": args.address, **(await read_all(link))}
+            # The same connection lists the rides the phone hasn't synced (the card's "N new").
+            try:
+                files = Files(client)
+                await files.start()
+                out["rides"] = [r["name"] for r in await list_rides(files)]
+            except Exception as exc:  # noqa: BLE001 - the card still works without the ride list
+                out["ridesError"] = str(exc)
+            return out
         if args.action == "set-profile":
             fields = {k: v for k, v in (("ftp", args.ftp), ("lthr", args.lthr), ("max_hr", args.max_hr),
                                         ("map", args.map), ("weight", args.weight),
@@ -178,7 +348,9 @@ async def run(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("action", choices=["scan", "hello", "set-profile"])
+    ap.add_argument("action", choices=["scan", "hello", "set-profile", "rides", "pull"])
+    ap.add_argument("--dest")
+    ap.add_argument("--only-stdin", action="store_true")
     ap.add_argument("--address")
     ap.add_argument("--timeout", type=float, default=8.0)
     for f in ("--ftp", "--lthr", "--max-hr", "--map"):

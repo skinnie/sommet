@@ -127,6 +127,9 @@ public:
     // files not yet in bike_seen via /api/magene/import. Rows are tagged source="c406", sharing
     // the same bike_seen history and library-dedup as the MTP bike computers.
     Q_INVOKABLE void importFromMagene(const QString &address, const QStringList &files);
+    // The Bryton Aero 60 over Bluetooth (2026-09-26): same flow as the Magene, rides tagged
+    // "bryton" like a cable import, so a ride pulled either way is only ever imported once.
+    Q_INVOKABLE void importFromBrytonBle(const QString &address, const QStringList &files);
     // How many of a bike computer's ride files a Sync would still pull (not yet in the bike_seen
     // history). Used only to decide whether "Sync rides" has anything to do - NOT a count of new
     // library entries (that needs decoding). 0 => everything's been checked, grey the button out.
@@ -211,6 +214,8 @@ signals:
     void sommetSyncConfiguredChanged();
 
 private:
+    void importFromBleBike(const QString &tag, const QString &endpoint, const QString &deviceName,
+                           const QString &address, const QStringList &files);
     QNetworkAccessManager m_network;
     QSqlDatabase m_db;
     bool m_loading = false;

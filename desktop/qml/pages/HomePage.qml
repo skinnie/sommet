@@ -60,9 +60,11 @@ PageFlickable {
     // wins, like the watch: while the Bryton is plugged in by USB only that entry shows.
     Settings { id: brytonBleMemory; category: "brytonble"; property string address: ""; property string name: "" }
     readonly property bool brytonOnUsb: mtpBikeComputers.some(b => b.kind === "bryton")
+    // Its unsynced rides, from the card's hello (null = not read yet this session).
+    property var brytonBleFiles: null
     readonly property var brytonBleDevices: brytonBleMemory.address.length > 0 && !brytonOnUsb
         ? [{ "kind": "brytonble", "name": brytonBleMemory.name || "AERO60", "address": brytonBleMemory.address,
-             "activityCount": -1, "files": null }] : []
+             "activityCount": brytonBleFiles ? brytonBleFiles.length : -1, "files": brytonBleFiles }] : []
     onBrytonBleDevicesChanged: BikeDevices.brytonBle = brytonBleDevices.length > 0 ? brytonBleDevices[0] : null
     property bool brytonScanning: false
     // Card data from ONE connection (tools/bryton_ble.py hello): battery, profile, settings.
@@ -98,6 +100,7 @@ PageFlickable {
                 return;
             }
             root.brytonBleStatus = r;
+            if (r.rides) root.brytonBleFiles = r.rides;
             BikeDevices.brytonBleAnswered(true);
             root.checkProfileSync();
         };
@@ -136,6 +139,36 @@ PageFlickable {
         };
         scan.open("GET", "http://127.0.0.1:8766/api/brytonble/devices");
         scan.send();
+    }
+    // Bryton Sync over Bluetooth: use the list from the card's hello, else read it first.
+    function syncBrytonBle(bike) {
+        if (bike.files) {
+            ActivityService.importFromBrytonBle(bike.address, bike.files);
+            return;
+        }
+        root.bikeSyncMsg = qsTr("Reading rides from the Bryton…");
+        root.bikeSyncOk = true;
+        BikeDevices.mageneConnecting = true;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            BikeDevices.mageneConnecting = false;
+            var r = {};
+            try { r = JSON.parse(xhr.responseText); } catch (e) {}
+            if (!r.ok) {
+                root.bikeSyncOk = false;
+                root.bikeSyncMsg = qsTr("Bryton not found — turn it on and turn off your phone's Bluetooth.");
+                BikeDevices.brytonBleAnswered(false);
+                return;
+            }
+            BikeDevices.brytonBleAnswered(true);
+            root.bikeSyncMsg = "";
+            root.brytonBleFiles = r.files || [];
+            ActivityService.importFromBrytonBle(bike.address, r.files || []);
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/brytonble/rides?address=" + encodeURIComponent(bike.address));
+        xhr.send();
     }
     // Magene Sync: list the rides over BLE when this session hasn't yet, then import the new ones.
     function syncMagene(bike) {
@@ -236,7 +269,8 @@ PageFlickable {
     readonly property int activeBikeUnsynced: {
         void bikeSyncTick;   // dependency: re-run when a sync finishes
         return root.activeBike
-            ? ActivityService.unsyncedBikeCount(root.activeBike.kind, root.activeBike.files || [])
+            ? ActivityService.unsyncedBikeCount(root.activeBike.kind === "brytonble" ? "bryton" : root.activeBike.kind,
+                                                root.activeBike.files || [])
             : 0;
     }
 
@@ -886,10 +920,12 @@ PageFlickable {
                                 text: {
                                     if (!root.activeBike)
                                         return "";
-                                    if (root.activeBike.kind === "brytonble")
+                                    if (root.activeBike.kind === "brytonble" && (root.brytonBleBusy || !root.brytonBleStatus))
                                         return root.brytonBleBusy ? qsTr("Bluetooth · connecting…")
-                                             : root.brytonBleStatus ? qsTr("Bluetooth · connected")
                                              : qsTr("Bluetooth · not found — turn it on and turn off your phone's Bluetooth");
+                                    // Over Bluetooth the Aero 60 only lists rides the phone hasn't synced.
+                                    if (root.activeBike.kind === "brytonble" && root.activeBike.activityCount === 0)
+                                        return qsTr("Bluetooth · no rides waiting (the phone app already has them)");
                                     var total = root.activeBike.activityCount;
                                     // A remembered Magene before its first Sync this session.
                                     if (total < 0)
@@ -967,9 +1003,8 @@ PageFlickable {
                             // A Magene whose ride list isn't known yet (asleep when selected) can still
                             // Sync: it reads the list first (syncMagene).
                             readonly property bool listUnknown: root.activeBike !== null
-                                && root.activeBike.kind === "c406" && !root.activeBike.files
-                            // Rides over Bluetooth aren't wired for the Bryton yet - the cable does it.
-                            visible: !(root.activeBike && root.activeBike.kind === "brytonble")
+                                && (root.activeBike.kind === "c406" || root.activeBike.kind === "brytonble")
+                                && !root.activeBike.files
                             enabled: !ActivityService.loading && (root.activeBikeUnsynced > 0 || listUnknown)
                             text: ActivityService.loading
                                 ? qsTr("Syncing…")
@@ -982,15 +1017,11 @@ PageFlickable {
                                 // library via the shared bikeImportFinished/Error signals.
                                 if (root.activeBike && root.activeBike.kind === "c406")
                                     root.syncMagene(root.activeBike);
+                                else if (root.activeBike && root.activeBike.kind === "brytonble")
+                                    root.syncBrytonBle(root.activeBike);
                                 else
                                     ActivityService.importFromBikeComputers();
                             }
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: root.activeBike !== null && root.activeBike.kind === "brytonble"
-                            text: qsTr("To sync rides, plug it in by cable for now.")
-                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                         // Profile, data screens, device settings and altitude calibration live
                         // on the GPS settings page, workouts in the Training Program - both in the
