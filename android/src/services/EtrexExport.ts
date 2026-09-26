@@ -13,6 +13,12 @@ const MIN_TURN_DEG = 40;
 const TURN_GAP_M = 40;
 const CROSS_M = 15;
 const CROSS_MIN_ALONG_M = 150;
+const RETRACE_MIN_M = 150; // a self-proximity run this long along the track is a genuine
+// out-and-back (the same physical road ridden in opposite directions), not a point-like
+// junction - "bear left/right" at its edges is the wrong vocabulary.
+const RETRACE_ANTIPARALLEL_DEG = 120; // the sibling pass has to head close to the opposite
+// way, not just "some other angle", or this is a Y-junction that stays close for a while
+// before diverging, not a real retrace - no marker either way.
 const CROSS_WPT_OFFSET_M = 18; // place a crossing's <wpt> this far past the junction, along
 // THAT pass's own outgoing branch - not at the junction itself. Two passes through the same
 // spot diverge afterwards, so offsetting each downstream separates the two pins on the map
@@ -24,6 +30,7 @@ interface Pt { lat: number; lon: number; ele: number | null }
 interface Mark {
   i: number; wptI?: number; km: number; delta: number; label: string; kind: 'turn' | 'crossing';
   name: string; desc: string; sym: string; event?: number; passNo?: number; otherKm?: number[];
+  kindHint?: 'retrace'; edge?: 'starts' | 'ends';
 }
 
 // Distinct per-pass symbol - a cue that survives GPS drift and screen zoom, unlike relying on
@@ -238,13 +245,42 @@ function findCrossings(xy: XY[], along: number[], crossM: number, wptOffsetM: nu
   const events = new Map<number, number[]>();
   runs.forEach((_, r) => { const f = find(r); const l = events.get(f); if (l) l.push(r); else events.set(f, [r]); });
   const ordered = [...events.values()].sort((a, b) => runs[a[0]][0] - runs[b[0]][0]);
-  const out: { i: number; wptI: number; km: number; delta: number; label: string; event: number; passNo: number; otherKm: number[] }[] = [];
+  const out: {
+    i: number; wptI: number; km: number; delta: number; label: string; event: number; passNo: number;
+    otherKm: number[]; kindHint?: 'retrace'; edge?: 'starts' | 'ends'; sym?: string;
+  }[] = [];
   ordered.forEach((rs, evNo) => {
     const kms = rs.map(r => along[runs[r][0]] / 1000);
     // Passes in ride order - lets the 1st/2nd/3rd pass through this same spot get a visibly
     // different marker (see PASS_SYM below), a cue that survives GPS drift and screen zoom,
     // unlike relying on the offset position alone.
     const rsInOrder = [...rs].sort((a, b) => runs[a][0] - runs[b][0]);
+    const runLength = new Map(rs.map(r => [r, along[runs[r][runs[r].length - 1]] - along[runs[r][0]]]));
+
+    if (rs.some(r => (runLength.get(r) ?? 0) >= RETRACE_MIN_M)) {
+      // A genuine out-and-back: this isn't "which fork do I take", it's "I'm about to ride a
+      // stretch I've already ridden, the other way". Only flag it where a sibling run really is
+      // heading close to the opposite way - a Y-junction that merely stays close for a while
+      // before diverging isn't a retrace, and gets no marker at all here.
+      const runBearing = new Map(rs.map(r => [r, bearing(xy[runs[r][0]], xy[runs[r][runs[r].length - 1]])]));
+      rsInOrder.forEach((r, idx) => {
+        const passNo = idx + 1;
+        const a = runs[r][0]; const b = runs[r][runs[r].length - 1];
+        const opposite = rs.some(r2 => r2 !== r && Math.abs(delta(runBearing.get(r)!, runBearing.get(r2)!)) >= RETRACE_ANTIPARALLEL_DEG);
+        if (!opposite) return;
+        const sym = PASS_SYM[(passNo - 1) % PASS_SYM.length];
+        (['starts', 'ends'] as const).forEach(edge => {
+          const i = edge === 'starts' ? a : b;
+          out.push({
+            i, wptI: i, km: along[i] / 1000, delta: 0, label: 'RETRACE', kindHint: 'retrace', edge, sym,
+            event: evNo + 1, passNo,
+            otherKm: kms.filter(k => Math.abs(k - along[a] / 1000) > 0.05).map(k => Math.round(k * 10) / 10),
+          });
+        });
+      });
+      return;
+    }
+
     rsInOrder.forEach((r, idx) => {
       const passNo = idx + 1;
       const a = runs[r][0]; const b = runs[r][runs[r].length - 1];
@@ -299,6 +335,15 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   }
   for (const c of crossings) {
     const ordinal = ordinalWord(c.passNo);
+    if (c.kindHint === 'retrace') {
+      // A genuine out-and-back, not a fork - "bear left/right" would be the wrong vocabulary
+      // here, so name it for what it actually is.
+      marks.push({
+        ...c, kind: 'crossing', name: `${ordinal} Retrace ${c.edge} ${c.km.toFixed(1)}`, sym: c.sym!,
+        desc: `You ride this same stretch again the other way (also at km ${c.otherKm.join(', ') || '-'}) - ${ordinal} time it ${c.edge} at ${c.km.toFixed(1)} km`,
+      });
+      continue;
+    }
     marks.push({
       ...c, kind: 'crossing', name: `${ordinal} ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`,
       sym: PASS_SYM[(c.passNo - 1) % PASS_SYM.length],

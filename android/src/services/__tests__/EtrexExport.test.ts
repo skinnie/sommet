@@ -32,6 +32,15 @@ describe('buildEtrexGpx', () => {
     expect(r.gpx).toMatch(/\d(st|nd|rd|th) (Straight|Bear)/);
   });
 
+  test('a dead-end out-and-back is a retrace, not a fork', () => {
+    const r = buildEtrexGpx(gpx([[0, 0], [400, 0], [0, 0]]), { mode: 'track' });
+    expect(r.gpx).toMatch(/1st Retrace starts/);
+    expect(r.gpx).toMatch(/1st Retrace ends/);
+    expect(r.gpx).toMatch(/2nd Retrace starts/);
+    expect(r.gpx).toMatch(/2nd Retrace ends/);
+    expect(r.gpx).not.toMatch(/Bear| Left | Right /);
+  });
+
   test('route mode respects the via-point cap', () => {
     const big = gpx([[0, 0], [0, 400], [400, 400], [400, 0], [800, 0], [800, 400], [1200, 400], [1200, 0]]);
     const r = buildEtrexGpx(big, { mode: 'route', maxVia: 12 });
