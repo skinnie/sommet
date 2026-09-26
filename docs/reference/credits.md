@@ -26,6 +26,10 @@ reverse-engineering here would have been possible, or would have taken far longe
   actual 2022 shutdown. Genuine, sophisticated App Zone code that this project's own
   structured-workout tooling learned from.
 
+- **Pavel Samokha** - the community App Zone / workout compiler (`ambitappscompiler`) and its
+  forum-published key: every scheduled (native WORKOUT-menu) workout this app installs is compiled
+  on it (`tools/guided_workout.py compile_workout`).
+
 - **Pavel Samokha** and the Suunto forum community, especially
   [`forum.suunto.com/topic/7592`](https://forum.suunto.com/topic/7592) - the documented,
   confirmed-real mechanism for adding a compiled Suunto App to SuuntoLink's own catalog
@@ -60,6 +64,9 @@ reverse-engineering here would have been possible, or would have taken far longe
 
 - **[OpenStreetMap](https://www.openstreetmap.org/copyright)** - © OpenStreetMap contributors
   (ODbL). The map views render OSM tiles.
+
+- **[PitStopper](https://pitstopper.net)** - the route POI search whose GPX export the Race Plan
+  reads for water / food / shelter stops along a route (`tools/race_pois.py`).
 
 - **[Leaflet](https://leafletjs.com/)** - © Vladimir Agafonkin / CloudMade (BSD-2-Clause). The
   interactive map engine behind the mobile map views; bundled inline (`android/src/services/

@@ -3,6 +3,14 @@
 Sommet, french name for Peak, is an application to sync and manage Suunto Ambit 1, Ambit 2, Ambit 3, Traverse , Traverse Alpha and Kailash families/variants + Garmin Etrex 10/20/20x/30/30x GPSr.
 The aim is to provide the same features to Android, Linux and later on if possible Mac and Windows.
 
+## Supported devices
+
+- **Suunto watches:** Ambit (1), Ambit2 / 2 S / 2 R, Ambit3 Peak / Sport / Run / Vertical, Traverse, Traverse Alpha, Kailash
+- **Suunto legacy (experimental):** T6 / T6c / T6d, X6HR, GPS Track Pod
+- **Sensors:** Suunto Smart Sensor (HR belt); Polar Verity Sense (sleep, experimental)
+- **GPS:** Garmin eTrex 10 / 20 / 20x / 30 / 30x
+- **Bike computers:** Bryton Aero 60 (activities, routes, workouts, profile), Magene C406 (activities, workouts), Garmin Edge and Hammerhead Karoo (activity import)
+
 
 All features that are visible in the app are available by USB/USB-OTG, and some are also available/being tested by bluetooth.
 Bluetooth currently is only available as experimental feature, which can be enabled in settings. Currently it works on the first pair, but then it is flaky.
@@ -16,7 +24,17 @@ Within the features we have:
 - Calendar: visual calendar with days where activities were done
 - Totals: totals of a certain activity
 - Backup: backup routes and POI altogether to a folder. Backup of your watch firmware (these watches firmwares should be matching the hw version)
-- Intervals: a visual workout builder, which later can be used as an app on the watch (I recommend to use suunto link to install them)
+- Scheduled workouts (Ambit3): the watch's own WORKOUT menu is back - step screen with target band, step text, melody at each step, optional backlight flash at step change / out of limits. Running, cycling, pool swimming... (the watch shows 5 at a time)
+- Training Program: calendar of dated workouts, imported from intervals.icu (or made in the app) and rotated onto the watch at each sync; also sent to Bryton / Magene bike computers
+- Workout Builder: build a workout step by step (time, distance, lap, energy, HR above/below; HR, pace, speed, power targets) and install it straight to the watch
+- Apps: Suunto App Zone apps (app-based workouts for Ambit1/2, or more complex ones on Ambit3), with app logging
+- Copy to watch: copy sport modes and settings from one watch to another
+- Watch settings: edit the watch's settings (Ambit1/2 and Ambit3 families)
+- Race Plan: plan a brevet / long ride from a GPX or roadbook: controls, stops, weather, climbs
+- Health, Weight, Coach: wellness and training load from intervals.icu, HRV from R-R, readiness and an optional chat coach (bring your own API key)
+- Gear: bikes, shoes and parts with service reminders, synced with intervals.icu
+- Cloud backup: Dropbox, Google Drive, OneDrive
+- Garmin Connect: activity, weight and health sync
 - Sports modes: sports mode editor for the watches
 - Firmware: flasher of firmware to the watch
 - Suunto HR Sensor: connection of the sensor, check battery level, firmware version, etc
@@ -41,7 +59,7 @@ Currently main features were tested with Ambit 3, Traverse and Kailash in Androi
 
 
 The app was entirely vibe coded with Claude, given my lack of knowledge. It was fueled in stubbornness, coffee and good will to bring some features for these watches for some operative systems.
-The app is free, no login/account and can be used almost fully offline (Orbital data, and intervals workout builder need internet)
+The app is free, no login/account and can be used almost fully offline (Orbital data, workout compiling and intervals.icu need internet)
 
 
 
@@ -53,7 +71,7 @@ The app is free, no login/account and can be used almost fully offline (Orbital 
 - Found something that you think is not correct from a dev perspective, contact me. I have zero experience, but willing to learn.
 - Found a bug? open an issue with logs and screenshots. Easier if you follow up [this](https://claude.ai/code/artifact/c88a8a2b-31cc-4ca1-93ef-b120a48fc1ae)
 - Are the Spartan, Suunto 5,9, and later suuntos be supported: No. Suunto link and suunto app already provide great features for them.
-- Can we get back scheduled workouts, guided workouts and training plans feature back from Movescount? I didn't arrive, if you have material that can help feel free to contact me
+- Can we get back scheduled workouts, guided workouts and training plans feature back from Movescount? Yes for the Ambit3: scheduled workouts are back in the watch's WORKOUT menu, fed by the Training Program (intervals.icu or made in the app). Ambit1/2 use app-based workouts.
 - Can you implement X,Y,Z feature? Propose, beware that if I don't have the hardware if may be complicated to implement it
 - My watch bugged, what I do now?! Go to mac or windows, connect to suunto link and reset. Your settings will be lost but your watch will be alive.
 - Are you gonna implement translations to X,Y,Z language? For the moment no, but if anyone has envy to do it go ahead.
@@ -288,6 +306,8 @@ Built on the real work of others:
   USB/BLE protocol work is checked against (GPLv3).
 - **opensportsync** — the starting point for the Android app.
 - **marguslt** — firmware-download recipe, gists, Movescount knowledge.
+- **Pavel Samokha** — the community App Zone / workout compiler every scheduled workout is compiled on, and the SuuntoLink app-catalogue method (Suunto forum).
+- **Emil Ljungdahl** — original author of `libambit`.
 - **sebchastang** — published Suunto App Zone interval-training scripts.
 - **[bwaldvogel/openmoves](https://github.com/bwaldvogel/openmoves)** — Openmoves.
 - **[iwanders/gps_track_pod](https://github.com/iwanders/gps_track_pod)** — Suunto GPS Track Pod
@@ -304,6 +324,13 @@ Built on the real work of others:
 - **[ruvido/goambit](https://github.com/ruvido/goambit)** & **[AlexLBraits/ambit2gpx](https://github.com/AlexLBraits/ambit2gpx)**
   — independent implementations of the same cloud-free USB paths (route upload / activity read),
   confirming they're real.
+- **tomoya kamata ([nabeka/x6hr-python](https://github.com/nabeka/x6hr-python))** — Suunto X6HR protocol (GPLv3), with
+  [larshesel/suunto_x6hr_erl](https://github.com/larshesel/suunto_x6hr_erl) and the terre-adelie wiki.
+- **[Taxom/OpenBikeCompanion](https://github.com/Taxom/OpenBikeCompanion)** — Magene C406 BLE protocol notes (GPLv3);
+  **[WSTRN/C406pro_Hack](https://github.com/WSTRN/C406pro_Hack)** — C406 Pro hardware reference.
+- **[googlarz/suunto-mcp](https://github.com/googlarz/suunto-mcp)** — workout-guide format for the Coach's Suunto sink.
+- **Eric Banister, Dr. Andrew Coggan, Hunter Allen** — the CTL / ATL / TSB training-load model behind the Coach.
+- **Suunto Apps Developer Manual** (2015) — watch variables and activity ids, checked against.
 - **[mihaildemidoff/suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model)** —
   a JAXB model of Suunto's SML format, a reference for the exercise-log work.
 - the **Suunto forum community** and **wanarun.net**.
@@ -328,4 +355,8 @@ Services and libraries the app talks to at runtime:
 - Map data © **OpenStreetMap** contributors, under the **Open Database License (ODbL)**. Tiles:
   **CyclOSM** / OpenStreetMap France, standard OSM, and **IGN Géoplateforme** (France).
 - Weather by **[Open-Meteo](https://open-meteo.com/)** (CC BY 4.0).
-- Icons: **Google Material Symbols** (Apache License 2.0).
+- Icons: **Google Material Symbols** (Apache License 2.0); 7 activity icons are Suunto's own (see credits).
+- Mobile maps: **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause).
+- POIs along a route: exported from **[PitStopper](https://pitstopper.net)**.
+
+Full list with details: [`docs/reference/credits.md`](docs/reference/credits.md).
