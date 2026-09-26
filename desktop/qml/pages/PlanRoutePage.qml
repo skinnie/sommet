@@ -637,9 +637,9 @@ Item {
                                   && !(HomeViewModel.isGarmin && GarminService.hasSdCard) }
     }
 
-    // Routes switches COMPLETELY between the Library (the old Routes page: saved routes + each
-    // device's own) and this planner (André, 2026-09-26: "just switch completely"). It opens on the
-    // Library; opening a route there shows the planner; "← Library" goes back.
+    // Routes opens on the old Routes screen (RouteLibraryView: upload a GPX and send it, or browse
+    // one source - a device or the Library - in a drop-down) and switches COMPLETELY to this planner
+    // with "Open planner" / "Open in planner"; "← Routes" goes back (André, 2026-09-26).
     property bool libraryMode: true
     RouteLibraryView {
         id: libraryView
@@ -650,6 +650,7 @@ Item {
             root.libraryId = libraryId
             root.libraryMode = false
         }
+        onOpenPlanner: root.libraryMode = false
     }
     // The Magene holds one route: the Library shows the last one sent from here.
     Settings { id: mageneRoute; category: "mageneRoute"; property string name: ""; property string libraryId: "" }
@@ -822,23 +823,29 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingSmall
 
-                        // Back to the Library (saved routes + each device's own; Import is there).
+                        // Back to the Routes screen, and the planner's own GPX upload (as before).
                         Row {
                             width: parent.width
                             spacing: Theme.spacingSmall
                             readonly property real cellW: (width - Theme.spacingSmall) / 2
                             RoundedButton {
                                 width: parent.cellW
-                                text: qsTr("← Library")
+                                text: qsTr("← Routes")
                                 enabled: !root.busy
                                 onClicked: { root.libraryMode = true; libraryView.refresh() }
                             }
                             RoundedButton {
                                 width: parent.cellW
-                                text: qsTr("Plan race")
-                                enabled: root.plannedGpx.length > 0
-                                onClicked: NavBus.navigate("racePlan")
+                                text: root.plannedGpx.length > 0 ? qsTr("Upload a different GPX") : qsTr("Upload GPX")
+                                enabled: !root.busy
+                                onClicked: gpxDialog.open()
                             }
+                        }
+                        RoundedButton {
+                            width: parent.width
+                            text: qsTr("Plan race")
+                            enabled: root.plannedGpx.length > 0
+                            onClicked: NavBus.navigate("racePlan")
                         }
                         Row {
                             width: parent.width
