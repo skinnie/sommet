@@ -19,7 +19,7 @@ export interface WorkoutStep {
   type: { typeName: string; value?: number };
   duration?: { durationName: string; value: number };
   target?: { targetName: string; valueRange?: { min: number; max: number } };
-  notify?: { beep?: boolean; light?: boolean };
+  notify?: { beep?: boolean; light?: boolean; limitLight?: boolean };
 }
 export interface Workout { name?: string; steps: WorkoutStep[] }
 

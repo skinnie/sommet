@@ -86,5 +86,49 @@ class LightOnStepChange(unittest.TestCase):
             IC.add_light_on_step_change(FX["hand_no_calls_even"])
 
 
+class PerStepLights(unittest.TestCase):
+    def test_condition_block_is_the_compilers_own_encoding(self):
+        # the compiler's output for `if (X == 1 || X == 3 || X == 5) Suunto.light();` and
+        # `if (X == 2) Suunto.light();` (X = slot 7), located by their light calls
+        b = FX["hand_light_if_chain"]
+        ins = IC.instructions(b)
+        code = b[IC.layout(b)["code"]:]
+        lights = IC.call_sites(b, IC.CALL_LIGHT)
+        pcs = [pc for pc, _, _ in ins]
+        chain_start = pcs[pcs.index(lights[0]) - 12]   # 3x(load,pushf,eq) + 2 or + jz
+        single_start = pcs[pcs.index(lights[1]) - 4]   # load, pushf, eq, jz
+        self.assertEqual(IC.light_if_step(7, [1, 3, 5], 10), code[chain_start:lights[0] + 7])
+        self.assertEqual(IC.light_if_step(7, [2], 10), code[single_start:lights[1] + 7])
+
+    def test_step_counter_counts_the_repeat_expanded_sequence(self):
+        totals = {k: IC.guidance_sites(FX[k])["total"] for k in GUIDANCE + ("guidance_repeat_3x2",)}
+        self.assertEqual(totals, {"guidance_2step": 2, "guidance_3step": 3,
+                                  "guidance_2step_hr": 2, "guidance_repeat_3x2": 8})
+
+    def test_light_only_on_chosen_steps(self):
+        rep = FX["guidance_repeat_3x2"]
+        g = IC.guidance_sites(rep)
+        patched, n = IC.add_lights(rep, on_step_start=[1, 3, 5], on_finish=False, expected_total=8)
+        self.assertEqual(n, 1)
+        block = IC.light_if_step(g["slot"], [1, 3, 5], 8)
+        code = patched[IC.layout(patched)["code"]:]
+        self.assertEqual(code[g["step_start"]:g["step_start"] + len(block)], block)
+        self.assertEqual(IC.splice(patched, g["step_start"], delete=len(block)), rep)
+
+    def test_light_with_the_limits_alarm_sits_inside_the_alarm(self):
+        hr = FX["guidance_2step_hr"]
+        g = IC.guidance_sites(hr)
+        patched, n = IC.add_lights(hr, on_step_start=[], on_limits=[0], on_finish=False)
+        self.assertEqual(n, 1)
+        block = IC.light_if_step(g["slot"], [0], 2)
+        beep = IC.call_sites(patched, IC.CALL_BEEP)[0]
+        self.assertEqual(beep, g["limits"] + len(block))   # flash right before the two beeps
+        self.assertEqual(IC.splice(patched, g["limits"], delete=len(block)), hr)
+
+    def test_step_count_mismatch_is_refused(self):
+        with self.assertRaises(ValueError):
+            IC.add_lights(FX["guidance_repeat_3x2"], on_step_start=[0], expected_total=4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

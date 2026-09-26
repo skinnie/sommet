@@ -7,6 +7,7 @@ import React from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import { useV3Theme, v3Radius, v3Type } from '../theme/v3';
 import type { Workout, WorkoutStep } from '../services/WorkoutSource';
+import Icon from './ui/Icon';
 
 export type PlanDevice = 'suunto' | 'bryton' | 'magene' | '';
 export const DEVICE_LABELS: Record<Exclude<PlanDevice, ''>, string> = {
@@ -36,10 +37,14 @@ const TGT_LABEL: Record<string, string> = {
 export interface StepRow {
   stepType: string; durationKind: string; durationValue: number;
   targetKind: string; targetMin: number; targetMax: number; repeatCount: number;
+  // Suunto guided workout only: backlight flash at this step's start / with its limits alarm
+  // (step.notify.light / notify.limitLight - spliced in at install, GuidedWorkoutCore.withLights).
+  lightStart: boolean; lightLimits: boolean;
 }
 
 export const defaultStep = (type: string, minutes = 10): StepRow =>
-  ({ stepType: type, durationKind: 'time_min', durationValue: minutes, targetKind: 'none', targetMin: 0, targetMax: 0, repeatCount: 3 });
+  ({ stepType: type, durationKind: 'time_min', durationValue: minutes, targetKind: 'none', targetMin: 0, targetMax: 0, repeatCount: 3,
+     lightStart: true, lightLimits: false });
 
 export const defaultSteps = (): StepRow[] => [
   defaultStep('warmup', 10), defaultStep('repeatStart'), defaultStep('interval', 4), defaultStep('recovery', 2),
@@ -60,6 +65,7 @@ export function fromSchema(s: WorkoutStep): StepRow {
   return {
     stepType: type, durationKind: kind, durationValue: value, targetKind: tn,
     targetMin: s.target?.valueRange?.min ?? 0, targetMax: s.target?.valueRange?.max ?? 0, repeatCount: 0,
+    lightStart: s.notify?.light !== false, lightLimits: !!s.notify?.limitLight,
   };
 }
 
@@ -78,6 +84,7 @@ export function toSchema(r: StepRow): WorkoutStep {
   step.target = r.targetKind === 'none'
     ? { targetName: 'none' }
     : { targetName: r.targetKind, valueRange: { min: Number(r.targetMin), max: Number(r.targetMax) } };
+  step.notify = { light: r.lightStart !== false, limitLight: r.targetKind !== 'none' && !!r.lightLimits };
   return step;
 }
 
@@ -129,6 +136,28 @@ function Num({ value, onChange, w = 56 }: { value: number; onChange: (n: number)
   );
 }
 
+// Same wording as the desktop editor / Workout Builder. The watch's beeps aren't configurable.
+const LIGHT_INFO = 'Light at start: the backlight flashes when this step begins, together with the watch\'s '
+  + 'step melody. Light outside limits: the backlight flashes together with the two quick beeps the watch '
+  + 'gives once you\'ve been outside this step\'s target for 5 s (then every 15 s). Handy with headphones on. '
+  + 'The workout-finished screen flashes if any step has Light at start.';
+
+/** Rounded tick - the Android twin of desktop's RoundedCheckBox (22px, primary fill when on). */
+function Tick({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  const t = useV3Theme();
+  return (
+    <Pressable onPress={() => onChange(!value)} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <View style={{
+        width: 22, height: 22, borderRadius: v3Radius.small, borderWidth: 1, alignItems: 'center', justifyContent: 'center',
+        borderColor: value ? t.primary : t.mutedText, backgroundColor: value ? t.primary : t.card,
+      }}>
+        {value && <Icon name="check" size={16} color={t.card} />}
+      </View>
+      <Text style={{ color: t.text, fontSize: v3Type.caption }}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const cycle = (list: string[], cur: string) => list[(Math.max(0, list.indexOf(cur)) + 1) % list.length];
 
 /** Tap a pill to cycle its value (type / duration unit / target) - compact on a phone. */
@@ -138,15 +167,34 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
   const t = useV3Theme();
   const caps = capsFor(device);
   const set = (i: number, patch: Partial<StepRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const suunto = device === 'suunto' || device === '';
+  const [infoRow, setInfoRow] = React.useState<number | null>(null);
+  const bold = { fontWeight: '700' as const, fontSize: v3Type.caption };
   return (
     <View style={{ gap: 8, marginTop: 10 }}>
+      {suunto && (
+        <View style={{ borderWidth: 1, borderColor: t.border, borderRadius: v3Radius.small, padding: 8 }}>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>
+            <Text style={bold}>Beeps</Text> come from the watch and always sound: a <Text style={bold}>melody</Text> when
+            a step starts and when the workout ends; <Text style={bold}>two quick beeps</Text> once you&apos;ve been outside
+            a step&apos;s target limits for 5 s, then every 15 s while you stay outside. The <Text style={bold}>Light</Text> ticks
+            add a backlight flash to those moments.
+          </Text>
+        </View>
+      )}
       {rows.map((r, i) => {
         const repeat = r.stepType === 'repeatStart' || r.stepType === 'repeatEnd';
         const badDur = !repeat && !caps.durations.includes(r.durationKind);
         const badTgt = !repeat && !caps.targets.includes(r.targetKind);
+        const info = (
+          <Pressable onPress={() => setInfoRow(infoRow === i ? null : i)} hitSlop={8}>
+            <Icon name="info" size={18} color={t.mutedText} />
+          </Pressable>
+        );
         return (
-          <View key={i} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+          <View key={i} style={{ gap: 6,
             paddingLeft: rows.slice(0, i).reduce((d, x) => d + (x.stepType === 'repeatStart' ? 1 : x.stepType === 'repeatEnd' ? -1 : 0), 0) > 0 && r.stepType !== 'repeatEnd' ? 14 : 0 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
             <Pill label={TYPE_LABEL[r.stepType]} onPress={() => set(i, { stepType: cycle(TYPES, r.stepType) })} />
             {r.stepType === 'repeatStart' && <Num value={r.repeatCount} onChange={n => set(i, { repeatCount: Math.max(1, Math.round(n)) })} w={44} />}
             {!repeat && r.durationKind !== 'lap' && <Num value={r.durationValue} onChange={n => set(i, { durationValue: n })} />}
@@ -164,6 +212,22 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
             <Pressable onPress={() => onChange(rows.filter((_, j) => j !== i))} hitSlop={8}>
               <Text style={{ color: t.mutedText, fontSize: 18, paddingHorizontal: 4 }}>×</Text>
             </Pressable>
+          </View>
+          {suunto && !repeat && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+              <Tick label="Light at start" value={r.lightStart !== false} onChange={v => set(i, { lightStart: v })} />
+              {info}
+              {r.targetKind !== 'none' && (
+                <>
+                  <Tick label="Light outside limits" value={!!r.lightLimits} onChange={v => set(i, { lightLimits: v })} />
+                  {info}
+                </>
+              )}
+            </View>
+          )}
+          {suunto && !repeat && infoRow === i && (
+            <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>{LIGHT_INFO}</Text>
+          )}
           </View>
         );
       })}

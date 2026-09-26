@@ -140,19 +140,50 @@ def with_hr_target_as_bps(workout):
     return wk
 
 
-def with_light_on_step_change(binary):
-    """(binary, sites): the compiled guidance binary with a Suunto.light() after every step change
-    and the finish screen - the compiler emits only the beep, easy to miss with headphones on
-    (André, 2026-09-26). If the binary isn't the template iamrule_code.py knows, it's returned
-    unchanged (sites=0) with a warning - never an unvalidated patch."""
+def step_sequence(workout):
+    """The workout's real steps in the order the watch runs them, repeat blocks expanded - the
+    same numbering the compiled program's step counter uses."""
+    seq, stack = [], []
+    for step in workout.get("steps", []):
+        t = (step.get("type") or {}).get("typeName")
+        if t == "repeatStart":
+            stack.append((int(step["type"].get("value", 1)), []))
+        elif t == "repeatEnd":
+            count, block = stack.pop()
+            (stack[-1][1] if stack else seq).extend(block * count)
+        else:
+            (stack[-1][1] if stack else seq).append(step)
+    return seq
+
+
+def light_choices(workout):
+    """Per-step backlight choices from each step's `notify` (the builder's per-step checkboxes):
+    `light` - flash when the step starts (default on), `limitLight` - flash together with the
+    out-of-limits alarm while outside the step's target (default off). The finish screen flashes
+    if any step start does. Beeps aren't configurable: Suunto's own (melody on step change and
+    finish, two quick beeps when out of limits)."""
+    seq = step_sequence(workout)
+    start = [i for i, s in enumerate(seq) if (s.get("notify") or {}).get("light", True)]
+    limits = [i for i, s in enumerate(seq)
+              if (s.get("notify") or {}).get("limitLight", False)
+              and (s.get("target") or {}).get("targetName", "none") != "none"]
+    return {"on_step_start": start, "on_limits": limits, "on_finish": bool(start),
+            "expected_total": len(seq)}
+
+
+def with_lights(binary, workout):
+    """(binary, flashes): the compiled guidance binary with the backlight flashes the workout asks
+    for (light_choices) - the compiler emits only beeps, easy to miss with headphones on (André,
+    2026-09-26). If the binary isn't the template iamrule_code.py knows, it's returned unchanged
+    with a warning - never an unvalidated patch."""
     import iamrule_code
     try:
-        patched, sites = iamrule_code.add_light_on_step_change(bytes(binary))
+        patched, flashes = iamrule_code.add_lights(bytes(binary), **light_choices(workout))
     except ValueError as e:
-        print(f"guided_workout: light-on-step-change skipped ({e}); using the compiler's binary",
+        print(f"guided_workout: backlight flashes skipped ({e}); using the compiler's binary",
               file=sys.stderr)
         return list(binary), 0
-    return list(patched), sites
+    return list(patched), flashes
 
 
 def compile_workout(workout, lang=None):
@@ -188,7 +219,7 @@ def compile_workout(workout, lang=None):
     except urllib.error.URLError as e:
         raise SystemExit("couldn't reach the compiler (ambitappscompiler.azurewebsites.net) - "
                          f"the guidance binary needs an internet connection. ({e.reason})") from None
-    binary, light_sites = with_light_on_step_change(j["binary"])
+    binary, light_sites = with_lights(j["binary"], workout)
     return {"name": workout["name"][:apps_name_len()], "activityId": activity_id,
             "binary": binary, "ruleId": j.get("ruleId"), "lightSites": light_sites}
 

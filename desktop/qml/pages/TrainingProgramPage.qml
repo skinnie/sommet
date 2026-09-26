@@ -946,6 +946,36 @@ Item {
         }
     }
 
+    // Small "(i)" that explains on hover or click. Drawn, not a glyph: the app's icon font has no
+    // info glyph (see RoundedCheckBox's note on not guessing glyphs).
+    component InfoDot: Rectangle {
+        id: infoDot
+        property string text: ""
+        property bool pinned: false
+        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+        width: 18
+        height: 18
+        radius: 9
+        color: "transparent"
+        border.width: 1
+        border.color: Theme.mutedText
+        Text {
+            anchors.centerIn: parent
+            text: "i"
+            color: Theme.mutedText
+            font.pixelSize: 11
+            font.bold: true
+        }
+        HoverHandler { id: infoHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: infoDot.pinned = !infoDot.pinned }
+        ToolTip {
+            visible: infoHover.hovered || infoDot.pinned
+            delay: 200
+            width: 340
+            text: infoDot.text
+        }
+    }
+
     // ---- per-day workout editor ----------------------------------------------------
     ThemedDialog {
         id: editor
@@ -964,6 +994,15 @@ Item {
         // restricts the duration/target pickers to what that device can take (root.capsFor).
         property string device: ""
         readonly property var caps: root.capsFor(device)
+        // Backlight flashes only exist on the Suunto guided workout (guided_workout.py adds them
+        // when compiling); the watch's own beeps aren't configurable, so they're only explained.
+        readonly property bool forSuunto: device === "" || device === "suunto"
+        readonly property string lightInfo: qsTr(
+            "Light at start: the backlight flashes when this step begins, together with the "
+            + "watch's step melody. Light outside limits: the backlight flashes together with the "
+            + "two quick beeps the watch gives once you've been outside this step's target for "
+            + "5 s (then every 15 s). Handy with headphones on. The workout-finished screen "
+            + "flashes if any step has Light at start.")
         function durationLabel(k) { return durationLabels[durationKinds.indexOf(k)] }
         function targetLabel(k) { return targetLabels[targetKinds.indexOf(k)] }
         // Steps the chosen device can't take (e.g. an HR step opened for the Magene).
@@ -1007,7 +1046,8 @@ Item {
 
         function defaultStep(type) {
             return { stepType: type, durationKind: "time_min", durationValue: 10,
-                     targetKind: "none", targetMin: 0, targetMax: 0, repeatCount: 2 }
+                     targetKind: "none", targetMin: 0, targetMax: 0, repeatCount: 2,
+                     lightStart: true, lightLimits: false }
         }
 
         function fromSchema(s) {
@@ -1035,7 +1075,9 @@ Item {
                      targetKind: target,
                      targetMin: s.target && s.target.valueRange ? s.target.valueRange.min : 0,
                      targetMax: s.target && s.target.valueRange ? s.target.valueRange.max : 0,
-                     repeatCount: 0 }
+                     repeatCount: 0,
+                     lightStart: !(s.notify && s.notify.light === false),
+                     lightLimits: !!(s.notify && s.notify.limitLight) }
         }
 
         function toSchema(row) {
@@ -1062,6 +1104,8 @@ Item {
                 step.target = { targetName: row.targetKind,
                                 valueRange: { min: Number(row.targetMin),
                                               max: Number(row.targetMax) } }
+            step.notify = { light: row.lightStart !== false,
+                            limitLight: row.targetKind !== "none" && !!row.lightLimits }
             return step
         }
 
@@ -1114,93 +1158,146 @@ Item {
                 onTextEdited: editor.workoutName = text
             }
 
+            // What the watch does on its own (not configurable) - the Light ticks below add to it.
+            Rectangle {
+                visible: editor.forSuunto
+                width: parent.width
+                height: legendText.implicitHeight + Theme.spacingSmall * 2
+                radius: Theme.radiusSmall
+                color: "transparent"
+                border.width: 1
+                border.color: Theme.border
+                Text {
+                    id: legendText
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacingSmall
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.StyledText
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("<b>Beeps</b> come from the watch and always sound: a <b>melody</b> "
+                               + "when a step starts and when the workout ends; <b>two quick "
+                               + "beeps</b> once you've been outside a step's target limits for "
+                               + "5 s, then every 15 s while you stay outside. The <b>Light</b> "
+                               + "ticks add a backlight flash to those moments.")
+                }
+            }
+
             Repeater {
                 model: editor.editSteps
-                delegate: Row {
+                delegate: Column {
                     id: stepRow
                     required property var modelData
                     required property int index
                     width: parent.width
-                    spacing: Theme.spacingSmall
+                    spacing: 2
 
                     readonly property bool isRepeat:
                         modelData.stepType === "repeatStart"
                         || modelData.stepType === "repeatEnd"
 
-                    RoundedComboBox {
-                        width: parent.width * 0.19
-                        model: editor.stepTypeLabels
-                        currentIndex: editor.stepTypes.indexOf(stepRow.modelData.stepType)
-                        onActivated: (i) => editor.mutate(stepRow.index,
-                                                          { stepType: editor.stepTypes[i] })
-                    }
-                    RoundedComboBox {
-                        visible: !stepRow.isRepeat
-                        width: parent.width * 0.19
-                        model: editor.caps.durations.map(editor.durationLabel)
-                        currentIndex: editor.caps.durations.indexOf(
-                            stepRow.modelData.durationKind)
-                        onActivated: (i) => editor.mutate(stepRow.index,
-                                                          { durationKind: editor.caps.durations[i] })
-                    }
-                    RoundedTextField {
-                        visible: !stepRow.isRepeat
-                                 && stepRow.modelData.durationKind !== "lap"
-                        width: parent.width * 0.1
-                        text: String(stepRow.modelData.durationValue)
-                        validator: DoubleValidator { bottom: 0 }
-                        onTextEdited: editor.mutate(stepRow.index,
-                                                    { durationValue: Number(text) })
-                    }
-                    RoundedTextField {
-                        visible: stepRow.modelData.stepType === "repeatStart"
-                        width: parent.width * 0.1
-                        text: String(stepRow.modelData.repeatCount)
-                        validator: IntValidator { bottom: 1; top: 99 }
-                        onTextEdited: editor.mutate(stepRow.index,
-                                                    { repeatCount: Number(text) })
-                    }
-                    RoundedComboBox {
-                        visible: !stepRow.isRepeat
-                        width: parent.width * 0.19
-                        model: editor.caps.targets.map(editor.targetLabel)
-                        currentIndex: editor.caps.targets.indexOf(
-                            stepRow.modelData.targetKind)
-                        onActivated: (i) => editor.mutate(stepRow.index,
-                                                          { targetKind: editor.caps.targets[i] })
-                    }
-                    RoundedTextField {
-                        visible: !stepRow.isRepeat
-                                 && stepRow.modelData.targetKind !== "none"
-                        width: parent.width * 0.08
-                        text: String(stepRow.modelData.targetMin)
-                        placeholderText: qsTr("min")
-                        validator: DoubleValidator { bottom: 0 }
-                        onTextEdited: editor.mutate(stepRow.index,
-                                                    { targetMin: Number(text) })
-                    }
-                    RoundedTextField {
-                        visible: !stepRow.isRepeat
-                                 && stepRow.modelData.targetKind !== "none"
-                        width: parent.width * 0.08
-                        text: String(stepRow.modelData.targetMax)
-                        placeholderText: qsTr("max")
-                        validator: DoubleValidator { bottom: 0 }
-                        onTextEdited: editor.mutate(stepRow.index,
-                                                    { targetMax: Number(text) })
-                    }
-                    Icon {
-                        anchors.verticalCenter: parent.verticalCenter
-                        glyph: Icons.close
-                        size: 18
-                        color: Theme.mutedText
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        TapHandler {
-                            onTapped: {
-                                const next = editor.editSteps.slice()
-                                next.splice(stepRow.index, 1)
-                                editor.editSteps = next
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+
+                        RoundedComboBox {
+                            width: parent.width * 0.19
+                            model: editor.stepTypeLabels
+                            currentIndex: editor.stepTypes.indexOf(stepRow.modelData.stepType)
+                            onActivated: (i) => editor.mutate(stepRow.index,
+                                                              { stepType: editor.stepTypes[i] })
+                        }
+                        RoundedComboBox {
+                            visible: !stepRow.isRepeat
+                            width: parent.width * 0.19
+                            model: editor.caps.durations.map(editor.durationLabel)
+                            currentIndex: editor.caps.durations.indexOf(
+                                stepRow.modelData.durationKind)
+                            onActivated: (i) => editor.mutate(stepRow.index,
+                                                              { durationKind: editor.caps.durations[i] })
+                        }
+                        RoundedTextField {
+                            visible: !stepRow.isRepeat
+                                     && stepRow.modelData.durationKind !== "lap"
+                            width: parent.width * 0.1
+                            text: String(stepRow.modelData.durationValue)
+                            validator: DoubleValidator { bottom: 0 }
+                            onTextEdited: editor.mutate(stepRow.index,
+                                                        { durationValue: Number(text) })
+                        }
+                        RoundedTextField {
+                            visible: stepRow.modelData.stepType === "repeatStart"
+                            width: parent.width * 0.1
+                            text: String(stepRow.modelData.repeatCount)
+                            validator: IntValidator { bottom: 1; top: 99 }
+                            onTextEdited: editor.mutate(stepRow.index,
+                                                        { repeatCount: Number(text) })
+                        }
+                        RoundedComboBox {
+                            visible: !stepRow.isRepeat
+                            width: parent.width * 0.19
+                            model: editor.caps.targets.map(editor.targetLabel)
+                            currentIndex: editor.caps.targets.indexOf(
+                                stepRow.modelData.targetKind)
+                            onActivated: (i) => editor.mutate(stepRow.index,
+                                                              { targetKind: editor.caps.targets[i] })
+                        }
+                        RoundedTextField {
+                            visible: !stepRow.isRepeat
+                                     && stepRow.modelData.targetKind !== "none"
+                            width: parent.width * 0.08
+                            text: String(stepRow.modelData.targetMin)
+                            placeholderText: qsTr("min")
+                            validator: DoubleValidator { bottom: 0 }
+                            onTextEdited: editor.mutate(stepRow.index,
+                                                        { targetMin: Number(text) })
+                        }
+                        RoundedTextField {
+                            visible: !stepRow.isRepeat
+                                     && stepRow.modelData.targetKind !== "none"
+                            width: parent.width * 0.08
+                            text: String(stepRow.modelData.targetMax)
+                            placeholderText: qsTr("max")
+                            validator: DoubleValidator { bottom: 0 }
+                            onTextEdited: editor.mutate(stepRow.index,
+                                                        { targetMax: Number(text) })
+                        }
+                        Icon {
+                            anchors.verticalCenter: parent.verticalCenter
+                            glyph: Icons.close
+                            size: 18
+                            color: Theme.mutedText
+                            HoverHandler { cursorShape: Qt.PointingHandCursor }
+                            TapHandler {
+                                onTapped: {
+                                    const next = editor.editSteps.slice()
+                                    next.splice(stepRow.index, 1)
+                                    editor.editSteps = next
+                                }
                             }
+                        }
+                    }
+
+                    // Suunto only: backlight flash at this step's start / with its limits alarm
+                    Row {
+                        visible: editor.forSuunto && !stepRow.isRepeat
+                        spacing: Theme.spacingSmall
+                        RoundedCheckBox {
+                            text: qsTr("Light at start")
+                            checked: stepRow.modelData.lightStart !== false
+                            onToggled: editor.mutate(stepRow.index, { lightStart: checked })
+                        }
+                        InfoDot { text: editor.lightInfo }
+                        Item { width: Theme.spacingMedium; height: 1 }
+                        RoundedCheckBox {
+                            visible: stepRow.modelData.targetKind !== "none"
+                            text: qsTr("Light outside limits")
+                            checked: !!stepRow.modelData.lightLimits
+                            onToggled: editor.mutate(stepRow.index, { lightLimits: checked })
+                        }
+                        InfoDot {
+                            visible: stepRow.modelData.targetKind !== "none"
+                            text: editor.lightInfo
                         }
                     }
                 }

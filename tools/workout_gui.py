@@ -155,6 +155,20 @@ HTML_PAGE = r"""<!doctype html>
   .install-picker select { width: 100%; box-sizing: border-box; padding: .35rem;
                             background: var(--card); color: var(--text);
                             border: 1px solid var(--border); }
+  .legend { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .8rem;
+            margin: .5rem 0 .8rem; font-size: .8rem; background: var(--code-bg); }
+  .legend p { margin: .2rem 0; }
+  .tick { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; opacity: 1; }
+  details.info { display: inline-block; position: relative; }
+  details.info summary { list-style: none; cursor: pointer; width: 1.1rem; height: 1.1rem;
+                         line-height: 1.1rem; text-align: center; border-radius: 50%;
+                         border: 1px solid var(--muted); color: var(--muted); font-size: .7rem;
+                         font-weight: 700; }
+  details.info summary::-webkit-details-marker { display: none; }
+  details.info .info-text { position: absolute; z-index: 5; right: 0; top: 1.5rem; width: 17rem;
+                            padding: .5rem .6rem; font-size: .8rem; background: var(--card);
+                            color: var(--text); border: 1px solid var(--border);
+                            border-radius: 8px; }
   #notes { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
   #notes h2 { font-size: 1rem; }
 </style>
@@ -180,6 +194,14 @@ create is also saved to <code>~/Downloads/AmbitWorkouts</code>.</p>
   <input id="wname" value="My workout">
   <label>Description</label>
   <input id="wdesc" value="">
+</div>
+
+<div class="legend">
+  <p><strong>Beeps</strong> come from the watch and always sound:</p>
+  <p>&bull; a <strong>melody</strong> when a step starts and when the workout ends;</p>
+  <p>&bull; <strong>two quick beeps</strong> when you've been outside a step's target limits for
+     5&nbsp;s, repeated every 15&nbsp;s while you stay outside.</p>
+  <p>The <strong>Light</strong> ticks on each step add a backlight flash to those moments.</p>
 </div>
 
 <div id="steps"></div>
@@ -292,8 +314,19 @@ function formatPace(decimalMinPerKm) {
 function addStep() {
   steps.push({type: {typeName: "interval"}, duration: {durationName: "time", value: 60, unit: "seconds"},
               target: {targetName: "none", valueRange: {min: 0, max: 0}},
-              notify: {beep: true, light: true}});
+              notify: {light: true, limitLight: false}});
   render();
+}
+
+// Shared by both Light ticks' (i). The watch's beeps aren't configurable (see the legend); the
+// light flashes are added by guided_workout.py (iamrule_code.py) when the workout is compiled.
+const LIGHT_INFO = "Light at start: the backlight flashes when this step begins, together with " +
+  "the watch's step melody. Light on limits: the backlight flashes together with the two quick " +
+  "beeps the watch gives once you've been outside this step's target for 5 s (then every 15 s). " +
+  "Handy with headphones on. The workout-finished screen flashes if any step has Light at start.";
+function infoTip() {
+  return `<details class="info"><summary title="What does Light do?">i</summary>
+    <div class="info-text">${LIGHT_INFO}</div></details>`;
 }
 function addRepeatStart() { steps.push({type: {typeName: "repeatStart", value: 3}}); render(); }
 function addRepeatEnd() { steps.push({type: {typeName: "repeatEnd"}}); render(); }
@@ -339,7 +372,7 @@ function render() {
       return `<div class="step marker">End repeat ${stepButtons(i)}</div>`;
     }
     const dur = s.duration, tgt = s.target;
-    const notify = s.notify || (s.notify = {beep: true, light: true});
+    const notify = s.notify || (s.notify = {light: true, limitLight: false});
     const units = unitsFor(dur.durationName);
     const unit = dur.unit || defaultUnit(dur.durationName);
     const factor = units ? units[unit] : 1;
@@ -384,11 +417,14 @@ function render() {
       <div class="field"><label>Max</label>
         <input type="number" value="${tgt.valueRange.max}" onchange="steps[${i}].target.valueRange.max=+this.value">
       </div>` : ""}
-      <div class="field"><label>On entering this step</label>
-        <label><input type="checkbox" ${notify.beep ? "checked" : ""}
-          onchange="steps[${i}].notify.beep=this.checked">Beep</label>
-        <label><input type="checkbox" ${notify.light ? "checked" : ""}
-          onchange="steps[${i}].notify.light=this.checked">Light</label>
+      ${showRange ? `
+      <div class="field"><label>Outside limits</label>
+        <span class="tick"><label class="tick"><input type="checkbox" ${notify.limitLight ? "checked" : ""}
+          onchange="steps[${i}].notify.limitLight=this.checked">Light</label>${infoTip()}</span>
+      </div>` : ""}
+      <div class="field"><label>Step start</label>
+        <span class="tick"><label class="tick"><input type="checkbox" ${notify.light !== false ? "checked" : ""}
+          onchange="steps[${i}].notify.light=this.checked">Light</label>${infoTip()}</span>
       </div>
       ${stepButtons(i)}
     </div>`;
