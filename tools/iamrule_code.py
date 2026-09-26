@@ -114,8 +114,12 @@ def splice(binary, pos, delete=0, insert=b""):
         if op not in JUMPS:
             continue
         tgt = jump_target(i)
-        if pos <= pc < pos + delete or pos < tgt < pos + delete:
-            raise ValueError(f"jump at code+{pc} touches the deleted range")
+        if pos <= pc < pos + delete:
+            if tgt <= pos + delete:
+                continue   # a jump that stays inside the removed block goes with it
+            raise ValueError(f"jump at code+{pc} leaves the deleted range")
+        if pos < tgt < pos + delete:
+            raise ValueError(f"jump at code+{pc} lands inside the deleted range")
         if pc < pos < tgt or (delete and pc < pos and tgt == pos + delete):
             new_off = tgt + delta - pc
             if not 0 < new_off <= 0xFFFF:
@@ -134,26 +138,90 @@ def call_sites(binary, call_id):
             if op == 0x21 and struct.unpack_from("<H", raw, 1)[0] == call_id]
 
 
-def add_light_on_step_change(binary):
-    """Insert Suunto.light() right after every guidance-display update (each new step + the
-    finish screen) of a JSON-compiled guided workout. Returns (patched_binary, sites_patched).
-    Raises ValueError if the binary isn't the expected guidance template."""
-    sites = call_sites(binary, CALL_GUIDANCE_DISPLAY)
-    if not sites:
-        raise ValueError("no guidance-display call (0x27) found - not a guided-workout binary")
-    if call_sites(binary, CALL_LIGHT):
-        return binary, 0   # already has a light call - leave it alone (idempotent)
+CALL_LOAD_STEP = 0x29
+
+
+def light_if_step(slot, steps, total):
+    """`if (slot == s1 || slot == s2 ...) Suunto.light();` in the compiler's own encoding (load,
+    push, eq per value, `or` between, jz over the call). Unconditional when every step is chosen,
+    empty when none is."""
+    steps = sorted(set(steps))
+    if not steps:
+        return b""
+    if steps == list(range(total)):
+        return call_bytes(CALL_LIGHT)
+    cond = b""
+    for k, s in enumerate(steps):
+        cond += struct.pack("<BHBfB", 0x14, slot, 0x90, float(s), 0x09)
+        if k:
+            cond += b"\x0c"
+    light = call_bytes(CALL_LIGHT)
+    return cond + struct.pack("<BH", 0x16, 3 + len(light)) + light
+
+
+def guidance_sites(binary):
+    """Where a guided workout (JSON-compiled template) shows things, as code offsets:
+    step counter slot + number of steps it runs (the repeat-expanded sequence), the display call
+    for each new step, the finish-screen display call, and the out-of-limits alarm beep."""
     ins = instructions(binary)
-    after = {pc: ins[k + 1][0] for k, (pc, _, _) in enumerate(ins[:-1])}
-    targets = {jump_target(i) for i in ins if i[1] in JUMPS}
-    if any(after[pc] in targets for pc in sites):
-        # Another path jumps to the statement after the display call; inserting there would flash
-        # the light on that path too. Not seen in any template so far - refuse rather than guess.
-        raise ValueError("instruction after a guidance-display call is a jump target")
+    loads = [k for k, (_, op, raw) in enumerate(ins)
+             if op == 0x21 and struct.unpack_from("<H", raw, 1)[0] == CALL_LOAD_STEP
+             and ins[k - 2][1] == 0x14 and ins[k - 1][1] == 0x90]
+    displays = [k for k, (_, op, raw) in enumerate(ins)
+                if op == 0x21 and struct.unpack_from("<H", raw, 1)[0] == CALL_GUIDANCE_DISPLAY]
+    beeps = [k for k, (_, op, raw) in enumerate(ins)
+             if op == 0x21 and struct.unpack_from("<H", raw, 1)[0] == CALL_BEEP]
+    if len(loads) != 1 or len(displays) != 2 or len(beeps) > 1:
+        raise ValueError("not the guided-workout template this code knows")
+    k = loads[0]
+    slot = struct.unpack_from("<H", ins[k - 2][2], 1)[0]
+    total = struct.unpack_from("<f", ins[k - 1][2], 1)[0]
+    advance = [struct.pack("<BH", 0x14, slot), struct.pack("<Bf", 0x90, 1.0), b"\x01",
+               struct.pack("<BH", 0x15, slot)]
+    if not any([i[2] for i in ins[j:j + 4]] == advance for j in range(len(ins) - 3)):
+        raise ValueError("step counter slot not recognised")
+    step_display = next((d for d in displays if d > k), None)
+    finish_display = next((d for d in displays if d != step_display), None)
+    if step_display is None or finish_display is None or total != int(total):
+        raise ValueError("guidance display calls not where expected")
+    return {"slot": slot, "total": int(total),
+            "step_start": ins[step_display + 1][0], "finish": ins[finish_display + 1][0],
+            "limits": ins[beeps[0]][0] if beeps else None,
+            "jump_targets": {jump_target(i) for i in ins if i[1] in JUMPS}}
+
+
+def add_lights(binary, on_step_start=(), on_limits=(), on_finish=True, expected_total=None):
+    """Guided workout + backlight: flash when each step in `on_step_start` begins (right after its
+    display update), together with the out-of-limits alarm for steps in `on_limits`, and on the
+    finish screen. Steps are 0-based positions in the repeat-expanded sequence (a step inside a
+    3x repeat appears 3 times). `expected_total` = length of that sequence from the workout JSON;
+    must match the template's own step count. Returns (binary, flashes_added)."""
+    if call_sites(binary, CALL_LIGHT):
+        return binary, 0   # already patched - idempotent
+    g = guidance_sites(binary)
+    if expected_total is not None and expected_total != g["total"]:
+        raise ValueError(f"workout has {expected_total} steps, binary runs {g['total']}")
+    edits = [(g["step_start"], light_if_step(g["slot"], on_step_start, g["total"]))]
+    if on_finish:
+        edits.append((g["finish"], call_bytes(CALL_LIGHT)))
+    if on_limits:
+        if g["limits"] is None:
+            raise ValueError("no out-of-limits alarm in this binary")
+        edits.append((g["limits"], light_if_step(g["slot"], on_limits, g["total"])))
+    edits = [(pos, block) for pos, block in edits if block]
+    for pos, _ in edits:
+        if pos in g["jump_targets"]:
+            # another path lands here; inserting would flash on that path too - refuse, not guess
+            raise ValueError(f"insertion point code+{pos} is a jump target")
     out = binary
-    for pc in sorted(sites, reverse=True):   # back to front: earlier offsets stay valid
-        out = splice(out, after[pc], insert=call_bytes(CALL_LIGHT))
-    return out, len(sites)
+    for pos, block in sorted(edits, reverse=True):   # back to front: earlier offsets stay valid
+        out = splice(out, pos, insert=block)
+    return out, len(edits)
+
+
+def add_light_on_step_change(binary):
+    """Light at every step start and at the finish (all steps chosen)."""
+    return add_lights(binary, on_step_start=range(guidance_sites(binary)["total"]))
 
 
 def disassemble(binary):
