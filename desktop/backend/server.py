@@ -809,7 +809,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # holding the watch lock across a multi-minute ride pull needlessly blocked every watch poll
     # behind it, which surfaced as "server didn't reply" with several devices plugged (André,
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
-    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py",
+    NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py", "bt_bonds.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
@@ -1186,6 +1186,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_magene_fields()
         elif self.path == "/api/magene/devices":
             self._handle_magene_devices()
+        elif self.path == "/api/bt/paired":
+            self._handle_bt_paired()
         elif self.path.startswith("/api/magene/rides"):
             self._handle_magene_rides()
         elif self.path == "/api/magene/import" or self.path.startswith("/api/magene/import?"):
@@ -1312,6 +1314,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ble_passkey(body)
         elif self.path == "/api/ble/forget":
             self._handle_ble_forget()
+        elif self.path == "/api/bt/forget":
+            self._handle_bt_forget(body)
         elif self.path == "/api/routes":
             self._handle_route_write(body)
         elif self.path == "/api/routes/export":
@@ -3857,6 +3861,23 @@ class Handler(BaseHTTPRequestHandler):
         see ble_bridge.BleBridge.stop()'s own comment."""
         ble_bridge.bridge.stop()
         self._send_json(200, {"ok": True})
+
+    def _handle_bt_paired(self):
+        """GET /api/bt/paired - Suunto watches + Magene C406s this computer is paired with
+        (tools/bt_bonds.py list), for Home's "Forget Bluetooth device". Nothing else paired
+        (mouse, headset) is ever listed."""
+        _code, out, err = run_tool("bt_bonds.py", ["list"], timeout=60)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "no answer"}
+        self._send_json(200, payload)
+
+    def _handle_bt_forget(self, body):
+        """POST /api/bt/forget {"address"} - unpair ONE Suunto watch or Magene (bt_bonds.py
+        re-checks it's one of those before removing). Removing the bond sends a C406 back to
+        its pair screen; a Suunto watch has to be paired again from its own menu."""
+        address = (body or {}).get("address") or ""
+        _code, out, err = run_tool("bt_bonds.py", ["forget", address], timeout=60)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "no answer"}
+        self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_ble_forget(self):
         """POST /api/ble/forget - real request 2026-08-13 ("we need to add a button to
