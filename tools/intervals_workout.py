@@ -124,7 +124,8 @@ def convert_target(step: dict, hr_resolve=None) -> dict:
 
     `hr_resolve`, when given, is a `bpm -> bpm` callable applied to BOTH ends of an `hr` band -
     used to re-resolve intervals.icu's zone bpm into the watch's own zone model (see
-    `karvonen_rescale`). It only touches HR targets; power/pace bands pass through unchanged.
+    `karvonen_rescale`). It only touches HR targets. Pace arrives from intervals.icu in m/s and is
+    converted to decimal min/km (our and Suunto App-Zone's unit); power passes through.
     """
     for key, target_name in RESOLVED_TARGETS:
         band = step.get(key)
@@ -141,7 +142,15 @@ def convert_target(step: dict, hr_resolve=None) -> dict:
             hi = hr_resolve(hi)
             if not band.get("start_is_watch_rest"):
                 lo = hr_resolve(lo)
-        lo, hi = round(lo), round(hi)
+        if target_name == "pace":
+            # intervals.icu resolves pace to m/s; our workout JSON (like Suunto's App-Zone
+            # SUUNTO_PACE) is decimal min/km - convert, keep the decimals (6.5 = 6:30), and let the
+            # sort below swap the ends (faster = fewer min/km).
+            if lo <= 0 or hi <= 0:
+                continue
+            lo, hi = round(1000 / 60 / lo, 2), round(1000 / 60 / hi, 2)
+        else:
+            lo, hi = round(lo), round(hi)
         if lo > hi:
             lo, hi = hi, lo
         return {"targetName": target_name, "valueRange": {"min": lo, "max": hi}}

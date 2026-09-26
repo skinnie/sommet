@@ -70,14 +70,24 @@ export function lightChoices(workout: Workout): LightChoices {
   return { onStepStart, onLimits, onFinish: onStepStart.length > 0, expectedTotal: seq.length };
 }
 
-/** Copy with every "hr" target range divided by 60 (bpm -> beats per second): the compiled
- *  program compares SUUNTO_HR * (1/60) against it (read from its bytecode, 2026-09-26). Apply to
- *  the JSON handed to the compiler, never to the stored plan (guided_workout.with_hr_target_as_bps). */
-export function withHrTargetAsBps(workout: Workout): Workout {
+// Our workout JSON's target units (Suunto App-Zone script units) -> the SI units the compiled
+// guidance program compares against (read from its bytecode, 2026-09-26) - guided_workout.SI_FACTOR.
+export const SI_FACTOR: Record<string, number> = {
+  hr: 1 / 60,       // bpm -> beats per second
+  cadence: 1 / 60,  // rpm -> revolutions per second
+  speed: 1 / 3.6,   // km/h -> m/s
+  pace: 0.06,       // min/km (decimal) -> s/m
+  // power: watts either way
+};
+
+/** Copy with every target range in the program's SI units. Apply to the JSON handed to the compiler,
+ *  never to the stored plan (guided_workout.with_si_targets). */
+export function withSiTargets(workout: Workout): Workout {
   const wk = clone(workout);
   for (const s of wk.steps || []) {
-    if (s.target?.targetName === 'hr' && s.target.valueRange) {
-      s.target.valueRange = { min: s.target.valueRange.min / 60, max: s.target.valueRange.max / 60 };
+    const f = SI_FACTOR[s.target?.targetName ?? ''];
+    if (f && s.target?.valueRange) {
+      s.target.valueRange = { min: s.target.valueRange.min * f, max: s.target.valueRange.max * f };
     }
   }
   return wk;
