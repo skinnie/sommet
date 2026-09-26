@@ -37,8 +37,8 @@ PageFlickable {
         const out = []
         if (root.watchHere || root.legacyWatch) out.push({ key: "watch", label: qsTr("On the watch") })
         if (root.etrexHere) out.push({ key: "etrex", label: qsTr("On the eTrex") })
-        if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("On the Bryton (Follow Track)") })
-        if (BikeDevices.magene !== null) out.push({ key: "magene", label: qsTr("On the Magene") })
+        if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("On the Bryton") })
+        if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("On the Magene") })
         out.push({ key: "library", label: qsTr("Library (saved routes)") })
         return out
     }
@@ -212,7 +212,7 @@ PageFlickable {
         root.brytonMsg = qsTr("Sending to Bryton…"); root.brytonOk = false
         root.api("POST", "/api/bryton/route", { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }, r => {
             root.brytonOk = !!r.ok
-            root.brytonMsg = r.ok ? qsTr("On the Bryton — in Follow Track after unplugging.")
+            root.brytonMsg = r.ok ? qsTr("Sent to the Bryton — it shows up once you unplug it.")
                                   : (r.error || qsTr("Send to Bryton failed"))
             if (r.ok) root.refresh()
         })
@@ -222,16 +222,44 @@ PageFlickable {
     property bool mageneSending: false
     function sendPendingToMagene() {
         root.mageneSending = true; root.mageneOk = false
+        BikeDevices.mageneConnecting = true
         root.mageneMsg = qsTr("Sending to Magene… keep the C406 awake and close by")
         const body = { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }
         if (BikeDevices.magene && BikeDevices.magene.address) body.address = BikeDevices.magene.address
         root.api("POST", "/api/magene/route", body, r => {
             root.mageneSending = false
+            BikeDevices.mageneConnecting = false
+            BikeDevices.mageneAnswered(!!r.ok)
             root.mageneOk = !!r.ok
             root.mageneMsg = r.ok ? qsTr("Sent to Magene — it's now the route under Navigation")
                                   : (r.error || qsTr("Send to Magene failed"))
             if (r.ok) { mageneRoute.name = root.pendingName(); mageneRoute.libraryId = root.pendingLibraryId }
         })
+    }
+
+    // "Send to device" (André, 2026-09-26): only the devices connected right now. One -> send
+    // straight away; several -> a menu to pick.
+    readonly property var sendTargets: {
+        const out = []
+        if (root.watchHere && DeviceCapabilities.supportsRouteWrite) out.push({ key: "watch", label: HomeViewModel.deviceDisplayName || qsTr("Watch") })
+        if (root.etrexHere && GarminService.hasSdCard) out.push({ key: "etrex", label: qsTr("eTrex (SD card)") })
+        if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("Bryton") })
+        if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("Magene") })
+        return out
+    }
+    function sendPendingTo(key) {
+        if (key === "watch") RouteService.uploadPendingRoute(true)
+        else if (key === "etrex") GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
+                                                                 RouteService.pendingRouteGpxText)
+        else if (key === "bryton") root.sendPendingToBryton()
+        else if (key === "magene") root.sendPendingToMagene()
+    }
+    ThemedMenu {
+        id: sendMenu
+        ThemedMenuItem { text: qsTr("Watch"); visible: root.sendTargets.some(t => t.key === "watch"); onTriggered: root.sendPendingTo("watch") }
+        ThemedMenuItem { text: qsTr("eTrex (SD card)"); visible: root.sendTargets.some(t => t.key === "etrex"); onTriggered: root.sendPendingTo("etrex") }
+        ThemedMenuItem { text: qsTr("Bryton"); visible: root.sendTargets.some(t => t.key === "bryton"); onTriggered: root.sendPendingTo("bryton") }
+        ThemedMenuItem { text: qsTr("Magene"); visible: root.sendTargets.some(t => t.key === "magene"); onTriggered: root.sendPendingTo("magene") }
     }
 
     // ---- rename / delete (saved + Bryton) ------------------------------------------------
@@ -478,7 +506,24 @@ PageFlickable {
                     spacing: Theme.spacingSmall
                     RoundedButton { text: qsTr("Upload GPX…"); onClicked: importDialog.open() }
                     // The planner: weather, climbs, days, race plan - for people who want to plan.
-                    RoundedButton { text: qsTr("Open planner"); onClicked: root.openPlanner() }
+                    // With a GPX uploaded it opens THAT route in the planner.
+                    RoundedButton {
+                        text: root.hasPending ? qsTr("Open in planner") : qsTr("Open planner")
+                        onClicked: root.hasPending
+                                   ? root.openRequested(root.pendingName(), RouteService.pendingRouteGpxText, root.pendingLibraryId)
+                                   : root.openPlanner()
+                    }
+                    RoundedButton {
+                        id: sendButton
+                        visible: root.hasPending
+                        enabled: root.sendTargets.length > 0 && !root.mageneSending
+                        text: root.mageneSending ? qsTr("Sending…")
+                              : root.sendTargets.length > 1 ? qsTr("Send to device ▾") : qsTr("Send to device")
+                        onClicked: {
+                            if (root.sendTargets.length === 1) root.sendPendingTo(root.sendTargets[0].key)
+                            else sendMenu.popup(sendButton, 0, sendButton.height)
+                        }
+                    }
                 }
                 Item {
                     width: parent.width
@@ -493,22 +538,18 @@ PageFlickable {
                         TapHandler { onTapped: root.showBig({ name: RouteService.pendingRoute.name, track: RouteService.pendingRoute.track }) }
                     }
                 }
-                Row {
+                Text {
                     visible: root.hasPending
                     width: parent.width
-                    spacing: Theme.spacingSmall
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - pendingPlanner.width - Theme.spacingSmall
-                        elide: Text.ElideRight
-                        text: RouteService.pendingRoute.name || ""
-                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
-                    }
-                    RoundedButton {
-                        id: pendingPlanner
-                        text: qsTr("Open in planner")
-                        onClicked: root.openRequested(root.pendingName(), RouteService.pendingRouteGpxText, root.pendingLibraryId)
-                    }
+                    elide: Text.ElideRight
+                    text: RouteService.pendingRoute.name || ""
+                    color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                }
+                Text {
+                    visible: root.hasPending && root.sendTargets.length === 0
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("No device connected that takes routes - plug one in (or wake the Magene) to send this one.")
                 }
                 // Garmin: SD card only (GARMIN_USB_IMPORT_SPEC.md - never internal memory).
                 Text {
@@ -526,31 +567,6 @@ PageFlickable {
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("%1 can't have routes written to it from this app yet - its routes are legacy waypoints, and only adding POIs is supported. You can still export this one.")
                         .arg(HomeViewModel.deviceDisplayName)
-                }
-                // Send the uploaded GPX to every connected device that takes routes.
-                Flow {
-                    visible: root.hasPending
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    RoundedButton {
-                        visible: root.watchHere && DeviceCapabilities.supportsRouteWrite
-                        text: qsTr("Upload to watch")
-                        onClicked: RouteService.uploadPendingRoute(true)
-                    }
-                    RoundedButton {
-                        visible: root.etrexHere
-                        text: qsTr("Send to eTrex (SD card)")
-                        enabled: GarminService.hasSdCard
-                        onClicked: GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
-                                                                  RouteService.pendingRouteGpxText)
-                    }
-                    RoundedButton { visible: root.bryton !== null; text: qsTr("Send to Bryton"); onClicked: root.sendPendingToBryton() }
-                    RoundedButton {
-                        visible: BikeDevices.magene !== null
-                        enabled: !root.mageneSending
-                        text: root.mageneSending ? qsTr("Sending…") : qsTr("Send to Magene")
-                        onClicked: root.sendPendingToMagene()
-                    }
                 }
                 Text { visible: root.brytonMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
                        font.pixelSize: Theme.fontSizeCaption; color: root.brytonOk ? Theme.success : Theme.error; text: root.brytonMsg }
