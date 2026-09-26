@@ -92,6 +92,31 @@ PageFlickable {
     // The remembered Magene only counts as connected while it actually answers (its last
     // connection worked). Asleep/off, it stays selectable but reads "asleep" and isn't counted
     // (André, 2026-09-26: "c406 shows connected and the device is off").
+    // Forget one paired device (the strip's "Forget Bluetooth device"): unpair it in BlueZ, and
+    // for the Magene also drop what Sommet remembers, so it stops showing as a device.
+    function forgetBtDevice(dev) {
+        if (!dev) return
+        const dropMagene = function () {
+            if (dev.kind !== "magene") return
+            if (DeviceService.activeBikeKind === "c406") DeviceService.selectBikeComputer("")
+            mageneMemory.address = ""; mageneMemory.name = ""
+            root.mageneDevices = []
+            BikeDevices.mageneAnswered(false)
+        }
+        if (dev.memoryOnly) { dropMagene(); forgetDialog.load(); return }
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            var r = null
+            try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
+            if (r && r.ok) dropMagene()
+            else forgetDialog.msg = (r && r.error) || qsTr("Couldn't forget it")
+            forgetDialog.load()
+        }
+        xhr.open("POST", "http://127.0.0.1:8766/api/bt/forget")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(JSON.stringify({ address: dev.address }))
+    }
     // Reachability lives in BikeDevices (shared with Routes/the planner, kept fresh by its scan).
     function mageneAnswered(ok) { BikeDevices.mageneAnswered(ok) }
     function isReachable(bike) { return BikeDevices.isReachable(bike) }
@@ -834,16 +859,6 @@ PageFlickable {
                                     ActivityService.importFromBikeComputers();
                             }
                         }
-                        // Pair over Bluetooth, on the same row as Sync (the watch's Bluetooth row
-                        // below hides while a bike computer is selected).
-                        RoundedButton {
-                            visible: DeviceService.bleExperimentEnabled && !DeviceService.demoMode
-                            text: DeviceService.bleAttempting
-                                ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
-                                : root.mageneScanning ? qsTr("Searching…") : qsTr("Pair over Bluetooth")
-                            enabled: !DeviceService.bleAttempting && !root.mageneScanning
-                            onClicked: pairDialog.open()
-                        }
                         // Profile, data screens, device settings and altitude calibration live
                         // on the GPS settings page, workouts in the Training Program - both in the
                         // nav while this bike computer is selected (André, 2026-09-25: Home keeps
@@ -873,12 +888,9 @@ PageFlickable {
                 // put two stacks on the same adapter at once, exactly the kind of contention that
                 // caused the trouble above. The menu lets André pick, and only one runs.
                 //
-                // Forget stays a single button, and only for the watch: the Magene never bonds
-                // (we connect to it unpaired), so there is literally nothing to "forget" for it -
-                // a "Forget Magene" entry would be a no-op. Forget is useful WHILE connected too
-                // (the "always Unpair, never Replace" recovery PROJECT_RULES.md recommends on the
-                // watch's own menu), so it isn't gated on being disconnected. Neither is shown for
-                // Garmin (no BLE pairing concept) or in Testing mode. ---
+                // "Forget Bluetooth device" (in the device strip) lists every paired Suunto watch
+                // AND Magene - the C406 does bond (2026-09-24: it stays on its pair screen
+                // otherwise), so forgetting it is real: it goes back to its pair screen. ---
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
@@ -889,36 +901,15 @@ PageFlickable {
                     visible: DeviceService.bleExperimentEnabled && !HomeViewModel.isGarmin
                              && !DeviceService.demoMode
 
-                    Row {
-                        width: parent.width
-                        spacing: Theme.spacingMedium
-                        // With a bike computer selected, Pair sits next to Sync rides instead
-                        // (one row of actions - André, 2026-09-25).
-                        visible: !DeviceService.bikeActive
-
-                        RoundedButton {
-                            // Reflects whichever flow is mid-connect so the one button still gives
-                            // the live feedback the two separate buttons used to (the passkey wait
-                            // can legitimately run long - see DeviceService::connectBle()).
-                            text: DeviceService.bleAttempting
-                                ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
-                                : root.mageneScanning ? qsTr("Searching…")
-                                                      : qsTr("Pair over Bluetooth")
-                            enabled: !DeviceService.bleAttempting && !root.mageneScanning
-                            onClicked: pairDialog.open()
-                        }
-                        RoundedButton {
-                            visible: !DeviceService.bikeActive      // a watch action only
-                            text: qsTr("Forget this watch (Bluetooth)")
-                            onClicked: DeviceService.forgetBle()
-                        }
-                    }
+                    // The Pair / Forget buttons moved to the device strip below the card (André,
+                    // 2026-09-26: "Pair over Bluetooth" on a device's card read as "pair THIS
+                    // device"). The pair dialog + status lines stay here.
 
                     // Behind the single Pair button: a centered dialog on the dimmed page, like the
                     // app's other pop-ups (André, 2026-09-25), one choice per wireless device kind.
                     ThemedDialog {
                         id: pairDialog
-                        title: qsTr("Pair over Bluetooth")
+                        title: qsTr("Pair another device by Bluetooth")
                         standardButtons: Dialog.Cancel
                         width: 420
                         contentItem: Column {
@@ -1307,20 +1298,28 @@ PageFlickable {
         // so the current watch is the hero and the alternatives are the row beneath it. Hidden
         // when 0 or 1 watch is connected.
         Card {
+            id: deviceStrip
             width: parent.width
             variant: "nested"   // secondary utility strip under the device card - recedes
             // Unified device switcher (André, 2026-09-04): EVERY plugged device - watches AND bike
             // computers - as one "tap to switch" strip, so you pick the one active device rather
             // than seeing watch + GPS at once. Shown when there's more than one to choose from.
-            visible: (DeviceService.connectedWatches.length + root.bikeComputers.length
-                      + (GarminService.connected ? 1 : 0)) > 1
+            // Shown with two or more devices (to switch), and whenever pairing is on (its Pair /
+            // Forget buttons live here - André, 2026-09-26), even with one device or none.
+            readonly property int deviceCount: DeviceService.connectedWatches.length
+                                               + root.bikeComputers.length + (GarminService.connected ? 1 : 0)
+            readonly property bool bleButtons: DeviceService.bleExperimentEnabled && !DeviceService.demoMode
+            visible: deviceCount > 1 || bleButtons
 
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
                 Text {
-                    text: qsTr("%1 devices connected — tap to switch:").arg(root.reachableCount)
+                    text: root.reachableCount === 0 ? qsTr("No device connected")
+                          : root.reachableCount === 1 && deviceStrip.deviceCount <= 1
+                            ? qsTr("1 device connected")
+                            : qsTr("%1 devices connected — tap to switch:").arg(root.reachableCount)
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
@@ -1372,7 +1371,132 @@ PageFlickable {
                         }
                     }
                 }
+
+                // Pair / Forget, next to the devices they add or remove (André, 2026-09-26) - not
+                // on one device's card, where "Pair over Bluetooth" read as "pair THIS device".
+                Row {
+                    visible: deviceStrip.bleButtons
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        // Live feedback of whichever flow is running (the watch's passkey wait
+                        // can legitimately run long - see DeviceService::connectBle()).
+                        text: DeviceService.bleAttempting
+                            ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
+                            : root.mageneScanning ? qsTr("Searching…")
+                                                  : qsTr("Pair another device by Bluetooth")
+                        enabled: !DeviceService.bleAttempting && !root.mageneScanning
+                        onClicked: pairDialog.open()
+                    }
+                    RoundedButton {
+                        text: qsTr("Forget Bluetooth device")
+                        onClicked: forgetDialog.open()
+                    }
+                }
             }
+        }
+
+        // "Forget Bluetooth device": every Suunto watch / Magene this computer is paired with
+        // (tools/bt_bonds.py - nothing else paired, like a mouse, is ever listed), one Forget each.
+        ThemedDialog {
+            id: forgetDialog
+            title: qsTr("Forget Bluetooth device")
+            standardButtons: Dialog.Close
+            width: 440
+            property var devices: []
+            property bool loading: false
+            property string msg: ""
+            property bool unsupported: false
+            function load() {
+                loading = true; msg = ""
+                const xhr = new XMLHttpRequest()
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    forgetDialog.loading = false
+                    var r = null
+                    try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
+                    forgetDialog.unsupported = !!(r && r.unsupported)
+                    var list = (r && r.ok) ? (r.devices || []) : []
+                    // No bluetoothctl (macOS/Windows): the OS owns the bonds - still offer to drop
+                    // the Magene Sommet remembers.
+                    if (forgetDialog.unsupported && mageneMemory.address.length > 0)
+                        list = [{ address: mageneMemory.address, name: mageneMemory.name, kind: "magene", memoryOnly: true }]
+                    forgetDialog.devices = list
+                    if (r && !r.ok && !r.unsupported) forgetDialog.msg = r.error || qsTr("Couldn't read the paired devices")
+                }
+                xhr.open("GET", "http://127.0.0.1:8766/api/bt/paired")
+                xhr.send()
+            }
+            onOpened: load()
+            contentItem: Column {
+                spacing: Theme.spacingSmall
+                Text {
+                    visible: forgetDialog.loading
+                    text: qsTr("Reading paired devices…"); color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                }
+                Text {
+                    visible: !forgetDialog.loading && forgetDialog.devices.length === 0
+                    width: 400; wrapMode: Text.WordWrap
+                    text: forgetDialog.msg.length > 0 ? forgetDialog.msg
+                          : qsTr("No Suunto watch or Magene is paired with this computer.")
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                }
+                Repeater {
+                    model: forgetDialog.loading ? [] : forgetDialog.devices
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: 408; height: 56
+                        radius: Theme.radiusSmall
+                        color: "transparent"; border.width: 1; border.color: Theme.border
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: Theme.spacingMedium
+                            spacing: Theme.spacingMedium
+                            Item {
+                                width: 32; height: 32
+                                anchors.verticalCenter: parent.verticalCenter
+                                Icon { anchors.centerIn: parent; visible: modelData.kind === "suunto"
+                                       glyph: Icons.watch; size: 26; color: Theme.text }
+                                BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind === "magene"
+                                                   kind: "c406"; size: 28 }
+                            }
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 220
+                                Text { text: modelData.kind === "magene" ? qsTr("Magene C406") : (modelData.name || qsTr("Suunto watch"))
+                                       color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                                       elide: Text.ElideRight; width: parent.width }
+                                Text { text: (modelData.kind === "magene" ? (modelData.name || "") + " · " : "") + modelData.address
+                                       color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                       elide: Text.ElideRight; width: parent.width }
+                            }
+                        }
+                        RoundedButton {
+                            anchors.right: parent.right; anchors.rightMargin: Theme.spacingSmall
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Forget")
+                            onClicked: { forgetConfirm.device = modelData; forgetConfirm.open() }
+                        }
+                    }
+                }
+            }
+        }
+        ThemedDialog {
+            id: forgetConfirm
+            property var device: null
+            title: qsTr("Forget Bluetooth device")
+            standardButtons: Dialog.Yes | Dialog.No
+            width: 400
+            contentItem: Text {
+                width: 360; wrapMode: Text.WordWrap
+                color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                text: !forgetConfirm.device ? ""
+                      : forgetConfirm.device.kind === "magene"
+                        ? qsTr("Forget the Magene C406? It goes back to its pair screen - pair it again from “Pair another device by Bluetooth”.")
+                        : qsTr("Forget %1? To use it over Bluetooth again, pair it from the watch's own menu (“Pair Mobile App”).")
+                              .arg(forgetConfirm.device.name || qsTr("this watch"))
+            }
+            onAccepted: root.forgetBtDevice(device)
         }
 
         // --- This year + Weather, side by side when the width is honest (2026-08-11
