@@ -38,36 +38,43 @@ interface IcuStep {
   warmup?: boolean; cooldown?: boolean; text?: string;
   duration?: number; distance?: number;
   hr?: { units?: string; value?: number };
-  _hr?: { start: number; end: number };
+  _hr?: { start: number; end: number; startIsWatchRest?: boolean };
   _power?: { start: number; end: number };
   _pace?: { start: number; end: number };
 }
 
 // ── zone reconstruction (port of resolve_zone_band / resolve_zones_into_hr / athlete_hr_zones) ──
 
-/** intervals.icu zone INDEX (1-based) -> [low, high] bpm from the athlete's per-zone upper bounds. */
+/** intervals.icu zone INDEX (1-based) -> [low, high, lowIsWatchRest] bpm from the athlete's per-zone
+ *  upper bounds. Zone 1 (Recovery) has no floor on intervals.icu - deliberately: a walk has no "too
+ *  slow" (André, 2026-09-26) - so its low is the watch's own resting HR when known, flagged so the
+ *  Karvonen rescale leaves it alone; else the old ~68%-of-LTHR estimate. Port of resolve_zone_band. */
 export function resolveZoneBand(
   zoneIndex: number | undefined, hrZones: number[], lthr?: number | null, maxHr?: number | null,
-): [number, number] | null {
+  watchRestHr?: number | null,
+): [number, number, boolean] | null {
   const n = hrZones.length;
   if (!n) return null;
   const idx = Math.max(1, Math.min(Math.trunc(zoneIndex ?? 1), n));
   const high = Math.trunc(hrZones[idx - 1]);
   let low: number;
+  let lowIsWatchRest = false;
   if (idx >= 2) low = Math.trunc(hrZones[idx - 2]) + 1;
+  else if (watchRestHr) { low = watchRestHr; lowIsWatchRest = true; }
   else if (lthr) low = Math.round(0.68 * lthr);
   else if (maxHr) low = Math.round(0.6 * maxHr);
   else low = Math.max(0, high - 30);
-  return [low, high];
+  return [low, high, lowIsWatchRest];
 }
 
-function resolveZonesIntoHr(steps: IcuStep[], hrZones: number[], lthr?: number | null, maxHr?: number | null): void {
+export function resolveZonesIntoHr(steps: IcuStep[], hrZones: number[], lthr?: number | null, maxHr?: number | null,
+  watchRestHr?: number | null): void {
   for (const step of steps) {
-    if (step.steps) { resolveZonesIntoHr(step.steps, hrZones, lthr, maxHr); continue; }
+    if (step.steps) { resolveZonesIntoHr(step.steps, hrZones, lthr, maxHr, watchRestHr); continue; }
     const hr = step.hr;
     if (step._hr || !hr || typeof hr !== 'object' || hr.units !== 'hr_zone') continue;
-    const band = resolveZoneBand(hr.value, hrZones, lthr, maxHr);
-    if (band) step._hr = { start: band[0], end: band[1] };
+    const band = resolveZoneBand(hr.value, hrZones, lthr, maxHr, watchRestHr);
+    if (band) step._hr = { start: band[0], end: band[1], startIsWatchRest: band[2] };
   }
 }
 
@@ -114,7 +121,12 @@ function convertTarget(step: IcuStep, hrResolve?: (bpm: number) => number): Work
     let { start: lo, end: hi } = band as { start: number; end: number };
     if (lo == null || hi == null) continue;
     lo = Number(lo); hi = Number(hi);
-    if (targetName === 'hr' && hrResolve) { lo = hrResolve(lo); hi = hrResolve(hi); }
+    if (targetName === 'hr' && hrResolve) {
+      // startIsWatchRest: lo is already the watch's own resting HR, not an intervals.icu-model
+      // bpm - rescaling it again would be wrong (tools/intervals_workout.convert_target).
+      hi = hrResolve(hi);
+      if (!band.startIsWatchRest) lo = hrResolve(lo);
+    }
     if (targetName === 'pace') {
       // intervals.icu resolves pace to m/s; our workout JSON (like Suunto's SUUNTO_PACE) is decimal
       // min/km - convert and keep the decimals (6.5 = 6:30); the swap below fixes the order.
@@ -229,7 +241,7 @@ export async function fetchIntervalsWorkouts(
     const steps: IcuStep[] | undefined = doc.steps;
     if (!steps || !steps.length) { skipped.push({ date, name, reason: 'no steps' }); continue; }
     const { hrZones, lthr, maxHr } = athleteHrZones(athlete ?? {}, ev.type ? [ev.type] : RUN_TYPES);
-    if (hrZones) resolveZonesIntoHr(steps, hrZones, lthr, maxHr);
+    if (hrZones) resolveZonesIntoHr(steps, hrZones, lthr, maxHr, watchRestHr);
     try {
       const workout = convertWorkout({ steps, sportSettings: { max_hr: maxHr ?? undefined } },
         name, watchMaxHr, watchRestHr);

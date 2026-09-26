@@ -13,6 +13,7 @@ import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
 import { withSiTargets } from '../services/GuidedWorkoutCore';
+import { readWatchMaxRestHr } from '../services/AmbitSettingsService';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
@@ -219,7 +220,10 @@ export default function WorkoutCalendarScreen() {
     if (params.watch && !mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
     setImporting(true);
     try {
-      const { entries, skipped } = await fetchIntervalsWorkouts(importStart, importEnd, mode ?? '');
+      // Resolve HR zones against the watch's own max/rest HR (walk floor = resting HR), like the
+      // desktop import; bike computers and an absent watch keep intervals.icu's bands.
+      const hr = params.watch ? await readWatchMaxRestHr() : { maxHr: null, restHr: null };
+      const { entries, skipped } = await fetchIntervalsWorkouts(importStart, importEnd, mode ?? '', hr.maxHr, hr.restHr);
       if (entries.length === 0) {
         Alert.alert(t.experimentalWorkoutCalendar,
           skipped.length ? `${t.workoutCalendarImportNone} (${skipped.length} skipped)` : t.workoutCalendarImportNone);
