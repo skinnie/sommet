@@ -119,6 +119,30 @@ def with_default_labels(workout, lang=None):
     return wk
 
 
+def with_hr_target_as_bps(workout):
+    """Return a copy where every step's "hr" target valueRange is divided by 60 (bpm ->
+    beats-per-second) before it goes to the community compiler.
+
+    Real captured Suunto guidance-workout JSON (marguslt gist, cross-validated 2026-08-21 to 15
+    decimal places - see `ambit_app_workout_schema_quirks` memory) encodes HR target ranges this
+    way, not as plain bpm. Our own workout JSON (author tools, intervals.icu import) has always
+    used plain bpm, and this conversion was never applied before compiling - the compiler embeds
+    whatever units it's given straight into the native target-band field, so a plain-bpm range
+    (e.g. 158-166) went in ~60x too high, and the watch showed garbage/saturated numbers instead
+    of the real target (André, 2026-09-26 - "134-204" for a 126-157 walk target, "255" for a
+    158-166 jog target). Other target types (pace/speed/power/cadence) aren't affected - only
+    "hr" has this documented quirk."""
+    import copy
+    wk = copy.deepcopy(workout)
+    for s in wk.get("steps", []):
+        target = s.get("target") or {}
+        if target.get("targetName") == "hr" and "valueRange" in target:
+            rng = target["valueRange"]
+            rng["min"] = rng["min"] / 60
+            rng["max"] = rng["max"] / 60
+    return wk
+
+
 def compile_workout(workout, lang=None):
     """Workout JSON -> compiled {name, activityId, binary, ruleId} = the GENUINE native guidance
     binary, by POSTing the workout JSON straight to the community/Komposti compiler.
@@ -139,6 +163,7 @@ def compile_workout(workout, lang=None):
             "~/.config/ambitapp/compile_key (all gitignored - never commit it).")
     activity_id = workout.get("activityId", 3)
     workout = with_default_labels(workout, lang)  # blank step -> phase word in the watch's language
+    workout = with_hr_target_as_bps(workout)  # bpm -> bpm/60 - see this function's docstring
     req = urllib.request.Request(
         W.COMPILE_URL, data=json.dumps(workout).encode("utf-8"), method="POST",
         headers={"Content-Type": "text/plain", "x-functions-key": W.COMPILE_KEY})

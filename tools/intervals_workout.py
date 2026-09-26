@@ -135,7 +135,12 @@ def convert_target(step: dict, hr_resolve=None) -> dict:
             continue
         lo, hi = float(lo), float(hi)
         if target_name == "hr" and hr_resolve is not None:
-            lo, hi = hr_resolve(lo), hr_resolve(hi)
+            # start_is_watch_rest: lo is already the watch's own resting HR (see
+            # resolve_zone_band), not an intervals.icu-model bpm value - rescaling it again
+            # would be wrong, only hi needs re-projecting.
+            hi = hr_resolve(hi)
+            if not band.get("start_is_watch_rest"):
+                lo = hr_resolve(lo)
         lo, hi = round(lo), round(hi)
         if lo > hi:
             lo, hi = hi, lo
@@ -360,43 +365,56 @@ def total_seconds(workout: dict) -> int:
 # boundaries (athlete_info.sportSettings.hr_zones) so the rest of the pipeline - including the
 # optional watch-Karvonen resolution in convert() - runs unchanged.
 
-def resolve_zone_band(zone_index, hr_zones, lthr=None, max_hr=None):
-    """intervals.icu zone INDEX (1-based) -> (low, high) bpm, from the athlete's `hr_zones`
-    (the per-zone UPPER bounds, e.g. [157,166,175,...]). Zones are contiguous: a zone's lower
-    bound is the previous zone's upper + 1. Zone 1 has no predecessor - intervals.icu doesn't
-    publish its floor in `hr_zones`, so we approximate it as ~68% of LTHR (or 60% of max HR),
-    which reproduces the file export's own Z1 floor to within ~1-2 bpm. That floor only governs
-    the "too easy" alert on the lowest zone, so a small approximation there is harmless."""
+def resolve_zone_band(zone_index, hr_zones, lthr=None, max_hr=None, watch_rest_hr=None):
+    """intervals.icu zone INDEX (1-based) -> (low, high, low_is_watch_rest) bpm, from the
+    athlete's `hr_zones` (the per-zone UPPER bounds, e.g. [157,166,175,...]). Zones are
+    contiguous: a zone's lower bound is the previous zone's upper + 1.
+
+    Zone 1 (Recovery) has no predecessor, and intervals.icu deliberately doesn't publish a floor
+    for it - a recovery/easy-walk step has no real "too slow" threshold (André, 2026-09-26: "I
+    don't think a walk should have a min, so I believe intervals.icu is right to not put
+    anything"). So Z1's low is the watch's own resting HR when known (its true physiological
+    floor - "moving at all" - and, per André, close enough to what he remembered: watch read
+    56bpm) - `low_is_watch_rest=True` tells `convert_target` this value is already expressed in
+    the watch's own frame and must NOT go through `karvonen_rescale` a second time. Falls back to
+    the old ~68%-of-LTHR (or 60%-of-max-HR) approximation only when no watch rest HR is
+    available (e.g. offline use with no connected watch)."""
     n = len(hr_zones)
     if not n:
         return None
     idx = max(1, min(int(zone_index), n))     # clamp into the real zone range
     high = int(hr_zones[idx - 1])
+    low_is_watch_rest = False
     if idx >= 2:
         low = int(hr_zones[idx - 2]) + 1
+    elif watch_rest_hr:
+        low = float(watch_rest_hr)
+        low_is_watch_rest = True
     elif lthr:
         low = round(0.68 * float(lthr))
     elif max_hr:
         low = round(0.60 * float(max_hr))
     else:
         low = max(0, high - 30)               # last-resort width
-    return low, high
+    return low, high, low_is_watch_rest
 
 
-def resolve_zones_into_hr(steps, hr_zones, lthr=None, max_hr=None):
+def resolve_zones_into_hr(steps, hr_zones, lthr=None, max_hr=None, watch_rest_hr=None):
     """In-place: give every hr-zone step a synthetic `_hr` band (the same key the file export
     carries and convert() already reads) reconstructed from its zone index. Recurses into repeat
     blocks. Leaves steps that already have `_hr`, or a non-zone target, untouched."""
     for step in steps:
         if step.get("steps"):
-            resolve_zones_into_hr(step["steps"], hr_zones, lthr, max_hr)
+            resolve_zones_into_hr(step["steps"], hr_zones, lthr, max_hr, watch_rest_hr)
             continue
         hr = step.get("hr")
         if step.get("_hr") or not isinstance(hr, dict) or hr.get("units") != "hr_zone":
             continue
-        band = resolve_zone_band(hr.get("value"), hr_zones, lthr, max_hr)
+        band = resolve_zone_band(hr.get("value"), hr_zones, lthr, max_hr, watch_rest_hr)
         if band:
-            step["_hr"] = {"start": float(band[0]), "end": float(band[1])}
+            low, high, low_is_watch_rest = band
+            step["_hr"] = {"start": float(low), "end": float(high),
+                           "start_is_watch_rest": low_is_watch_rest}
     return steps
 
 
@@ -450,7 +468,7 @@ def fetch_intervals_workouts(athlete_id, api_key, start, end, mode,
         hr_zones, lthr, max_hr = athlete_hr_zones(athlete, (ev.get("type"),) if ev.get("type")
                                                   else ("Run", "VirtualRun", "TrailRun"))
         if hr_zones:
-            resolve_zones_into_hr(steps, hr_zones, lthr, max_hr)
+            resolve_zones_into_hr(steps, hr_zones, lthr, max_hr, watch_rest_hr)
         icu = {"steps": steps, "duration": doc.get("duration"),
                "sportSettings": {"max_hr": max_hr}}
         try:
