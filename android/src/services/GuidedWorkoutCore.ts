@@ -112,6 +112,24 @@ export function withSiUnits(workout: Workout): Workout {
   return wk;
 }
 
+/** What the watch shows for a step without text: its type's word (guided_workout.py
+ *  PHASE_LABELS_BY_LANG "en" - add a language there and here to localize). */
+export const PHASE_WORD: Record<string, string> = {
+  warmup: 'Warmup', interval: 'Interval', recovery: 'Recovery', rest: 'Rest', cooldown: 'Cooldown',
+};
+
+/** Copy where every real step without `text` gets its type's word, so no step renders blank on
+ *  the watch (guided_workout.with_default_labels). Apply to the JSON handed to the compiler. */
+export function withDefaultLabels(workout: Workout): Workout {
+  const wk = clone(workout);
+  for (const s of wk.steps || []) {
+    const t = s.type?.typeName;
+    if (t === 'repeatStart' || t === 'repeatEnd') continue;
+    if (!(s.text ?? '').trim()) s.text = PHASE_WORD[t ?? ''] ?? (t ? t[0].toUpperCase() + t.slice(1) : 'Step');
+  }
+  return wk;
+}
+
 /** The compiled guidance binary with the backlight flashes the workout asks for; unchanged (0) if it
  *  isn't the template IamruleCode knows - never an unvalidated patch. */
 export function withLights(binary: Uint8Array, workout: Workout): [Uint8Array, number] {

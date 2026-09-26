@@ -12,7 +12,7 @@ import { pickFile } from '../services/CatalogService';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
-import { withSiUnits } from '../services/GuidedWorkoutCore';
+import { withDefaultLabels, withSiUnits } from '../services/GuidedWorkoutCore';
 import { readWatchMaxRestHr } from '../services/AmbitSettingsService';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
@@ -205,7 +205,7 @@ export default function WorkoutCalendarScreen() {
   // IntervalsScreen uses. Confirmed by reading the site's own bundled main.js, 2026-08-21.
   function handleGenerateAndOpen() {
     try {
-      setGeneratedJson(JSON.stringify(withSiUnits(buildWorkout()), null, 2));
+      setGeneratedJson(JSON.stringify(withSiUnits(withDefaultLabels(buildWorkout())), null, 2));
       Linking.openURL(COMPILE_SITE_URL);
       Alert.alert(t.experimentalWorkoutCalendar, t.intervalsSourceCopiedMsg);
     } catch (e: any) {
@@ -216,8 +216,8 @@ export default function WorkoutCalendarScreen() {
   // Pull the athlete's planned workouts from intervals.icu for the date range and drop them into
   // the plan as pending entries (each carries its structured workout so it can be compiled below).
   async function handleImportFromIntervals() {
-    // The sport mode only matters for the watch install; bike computers don't have one.
-    if (params.watch && !mode) { Alert.alert(t.error, t.workoutCalendarPickModeFirst); return; }
+    // No sport to pick first (André, 2026-09-26): each workout keeps its own intervals.icu sport and
+    // goes to that sport's watch mode at sync; the selected mode only covers sports without one.
     setImporting(true);
     try {
       // Resolve HR zones against the watch's own max/rest HR (walk floor = resting HR), like the
@@ -259,7 +259,7 @@ export default function WorkoutCalendarScreen() {
   function handleCompileEntry(i: number) {
     const e = plan[i];
     if (!e.workout) return;
-    setGeneratedJson(JSON.stringify(withSiUnits(e.workout), null, 2));
+    setGeneratedJson(JSON.stringify(withSiUnits(withDefaultLabels(e.workout)), null, 2));
     setCompileTarget(i);
     Linking.openURL(COMPILE_SITE_URL);
     Alert.alert(t.experimentalWorkoutCalendar, t.intervalsSourceCopiedMsg);
@@ -327,7 +327,12 @@ export default function WorkoutCalendarScreen() {
     // Only the watch's entries: bike-computer ones are sent from their own menu.
     // Each in the watch sport mode matching its sport (desktop modeForSport), else its own mode.
     const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene')
-      .map(e => ({ ...e, mode: (e.sport && modeForSport(e.sport)) || e.mode }));
+      .map(e => ({ ...e, mode: (e.sport && modeForSport(e.sport)) || e.mode || mode || '' }));
+    const noMode = watchPlan.filter(e => !e.mode);
+    if (noMode.length) {
+      Alert.alert(t.error, `${t.workoutCalendarPickModeFirst} (${noMode.map(e => `${e.date} ${e.sport ?? ''}`.trim()).join(', ')})`);
+      return;
+    }
     const result = await syncCalendar(watchPlan, new Date(), write, setSyncState);
     if (result) setSyncResult(result);
   }
@@ -346,14 +351,9 @@ export default function WorkoutCalendarScreen() {
           <Field label={t.workoutCalendarImportFrom} value={importStart} onChangeText={setImportStart} s={s} theme={theme} />
           <Field label={t.workoutCalendarImportTo} value={importEnd} onChangeText={setImportEnd} s={s} theme={theme} />
         </Row>
-        {params.watch && (
-          <Text style={[s.desc, { marginTop: 8 }]}>
-            {mode ? `${t.workoutCalendarModeLabel}: ${mode}` : t.workoutCalendarPickModeFirst}
-          </Text>
-        )}
         <TouchableOpacity
-          style={[s.btn, s.primaryBtn, (importing || (params.watch && !mode)) && { opacity: 0.5 }]}
-          disabled={importing || (params.watch && !mode)}
+          style={[s.btn, s.primaryBtn, importing && { opacity: 0.5 }]}
+          disabled={importing}
           onPress={handleImportFromIntervals}
         >
           {importing
@@ -389,7 +389,9 @@ export default function WorkoutCalendarScreen() {
             {modesLoading && <ActivityIndicator size="small" color={theme.primary} style={{ marginTop: 6, alignSelf: 'flex-start' }} />}
             {!modesLoading && (
               <View style={s.chipRow}>
-                {(modes ?? []).map((m, i) => (
+                {/* One per sport: the watch lists a workout under every mode of its sport (desktop
+                    TrainingProgramPage workoutModes), so e.g. "Running Couch25k -W1" isn't a choice. */}
+                {(modes ?? []).filter((m, i, all) => all.findIndex(x => x.settings.activityId === m.settings.activityId) === i).map((m, i) => (
                   <TouchableOpacity key={i} style={[s.chip, mode === m.settings.name && s.chipActive]} onPress={() => setMode(m.settings.name)}>
                     <Text style={[s.chipText, mode === m.settings.name && s.chipTextActive]}>{m.settings.name}</Text>
                   </TouchableOpacity>

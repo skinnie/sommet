@@ -195,11 +195,36 @@ Item {
     })
     function modeForSport(sport) {
         const words = root.sportWords[sport] || []
-        const names = CustomModesService.modes.map(m => m.name)
+        const names = root.workoutModes
         for (const w of words)
             for (const n of names)
                 if (n.toLowerCase().indexOf(w) >= 0) return n
         return ""
+    }
+    // Watch sport modes to offer for a workout: the first one per sport (ActivityID). The watch
+    // lists a native workout under EVERY mode of its sport (hardware-confirmed 2026-09-26), so a
+    // second mode of the same sport - e.g. "Running Couch25k -W1", set up for the Couch-to-5K app -
+    // adds nothing as a choice.
+    readonly property var workoutModes: {
+        const seen = {}, out = []
+        for (const m of CustomModesService.modes) {
+            if (seen[m.activityId]) continue
+            seen[m.activityId] = true
+            out.push(m.name)
+        }
+        return out
+    }
+    // The offered mode for any mode name: the first mode of the same sport.
+    function canonicalMode(name) {
+        const m = CustomModesService.modes.find(x => x.name === name)
+        if (!m) return name
+        return CustomModesService.modes.find(x => x.activityId === m.activityId).name
+    }
+    // Sport mode of a planned workout: the one picked in the editor, else the mode matching its
+    // intervals.icu sport, else its own mode, else `fallbackMode`.
+    function modeOf(e, fallbackMode) {
+        if (e.modePicked && e.mode) return e.mode
+        return (e.sport && root.modeForSport(e.sport)) || e.mode || fallbackMode
     }
     // What "Sync to watch" installs: every entry except those made for a bike computer, each in the
     // sport mode matching its sport when it has one, else its own mode, else the picked one.
@@ -207,8 +232,7 @@ Item {
         return root.entries
             .filter(e => e.device !== "bryton" && e.device !== "magene")
             .map(function (e) {
-                return { date: e.date, mode: (e.sport && root.modeForSport(e.sport)) || e.mode || fallbackMode,
-                         workout: e.workout }
+                return { date: e.date, mode: root.modeOf(e, fallbackMode), workout: e.workout }
             })
     }
 
@@ -506,22 +530,18 @@ Item {
                                 return root.isoFor(d.getFullYear(), d.getMonth(), d.getDate())
                             }
                         }
-                        RoundedComboBox {
-                            id: importMode
-                            width: parent.width * 0.28
-                            model: CustomModesService.modes.map(m => m.name)
-                            Component.onCompleted: CustomModesService.refresh()
-                        }
                         RoundedButton {
                             text: TrainingProgramService.loading
                                   ? qsTr("Fetching…") : qsTr("Fetch")
                             enabled: ConnectionsService.intervalsIcuConnected
                                      && !TrainingProgramService.loading
-                                     && importMode.currentText.length > 0
+                                     && modePicker.currentText.length > 0
                             onClicked: {
                                 root.importStatus = ""
                                 TrainingProgramService.importFromIntervals(
-                                    importFrom.text, importTo.text, importMode.currentText,
+                                    // Each workout keeps its own intervals.icu sport (modeOf);
+                                    // "Install into" only covers a sport with no watch mode.
+                                    importFrom.text, importTo.text, modePicker.currentText,
                                     ConnectionsService.intervalsIcuAthleteId,
                                     ConnectionsService.intervalsIcuApiKey())
                             }
@@ -802,7 +822,7 @@ Item {
                         RoundedComboBox {
                             id: modePicker
                             width: parent.width * 0.3
-                            model: CustomModesService.modes.map(m => m.name)
+                            model: root.workoutModes
                             Component.onCompleted: CustomModesService.refresh()
                         }
                         Text {
@@ -986,11 +1006,27 @@ Item {
         }
         HoverHandler { id: infoHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: infoDot.pinned = !infoDot.pinned }
-        ToolTip {
+        // Same themed hover card as CalendarPage's day tip (André, 2026-08-23: the default
+        // ToolTip "doesn't match at all our design").
+        Popup {
             visible: infoHover.hovered || infoDot.pinned
-            delay: 200
-            width: 340
-            text: infoDot.text
+            x: infoDot.width / 2 - width / 2
+            y: -height - 6
+            width: 320
+            padding: Theme.spacingSmall
+            closePolicy: Popup.NoAutoClose
+            background: Rectangle {
+                color: Theme.card
+                radius: Theme.radiusSmall
+                border.width: 1
+                border.color: Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.3)
+            }
+            contentItem: Text {
+                text: infoDot.text
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontSizeCaption
+            }
         }
     }
 
@@ -1004,6 +1040,9 @@ Item {
 
         property string editDate: ""
         property string workoutName: ""
+        // The watch sport mode this workout goes into - each sport's WORKOUT menu lists only its
+        // own workouts (hardware-confirmed 2026-09-26).
+        property string mode: ""
         // Editable step rows: {stepType, durationKind, durationValue, targetKind,
         // targetMin, targetMax, repeatCount} - converted to/from workout.py's schema on
         // open/save. Reassigned wholesale after each mutation so the Repeater updates.
@@ -1015,14 +1054,17 @@ Item {
         // Backlight flashes only exist on the Suunto guided workout (guided_workout.py adds them
         // when compiling); the watch's own beeps aren't configurable, so they're only explained.
         readonly property bool forSuunto: device === "" || device === "suunto"
+        readonly property var phaseWord: ({ warmup: "Warmup", interval: "Interval",
+                                            recovery: "Recovery", cooldown: "Cooldown" })
         readonly property var limitWord: ({ hr: qsTr("HR"), pace: qsTr("pace"), speed: qsTr("speed"),
                                             power: qsTr("power"), cadence: qsTr("cadence") })
-        readonly property string lightInfo: qsTr(
-            "Light On at each step: the backlight flashes when this step begins, together with the "
-            + "watch's step melody. Light On for limits: the backlight flashes together with the "
-            + "two quick beeps the watch gives once you've been outside this step's target for "
-            + "5 s (then every 15 s). Handy with headphones on. The workout-finished screen "
-            + "flashes if any step has Light On at each step.")
+        readonly property string stepLightInfo: qsTr(
+            "The backlight flashes when this step begins, together with the watch's step melody - "
+            + "handy with headphones on. The workout-finished screen flashes too if any step has "
+            + "this ticked.")
+        readonly property string limitLightInfo: qsTr(
+            "The backlight flashes together with the two quick beeps the watch gives once you've "
+            + "been outside this step's target for 5 s, then every 15 s while you stay outside.")
         function durationLabel(k) { return durationLabels[durationKinds.indexOf(k)] }
         function targetLabel(k) { return targetLabels[targetKinds.indexOf(k)] }
         // Steps the chosen device can't take (e.g. an HR step opened for the Magene).
@@ -1060,6 +1102,8 @@ Item {
             const entry = root.entryForDate(iso)
             device = forDevice !== undefined ? forDevice : (entry && entry.device ? entry.device : "")
             workoutName = entry ? entry.workout.name : qsTr("Workout")
+            mode = root.canonicalMode(entry ? root.modeOf(entry, modePicker.currentText)
+                                            : modePicker.currentText)
             editSteps = entry ? entry.workout.steps.map(editor.fromSchema)
                               : [editor.defaultStep("warmup"),
                                  editor.defaultStep("interval"),
@@ -1165,6 +1209,8 @@ Item {
                             icuOwned: prev ? prev.icuOwned !== false : true }
             if (prev && prev.icuEventId) entry.icuEventId = prev.icuEventId
             if (prev && prev.mode) entry.mode = prev.mode
+            if (prev && prev.sport) entry.sport = prev.sport
+            if (editor.forSuunto && editor.mode) { entry.mode = editor.mode; entry.modePicked = true }
             if (editor.device) entry.device = editor.device
             const next = root.entries.filter(e => e.date !== editor.editDate)
             next.push(entry)
@@ -1184,11 +1230,23 @@ Item {
         contentItem: Column {
             spacing: Theme.spacingMedium
 
-            RoundedTextField {
+            Row {
                 width: parent.width
-                text: editor.workoutName
-                placeholderText: qsTr("Workout name")
-                onTextEdited: editor.workoutName = text
+                spacing: Theme.spacingSmall
+                RoundedTextField {
+                    width: editor.forSuunto ? parent.width * 0.62 : parent.width
+                    text: editor.workoutName
+                    placeholderText: qsTr("Workout name")
+                    onTextEdited: editor.workoutName = text
+                }
+                RoundedComboBox {
+                    visible: editor.forSuunto
+                    width: parent.width * 0.38 - parent.spacing
+                    model: root.workoutModes
+                    currentIndex: Math.max(model.indexOf(editor.mode), 0)
+                    onActivated: editor.mode = currentText
+                    Component.onCompleted: if (!editor.mode) editor.mode = currentText
+                }
             }
 
             // What the watch does on its own (not configurable) - the Light ticks below add to it.
@@ -1319,7 +1377,10 @@ Item {
                         RoundedTextField {
                             width: stepRow.width * 0.3
                             text: stepRow.modelData.stepText || ""
-                            placeholderText: qsTr("Text on watch")
+                            // Empty -> the watch shows the step type's word (guided_workout.py
+                            // PHASE_LABELS_BY_LANG, English until a language is added there).
+                            placeholderText: qsTr("On watch: %1").arg(
+                                editor.phaseWord[stepRow.modelData.stepType] || qsTr("Step"))
                             maximumLength: 29
                             onTextEdited: editor.mutate(stepRow.index, { stepText: text })
                         }
@@ -1329,7 +1390,7 @@ Item {
                             checked: stepRow.modelData.lightStart !== false
                             onToggled: editor.mutate(stepRow.index, { lightStart: checked })
                         }
-                        InfoDot { visible: editor.forSuunto; text: editor.lightInfo }
+                        InfoDot { visible: editor.forSuunto; text: editor.stepLightInfo }
                         Item { width: Theme.spacingMedium; height: 1 }
                         RoundedCheckBox {
                             visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
@@ -1340,7 +1401,7 @@ Item {
                         }
                         InfoDot {
                             visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
-                            text: editor.lightInfo
+                            text: editor.limitLightInfo
                         }
                     }
                 }
