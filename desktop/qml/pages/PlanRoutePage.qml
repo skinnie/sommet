@@ -592,7 +592,8 @@ Item {
     // Garmin eTrex 30/30x/32x: a track has no turn guidance and a route holds only ~50 points, so
     // build either the full track + named turn/crossing waypoints, or a <=50-point route whose via
     // points sit at the turns (tools/etrex_export.py). Saved through the same dialog as a day export.
-    function exportForEtrex(mode) {
+    // toDevice: write straight onto the plugged eTrex (Send to…) instead of the save dialog.
+    function exportForEtrex(mode, toDevice) {
         if (!plannedGpx) return
         var name = (routeName || "route").replace(/\.gpx$/i, "")
         statusMsg = qsTr("Preparing eTrex file…")
@@ -603,6 +604,11 @@ Item {
                 statusMsg = mode === "track"
                     ? qsTr("eTrex track: %1 turns, %2 crossings marked").arg(st.turns).arg(st.crossings)
                     : qsTr("eTrex route: %1 via points").arg(st.points_out)
+                if (toDevice) {
+                    GarminService.writeGpxToDevice((name + (mode === "track" ? " - track" : " - route"))
+                                                   .replace(/[\\/:*?"<>|]/g, "_") + ".gpx", res.gpx)
+                    return
+                }
                 exportGpxText = res.gpx
                 saveDayDialog.title = qsTr("Export for eTrex")
                 saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/"
@@ -617,13 +623,17 @@ Item {
         ThemedMenuItem { text: qsTr("Watch"); visible: root.watchCanTakeRoute; onTriggered: sendDialog.open() }
         ThemedMenuItem { text: qsTr("Bryton (Follow Track)"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
         ThemedMenuItem { text: qsTr("Magene C406"); visible: BikeDevices.magene !== null; onTriggered: root.sendToMagene() }
-        ThemedMenuItem { text: qsTr("Garmin eTrex (on the device)")
+        // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
+        // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
+        ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")
                          visible: HomeViewModel.isGarmin && GarminService.hasSdCard
-                         onTriggered: GarminService.writeGpxToDevice(root.cleanName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx", root.plannedGpx) }
-        MenuSeparator {}
-        ThemedMenuItem { text: qsTr("eTrex file — track + turn & crossing waypoints…"); onTriggered: root.exportForEtrex("track") }
-        ThemedMenuItem { text: qsTr("eTrex file — route (max 50 via points)…"); onTriggered: root.exportForEtrex("route") }
-        ThemedMenuItem { text: qsTr("GPX file…"); onTriggered: root.saveGpxFile(root.cleanName(), root.plannedGpx) }
+                         onTriggered: root.exportForEtrex("track", true) }
+        ThemedMenuItem { text: qsTr("eTrex — route (max 50 via points)")
+                         visible: HomeViewModel.isGarmin && GarminService.hasSdCard
+                         onTriggered: root.exportForEtrex("route", true) }
+        ThemedMenuItem { text: qsTr("No device connected"); enabled: false
+                         visible: !root.watchCanTakeRoute && !root.brytonHere && BikeDevices.magene === null
+                                  && !(HomeViewModel.isGarmin && GarminService.hasSdCard) }
     }
 
     RouteLibraryMenu {
@@ -804,7 +814,8 @@ Item {
                             width: parent.width
                             text: (root.routeName.length > 0 ? root.cleanName() : qsTr("Choose a route")) + "  ▾"
                             enabled: !root.busy
-                            onClicked: { libraryMenu.x = 0; libraryMenu.y = height + 4; libraryMenu.parent = libraryButton; libraryMenu.open() }
+                            onClicked: { libraryMenu.parent = libraryButton; libraryMenu.x = 0; libraryMenu.y = height + 4
+                                         libraryMenu.width = libraryButton.width; libraryMenu.open() }
                         }
                         Row {
                             width: parent.width

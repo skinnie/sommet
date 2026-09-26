@@ -18,14 +18,17 @@ Popup {
     signal openRequested(string name, string gpx)
     signal exportRequested(string name, string gpx)
 
+    // Same look as every ThemedMenu (border, radius, padding, 34 px rows, primary-tint highlight).
     width: 400
-    padding: Theme.spacingSmall
+    padding: 4
     modal: false
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     background: Rectangle {
-        color: Theme.card; radius: Theme.radiusCard
-        border.width: 1; border.color: Theme.border
+        radius: Theme.radiusCard
+        color: Theme.card
+        border.width: 1
+        border.color: Theme.mutedText
     }
 
     // The Magene's current route: set by the Routes page when it sends one (the C406 keeps one).
@@ -194,7 +197,7 @@ Popup {
                         id: row
                         required property var modelData
                         width: list.width
-                        height: modelData.header ? 30 : modelData.note ? 28 : 44
+                        height: modelData.header ? 28 : modelData.note ? 26 : 40
                         readonly property bool editing: root.editKey === modelData.key
                         readonly property bool confirming: root.confirmKey === modelData.key
 
@@ -216,7 +219,7 @@ Popup {
                             visible: !row.modelData.header && !row.modelData.note
                             anchors.fill: parent; anchors.margins: 2
                             radius: Theme.radiusSmall
-                            color: rowHover.hovered ? Theme.cardNested : "transparent"
+                            color: rowHover.hovered ? Theme.primary + "26" : "transparent"
                             HoverHandler { id: rowHover }
                             TapHandler {
                                 enabled: !row.editing && !row.confirming && root.busyRow === ""
@@ -233,7 +236,7 @@ Popup {
                                 visible: !row.editing
                                 anchors.verticalCenter: parent.verticalCenter
                                 x: Theme.spacingMedium
-                                width: parent.width - 150
+                                width: parent.width - 70
                                 Text { width: parent.width; text: row.modelData.name || ""; elide: Text.ElideRight
                                        color: Theme.text; font.pixelSize: Theme.fontSizeBody }
                                 Text { text: root.busyRow === row.modelData.key ? qsTr("Opening…") : (row.modelData.sub || "")
