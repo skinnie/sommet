@@ -119,8 +119,10 @@ Item {
         if (device === "bryton")
             return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
                      targets: ["none", "power", "hr", "speed", "cadence"] }
-        return { durations: ["time_min", "time_s", "distance_km", "distance_m", "ascent_m", "lap"],
-                 targets: ["none", "hr", "pace", "speed", "vertical_speed", "power", "cadence"] }
+        // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed
+        // targets (2026-09-26), so they're not offered here (app workouts still have them).
+        return { durations: ["time_min", "time_s", "distance_km", "distance_m", "lap"],
+                 targets: ["none", "hr", "pace", "speed", "power", "cadence"] }
     }
 
     ThemedMenu {
@@ -997,12 +999,14 @@ Item {
         // Backlight flashes only exist on the Suunto guided workout (guided_workout.py adds them
         // when compiling); the watch's own beeps aren't configurable, so they're only explained.
         readonly property bool forSuunto: device === "" || device === "suunto"
+        readonly property var limitWord: ({ hr: qsTr("HR"), pace: qsTr("pace"), speed: qsTr("speed"),
+                                            power: qsTr("power"), cadence: qsTr("cadence") })
         readonly property string lightInfo: qsTr(
-            "Light at start: the backlight flashes when this step begins, together with the "
-            + "watch's step melody. Light outside limits: the backlight flashes together with the "
+            "Light On at each step: the backlight flashes when this step begins, together with the "
+            + "watch's step melody. Light On for limits: the backlight flashes together with the "
             + "two quick beeps the watch gives once you've been outside this step's target for "
             + "5 s (then every 15 s). Handy with headphones on. The workout-finished screen "
-            + "flashes if any step has Light at start.")
+            + "flashes if any step has Light On at each step.")
         function durationLabel(k) { return durationLabels[durationKinds.indexOf(k)] }
         function targetLabel(k) { return targetLabels[targetKinds.indexOf(k)] }
         // Steps the chosen device can't take (e.g. an HR step opened for the Magene).
@@ -1028,7 +1032,7 @@ Item {
         readonly property var targetKinds: ["none", "hr", "pace", "speed",
                                             "vertical_speed", "power", "cadence"]
         readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate"),
-                                             qsTr("Pace"), qsTr("Speed"),
+                                             qsTr("Pace (min/km)"), qsTr("Speed (km/h)"),
                                              qsTr("Vertical speed"), qsTr("Power (W)"),
                                              qsTr("Cadence (rpm)")]
 
@@ -1047,7 +1051,7 @@ Item {
         function defaultStep(type) {
             return { stepType: type, durationKind: "time_min", durationValue: 10,
                      targetKind: "none", targetMin: 0, targetMax: 0, repeatCount: 2,
-                     lightStart: true, lightLimits: false }
+                     lightStart: true, lightLimits: false, stepText: "" }
         }
 
         function fromSchema(s) {
@@ -1075,7 +1079,7 @@ Item {
                      targetKind: target,
                      targetMin: s.target && s.target.valueRange ? s.target.valueRange.min : 0,
                      targetMax: s.target && s.target.valueRange ? s.target.valueRange.max : 0,
-                     repeatCount: 0,
+                     repeatCount: 0, stepText: s.text || "",
                      lightStart: !(s.notify && s.notify.light === false),
                      lightLimits: !!(s.notify && s.notify.limitLight) }
         }
@@ -1104,6 +1108,7 @@ Item {
                 step.target = { targetName: row.targetKind,
                                 valueRange: { min: Number(row.targetMin),
                                               max: Number(row.targetMax) } }
+            if (row.stepText) step.text = row.stepText
             step.notify = { light: row.lightStart !== false,
                             limitLight: row.targetKind !== "none" && !!row.lightLimits }
             return step
@@ -1178,7 +1183,7 @@ Item {
                     text: qsTr("<b>Beeps</b> come from the watch and always sound: a <b>melody</b> "
                                + "when a step starts and when the workout ends; <b>two quick "
                                + "beeps</b> once you've been outside a step's target limits for "
-                               + "5 s, then every 15 s while you stay outside. The <b>Light</b> "
+                               + "5 s, then every 15 s while you stay outside. The <b>Light On</b> "
                                + "ticks add a backlight flash to those moments.")
                 }
             }
@@ -1278,25 +1283,35 @@ Item {
                         }
                     }
 
-                    // Suunto only: backlight flash at this step's start / with its limits alarm
+                    // Step text shown on the watch (native workouts take long text with digits -
+                    // a real Movescount one had 29 chars); Suunto only: backlight flashes.
                     Row {
-                        visible: editor.forSuunto && !stepRow.isRepeat
+                        visible: !stepRow.isRepeat
                         spacing: Theme.spacingSmall
+                        RoundedTextField {
+                            width: stepRow.width * 0.3
+                            text: stepRow.modelData.stepText || ""
+                            placeholderText: qsTr("Text on watch")
+                            maximumLength: 29
+                            onTextEdited: editor.mutate(stepRow.index, { stepText: text })
+                        }
                         RoundedCheckBox {
-                            text: qsTr("Light at start")
+                            visible: editor.forSuunto
+                            text: qsTr("Light On at each step")
                             checked: stepRow.modelData.lightStart !== false
                             onToggled: editor.mutate(stepRow.index, { lightStart: checked })
                         }
-                        InfoDot { text: editor.lightInfo }
+                        InfoDot { visible: editor.forSuunto; text: editor.lightInfo }
                         Item { width: Theme.spacingMedium; height: 1 }
                         RoundedCheckBox {
-                            visible: stepRow.modelData.targetKind !== "none"
-                            text: qsTr("Light outside limits")
+                            visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
+                            text: qsTr("Light On for %1 limits").arg(
+                                editor.limitWord[stepRow.modelData.targetKind] || "")
                             checked: !!stepRow.modelData.lightLimits
                             onToggled: editor.mutate(stepRow.index, { lightLimits: checked })
                         }
                         InfoDot {
-                            visible: stepRow.modelData.targetKind !== "none"
+                            visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
                             text: editor.lightInfo
                         }
                     }

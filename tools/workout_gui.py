@@ -201,7 +201,7 @@ create is also saved to <code>~/Downloads/AmbitWorkouts</code>.</p>
   <p>&bull; a <strong>melody</strong> when a step starts and when the workout ends;</p>
   <p>&bull; <strong>two quick beeps</strong> when you've been outside a step's target limits for
      5&nbsp;s, repeated every 15&nbsp;s while you stay outside.</p>
-  <p>The <strong>Light</strong> ticks on each step add a backlight flash to those moments.</p>
+  <p>The <strong>Light On</strong> ticks on each step add a backlight flash to those moments.</p>
 </div>
 
 <div id="steps"></div>
@@ -280,8 +280,12 @@ let steps = [];
 // same reason: "Ambit3" -> "Ambit 3").
 
 const TYPE_NAMES = ["warmup", "interval", "recovery", "cooldown"];
-const DURATION_NAMES = ["time", "distance", "ascent", "lap"];
-const TARGET_NAMES = ["none", "hr", "pace", "speed", "vertical_speed", "power"];
+// Native guided workouts only (this builder): the compiler rejects "ascent" steps and
+// "vertical_speed" targets - both are app-workout-only (apps_gui.py) - 2026-09-26.
+const DURATION_NAMES = ["time", "distance", "lap"];
+const TARGET_NAMES = ["none", "hr", "pace", "speed", "power"];
+const TARGET_UNITS = {hr: "bpm", speed: "km/h", power: "W"};
+const TARGET_WORD = {hr: "HR", pace: "pace", speed: "speed", power: "power", cadence: "cadence"};
 
 // value/unit -> base units (seconds for time, meters for distance/ascent) this project's
 // generator expects (SUUNTO_DURATION is seconds, SUUNTO_DISTANCE/SUUNTO_ASCENT are meters).
@@ -320,10 +324,10 @@ function addStep() {
 
 // Shared by both Light ticks' (i). The watch's beeps aren't configurable (see the legend); the
 // light flashes are added by guided_workout.py (iamrule_code.py) when the workout is compiled.
-const LIGHT_INFO = "Light at start: the backlight flashes when this step begins, together with " +
-  "the watch's step melody. Light on limits: the backlight flashes together with the two quick " +
+const LIGHT_INFO = "Light On at each step: the backlight flashes when this step begins, together " +
+  "with the watch's step melody. Light On for limits: the backlight flashes together with the two quick " +
   "beeps the watch gives once you've been outside this step's target for 5 s (then every 15 s). " +
-  "Handy with headphones on. The workout-finished screen flashes if any step has Light at start.";
+  "Handy with headphones on. The workout-finished screen flashes if any step has Light On at each step.";
 function infoTip() {
   return `<details class="info"><summary title="What does Light do?">i</summary>
     <div class="info-text">${LIGHT_INFO}</div></details>`;
@@ -384,9 +388,9 @@ function render() {
         <select onchange="steps[${i}].type.typeName=this.value">${optionList(TYPE_NAMES, t)}</select>
       </div>
       <div class="field"><label>Text on watch</label>
-        <input type="text" size="7" maxlength="6" placeholder="e.g. Fast" value="${s.text || ""}"
+        <input type="text" size="14" maxlength="29" placeholder="e.g. Jog" value="${s.text || ""}"
                oninput="steps[${i}].text=this.value"
-               title="Short label the watch shows when this step starts. Digits are stripped and it's trimmed to about 6 characters.">
+               title="Shown on the watch when this step starts (up to 29 characters, digits allowed).">
       </div>
       <div class="field"><label>Duration</label>
         <select onchange="setDurationName(${i}, this.value)">${optionList(DURATION_NAMES, dur.durationName)}</select>
@@ -411,20 +415,20 @@ function render() {
                onchange="steps[${i}].target.valueRange.max=parsePace(this.value); this.value=formatPace(steps[${i}].target.valueRange.max)">
       </div>` : ""}
       ${showRange && !isPace ? `
-      <div class="field"><label>Min</label>
+      <div class="field"><label>Min${TARGET_UNITS[tgt.targetName] ? ` (${TARGET_UNITS[tgt.targetName]})` : ""}</label>
         <input type="number" value="${tgt.valueRange.min}" onchange="steps[${i}].target.valueRange.min=+this.value">
       </div>
-      <div class="field"><label>Max</label>
+      <div class="field"><label>Max${TARGET_UNITS[tgt.targetName] ? ` (${TARGET_UNITS[tgt.targetName]})` : ""}</label>
         <input type="number" value="${tgt.valueRange.max}" onchange="steps[${i}].target.valueRange.max=+this.value">
       </div>` : ""}
       ${showRange ? `
-      <div class="field"><label>Outside limits</label>
+      <div class="field"><label>&nbsp;</label>
         <span class="tick"><label class="tick"><input type="checkbox" ${notify.limitLight ? "checked" : ""}
-          onchange="steps[${i}].notify.limitLight=this.checked">Light</label>${infoTip()}</span>
+          onchange="steps[${i}].notify.limitLight=this.checked">Light On for ${TARGET_WORD[tgt.targetName] || ""} limits</label>${infoTip()}</span>
       </div>` : ""}
-      <div class="field"><label>Step start</label>
+      <div class="field"><label>&nbsp;</label>
         <span class="tick"><label class="tick"><input type="checkbox" ${notify.light !== false ? "checked" : ""}
-          onchange="steps[${i}].notify.light=this.checked">Light</label>${infoTip()}</span>
+          onchange="steps[${i}].notify.light=this.checked">Light On at each step</label>${infoTip()}</span>
       </div>
       ${stepButtons(i)}
     </div>`;

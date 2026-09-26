@@ -19,7 +19,9 @@ export const DEVICE_LABELS: Record<Exclude<PlanDevice, ''>, string> = {
 export function capsFor(device: PlanDevice) {
   if (device === 'magene') return { durations: ['time_min', 'time_s'], targets: ['none', 'power', 'cadence'] };
   if (device === 'bryton') return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m'], targets: ['none', 'power', 'hr', 'speed', 'cadence'] };
-  return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m', 'ascent_m', 'lap'], targets: ['none', 'hr', 'pace', 'speed', 'vertical_speed', 'power', 'cadence'] };
+  // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed targets
+  // (2026-09-26) - app workouts (Intervals screen) still have them.
+  return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m', 'lap'], targets: ['none', 'hr', 'pace', 'speed', 'power', 'cadence'] };
 }
 
 const TYPES = ['warmup', 'interval', 'recovery', 'cooldown', 'repeatStart', 'repeatEnd'];
@@ -31,7 +33,7 @@ const DUR_LABEL: Record<string, string> = {
   time_min: 'min', time_s: 's', distance_km: 'km', distance_m: 'm', ascent_m: 'm+', lap: 'lap',
 };
 const TGT_LABEL: Record<string, string> = {
-  none: 'No target', hr: 'HR', pace: 'Pace', speed: 'Speed', vertical_speed: 'V-speed', power: 'Power W', cadence: 'Cadence',
+  none: 'No target', hr: 'HR', pace: 'Pace min/km', speed: 'Speed km/h', vertical_speed: 'V-speed', power: 'Power W', cadence: 'Cadence',
 };
 
 export interface StepRow {
@@ -40,11 +42,12 @@ export interface StepRow {
   // Suunto guided workout only: backlight flash at this step's start / with its limits alarm
   // (step.notify.light / notify.limitLight - spliced in at install, GuidedWorkoutCore.withLights).
   lightStart: boolean; lightLimits: boolean;
+  stepText: string; // shown on the watch when the step starts (native: long text + digits OK)
 }
 
 export const defaultStep = (type: string, minutes = 10): StepRow =>
   ({ stepType: type, durationKind: 'time_min', durationValue: minutes, targetKind: 'none', targetMin: 0, targetMax: 0, repeatCount: 3,
-     lightStart: true, lightLimits: false });
+     lightStart: true, lightLimits: false, stepText: '' });
 
 export const defaultSteps = (): StepRow[] => [
   defaultStep('warmup', 10), defaultStep('repeatStart'), defaultStep('interval', 4), defaultStep('recovery', 2),
@@ -65,7 +68,7 @@ export function fromSchema(s: WorkoutStep): StepRow {
   return {
     stepType: type, durationKind: kind, durationValue: value, targetKind: tn,
     targetMin: s.target?.valueRange?.min ?? 0, targetMax: s.target?.valueRange?.max ?? 0, repeatCount: 0,
-    lightStart: s.notify?.light !== false, lightLimits: !!s.notify?.limitLight,
+    lightStart: s.notify?.light !== false, lightLimits: !!s.notify?.limitLight, stepText: s.text ?? '',
   };
 }
 
@@ -84,6 +87,7 @@ export function toSchema(r: StepRow): WorkoutStep {
   step.target = r.targetKind === 'none'
     ? { targetName: 'none' }
     : { targetName: r.targetKind, valueRange: { min: Number(r.targetMin), max: Number(r.targetMax) } };
+  if (r.stepText) step.text = r.stepText;
   step.notify = { light: r.lightStart !== false, limitLight: r.targetKind !== 'none' && !!r.lightLimits };
   return step;
 }
@@ -137,10 +141,11 @@ function Num({ value, onChange, w = 56 }: { value: number; onChange: (n: number)
 }
 
 // Same wording as the desktop editor / Workout Builder. The watch's beeps aren't configurable.
-const LIGHT_INFO = 'Light at start: the backlight flashes when this step begins, together with the watch\'s '
-  + 'step melody. Light outside limits: the backlight flashes together with the two quick beeps the watch '
+const LIMIT_WORD: Record<string, string> = { hr: 'HR', pace: 'pace', speed: 'speed', power: 'power', cadence: 'cadence' };
+const LIGHT_INFO = 'Light On at each step: the backlight flashes when this step begins, together with the watch\'s '
+  + 'step melody. Light On for limits: the backlight flashes together with the two quick beeps the watch '
   + 'gives once you\'ve been outside this step\'s target for 5 s (then every 15 s). Handy with headphones on. '
-  + 'The workout-finished screen flashes if any step has Light at start.';
+  + 'The workout-finished screen flashes if any step has Light On at each step.';
 
 /** Rounded tick - the Android twin of desktop's RoundedCheckBox (22px, primary fill when on). */
 function Tick({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
@@ -177,7 +182,7 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
           <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>
             <Text style={bold}>Beeps</Text> come from the watch and always sound: a <Text style={bold}>melody</Text> when
             a step starts and when the workout ends; <Text style={bold}>two quick beeps</Text> once you&apos;ve been outside
-            a step&apos;s target limits for 5 s, then every 15 s while you stay outside. The <Text style={bold}>Light</Text> ticks
+            a step&apos;s target limits for 5 s, then every 15 s while you stay outside. The <Text style={bold}>Light On</Text> ticks
             add a backlight flash to those moments.
           </Text>
         </View>
@@ -213,14 +218,25 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
               <Text style={{ color: t.mutedText, fontSize: 18, paddingHorizontal: 4 }}>×</Text>
             </Pressable>
           </View>
-          {suunto && !repeat && (
+          {!repeat && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-              <Tick label="Light at start" value={r.lightStart !== false} onChange={v => set(i, { lightStart: v })} />
-              {info}
-              {r.targetKind !== 'none' && (
+              <TextInput value={r.stepText ?? ''} maxLength={29} placeholder="Text on watch"
+                placeholderTextColor={t.mutedText} onChangeText={v => set(i, { stepText: v })}
+                style={{
+                  minWidth: 120, borderWidth: 1, borderColor: t.border, borderRadius: v3Radius.small, color: t.text,
+                  backgroundColor: t.surface, paddingHorizontal: 8, paddingVertical: 4, fontSize: v3Type.body,
+                }} />
+              {suunto && (
                 <>
-                  <Tick label="Light outside limits" value={!!r.lightLimits} onChange={v => set(i, { lightLimits: v })} />
+                  <Tick label="Light On at each step" value={r.lightStart !== false} onChange={v => set(i, { lightStart: v })} />
                   {info}
+                  {r.targetKind !== 'none' && (
+                    <>
+                      <Tick label={`Light On for ${LIMIT_WORD[r.targetKind] ?? ''} limits`} value={!!r.lightLimits}
+                        onChange={v => set(i, { lightLimits: v })} />
+                      {info}
+                    </>
+                  )}
                 </>
               )}
             </View>

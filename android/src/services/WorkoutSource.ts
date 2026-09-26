@@ -20,6 +20,7 @@ export interface WorkoutStep {
   duration?: { durationName: string; value: number };
   target?: { targetName: string; valueRange?: { min: number; max: number } };
   notify?: { beep?: boolean; light?: boolean; limitLight?: boolean };
+  text?: string; // shown on the watch when the step starts (native guided workouts)
 }
 export interface Workout { name?: string; steps: WorkoutStep[] }
 
