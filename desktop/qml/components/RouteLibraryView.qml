@@ -4,16 +4,11 @@ import QtQuick.Dialogs
 import QtCore
 import AmbitApp
 
-// Routes - the Library view (André, 2026-09-26: the old Routes page back, and the Routes page
-// "switches completely" between this and the planner). The old page's look - import card with the
-// planner-tools "i", map-preview cards (tap = big map), map/list view, sort - now for EVERY source:
-//   Saved             - every imported GPX (tools/route_library.py, same file twice = one entry)
-//   On the watch      - the Suunto's own routes (RouteService); Ambit1/2 listed read-only
-//   On the eTrex      - GPX files on the Garmin (GarminService)
-//   On the Bryton     - its Follow Track list (tools/bryton_tracks.py)
-//   On the Magene     - the one route it holds (the last sent from Sommet)
-// Open (or tapping a list row) loads the route into the planner - openRequested - and the page
-// switches over. ⋯ holds what the source allows: Export GPX, Rename, Delete.
+// Routes - the first screen (André, 2026-09-26): the old Suunto Routes page, like POIs. The top
+// card imports a GPX (preview, then send it to a connected device - no planning needed) and opens
+// the planner; the list card shows ONE source picked in a drop-down - the watch, the eTrex, the
+// Bryton's Follow Track list, the Magene's current route, or the Library of saved routes - with
+// the old map/list cards (Export, ⋯ Open in planner / Rename / Delete where the source allows).
 PageFlickable {
     id: root
     contentWidth: width
@@ -21,6 +16,7 @@ PageFlickable {
     clip: true
 
     signal openRequested(string name, string gpx, string libraryId)
+    signal openPlanner()
 
     // ---- state -----------------------------------------------------------------------------
     property var saved: []
@@ -34,6 +30,24 @@ PageFlickable {
     readonly property bool legacyWatch: HomeViewModel.connected && !HomeViewModel.isGarmin
                                         && !DeviceCapabilities.supportsRoutes
     readonly property bool etrexHere: HomeViewModel.isGarmin
+
+    // The list card's source drop-down: connected devices, then the Library (always there).
+    readonly property var sources: {
+        const out = []
+        if (root.watchHere || root.legacyWatch) out.push({ key: "watch", label: qsTr("On the watch") })
+        if (root.etrexHere) out.push({ key: "etrex", label: qsTr("On the eTrex") })
+        if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("On the Bryton (Follow Track)") })
+        if (BikeDevices.magene !== null) out.push({ key: "magene", label: qsTr("On the Magene") })
+        out.push({ key: "library", label: qsTr("Library (saved routes)") })
+        return out
+    }
+    property string sourceKey: ""
+    readonly property string source: root.sources.some(x => x.key === root.sourceKey)
+                                     ? root.sourceKey : root.sources[0].key
+    readonly property var sourceItems: root.source === "watch" ? root.watchItems
+        : root.source === "etrex" ? root.etrexItems
+        : root.source === "bryton" ? root.brytonItems
+        : root.source === "magene" ? root.mageneItems : root.savedItems
 
     // The Magene's current route: noted by the planner when it sends one (the C406 keeps one).
     Settings { id: mageneRoute; category: "mageneRoute"; property string name: ""; property string libraryId: "" }
@@ -154,21 +168,55 @@ PageFlickable {
         exportDialog.open()
     }
 
-    // ---- import (kept in Saved, then opened) ---------------------------------------------
+    // ---- upload a GPX (the old page's flow): preview it, then send it to a connected device.
+    // It's also kept in the Library, and can go to the planner. RouteService does the preview
+    // + the watch upload exactly as before.
+    property string pendingLibraryId: ""
     FileDialog {
         id: importDialog
-        title: qsTr("Import GPX")
+        title: qsTr("Upload GPX")
         nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
         onAccepted: {
+            RouteService.loadGpxFile(selectedFile)
+            root.brytonMsg = ""; root.mageneMsg = ""; root.pendingLibraryId = ""
             const gpx = LocalFileService.readText(selectedFile)
-            if (!gpx || gpx.length === 0) { root.msg = qsTr("Couldn't read that file"); return }
+            if (!gpx || gpx.length === 0) return
             const s = selectedFile.toString()
             const name = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1)).replace(/\.gpx$/i, "")
             root.api("POST", "/api/library/save", { name: name, gpx: gpx }, r => {
-                root.refresh()
-                root.openRequested(name, gpx, r.ok ? r.id : "")
+                if (r.ok) root.pendingLibraryId = r.id
+                root.api("GET", "/api/library", null, l => root.saved = l.ok ? l.routes : root.saved)
             })
         }
+    }
+    readonly property bool hasPending: RouteService.pendingRoute.name !== undefined
+    function pendingName() { return (RouteService.pendingRoute.name || "route").replace(/\.gpx$/i, "") }
+    property string brytonMsg: ""
+    property bool brytonOk: false
+    function sendPendingToBryton() {
+        root.brytonMsg = qsTr("Sending to Bryton…"); root.brytonOk = false
+        root.api("POST", "/api/bryton/route", { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }, r => {
+            root.brytonOk = !!r.ok
+            root.brytonMsg = r.ok ? qsTr("On the Bryton — in Follow Track after unplugging.")
+                                  : (r.error || qsTr("Send to Bryton failed"))
+            if (r.ok) root.refresh()
+        })
+    }
+    property string mageneMsg: ""
+    property bool mageneOk: false
+    property bool mageneSending: false
+    function sendPendingToMagene() {
+        root.mageneSending = true; root.mageneOk = false
+        root.mageneMsg = qsTr("Sending to Magene… keep the C406 awake and close by")
+        const body = { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }
+        if (BikeDevices.magene && BikeDevices.magene.address) body.address = BikeDevices.magene.address
+        root.api("POST", "/api/magene/route", body, r => {
+            root.mageneSending = false
+            root.mageneOk = !!r.ok
+            root.mageneMsg = r.ok ? qsTr("Sent to Magene — it's now the route under Navigation")
+                                  : (r.error || qsTr("Send to Magene failed"))
+            if (r.ok) { mageneRoute.name = root.pendingName(); mageneRoute.libraryId = root.pendingLibraryId }
+        })
     }
 
     // ---- rename / delete (saved + Bryton) ------------------------------------------------
@@ -216,9 +264,8 @@ PageFlickable {
     ThemedMenu {
         id: itemMenu
         property var item: ({})
-        ThemedMenuItem { text: qsTr("Open"); onTriggered: root.openItem(itemMenu.item) }
-        ThemedMenuItem { text: qsTr("Export GPX…"); visible: itemMenu.item.src !== "magene" || !!itemMenu.item.libraryId
-                         onTriggered: root.exportItem(itemMenu.item) }
+        ThemedMenuItem { text: qsTr("Open in planner"); onTriggered: root.openItem(itemMenu.item) }
+
         ThemedMenuItem { text: qsTr("Rename…"); visible: itemMenu.item.src === "saved" || itemMenu.item.src === "bryton"
                          onTriggered: { renameDialog.item = itemMenu.item; renameDialog.open() } }
         ThemedMenuItem { text: qsTr("Delete…"); visible: itemMenu.item.src === "saved" || itemMenu.item.src === "bryton"
@@ -236,19 +283,23 @@ PageFlickable {
     }
 
     // ---- a section of route cards (the old "On the watch" card, for any source) -------------
-    component RouteSection: Card {
+    // The route cards of one source (the old "On the watch" list), inside the list card.
+    component RouteSection: Item {
         id: section
         property string title: ""
         property var items: []
         property bool loading: false
         property string emptyText: qsTr("No routes.")
         width: parent ? parent.width : 0
+        implicitHeight: sectionCol.implicitHeight
+        height: implicitHeight
 
         Column {
+            id: sectionCol
             width: parent.width
             spacing: Theme.spacingSmall
 
-            Text { text: section.title; font.bold: true; color: Theme.text }
+            Text { visible: section.title.length > 0; text: section.title; font.bold: true; color: Theme.text }
             Text { visible: section.loading; text: qsTr("Reading…"); color: Theme.mutedText }
             Text { visible: !section.loading && section.items.length === 0
                    text: section.emptyText; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
@@ -306,9 +357,9 @@ PageFlickable {
                                     id: actions
                                     spacing: Theme.spacingSmall
                                     RoundedButton {
-                                        text: root.busyKey === routeDelegate.route.key ? qsTr("Opening…") : qsTr("Open")
+                                        text: root.busyKey === routeDelegate.route.key ? qsTr("Exporting…") : qsTr("Export")
                                         enabled: root.busyKey === "" && (routeDelegate.route.src !== "magene" || !!routeDelegate.route.libraryId)
-                                        onClicked: root.openItem(routeDelegate.route)
+                                        onClicked: root.exportItem(routeDelegate.route)
                                     }
                                     RoundedButton {
                                         id: moreButton
@@ -332,7 +383,7 @@ PageFlickable {
                                 Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                             }
                             HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { enabled: root.busyKey === ""; onTapped: root.openItem(routeDelegate.route) }
+                            TapHandler { onTapped: root.showBig(routeDelegate.route) }
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: (p) => { itemMenu.item = routeDelegate.route; itemMenu.popup(p.position.x, p.position.y) }
@@ -354,7 +405,7 @@ PageFlickable {
                                     Text { width: parent.width; elide: Text.ElideRight; text: routeDelegate.route.name
                                            color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
                                     Text { width: parent.width; elide: Text.ElideRight
-                                           text: root.busyKey === routeDelegate.route.key ? qsTr("Opening…") : routeDelegate.stats
+                                           text: root.busyKey === routeDelegate.route.key ? qsTr("Working…") : routeDelegate.stats
                                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 }
                                 RoundedButton {
@@ -384,7 +435,7 @@ PageFlickable {
         width: 520
         spacing: Theme.spacingMedium
 
-        // Import card (the old page's, with its planner-tools "i")
+        // --- Import a route (the old card): Upload GPX -> preview -> send to a device; or the planner
         Card {
             width: parent.width
             Column {
@@ -402,16 +453,125 @@ PageFlickable {
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: routePlannerDialog.open() }
                     }
                 }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton { text: qsTr("Upload GPX…"); onClicked: importDialog.open() }
+                    // The planner: weather, climbs, days, race plan - for people who want to plan.
+                    RoundedButton { text: qsTr("Open planner"); onClicked: root.openPlanner() }
+                }
+                Item {
+                    width: parent.width
+                    height: 160
+                    MapView {
+                        anchors.fill: parent
+                        readonly property var center: RouteViewModel.trackCenter(RouteService.pendingRoute.track)
+                        latitude: center ? center.lat : WeatherService.latitude
+                        longitude: center ? center.lon : WeatherService.longitude
+                        zoomLevel: center ? 12 : 10
+                        trackPoints: RouteService.pendingRoute.track || []
+                        TapHandler { onTapped: root.showBig({ name: RouteService.pendingRoute.name, track: RouteService.pendingRoute.track }) }
+                    }
+                }
+                Row {
+                    visible: root.hasPending
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - pendingPlanner.width - Theme.spacingSmall
+                        elide: Text.ElideRight
+                        text: RouteService.pendingRoute.name || ""
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                    }
+                    RoundedButton {
+                        id: pendingPlanner
+                        text: qsTr("Open in planner")
+                        onClicked: root.openRequested(root.pendingName(), RouteService.pendingRouteGpxText, root.pendingLibraryId)
+                    }
+                }
+                // Garmin: SD card only (GARMIN_USB_IMPORT_SPEC.md - never internal memory).
                 Text {
+                    visible: HomeViewModel.isGarmin
                     width: parent.width; wrapMode: Text.WordWrap
-                    text: qsTr("It's kept in Saved and opens in the planner — weather, climbs, days — to send to any device.")
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                    text: GarminService.hasSdCard
+                        ? qsTr("This will be sent to the SD card only - writing to internal memory can break your device.")
+                        : qsTr("No SD card detected in this Garmin device - sending a route is disabled. Writing to internal memory can break your device.")
+                }
+                // Ambit1/2 predate the route region: reading works, writing doesn't.
+                Text {
+                    visible: root.watchHere && root.hasPending && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRouteWrite
+                    width: parent.width; wrapMode: Text.WordWrap
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("%1 can't have routes written to it from this app yet - its routes are legacy waypoints, and only adding POIs is supported. You can still export this one.")
+                        .arg(HomeViewModel.deviceDisplayName)
+                }
+                // Send the uploaded GPX to every connected device that takes routes.
+                Flow {
+                    visible: root.hasPending
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        visible: HomeViewModel.anyDevice && (HomeViewModel.isGarmin || DeviceCapabilities.supportsRouteWrite)
+                        text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Upload to watch")
+                        enabled: !HomeViewModel.isGarmin || GarminService.hasSdCard
+                        onClicked: {
+                            if (HomeViewModel.isGarmin)
+                                GarminService.writeGpxToDevice(root.pendingName().replace(/[\\/:*?"<>|]/g, "_") + ".gpx",
+                                                               RouteService.pendingRouteGpxText)
+                            else
+                                RouteService.uploadPendingRoute(true)
+                        }
+                    }
+                    RoundedButton { visible: root.bryton !== null; text: qsTr("Send to Bryton"); onClicked: root.sendPendingToBryton() }
+                    RoundedButton {
+                        visible: BikeDevices.magene !== null
+                        enabled: !root.mageneSending
+                        text: root.mageneSending ? qsTr("Sending…") : qsTr("Send to Magene")
+                        onClicked: root.sendPendingToMagene()
+                    }
+                }
+                Text { visible: root.brytonMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
+                       font.pixelSize: Theme.fontSizeCaption; color: root.brytonOk ? Theme.success : Theme.error; text: root.brytonMsg }
+                Text { visible: root.mageneMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
+                       font.pixelSize: Theme.fontSizeCaption
+                       color: root.mageneSending ? Theme.mutedText : (root.mageneOk ? Theme.success : Theme.error); text: root.mageneMsg }
+                Text { visible: !HomeViewModel.isGarmin && RouteService.uploadResultText.length > 0; width: parent.width
+                       wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption
+                       color: RouteService.uploadOk ? Theme.success : Theme.error; text: RouteService.uploadResultText }
+                Text { visible: HomeViewModel.isGarmin && GarminService.writeError.length > 0; width: parent.width
+                       wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption; color: Theme.error; text: GarminService.writeError }
+                Text { visible: HomeViewModel.isGarmin && GarminService.writeOk && GarminService.writeError.length === 0
+                       text: qsTr("Sent to the SD card."); color: Theme.success; font.pixelSize: Theme.fontSizeCaption }
+            }
+        }
+
+        // --- The route list: ONE source at a time, picked in the drop-down --------------------
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingMedium
+                    RoundedComboBox {
+                        id: sourceBox
+                        width: 240
+                        model: root.sources.map(x => x.label)
+                        currentIndex: root.sources.findIndex(x => x.key === root.source)
+                        onActivated: (i) => { root.sourceKey = root.sources[i].key; root.msg = "" }
+                    }
+                    ViewModeToggle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.source !== "watch" || !root.legacyWatch
+                        mode: Theme.routesView
+                        onChosen: (m) => Theme.routesView = m
+                    }
                 }
                 Row {
                     spacing: Theme.spacingSmall
-                    RoundedButton { text: qsTr("Import GPX…"); onClicked: importDialog.open() }
-                    Text { anchors.verticalCenter: parent.verticalCenter; text: qsTr("View:"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
-                    ViewModeToggle { anchors.verticalCenter: parent.verticalCenter; mode: Theme.routesView; onChosen: (m) => Theme.routesView = m }
+                    visible: root.sourceItems.length > 1
                     Text { anchors.verticalCenter: parent.verticalCenter; text: qsTr("Sort:"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                     Repeater {
                         model: [{ key: "name", label: qsTr("Name") }, { key: "distance", label: qsTr("Distance") },
@@ -428,46 +588,39 @@ PageFlickable {
                         }
                     }
                 }
-                Text {
-                    visible: root.msg.length > 0
-                    width: parent.width; wrapMode: Text.WordWrap
-                    text: root.msg; color: Theme.error; font.pixelSize: Theme.fontSizeCaption
-                }
-            }
-        }
+                Text { visible: root.msg.length > 0; width: parent.width; wrapMode: Text.WordWrap
+                       text: root.msg; color: Theme.error; font.pixelSize: Theme.fontSizeCaption }
 
-        RouteSection { title: qsTr("Saved"); items: root.savedItems
-                       emptyText: qsTr("Nothing saved yet — Import GPX keeps it here.") }
-        RouteSection { visible: root.watchHere; title: qsTr("On the watch"); items: root.watchItems
-                       loading: RouteService.loading; emptyText: qsTr("No routes on the watch.") }
-        Card {
-            // Ambit1/2: readable (openambit) but not writable and without a track - read-only.
-            visible: root.legacyWatch
-            width: parent.width
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-                Text { text: qsTr("On the watch (read-only)"); font.bold: true; color: Theme.text }
-                Text { visible: root.legacyRoutes.length === 0; text: qsTr("No routes on the watch."); color: Theme.mutedText }
-                Repeater {
-                    model: root.legacyRoutes
-                    delegate: Column {
-                        required property var modelData
-                        spacing: 2
-                        Text { color: Theme.text; font.bold: true; text: modelData.name }
-                        Text { color: Theme.mutedText
-                               text: qsTr("%1 points, %2 m, +%3/-%4 m").arg(modelData.points_count).arg(modelData.distance_m)
-                                     .arg(modelData.altitude_asc_m).arg(modelData.altitude_dec_m) }
+                // Ambit1/2: readable but not writable, no track - read-only rows (as before).
+                Column {
+                    visible: root.source === "watch" && root.legacyWatch
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text { visible: root.legacyRoutes.length === 0; text: qsTr("No routes on the watch."); color: Theme.mutedText }
+                    Repeater {
+                        model: root.legacyRoutes
+                        delegate: Column {
+                            required property var modelData
+                            spacing: 2
+                            Text { color: Theme.text; font.bold: true; text: modelData.name }
+                            Text { color: Theme.mutedText
+                                   text: qsTr("%1 points, %2 m, +%3/-%4 m").arg(modelData.points_count).arg(modelData.distance_m)
+                                         .arg(modelData.altitude_asc_m).arg(modelData.altitude_dec_m) }
+                        }
                     }
                 }
+                RouteSection {
+                    visible: !(root.source === "watch" && root.legacyWatch)
+                    title: ""
+                    items: root.sourceItems
+                    loading: (root.source === "watch" && RouteService.loading)
+                             || (root.source === "etrex" && GarminService.deviceGpxLoading)
+                    emptyText: root.source === "library" ? qsTr("Nothing saved yet — Upload GPX keeps it here.")
+                             : root.source === "magene" ? qsTr("It holds one route — sending one replaces it.")
+                             : qsTr("No routes here.")
+                }
             }
         }
-        RouteSection { visible: root.etrexHere; title: qsTr("On the eTrex"); items: root.etrexItems
-                       loading: GarminService.deviceGpxLoading; emptyText: qsTr("No routes on the eTrex.") }
-        RouteSection { visible: root.bryton !== null; title: qsTr("On the Bryton (Follow Track)"); items: root.brytonItems
-                       emptyText: qsTr("No routes on the Bryton.") }
-        RouteSection { visible: BikeDevices.magene !== null; title: qsTr("On the Magene (current route)"); items: root.mageneItems
-                       emptyText: qsTr("It holds one route — sending one from the planner replaces it.") }
     }
 
     // Route-planner help - the old page's "i" dialog, unchanged: the tools that make a GPX.
