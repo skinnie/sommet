@@ -31,12 +31,12 @@ Item {
         anchors.centerIn: parent
         size: root.size
         color: root.color
-        visible: root.kind === "bryton"
+        visible: root.kind === "bryton" || root.kind === "brytonble"
     }
     EdgeIcon {
         anchors.centerIn: parent
         size: root.size
         color: root.color
-        visible: root.kind !== "karoo" && root.kind !== "c406" && root.kind !== "bryton"
+        visible: root.kind !== "karoo" && root.kind !== "c406" && root.kind !== "bryton" && root.kind !== "brytonble"
     }
 }

@@ -56,6 +56,87 @@ PageFlickable {
             root.mageneDevices = [{ "kind": "c406", "name": mageneMemory.name || "Magene C406",
                                     "address": mageneMemory.address, "activityCount": -1, "files": null }];
     }
+    // --- Bryton Aero 60 over Bluetooth (André, 2026-09-26). Remembered like the Magene. The cable
+    // wins, like the watch: while the Bryton is plugged in by USB only that entry shows.
+    Settings { id: brytonBleMemory; category: "brytonble"; property string address: ""; property string name: "" }
+    readonly property bool brytonOnUsb: mtpBikeComputers.some(b => b.kind === "bryton")
+    readonly property var brytonBleDevices: brytonBleMemory.address.length > 0 && !brytonOnUsb
+        ? [{ "kind": "brytonble", "name": brytonBleMemory.name || "AERO60", "address": brytonBleMemory.address,
+             "activityCount": -1, "files": null }] : []
+    onBrytonBleDevicesChanged: BikeDevices.brytonBle = brytonBleDevices.length > 0 ? brytonBleDevices[0] : null
+    property bool brytonScanning: false
+    // Card data from ONE connection (tools/bryton_ble.py hello): battery, profile, settings.
+    property var brytonBleStatus: null
+    property string brytonBleStatusFor: ""
+    property bool brytonBleBusy: false
+    function fetchBrytonBleStatus() {
+        if (!root.activeBike || root.activeBike.kind !== "brytonble") {
+            root.brytonBleStatus = null;
+            root.brytonBleStatusFor = "";
+            return;
+        }
+        const addr = root.activeBike.address;
+        if (addr === root.brytonBleStatusFor || root.brytonBleBusy)
+            return;
+        root.brytonBleStatusFor = addr;
+        root.brytonBleBusy = true;
+        BikeDevices.mageneConnecting = true;        // keep the background scans off the radio
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            BikeDevices.mageneConnecting = false;
+            if (!root)
+                return;
+            root.brytonBleBusy = false;
+            var r = null;
+            try { r = JSON.parse(xhr.responseText); } catch (e) { r = null; }
+            if (!r || !r.ok) {
+                root.brytonBleStatus = null;
+                root.brytonBleStatusFor = "";
+                BikeDevices.brytonBleAnswered(false);
+                return;
+            }
+            root.brytonBleStatus = r;
+            BikeDevices.brytonBleAnswered(true);
+            root.checkProfileSync();
+        };
+        xhr.open("POST", "http://127.0.0.1:8766/api/brytonble/device");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ action: "hello", address: addr }));
+    }
+    // "Pair another device by Bluetooth" -> Bryton Aero 60: find it, remember it, select it.
+    function scanBrytonBle() {
+        if (root.brytonScanning)
+            return;
+        root.brytonScanning = true;
+        root.mageneMsg = qsTr("Searching for the Bryton…");
+        const scan = new XMLHttpRequest();
+        scan.onreadystatechange = function() {
+            if (scan.readyState !== XMLHttpRequest.DONE)
+                return;
+            root.brytonScanning = false;
+            var dev = null;
+            try {
+                const r = JSON.parse(scan.responseText);
+                if (r && r.ok && r.devices && r.devices.length > 0)
+                    dev = r.devices[0];
+            } catch (e) { dev = null; }
+            if (!dev) {
+                root.mageneMsg = qsTr("No Bryton found — turn it on, and turn off your phone's Bluetooth (the Bryton hides while the phone app is connected).");
+                return;
+            }
+            brytonBleMemory.address = dev.address;
+            brytonBleMemory.name = dev.name || "AERO60";
+            root.mageneMsg = qsTr("Found the Bryton Aero 60");
+            root.brytonBleStatusFor = "";
+            BikeDevices.brytonBleAnswered(true);
+            DeviceService.selectBikeComputer("brytonble");
+            root.fetchBrytonBleStatus();
+        };
+        scan.open("GET", "http://127.0.0.1:8766/api/brytonble/devices");
+        scan.send();
+    }
     // Magene Sync: list the rides over BLE when this session hasn't yet, then import the new ones.
     function syncMagene(bike) {
         if (bike.files) {
@@ -88,7 +169,7 @@ PageFlickable {
     onMageneDevicesChanged: BikeDevices.magene = mageneDevices.length > 0 ? mageneDevices[0] : null
     // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
     // over Bluetooth. One "active device across watches and bike computers" (André, 2026-09-04).
-    readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices)
+    readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices).concat(brytonBleDevices)
     // The remembered Magene only counts as connected while it actually answers (its last
     // connection worked). Asleep/off, it stays selectable but reads "asleep" and isn't counted
     // (André, 2026-09-26: "c406 shows connected and the device is off").
@@ -102,6 +183,14 @@ PageFlickable {
             mageneMemory.address = ""; mageneMemory.name = ""
             root.mageneDevices = []
             BikeDevices.mageneAnswered(false)
+        }
+        if (dev.kind === "brytonble") {
+            if (DeviceService.activeBikeKind === "brytonble") DeviceService.selectBikeComputer("")
+            brytonBleMemory.address = ""; brytonBleMemory.name = ""
+            root.brytonBleStatus = null; root.brytonBleStatusFor = ""
+            BikeDevices.brytonBleAnswered(false)
+            forgetDialog.load()
+            return
         }
         if (dev.memoryOnly) { dropMagene(); forgetDialog.load(); return }
         const xhr = new XMLHttpRequest()
@@ -126,6 +215,10 @@ PageFlickable {
         function onMageneReachableChanged() {
             if (BikeDevices.mageneReachable && root.activeBike && root.activeBike.kind === "c406" && !root.mageneStatus)
                 root.fetchMageneStatus()
+        }
+        function onBrytonBleReachableChanged() {
+            if (BikeDevices.brytonBleReachable && root.activeBike && root.activeBike.kind === "brytonble" && !root.brytonBleStatus)
+                root.fetchBrytonBleStatus()
         }
     }
     readonly property int reachableCount: DeviceService.connectedWatches.length
@@ -164,7 +257,7 @@ PageFlickable {
             DeviceService.selectBikeComputer("");
         else if (!DeviceService.bikeActive && !HomeViewModel.connected && !HomeViewModel.garminPicked) {
             // prefer a plugged one over a remembered Magene that may be asleep
-            const live = bikeComputers.filter(b => b.kind !== "c406")
+            const live = bikeComputers.filter(b => b.kind !== "c406" && b.kind !== "brytonble")
             if (live.length > 0) DeviceService.selectBikeComputer(live[0].kind)
             // The remembered Magene is known at once, before the USB list and the watch have
             // answered - picking it straight away beat every plugged device (André, 2026-09-26).
@@ -270,7 +363,7 @@ PageFlickable {
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify({ action: "hello", address: addr }));
     }
-    onActiveBikeChanged: { fetchBrytonInfo(); fetchMageneStatus(); checkProfileSync(); }
+    onActiveBikeChanged: { fetchBrytonInfo(); fetchMageneStatus(); fetchBrytonBleStatus(); checkProfileSync(); }
 
     // --- Bike computer profile vs intervals.icu (André, 2026-09-25). The first time a Bryton or
     // Magene shows values that differ from intervals.icu, ask ONCE (ProfileSyncPrompt). "Yes" is
@@ -280,7 +373,7 @@ PageFlickable {
     Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
     property int profileSyncTick: 0          // bumped when a mode changes, for the button binding
     property string profileCheckedFor: ""    // one check per connected device, not per 8 s poll
-    function profileApiBase(kind) { return kind === "c406" ? "magene" : "bryton" }
+    function profileApiBase(kind) { return kind === "c406" ? "magene" : kind === "brytonble" ? "brytonble" : "bryton" }
     function profileDeviceName(kind) { return kind === "c406" ? qsTr("Magene") : qsTr("Bryton") }
     function profileSyncMode(kind) {
         void root.profileSyncTick;
@@ -292,7 +385,7 @@ PageFlickable {
     }
     function checkProfileSync() {
         const bike = root.activeBike;
-        if (!bike || (bike.kind !== "bryton" && bike.kind !== "c406")) {
+        if (!bike || (bike.kind !== "bryton" && bike.kind !== "c406" && bike.kind !== "brytonble")) {
             root.profileCheckedFor = "";
             return;
         }
@@ -302,6 +395,10 @@ PageFlickable {
         // than opening a connection of our own (fetchMageneStatus calls back here when it lands).
         if (bike.kind === "c406" && !(root.mageneStatus && root.mageneStatusFor === bike.address
                                       && root.mageneStatus.profile))
+            return;
+        // Same for the Bluetooth Bryton: its profile comes from the card's hello.
+        if (bike.kind === "brytonble" && !(root.brytonBleStatus && root.brytonBleStatusFor === bike.address
+                                           && root.brytonBleStatus.profile))
             return;
         const key = bike.kind + "|" + (bike.address || bike.mount || "");
         if (key === root.profileCheckedFor)
@@ -332,6 +429,7 @@ PageFlickable {
                        api_key: ConnectionsService.intervalsIcuApiKey() };
         if (bike.address) body.address = bike.address;
         if (kind === "c406") body.device_profile = root.mageneStatus.profile;
+        if (kind === "brytonble") body.device_profile = root.brytonBleStatus.profile;
         xhr.open("POST", "http://127.0.0.1:8766/api/" + root.profileApiBase(kind) + "/profile/compare");
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify(body));
@@ -348,6 +446,8 @@ PageFlickable {
             var r = {};
             try { r = JSON.parse(xhr.responseText); } catch (e) {}
             root.bikeSyncOk = !!r.ok;
+            if (r.ok && kind === "brytonble" && r.profile && root.brytonBleStatus)
+                root.brytonBleStatus = Object.assign({}, root.brytonBleStatus, { profile: r.profile });
             root.bikeSyncMsg = r.ok ? qsTr("Profile updated from intervals.icu.")
                                     : (r.error || qsTr("Profile update failed."));
         };
@@ -368,6 +468,7 @@ PageFlickable {
         case "karoo":  return qsTr("Hammerhead Karoo");
         case "c406":   return qsTr("Magene C406 Pro");
         case "bryton": return qsTr("Bryton Aero 60");
+        case "brytonble": return qsTr("Bryton Aero 60 (Bluetooth)");
         default:       return bike.name || bike.kind || "";
         }
     }
@@ -785,6 +886,10 @@ PageFlickable {
                                 text: {
                                     if (!root.activeBike)
                                         return "";
+                                    if (root.activeBike.kind === "brytonble")
+                                        return root.brytonBleBusy ? qsTr("Bluetooth · connecting…")
+                                             : root.brytonBleStatus ? qsTr("Bluetooth · connected")
+                                             : qsTr("Bluetooth · not found — turn it on and turn off your phone's Bluetooth");
                                     var total = root.activeBike.activityCount;
                                     // A remembered Magene before its first Sync this session.
                                     if (total < 0)
@@ -817,6 +922,26 @@ PageFlickable {
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             }
                             Text {
+                                // Bryton over Bluetooth: battery + profile from its one-connection hello.
+                                visible: root.activeBike !== null && root.activeBike.kind === "brytonble"
+                                         && root.brytonBleStatus !== null
+                                text: {
+                                    const st = root.brytonBleStatus;
+                                    if (!st) return "";
+                                    var parts = [];
+                                    if (st.charging) parts.push(qsTr("Charging"));
+                                    else if (typeof st.batteryBars === "number")
+                                        parts.push(qsTr("Battery %1/%2").arg(st.batteryBars).arg(st.batteryOf || 4));
+                                    const p = st.profile || {};
+                                    if (p.ftp) parts.push(qsTr("FTP %1 W").arg(p.ftp));
+                                    if (p.lthr) parts.push(qsTr("LTHR %1").arg(p.lthr));
+                                    if (p.max_hr) parts.push(qsTr("Max HR %1").arg(p.max_hr));
+                                    if (p.weight) parts.push(qsTr("%1 kg").arg(p.weight));
+                                    return parts.join(" · ");
+                                }
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                            }
+                            Text {
                                 // Magene only: battery + firmware from the one-connection status
                                 // read (root.fetchMageneStatus), e.g. "Battery 94 % · Firmware 0.411".
                                 visible: root.activeBike !== null && root.activeBike.kind === "c406"
@@ -843,6 +968,8 @@ PageFlickable {
                             // Sync: it reads the list first (syncMagene).
                             readonly property bool listUnknown: root.activeBike !== null
                                 && root.activeBike.kind === "c406" && !root.activeBike.files
+                            // Rides over Bluetooth aren't wired for the Bryton yet - the cable does it.
+                            visible: !(root.activeBike && root.activeBike.kind === "brytonble")
                             enabled: !ActivityService.loading && (root.activeBikeUnsynced > 0 || listUnknown)
                             text: ActivityService.loading
                                 ? qsTr("Syncing…")
@@ -858,6 +985,12 @@ PageFlickable {
                                 else
                                     ActivityService.importFromBikeComputers();
                             }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: root.activeBike !== null && root.activeBike.kind === "brytonble"
+                            text: qsTr("To sync rides, plug it in by cable for now.")
+                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                         // Profile, data screens, device settings and altitude calibration live
                         // on the GPS settings page, workouts in the Training Program - both in the
@@ -926,7 +1059,10 @@ PageFlickable {
                                       enabled: !DeviceService.bleHandshakeDone },
                                     { kind: "c406", label: qsTr("Magene C406"),
                                       hint: qsTr("Wake the C406 (any button) and keep it close"),
-                                      enabled: !root.mageneScanning }
+                                      enabled: !root.mageneScanning },
+                                    { kind: "brytonble", label: qsTr("Bryton Aero 60"),
+                                      hint: qsTr("Turn it on, and turn off your phone's Bluetooth"),
+                                      enabled: !root.brytonScanning }
                                 ]
                                 delegate: Rectangle {
                                     required property var modelData
@@ -944,8 +1080,8 @@ PageFlickable {
                                             anchors.verticalCenter: parent.verticalCenter
                                             Icon { anchors.centerIn: parent; visible: modelData.kind === "watch"
                                                    glyph: Icons.watch; size: 28; color: Theme.text }
-                                            BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind === "c406"
-                                                               kind: "c406"; size: 30 }
+                                            BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind !== "watch"
+                                                               kind: modelData.kind; size: 30 }
                                         }
                                         Column {
                                             anchors.verticalCenter: parent.verticalCenter
@@ -961,6 +1097,7 @@ PageFlickable {
                                         onTapped: {
                                             pairDialog.close();
                                             if (modelData.kind === "watch") DeviceService.connectBle(false);
+                                            else if (modelData.kind === "brytonble") root.scanBrytonBle();
                                             else root.scanMagene();
                                         }
                                     }
@@ -994,7 +1131,7 @@ PageFlickable {
                         font.pixelSize: Theme.fontSizeLabel
                     }
                     Text {
-                        visible: !DeviceService.bleAttempting && !root.mageneScanning
+                        visible: !DeviceService.bleAttempting && !root.mageneScanning && !root.brytonScanning
                                  && root.mageneMsg.length > 0
                         text: root.mageneMsg
                         color: Theme.mutedText
@@ -1361,7 +1498,8 @@ PageFlickable {
                         delegate: DeviceChip {
                             required property var modelData
                             label: root.bikeDisplayName(modelData)
-                                   + (root.isReachable(modelData) ? "" : qsTr(" (asleep)"))
+                                   + (root.isReachable(modelData) ? ""
+                                      : modelData.kind === "brytonble" ? qsTr(" (not found)") : qsTr(" (asleep)"))
                             active: DeviceService.activeBikeKind === modelData.kind
                             onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectBikeComputer(modelData.kind) }
                         }
@@ -1378,9 +1516,9 @@ PageFlickable {
                         // can legitimately run long - see DeviceService::connectBle()).
                         text: DeviceService.bleAttempting
                             ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
-                            : root.mageneScanning ? qsTr("Searching…")
+                            : root.mageneScanning || root.brytonScanning ? qsTr("Searching…")
                                                   : qsTr("Pair another device by Bluetooth")
-                        enabled: !DeviceService.bleAttempting && !root.mageneScanning
+                        enabled: !DeviceService.bleAttempting && !root.mageneScanning && !root.brytonScanning
                         onClicked: pairDialog.open()
                     }
                     RoundedButton {
@@ -1416,6 +1554,11 @@ PageFlickable {
                     // the Magene Sommet remembers.
                     if (forgetDialog.unsupported && mageneMemory.address.length > 0)
                         list = [{ address: mageneMemory.address, name: mageneMemory.name, kind: "magene", memoryOnly: true }]
+                    // The Aero 60 isn't bonded (its settings need no pairing), so it's only
+                    // remembered by Sommet - forgetting it just drops that.
+                    if (brytonBleMemory.address.length > 0)
+                        list = list.concat([{ address: brytonBleMemory.address, name: brytonBleMemory.name,
+                                              kind: "brytonble", memoryOnly: true }])
                     forgetDialog.devices = list
                     if (r && !r.ok && !r.unsupported) forgetDialog.msg = r.error || qsTr("Couldn't read the paired devices")
                 }
@@ -1453,16 +1596,18 @@ PageFlickable {
                                 anchors.verticalCenter: parent.verticalCenter
                                 Icon { anchors.centerIn: parent; visible: modelData.kind === "suunto"
                                        glyph: Icons.watch; size: 26; color: Theme.text }
-                                BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind === "magene"
-                                                   kind: "c406"; size: 28 }
+                                BikeComputerIcon { anchors.centerIn: parent; visible: modelData.kind !== "suunto"
+                                                   kind: modelData.kind === "magene" ? "c406" : "brytonble"; size: 28 }
                             }
                             Column {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 220
-                                Text { text: modelData.kind === "magene" ? qsTr("Magene C406") : (modelData.name || qsTr("Suunto watch"))
+                                Text { text: modelData.kind === "magene" ? qsTr("Magene C406")
+                                             : modelData.kind === "brytonble" ? qsTr("Bryton Aero 60")
+                                             : (modelData.name || qsTr("Suunto watch"))
                                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
                                        elide: Text.ElideRight; width: parent.width }
-                                Text { text: (modelData.kind === "magene" ? (modelData.name || "") + " · " : "") + modelData.address
+                                Text { text: (modelData.kind !== "suunto" ? (modelData.name || "") + " · " : "") + modelData.address
                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                                        elide: Text.ElideRight; width: parent.width }
                             }
@@ -1487,6 +1632,8 @@ PageFlickable {
                 width: 360; wrapMode: Text.WordWrap
                 color: Theme.text; font.pixelSize: Theme.fontSizeBody
                 text: !forgetConfirm.device ? ""
+                      : forgetConfirm.device.kind === "brytonble"
+                        ? qsTr("Forget the Bryton Aero 60 in Sommet? Pair it again any time from “Pair another device by Bluetooth”.")
                       : forgetConfirm.device.kind === "magene"
                         ? qsTr("Forget the Magene C406? It goes back to its pair screen - pair it again from “Pair another device by Bluetooth”.")
                         : qsTr("Forget %1? To use it over Bluetooth again, pair it from the watch's own menu (“Pair Mobile App”).")
