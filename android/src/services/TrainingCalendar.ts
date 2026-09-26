@@ -43,6 +43,7 @@ export interface SyncResult {
   added: string[];
   pendingCompile: string[]; // plan entries that are due but have no compiled binary yet
   displaysAdded: string[];
+  waiting: string[];        // upcoming plan entries past the WORKOUT menu's 5 slots
 }
 
 function u16(b: Uint8Array, o: number) { return b[o] | (b[o + 1] << 8); }
@@ -109,9 +110,11 @@ export async function syncCalendar(
     // anything else that fails to decode is suspect, so re-read before believing it.
     const existing = await readExistingAppsStable(apps.base);
 
-    const { keptRawBlocks, toAdd } = planDiff(existing, plan, today);
+    const { keptRawBlocks, toAdd, waiting } = planDiff(existing, plan, today);
     const kept = new Set(keptRawBlocks);
-    const removed = existing.filter((e) => isManaged(e.name) && !kept.has(e.rawBlock)).map((e) => e.name);
+    // Expired or removed from the plan; one moved back to waiting is reported under `waiting`.
+    const removed = existing.filter((e) => isManaged(e.name) && !kept.has(e.rawBlock)
+      && !waiting.includes(e.name)).map((e) => e.name);
 
     const ready = toAdd.filter((e) => (e as CalendarPlanEntry).compiled);
     const pendingCompile = toAdd.filter((e) => !(e as CalendarPlanEntry).compiled)
@@ -147,19 +150,21 @@ export async function syncCalendar(
       cmDecoded = decoded;
       if (wasAdded) displaysAdded.push(modeName);
     }
-    const cmImage = displaysAdded.length ? encodeRegion(cmDecoded, CUSTOM_MODES_SIZE)
-      : base64ToBytes(await readCustomModesRaw());
+    // Sport modes are written only when a guidance display was added (same as the desktop sync).
+    const cmImage = displaysAdded.length ? encodeRegion(cmDecoded, CUSTOM_MODES_SIZE) : null;
 
-    const result: SyncResult = { removed, added, pendingCompile, displaysAdded };
+    const result: SyncResult = { removed, added, pendingCompile, displaysAdded, waiting };
     if (!write) { onState({ phase: 'done' }); return result; }
 
     onState({ phase: 'writingApps' });
     if (!await writeRegion(apps.base, bytesToBase64(newAppsBytes), newAppsBytes.length)) {
       onState({ phase: 'error', error: 'Apps region write was not acknowledged.' }); return null;
     }
-    onState({ phase: 'writingModes' });
-    if (!await writeCustomModesRaw(bytesToBase64(cmImage))) {
-      onState({ phase: 'error', error: 'Sport-mode write was not acknowledged.' }); return null;
+    if (cmImage) {
+      onState({ phase: 'writingModes' });
+      if (!await writeCustomModesRaw(bytesToBase64(cmImage))) {
+        onState({ phase: 'error', error: 'Sport-mode write was not acknowledged.' }); return null;
+      }
     }
 
     onState({ phase: 'verifying' });
@@ -167,9 +172,11 @@ export async function syncCalendar(
     if (!bytesEqualPrefix(appsBack, newAppsBytes, newAppsBytes.length)) {
       onState({ phase: 'error', error: 'Apps region read back different bytes than written.' }); return null;
     }
-    const cmBack = base64ToBytes(await readCustomModesRaw());
-    if (!bytesEqualPrefix(cmBack, cmImage, cmImage.length)) {
-      onState({ phase: 'error', error: 'Sport-mode region read back different bytes than written.' }); return null;
+    if (cmImage) {
+      const cmBack = base64ToBytes(await readCustomModesRaw());
+      if (!bytesEqualPrefix(cmBack, cmImage, cmImage.length)) {
+        onState({ phase: 'error', error: 'Sport-mode region read back different bytes than written.' }); return null;
+      }
     }
 
     onState({ phase: 'done' });

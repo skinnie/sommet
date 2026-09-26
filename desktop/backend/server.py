@@ -6641,10 +6641,11 @@ class Handler(BaseHTTPRequestHandler):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(workout, f)
             path = f.name
+        args = [path, "--mode", str(mode), "--append", "--json", "--write"]
+        if body.get("replace"):   # menu full ("menuFull" in the reply): swap this one out
+            args += ["--replace", str(body["replace"])]
         try:
-            code, out, err = run_tool(
-                "guided_workout.py",
-                [path, "--mode", str(mode), "--append", "--json", "--write"], timeout=180)
+            code, out, err = run_tool("guided_workout.py", args, timeout=180)
         finally:
             os.unlink(path)
         info = self._parse_last_json_line(out)

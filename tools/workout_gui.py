@@ -502,6 +502,11 @@ async function toggleInstallPicker(pickerId, workout) {
   renderPickerForm(pickerId);
 }
 
+const pickerFull = {};
+function escapeText(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function renderPickerForm(pickerId) {
   const modes = pickerModes[pickerId];
   const el = document.getElementById(pickerId);
@@ -518,16 +523,29 @@ function renderPickerForm(pickerId) {
     <div id="${pickerId}_result"></div>`;
 }
 
-async function doInstallToWatch(pickerId) {
+async function doInstallToWatch(pickerId, replace) {
   const mode = document.getElementById(`${pickerId}_mode`).value;
   const resultEl = document.getElementById(`${pickerId}_result`);
   resultEl.innerHTML = '<p class="hint">installing...</p>';
   const resp = await fetch("/api/install-to-watch", {method: "POST", body: JSON.stringify({
-    workout: pickerWorkout[pickerId], mode,
+    workout: pickerWorkout[pickerId], mode, replace: replace || null,
   })});
   const data = await resp.json();
   if (resp.ok && data.ok) {
-    resultEl.innerHTML = `<p class="result-ok">Installed &ndash; now in ${mode}'s WORKOUT menu (hold [Next] &rarr; WORKOUT).</p>`;
+    const swapped = replace ? ` &ldquo;${escapeText(replace)}&rdquo; was removed.` : "";
+    resultEl.innerHTML = `<p class="result-ok">Installed &ndash; now in ${mode}'s WORKOUT menu (hold [Next] &rarr; WORKOUT).${swapped}</p>`;
+    return;
+  }
+  // The watch shows only the first few native workouts - installing past that would be
+  // invisible, so nothing was written. Offer to swap one out instead.
+  if (data.menuFull) {
+    pickerFull[pickerId] = data.workouts;
+    resultEl.innerHTML = `<p class="result-err">The WORKOUT menu is full &ndash; the watch shows
+      only ${data.menuMax} workouts. Nothing was installed. Replace one?</p>
+      <div class="row-buttons">${data.workouts.map((w, i) =>
+        `<button class="secondary" onclick="doInstallToWatch('${pickerId}', pickerFull['${pickerId}'][${i}])">Replace ${escapeText(w)}</button>`).join("")}</div>
+      <p class="hint">A dated plan workout you replace comes back on a later calendar sync, once
+      there is room again.</p>`;
     return;
   }
   // Show what the watch tool actually said - "no parseable JSON" usually means the watch
@@ -802,6 +820,8 @@ class Handler(BaseHTTPRequestHandler):
             workout_path = f.name
         try:
             args = [workout_path, "--mode", str(mode), "--append", "--json", "--write"]
+            if body.get("replace"):
+                args += ["--replace", str(body["replace"])]
             code, out, err = run_tool("guided_workout.py", args, timeout=180)
         finally:
             Path(workout_path).unlink(missing_ok=True)

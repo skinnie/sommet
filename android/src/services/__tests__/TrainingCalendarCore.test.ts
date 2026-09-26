@@ -59,6 +59,37 @@ describe('TrainingCalendarCore', () => {
     expect(toAdd).toEqual([]);
   });
 
+  // Same cases as tools/test_training_calendar.py PlanDiffWindow: the menu shows 5 natives.
+  const run = (d: string) => ({ date: d, mode: 'Running', workoutName: `W${d.slice(-2)}` });
+  const today926 = new Date(2026, 8, 26);
+
+  test('planDiff syncs only the soonest workouts that fit the 5-slot menu', () => {
+    const existing = decodeApps(fakeAppsRegion(['Mine']));  // one manual native workout
+    const plan = ['2026-09-26', '2026-09-28', '2026-09-30', '2026-10-03', '2026-10-05', '2026-10-07'].map(run);
+    const { keptRawBlocks, toAdd, waiting } = planDiff(existing, plan, today926);
+    expect(toAdd.map((e) => e.date)).toEqual(['2026-09-26', '2026-09-28', '2026-09-30', '2026-10-03']);
+    expect(waiting).toEqual(['05/10_W05', '07/10_W07']);
+    expect(keptRawBlocks.length).toBe(1);
+  });
+
+  test('planDiff erases installed workouts outside the window', () => {
+    const existing = decodeApps(fakeAppsRegion(['24/09_W24', '26/09_W26', '28/09_W28', '30/09_W30',
+      '03/10_W03', '05/10_W05', '07/10_W07']));
+    const plan = ['2026-09-24', '2026-09-26', '2026-09-28', '2026-09-30', '2026-10-03', '2026-10-05', '2026-10-07'].map(run);
+    const { keptRawBlocks, toAdd, waiting } = planDiff(existing, plan, today926);
+    expect(decodeApps(rebuildAppsRegion(keptRawBlocks)).map((e) => e.name))
+      .toEqual(['26/09_W26', '28/09_W28', '30/09_W30', '03/10_W03', '05/10_W05']);
+    expect(toAdd).toEqual([]);
+    expect(waiting).toEqual(['07/10_W07']);
+  });
+
+  test('planDiff leaves no room when 5 manual workouts fill the menu', () => {
+    const existing = decodeApps(fakeAppsRegion(['M0', 'M1', 'M2', 'M3', 'M4']));
+    const { toAdd, waiting } = planDiff(existing, [run('2026-09-28')], today926);
+    expect(toAdd).toEqual([]);
+    expect(waiting).toEqual(['28/09_W28']);
+  });
+
   test('rebuildAppsRegion round-trips a filtered raw-block list byte-clean', () => {
     const region = fakeAppsRegion(['25/08_Long run', '28/08_Interval']);
     const existing = decodeApps(region);
