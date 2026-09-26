@@ -3,8 +3,8 @@ import { base64ToBytes, bytesToBase64 } from './Base64';
 import { decode as decodeCM, encodeRegion } from './SportModeCodec';
 import { decodeApps, buildAppsRegion, CompiledApp, AppEntry } from './AppsCodec';
 import { resolveRegion } from './MemoryMap';
-import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE } from './GuidedWorkoutCore';
-import { entryLabel, isExpired, planDiff, rebuildAppsRegion, CalendarEntry } from './TrainingCalendarCore';
+import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE, withLights } from './GuidedWorkoutCore';
+import { entryLabel, isManaged, planDiff, rebuildAppsRegion, CalendarEntry } from './TrainingCalendarCore';
 
 // Orchestration for the Calendar feature (native I/O) - the Android counterpart to
 // tools/training_calendar.py's sync(), reusing the same read/write/verify shape as
@@ -27,9 +27,9 @@ const CUSTOM_MODES_SIZE = 12288;
 
 export interface CalendarPlanEntry extends CalendarEntry {
   compiled?: CompiledApp; // set once the user has pasted-and-imported the compiled result
-  // The structured workout, carried on entries imported from intervals.icu so a pending entry can
-  // regenerate its compiler JSON (IntervalsWorkouts). Undefined on hand-built entries. Not used by
-  // syncCalendar (which only installs `compiled`).
+  // The structured workout: lets a pending entry regenerate its compiler JSON (IntervalsWorkouts),
+  // and gives syncCalendar each step's backlight choices (notify.light / notify.limitLight), which
+  // it splices into `compiled` at install time (GuidedWorkoutCore.withLights).
   workout?: import('./WorkoutSource').Workout;
 }
 
@@ -109,8 +109,9 @@ export async function syncCalendar(
     // anything else that fails to decode is suspect, so re-read before believing it.
     const existing = await readExistingAppsStable(apps.base);
 
-    const removed = existing.filter((e) => isExpired(e.name, today)).map((e) => e.name);
     const { keptRawBlocks, toAdd } = planDiff(existing, plan, today);
+    const kept = new Set(keptRawBlocks);
+    const removed = existing.filter((e) => isManaged(e.name) && !kept.has(e.rawBlock)).map((e) => e.name);
 
     const ready = toAdd.filter((e) => (e as CalendarPlanEntry).compiled);
     const pendingCompile = toAdd.filter((e) => !(e as CalendarPlanEntry).compiled)
@@ -121,7 +122,9 @@ export async function syncCalendar(
     const added: string[] = [];
     for (const e of ready as CalendarPlanEntry[]) {
       const label = entryLabel(e.date, e.workoutName);
-      const compiled: CompiledApp = { ...e.compiled!, name: label };
+      // Backlight flashes from the workout's per-step ticks - the compiler emits only beeps.
+      const [binary] = e.workout ? withLights(e.compiled!.binary, e.workout) : [e.compiled!.binary];
+      const compiled: CompiledApp = { ...e.compiled!, binary, name: label };
       newAppsBytes = buildAppsRegion(currentList.map((x) => x.rawBlock), compiled, GUIDANCE_ENTRY_TYPE);
       currentList = decodeApps(newAppsBytes).map((x) => ({ rawBlock: x.rawBlock }));
       added.push(label);

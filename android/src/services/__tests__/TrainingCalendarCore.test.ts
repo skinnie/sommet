@@ -48,6 +48,17 @@ describe('TrainingCalendarCore', () => {
     expect(toAdd.map((e) => e.date)).toEqual(['2026-09-01']);
   });
 
+  test('planDiff erases a still-future managed entry that was removed from the plan', () => {
+    const region = fakeAppsRegion(['Couch-to-5K', '28/08_Interval', '30/08_Tempo']);
+    const existing = decodeApps(region);
+    const today = new Date(2026, 7, 27);
+    const plan = [{ date: '2026-08-30', mode: 'Running', workoutName: 'Tempo' }];  // 28/08 removed
+    const { keptRawBlocks, toAdd } = planDiff(existing, plan, today);
+    const keptNames = existing.filter((e) => keptRawBlocks.includes(e.rawBlock)).map((e) => e.name);
+    expect(keptNames).toEqual(['Couch-to-5K', '30/08_Tempo']);  // unmanaged app always kept
+    expect(toAdd).toEqual([]);
+  });
+
   test('rebuildAppsRegion round-trips a filtered raw-block list byte-clean', () => {
     const region = fakeAppsRegion(['25/08_Long run', '28/08_Interval']);
     const existing = decodeApps(region);

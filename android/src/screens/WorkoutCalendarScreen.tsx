@@ -12,6 +12,7 @@ import { pickFile } from '../services/CatalogService';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 import { syncCalendar, CalendarPlanEntry, SyncState, SyncResult } from '../services/TrainingCalendar';
+import { withHrTargetAsBps } from '../services/GuidedWorkoutCore';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
@@ -203,7 +204,7 @@ export default function WorkoutCalendarScreen() {
   // IntervalsScreen uses. Confirmed by reading the site's own bundled main.js, 2026-08-21.
   function handleGenerateAndOpen() {
     try {
-      setGeneratedJson(JSON.stringify(buildWorkout(), null, 2));
+      setGeneratedJson(JSON.stringify(withHrTargetAsBps(buildWorkout()), null, 2));
       Linking.openURL(COMPILE_SITE_URL);
       Alert.alert(t.experimentalWorkoutCalendar, t.intervalsSourceCopiedMsg);
     } catch (e: any) {
@@ -254,7 +255,7 @@ export default function WorkoutCalendarScreen() {
   function handleCompileEntry(i: number) {
     const e = plan[i];
     if (!e.workout) return;
-    setGeneratedJson(JSON.stringify(e.workout, null, 2));
+    setGeneratedJson(JSON.stringify(withHrTargetAsBps(e.workout), null, 2));
     setCompileTarget(i);
     Linking.openURL(COMPILE_SITE_URL);
     Alert.alert(t.experimentalWorkoutCalendar, t.intervalsSourceCopiedMsg);
