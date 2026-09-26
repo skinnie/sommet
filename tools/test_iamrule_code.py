@@ -140,6 +140,20 @@ class TargetUnits(unittest.TestCase):
         self.assertEqual(set(android), set(GW.SI_FACTOR))
         for k, v in GW.SI_FACTOR.items():
             self.assertAlmostEqual(android[k], v)
+        body = ts[ts.index("SI_DURATION_FACTOR"):ts.index("};", ts.index("SI_DURATION_FACTOR"))]
+        android_d = {k: eval(v) for k, v in re.findall(r"(\w+): ([\d./ ]+),", body)}
+        self.assertEqual(set(android_d), set(GW.SI_DURATION_FACTOR))
+        for k, v in GW.SI_DURATION_FACTOR.items():
+            self.assertAlmostEqual(android_d[k], v)
+
+    def test_step_ends_go_to_the_compiler_in_si(self):
+        import guided_workout as GW
+        wk = {"steps": [{"duration": {"durationName": n, "value": v}} for n, v in
+                        (("energy", 50), ("hr_above", 150), ("hr_below", 120), ("time", 60),
+                         ("distance", 1000))]}
+        got = [s["duration"]["value"] for s in GW.with_si_units(wk)["steps"]]
+        self.assertEqual([round(x, 4) for x in got], [209200.0, 2.5, 2.0, 60, 1000])
+        self.assertEqual(wk["steps"][0]["duration"]["value"], 50)   # input untouched
 
     def test_intervals_pace_arrives_as_decimal_min_per_km(self):
         import intervals_workout as IW
