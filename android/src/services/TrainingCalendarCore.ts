@@ -48,9 +48,16 @@ export interface CalendarEntry { date: string; mode: string; workoutName: string
 export function planDiff(existing: AppEntry[], planEntries: CalendarEntry[], today: Date):
     { keptRawBlocks: Uint8Array[]; toAdd: CalendarEntry[] } {
   const namesPresent = new Set(existing.map((e) => e.name));
-  const keptRawBlocks = existing.filter((e) => !isExpired(e.name, today)).map((e) => e.rawBlock);
-
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // A managed entry stays only if it's unexpired AND still in the plan - one removed from the
+  // calendar is erased now, not left on the watch until its date passes (tools/training_calendar.py
+  // plan_diff, fixed 2026-09-22). Unmanaged apps are never touched.
+  const futureLabels = new Set(planEntries.filter((e) => e.date >= todayIso)
+    .map((e) => entryLabel(e.date, e.workoutName)));
+  const keptRawBlocks = existing
+    .filter((e) => !isManaged(e.name) || (!isExpired(e.name, today) && futureLabels.has(e.name)))
+    .map((e) => e.rawBlock);
+
   const toAdd = [...planEntries]
     .sort((a, b) => a.date.localeCompare(b.date))
     .filter((e) => e.date >= todayIso)
