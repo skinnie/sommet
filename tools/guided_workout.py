@@ -123,15 +123,12 @@ def with_hr_target_as_bps(workout):
     """Return a copy where every step's "hr" target valueRange is divided by 60 (bpm ->
     beats-per-second) before it goes to the community compiler.
 
-    Real captured Suunto guidance-workout JSON (marguslt gist, cross-validated 2026-08-21 to 15
-    decimal places - see `ambit_app_workout_schema_quirks` memory) encodes HR target ranges this
-    way, not as plain bpm. Our own workout JSON (author tools, intervals.icu import) has always
-    used plain bpm, and this conversion was never applied before compiling - the compiler embeds
-    whatever units it's given straight into the native target-band field, so a plain-bpm range
-    (e.g. 158-166) went in ~60x too high, and the watch showed garbage/saturated numbers instead
-    of the real target (André, 2026-09-26 - "134-204" for a 126-157 walk target, "255" for a
-    158-166 jog target). Other target types (pace/speed/power/cadence) aren't affected - only
-    "hr" has this documented quirk."""
+    The compiled guidance program compares `SUUNTO_HR * (1/60)` against the step's min/max (read
+    from its bytecode, 2026-09-26 - see iamrule_code.py), and real captured Suunto workout JSON
+    (marguslt gist) carries HR ranges the same way. Our workout JSON (builder, intervals.icu
+    import) is plain bpm; sent unconverted, the live value was always "below min", so the
+    out-of-range alarm fired all run and the target band showed nonsense (André, 2026-09-26:
+    "134-204" for a 126-157 walk, "255" for a 158-166 jog). Only "hr" is converted."""
     import copy
     wk = copy.deepcopy(workout)
     for s in wk.get("steps", []):
@@ -141,6 +138,21 @@ def with_hr_target_as_bps(workout):
             rng["min"] = rng["min"] / 60
             rng["max"] = rng["max"] / 60
     return wk
+
+
+def with_light_on_step_change(binary):
+    """(binary, sites): the compiled guidance binary with a Suunto.light() after every step change
+    and the finish screen - the compiler emits only the beep, easy to miss with headphones on
+    (André, 2026-09-26). If the binary isn't the template iamrule_code.py knows, it's returned
+    unchanged (sites=0) with a warning - never an unvalidated patch."""
+    import iamrule_code
+    try:
+        patched, sites = iamrule_code.add_light_on_step_change(bytes(binary))
+    except ValueError as e:
+        print(f"guided_workout: light-on-step-change skipped ({e}); using the compiler's binary",
+              file=sys.stderr)
+        return list(binary), 0
+    return list(patched), sites
 
 
 def compile_workout(workout, lang=None):
@@ -176,8 +188,9 @@ def compile_workout(workout, lang=None):
     except urllib.error.URLError as e:
         raise SystemExit("couldn't reach the compiler (ambitappscompiler.azurewebsites.net) - "
                          f"the guidance binary needs an internet connection. ({e.reason})") from None
+    binary, light_sites = with_light_on_step_change(j["binary"])
     return {"name": workout["name"][:apps_name_len()], "activityId": activity_id,
-            "binary": j["binary"], "ruleId": j.get("ruleId")}
+            "binary": binary, "ruleId": j.get("ruleId"), "lightSites": light_sites}
 
 
 def apps_name_len():
