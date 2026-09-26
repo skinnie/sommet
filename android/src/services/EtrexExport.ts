@@ -23,8 +23,14 @@ type XY = [number, number];
 interface Pt { lat: number; lon: number; ele: number | null }
 interface Mark {
   i: number; wptI?: number; km: number; delta: number; label: string; kind: 'turn' | 'crossing';
-  name: string; desc: string; sym: string; event?: number; otherKm?: number[];
+  name: string; desc: string; sym: string; event?: number; passNo?: number; otherKm?: number[];
 }
+
+// Distinct per-pass symbol - a cue that survives GPS drift and screen zoom, unlike relying on
+// the offset position alone (untested assumption: whether the eTrex actually renders these
+// Garmin symbol names as visually distinct icons - confirm on hardware). Cycles for a 3rd+ pass
+// through the same spot (rare - only a real triple self-crossing would hit it).
+const PASS_SYM = ['Flag, Green', 'Flag, Yellow', 'Flag, Red', 'Flag, Blue'];
 
 export interface EtrexStats {
   mode: 'track' | 'route'; km: number; pointsIn: number; pointsOut: number;
@@ -227,20 +233,26 @@ function findCrossings(xy: XY[], along: number[], crossM: number, wptOffsetM: nu
   const events = new Map<number, number[]>();
   runs.forEach((_, r) => { const f = find(r); const l = events.get(f); if (l) l.push(r); else events.set(f, [r]); });
   const ordered = [...events.values()].sort((a, b) => runs[a[0]][0] - runs[b[0]][0]);
-  const out: { i: number; wptI: number; km: number; delta: number; label: string; event: number; otherKm: number[] }[] = [];
+  const out: { i: number; wptI: number; km: number; delta: number; label: string; event: number; passNo: number; otherKm: number[] }[] = [];
   ordered.forEach((rs, evNo) => {
     const kms = rs.map(r => along[runs[r][0]] / 1000);
-    for (const r of rs) {
+    // Passes in ride order - lets the 1st/2nd/3rd pass through this same spot get a visibly
+    // different marker (see PASS_SYM below), a cue that survives GPS drift and screen zoom,
+    // unlike relying on the offset position alone.
+    const rsInOrder = [...rs].sort((a, b) => runs[a][0] - runs[b][0]);
+    rsInOrder.forEach((r, idx) => {
+      const passNo = idx + 1;
       const a = runs[r][0]; const b = runs[r][runs[r].length - 1];
       const spots = along[b] - along[a] <= 60 ? [Math.floor((a + b) / 2)] : [a, b];
       for (const i of spots) {
         const d = spots.length === 1 ? headingChange(xy, a, b) : headingChange(xy, i, i);
         out.push({
-          i, wptI: offsetForward(along, i, wptOffsetM), km: along[i] / 1000, delta: d, label: label(d), event: evNo + 1,
+          i, wptI: offsetForward(along, i, wptOffsetM), km: along[i] / 1000, delta: d, label: label(d),
+          event: evNo + 1, passNo,
           otherKm: kms.filter(k => Math.abs(k - along[a] / 1000) > 0.05).map(k => Math.round(k * 10) / 10),
         });
       }
-    }
+    });
   });
   return out.sort((a, b) => a.i - b.i);
 }
@@ -282,7 +294,8 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
   }
   for (const c of crossings) {
     marks.push({
-      ...c, kind: 'crossing', name: `Cross ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`, sym: 'Flag, Red',
+      ...c, kind: 'crossing', name: `Cross ${NAME_WORD[c.label]} ${c.km.toFixed(1)}`,
+      sym: PASS_SYM[(c.passNo - 1) % PASS_SYM.length],
       desc: `Track crosses itself here (also at km ${c.otherKm.join(', ') || '-'}): ${WORDING[c.label].toLowerCase()} at ${c.km.toFixed(1)} km`,
     });
   }
