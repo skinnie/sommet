@@ -176,14 +176,14 @@ function label(d: number): string {
   return 'STR';
 }
 const WORDING: Record<string, string> = {
-  L: 'Turn left', R: 'Turn right', SL: 'Bear left', SR: 'Bear right',
+  L: 'Turn left', R: 'Turn right', SL: 'Slight left', SR: 'Slight right',
   SHL: 'Sharp left', SHR: 'Sharp right', U: 'U-turn', STR: 'Go straight',
 };
 // Spelled out, not the raw L/R/SL/SR code - a rider glancing at the map has no legend and the
 // fuller desc text isn't reliably shown by the eTrex UI (confirmed on hardware, 2026-09-25: only
 // the <name> is visible while navigating), so the visible name has to be self-explanatory alone.
 const NAME_WORD: Record<string, string> = {
-  L: 'Left', R: 'Right', SL: 'Bear left', SR: 'Bear right',
+  L: 'Left', R: 'Right', SL: 'Slight left', SR: 'Slight right',
   SHL: 'Sharp left', SHR: 'Sharp right', U: 'U-turn', STR: 'Straight',
 };
 
@@ -339,7 +339,7 @@ export function buildEtrexGpx(gpxXml: string, opts: EtrexOptions): EtrexResult {
       // A genuine out-and-back, not a fork - "bear left/right" would be the wrong vocabulary
       // here, so name it for what it actually is.
       marks.push({
-        ...c, kind: 'crossing', name: `${ordinal} Retrace ${c.edge} ${c.km.toFixed(1)}`, sym: c.sym!,
+        ...c, kind: 'crossing', name: `${ordinal} Backtrack ${c.edge} ${c.km.toFixed(1)}`, sym: c.sym!,
         desc: `You ride this same stretch again the other way (also at km ${c.otherKm.join(', ') || '-'}) - ${ordinal} time it ${c.edge} at ${c.km.toFixed(1)} km`,
       });
       continue;

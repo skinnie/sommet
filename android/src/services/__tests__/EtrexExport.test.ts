@@ -29,16 +29,16 @@ describe('buildEtrexGpx', () => {
   test('a figure of eight is one crossing, crossed straight', () => {
     const r = buildEtrexGpx(gpx([[-300, -300], [300, 300], [300, 600], [-300, 600], [-300, 300], [300, -300]]), { mode: 'track' });
     expect(r.stats.crossings).toBe(1);
-    expect(r.gpx).toMatch(/\d(st|nd|rd|th) (Straight|Bear)/);
+    expect(r.gpx).toMatch(/\d(st|nd|rd|th) (Straight|Slight)/);
   });
 
   test('a dead-end out-and-back is a retrace, not a fork', () => {
     const r = buildEtrexGpx(gpx([[0, 0], [400, 0], [0, 0]]), { mode: 'track' });
-    expect(r.gpx).toMatch(/1st Retrace starts/);
-    expect(r.gpx).toMatch(/1st Retrace ends/);
-    expect(r.gpx).toMatch(/2nd Retrace starts/);
-    expect(r.gpx).toMatch(/2nd Retrace ends/);
-    expect(r.gpx).not.toMatch(/Bear| Left | Right /);
+    expect(r.gpx).toMatch(/1st Backtrack starts/);
+    expect(r.gpx).toMatch(/1st Backtrack ends/);
+    expect(r.gpx).toMatch(/2nd Backtrack starts/);
+    expect(r.gpx).toMatch(/2nd Backtrack ends/);
+    expect(r.gpx).not.toMatch(/Slight| Left | Right /);
   });
 
   test('route mode respects the via-point cap', () => {
