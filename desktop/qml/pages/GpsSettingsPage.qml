@@ -20,6 +20,9 @@ PageFlickable {
 
     readonly property string kind: DeviceService.activeBikeKind
     readonly property bool isMagene: root.kind === "c406"
+    // The Aero 60 over Bluetooth (2026-09-26): profile + device settings, no USB data screens.
+    readonly property bool isBrytonBle: root.kind === "brytonble"
+    readonly property string brytonBleAddress: BikeDevices.brytonBle ? BikeDevices.brytonBle.address : ""
     readonly property string mageneAddress: BikeDevices.magene ? BikeDevices.magene.address : ""
     readonly property string deviceName: root.isMagene
         ? (BikeDevices.magene && BikeDevices.magene.name ? BikeDevices.magene.name : qsTr("Magene C406"))
@@ -99,24 +102,28 @@ PageFlickable {
                     width: parent.width; wrapMode: Text.WordWrap
                     text: profileSyncPrefs.value(root.kind + "_mode", "") === "auto"
                           ? qsTr("Kept in sync with intervals.icu automatically every time it's connected.")
-                          : qsTr("FTP, LTHR, max HR, weight, height, gender and age — compare with intervals.icu and pick the right values.")
+                          : root.isBrytonBle
+                            ? qsTr("FTP, LTHR, max HR, MAP, weight and height — compare with intervals.icu and pick the right values.")
+                            : qsTr("FTP, LTHR, max HR, weight, height, gender and age — compare with intervals.icu and pick the right values.")
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                 }
                 RoundedButton {
                     text: qsTr("Sync profile")
                     onClicked: {
-                        profileDialog.apiBase = root.isMagene ? "magene" : "bryton"
+                        profileDialog.apiBase = root.isMagene ? "magene" : root.isBrytonBle ? "brytonble" : "bryton"
                         profileDialog.deviceName = root.isMagene ? qsTr("Magene") : qsTr("Bryton")
-                        profileDialog.address = root.isMagene ? root.mageneAddress : ""
+                        profileDialog.address = root.isMagene ? root.mageneAddress
+                                              : root.isBrytonBle ? root.brytonBleAddress : ""
                         profileDialog.open()
                     }
                 }
             }
         }
 
-        // ---- Data screens ----
+        // ---- Data screens (the Bryton's are its USB files - cable only for now) ----
         Card {
             width: parent.width
+            visible: !root.isBrytonBle
             Loader {
                 width: parent.width
                 sourceComponent: root.isMagene ? mageneScreens : brytonScreens
@@ -124,6 +131,24 @@ PageFlickable {
         }
         Component { id: brytonScreens; BrytonScreensPanel { } }
         Component { id: mageneScreens; MageneScreensPanel { address: root.mageneAddress; shared: true; preloaded: root.mageneConfig } }
+
+        // ---- Bryton over Bluetooth: device settings ----
+        Card {
+            width: parent.width
+            visible: root.isBrytonBle
+            Loader {
+                width: parent.width
+                active: root.isBrytonBle
+                sourceComponent: Column {
+                    spacing: Theme.spacingSmall
+                    Text {
+                        text: qsTr("Device settings")
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                    }
+                    BrytonBleSettingsPanel { width: parent.width; address: root.brytonBleAddress }
+                }
+            }
+        }
 
         // ---- Magene only: device settings + altitude ----
         Card {

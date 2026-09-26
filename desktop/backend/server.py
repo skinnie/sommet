@@ -2449,10 +2449,16 @@ class Handler(BaseHTTPRequestHandler):
         profile (height/weight/birthday/FTP/MHR/LTHR/MAP) and settings."""
         body = body or {}
         address = body.get("address")
-        if body.get("action") != "hello" or not address:
-            self._send_json(400, {"ok": False, "error": "need action \"hello\" and an address"})
+        action = body.get("action")
+        if action not in ("hello", "set-settings") or not address:
+            self._send_json(400, {"ok": False, "error": "need action hello|set-settings and an address"})
             return
-        payload = self._magene_run("bryton_ble.py", ["hello", "--address", address], timeout=90)
+        if action == "set-settings":
+            code, out, err = run_tool("bryton_ble.py", ["set-settings", "--address", address],
+                                      timeout=90, stdin=json.dumps(body.get("settings") or {}))
+            payload = self._parse_last_json_line(out) or {"ok": False, "error": (err or "no answer")[-300:]}
+        else:
+            payload = self._magene_run("bryton_ble.py", ["hello", "--address", address], timeout=90)
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     _BRYTONBLE_FIELDS = ("ftp", "lthr", "max_hr", "map", "weight", "height")
@@ -2464,6 +2470,12 @@ class Handler(BaseHTTPRequestHandler):
         stores a birthday, and writing it isn't wired yet."""
         body = body or {}
         prof = body.get("device_profile") or {}
+        if not prof and body.get("address"):
+            read = self._magene_run("bryton_ble.py", ["hello", "--address", body["address"]], timeout=90)
+            if not read.get("ok"):
+                self._send_json(502, {"ok": False, "error": read.get("error") or "could not read the Bryton"})
+                return
+            prof = read.get("profile") or {}
         device = {f: prof.get(f) for f in self._BRYTONBLE_FIELDS}
         intervals = None
         aid, akey = body.get("athlete_id"), body.get("api_key")

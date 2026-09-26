@@ -247,7 +247,8 @@ Rectangle {
             NavItem {
                 width: parent.width
                 visible: DeviceService.bikeActive && (DeviceService.activeBikeKind === "bryton"
-                                                      || DeviceService.activeBikeKind === "c406")
+                                                      || DeviceService.activeBikeKind === "c406"
+                                                      || DeviceService.activeBikeKind === "brytonble")
                 glyph: Icons.settings
                 label: qsTr("GPS settings")
                 selected: root.currentPage === "gpsSettings"
