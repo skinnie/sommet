@@ -38,6 +38,7 @@ Plan JSON (dates are ISO YYYY-MM-DD; `workout` is workout.py's own schema unchan
     ./tools/training_calendar.py PLAN.json --sync --write         # actually erase + install
     ./tools/training_calendar.py PLAN.json --sync --today 2026-08-27 --write   # override "today"
     ./tools/training_calendar.py --list                           # show what's on the watch now
+    ./tools/training_calendar.py --remove "Light workout" --write # drop one manual native workout
 """
 import argparse
 import datetime
@@ -228,12 +229,62 @@ def sync(link, plan, today, write, json_out):
     return result
 
 
+def remove_native_entry(current_apps_bytes, name):
+    """Apps region with the native guided workout `name` taken out - for a manually installed
+    one the sync never touches (e.g. the Builder's "Light workout").
+
+    Only native entries (byte0 == 1) are removable, and only when no generic Suunto App sits
+    after them: sport-mode App displays point at generic apps by position, so removing an
+    entry in front of one would re-point that display at a different app."""
+    existing = WI.apps_entries_with_raw_blocks(current_apps_bytes)
+    idx = next((i for i, e in enumerate(existing) if e.get("name") == name), None)
+    if idx is None:
+        raise ValueError(f"no workout named {name!r} on the watch")
+    if existing[idx].get("reserved") != GW.GUIDANCE_ENTRY_TYPE:
+        raise ValueError(f"{name!r} is a Suunto App, not a native workout - not removed")
+    later_apps = [e.get("name") for e in existing[idx + 1:]
+                  if e.get("reserved") != GW.GUIDANCE_ENTRY_TYPE]
+    if later_apps:
+        raise ValueError(f"Suunto Apps after {name!r} would shift position ({later_apps}) - "
+                         "not removed")
+    return rebuild_apps_region([e["_raw_block"] for i, e in enumerate(existing) if i != idx])
+
+
+def remove(link, name, write, json_out):
+    mm = read_memory_map(link)
+    apps_base, apps_size = mm["Apps"]
+    current_apps = read_flash(link, apps_base, apps_size, label="Apps")
+    try:
+        new_apps_bytes = remove_native_entry(current_apps, name)
+    except ValueError as err:
+        result = {"ok": False, "error": str(err)}
+        print(json.dumps(result) if json_out else f"refused: {err}")
+        return result
+    result = {"ok": True, "removed": [name], "appsBytes": len(new_apps_bytes), "written": False}
+    result["remaining"] = [e["name"] for e in apps.decode(new_apps_bytes)]
+    if write:
+        import pathlib
+        backup = f"backups/Apps_pre_remove_{int(time.time())}.bin"
+        pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
+        open(backup, "wb").write(current_apps)
+        result["backup"] = backup
+        fi = FlashImage(); fi.write(apps_base, new_apps_bytes)
+        send_plan(link, fi, [("Apps", apps_base, new_apps_bytes), ("t", apps_base, None)],
+                  commit=False)
+        result["written"] = True
+    if json_out:
+        print(json.dumps(result))
+    else:
+        print(f"remove {name!r}: " + ("written" if write else "dry-run: pass --write to apply"))
+    return result
+
+
 def list_calendar(link, json_out):
     mm = read_memory_map(link)
     apps_base, apps_size = mm["Apps"]
     current_apps = read_flash(link, apps_base, apps_size, label="Apps")
     existing = WI.apps_entries_with_raw_blocks(current_apps)
-    managed = sorted(e["name"] for e in existing if is_managed(e["name"]))
+    managed = [e["name"] for e in existing if is_managed(e["name"])]  # watch (menu) order
     if json_out:
         print(json.dumps({"managed": managed}))
     else:
@@ -248,6 +299,8 @@ def main():
     ap.add_argument("plan", nargs="?", help="plan JSON file (see this file's docstring)")
     ap.add_argument("--sync", action="store_true", help="diff the plan against the watch")
     ap.add_argument("--list", action="store_true", help="list installed dated calendar workouts")
+    ap.add_argument("--remove", metavar="NAME",
+                    help="remove one native workout by its on-watch name (e.g. 'Light workout')")
     ap.add_argument("--today", metavar="YYYY-MM-DD", help="override today's date (testing)")
     ap.add_argument("--write", action="store_true", help="actually write (else dry-run)")
     ap.add_argument("--json", action="store_true", help="print one-line JSON (for a GUI)")
@@ -260,6 +313,8 @@ def main():
     if args.list:
         list_calendar(link, args.json)
         return 0
+    if args.remove:
+        return 0 if remove(link, args.remove, args.write, args.json).get("ok") else 1
 
     if not args.sync or not args.plan:
         ap.error("PLAN.json --sync is required (or use --list)")
