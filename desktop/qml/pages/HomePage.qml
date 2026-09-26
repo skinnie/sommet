@@ -205,6 +205,8 @@ PageFlickable {
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE)
                 return;
+            if (!root)          // Home was left while the C406 answered - ignore the late reply
+                return;
             root.mageneBusy = false;
             var r = null;
             try { r = JSON.parse(xhr.responseText); } catch (e) { r = null; }
