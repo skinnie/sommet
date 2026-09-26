@@ -29,7 +29,7 @@ describe('buildEtrexGpx', () => {
   test('a figure of eight is one crossing, crossed straight', () => {
     const r = buildEtrexGpx(gpx([[-300, -300], [300, 300], [300, 600], [-300, 600], [-300, 300], [300, -300]]), { mode: 'track' });
     expect(r.stats.crossings).toBe(1);
-    expect(r.gpx).toMatch(/Cross (Straight|Bear)/);
+    expect(r.gpx).toMatch(/\d(st|nd|rd|th) (Straight|Bear)/);
   });
 
   test('route mode respects the via-point cap', () => {
