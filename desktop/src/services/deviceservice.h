@@ -49,6 +49,9 @@ class DeviceService : public QObject
     // then target it), or -1 for "whichever is plugged".
     Q_PROPERTY(QVariantList connectedWatches READ connectedWatches NOTIFY connectedWatchesChanged)
     Q_PROPERTY(int selectedProductId READ selectedProductId NOTIFY connectedWatchesChanged)
+    // ...and which physical watch of that model (USB serial; "" = not pinned by serial). Two
+    // Ambit3 Peaks share productId 27 - only this tells the Home chips which one is active.
+    Q_PROPERTY(QString selectedSerial READ selectedSerial NOTIFY connectedWatchesChanged)
     // The unified "active device" model (André, 2026-09-04): a Garmin Edge / Hammerhead Karoo can
     // be the active device instead of a watch. When activeBikeKind is set ("edge"/"karoo"), the
     // app is focused on that bike computer - Home shows it, watch-only sections hide. Empty means
@@ -192,6 +195,7 @@ public:
     int batteryPercent() const { return m_batteryPercent; }
     QVariantList connectedWatches() const { return m_connectedWatches; }
     int selectedProductId() const { return m_selectedProductId; }
+    QString selectedSerial() const { return m_selectedSerial; }
     QString activeBikeKind() const { return m_activeBikeKind; }
     bool bikeActive() const { return !m_activeBikeKind.isEmpty(); }
 
@@ -203,11 +207,11 @@ public:
     Q_INVOKABLE void refreshDevices();
     // POST /api/device/select then re-read: pin every backend tool to this one watch when
     // several share the bus (productId < 0 clears the pin). Mirrors Android's selectWatch().
-    Q_INVOKABLE void selectWatch(int productId);
+    Q_INVOKABLE void selectWatch(int productId, const QString &serial = QString());
     // selectWatch() minus the "active device" hand-back: re-pins which watch the backend tools
     // target without taking the active device away from a bike computer (the heartbeat's own
     // fallback pin used to, flipping Home from the Bryton to the watch unasked).
-    void pinWatch(int productId);
+    void pinWatch(int productId, const QString &serial = QString());
     // Make a bike computer the active device ("edge"/"karoo"), or "" to hand back to the watch.
     Q_INVOKABLE void selectBikeComputer(const QString &kind);
 
@@ -361,6 +365,8 @@ private:
     int m_batteryPercent = -1;
     QVariantList m_connectedWatches;
     int m_selectedProductId = -1;
+    QString m_selectedSerial;
+    bool m_rememberedPickApplied = false;   // the remembered Home pick, restored once per session
     QString m_activeBikeKind;   // "" = watch active; "edge"/"karoo" = that bike computer active
 
     bool m_gpsOrbitBusy = false;

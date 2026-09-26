@@ -1334,14 +1334,20 @@ PageFlickable {
                         model: DeviceService.connectedWatches
                         delegate: DeviceChip {
                             required property var modelData
-                            label: modelData.name
+                            label: modelData.name + HomeViewModel.twinSuffix(modelData)
                             // Active only when no bike computer has taken over, and this is the
                             // pinned watch (or the connected one when nothing is explicitly pinned).
+                            // Same-model watches (two Peaks) are told apart by serial.
                             active: !DeviceService.bikeActive && !HomeViewModel.isGarmin
                                     && (DeviceService.selectedProductId >= 0
                                         ? modelData.productId === DeviceService.selectedProductId
+                                          && (DeviceService.selectedSerial.length === 0
+                                              || modelData.serial === DeviceService.selectedSerial)
                                         : DeviceService.model === modelData.codename)
-                            onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectWatch(modelData.productId) }
+                            onPicked: {
+                                HomeViewModel.garminPicked = false
+                                DeviceService.selectWatch(modelData.productId, modelData.serial || "")
+                            }
                         }
                     }
                     // Garmin eTrex (USB mass storage)

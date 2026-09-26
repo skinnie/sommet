@@ -99,6 +99,13 @@ QtObject {
     // be told apart; the send pins that exact watch (RouteService.uploadPendingRouteTo). Ambit1/2
     // and Kailash can't take routes. With no USB watch but one on Bluetooth, that one watch
     // (productId -1 = the backend's current, BLE, connection).
+    // " · 0900" (the serial's last 4) when another plugged watch is the same model, else "" -
+    // so two Ambit3 Peaks read as two different chips / menu rows (André, 2026-09-26).
+    function twinSuffix(w) {
+        const ws = DeviceService.connectedWatches || []
+        return w && w.serial && ws.filter(x => x.codename === w.codename).length > 1
+            ? " · " + w.serial.slice(-4) : ""
+    }
     readonly property var routeWatches: {
         const ws = DeviceService.connectedWatches || []
         const noRoutes = ["Bluebird", "Duck", "Colibri", "Greentit", "Hoopoe"]
@@ -106,10 +113,8 @@ QtObject {
             return connected && DeviceCapabilities.supportsRouteWrite
                 ? [{ productId: -1, serial: "", label: deviceDisplayName }] : []
         return ws.filter(w => noRoutes.indexOf(w.codename) < 0).map(w => {
-            const name = displayNameForModel(w.codename) || w.name
-            const twin = ws.filter(x => x.codename === w.codename).length > 1
             return { productId: w.productId, serial: w.serial || "",
-                     label: twin && w.serial ? name + " · " + w.serial.slice(-4) : name }
+                     label: (displayNameForModel(w.codename) || w.name) + twinSuffix(w) }
         })
     }
 
