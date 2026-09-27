@@ -201,6 +201,13 @@ Item {
             }
         }
 
+        // The weather it was done in (Open-Meteo history + wind along the track).
+        ActivityWeather {
+            x: Theme.spacingLarge
+            activity: root.activity
+            track: root._resolvedTrack
+        }
+
         Row {
             x: Theme.spacingLarge
             spacing: Theme.spacingMedium

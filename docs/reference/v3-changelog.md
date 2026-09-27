@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: The weather each move was done in (desktop 0.2.39)
+
+André, 2026-09-27, on OpenAthlete attaching weather history to every activity: "2 super nice".
+
+- **A weather line under every activity's map**: conditions, temperature range, rain, mean wind
+  with direction and gusts, and how much of the track went into / across / with the wind (the
+  same 60°/120° split as the race planner's weather). Asked once from Open-Meteo at the track's
+  first point, for the hours the move spans (start and end in UTC; intervals.icu rows' local
+  times are converted).
+- **Archive first, and cached for good.** Moves older than ~6 days use Open-Meteo's historical
+  archive (ERA5); those answers never change, so they're written to `activity-weather.json` next
+  to activities.db and never asked again. Newer moves use the forecast API's recent past, kept
+  in memory only until the archive has them. Moves without GPS (indoor, pool) show nothing;
+  offline, the line just stays hidden.
+- Checked against Open-Meteo by hand: the 2026-09-23 37 km ride (10:15-11:28 UTC) shows
+  "Overcast · 18–21 °C · 8 km/h S (gusts 19)", exactly the 10:00/11:00 hours (18.3/20.5 °C,
+  9.0/6.8 km/h from 204°/194°, gusts 19.4, code 3). The 2026-08-20 Karoo ride came from the
+  archive and was cached.
+- Credit: the idea from [OpenAthlete](https://github.com/openathleteorg/openathlete)'s weather
+  processor (AGPL - idea and API choice only, no code copied); data Open-Meteo (CC BY 4.0).
+
 ## 2026-09-27: Coach readiness without intervals.icu - on-device HR load (desktop 0.2.38)
 
 André, 2026-09-27, on taking OpenAthlete's transparent training load: "nice, but keep

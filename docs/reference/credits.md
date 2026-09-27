@@ -143,7 +143,9 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   is where the Coach's on-device fallback comes from: when intervals.icu is not connected, each
   move's load is Banister's TRIMP from its average HR (duration when there is none), fed into
   the same 42/7-day CTL/ATL curves. Only the published formula was taken - no code was copied,
-  since AGPL code cannot be pasted into this GPL-3.0 app without carrying the AGPL's terms.
+  since AGPL code cannot be pasted into this GPL-3.0 app without carrying the AGPL's terms. Its weather
+  processor is also where the per-activity weather line comes from (historical Open-Meteo for the
+  hours a move spans) - again the idea only.
 
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
