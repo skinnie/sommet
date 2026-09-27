@@ -1123,6 +1123,11 @@ class Handler(BaseHTTPRequestHandler):
             data["entries"].append({"ts": now, "type": "meal", "name": body.get("name", "Meal"),
                                     "kcal": int(body.get("kcal", 0)), "protein": int(body.get("protein", 0)),
                                     "carbs": int(body.get("carbs", 0)), "fat": int(body.get("fat", 0))})
+            # Eating ends a fast (the meal dialog says so first) - same rule as a fast-breaking drink.
+            if body.get("breaksFast"):
+                for f in data["fasts"]:
+                    if f.get("end") is None:
+                        f["end"] = now
         elif typ == "drink":
             # a specific beverage from the fast-aware drinks list; counts as a coffee/water where
             # relevant, and ends the fast if it breaks it (same behaviour as the phone app).

@@ -55,7 +55,7 @@ export type LogBody =
   | { type: 'coffee' }
   | { type: 'coffee-undo' }
   | { type: 'water'; volumeMl?: number }
-  | { type: 'meal'; name?: string; kcal?: number; protein?: number; carbs?: number; fat?: number }
+  | { type: 'meal'; name?: string; kcal?: number; protein?: number; carbs?: number; fat?: number; breaksFast?: boolean }
   | { type: 'drink'; name?: string; kcal?: number; caffeineMg?: number; volumeMl?: number; isCoffee?: boolean; breaksFast?: boolean }
   | { type: 'fast-start'; goalHours?: number }
   | { type: 'fast-end' };
@@ -108,6 +108,8 @@ export function applyLog(data: EmberData, body: LogBody): EmberData {
         ts: now, type: 'meal', name: body.name ?? 'Meal', kcal: Math.round(body.kcal ?? 0),
         protein: Math.round(body.protein ?? 0), carbs: Math.round(body.carbs ?? 0), fat: Math.round(body.fat ?? 0),
       });
+      // Eating ends a fast (the meal sheet says so first) - same rule as a fast-breaking drink.
+      if (body.breaksFast) for (const f of data.fasts) if (f.end === null) f.end = now;
       break;
     case 'drink': {
       const et = body.isCoffee ? 'coffee' : (body.volumeMl ? 'water' : 'drink');

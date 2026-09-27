@@ -349,6 +349,10 @@ Services and libraries the app talks to at runtime:
   export, the wellness and weight feeds, and the profile/activity-level writes to the watch.
 - **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** — the Wahoo SYSTM
   workout catalogue the Coach can read from (its offline sample ships as `coach/data/`).
+- **[Open Food Facts](https://world.openfoodfacts.org/)** (database under ODbL) and **[USDA FoodData Central](https://fdc.nal.usda.gov/)**
+  (public domain) — the food search behind Ember's meal logging. The idea came from
+  [SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness); none of its code is used (its
+  licence is non-commercial, incompatible with GPL-3.0).
 - **[Anthropic Claude API](https://www.anthropic.com/api)** — optional, powers the Coach chat
   when you supply your own API key. The app works fully without it.
 - **[Qt](https://www.qt.io/)** (LGPLv3) — the desktop app's UI framework; **React Native** for

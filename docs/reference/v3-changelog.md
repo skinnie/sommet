@@ -7,6 +7,26 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Ember - log a meal from a food database (desktop 0.2.41)
+
+André, 2026-09-27: "go for ember" (issue #20).
+
+- **Tap "kcal in" to log a meal** (both apps; there was no meal logging before). Search by name,
+  or type/scan a barcode - on the desktop a USB barcode scanner types into the box, so it just
+  works. Pick a food, set the grams, and kcal / protein / carbs / fat are filled in. Recent picks
+  show while the box is empty, offline too; "Just kcal" logs a plain number when nothing matches.
+- **Sources:** Open Food Facts (packaged products, barcodes; ODbL, attributed in the dialog) and
+  USDA FoodData Central (generic foods; public domain), everything normalised to per 100 g.
+  Results ranked by how many query words the name contains, then shortest name - "banana raw"
+  now leads with USDA's "Bananas, raw" instead of branded granola.
+- **A meal ends an active fast** (the dialog says so first), like a fast-breaking drink. Backend
+  and Android store both, checked in isolation (throwaway HOME / jest) - no test entry was written
+  to the real Ember store or the NAS.
+- Why not SparkyFitness's code: its licence is non-commercial only, which GPL-3.0 can't carry -
+  same databases, queried directly.
+- Still open on #20: camera barcode scanning on Android (needs a native camera dependency and a
+  phone build).
+
 ## 2026-09-27: Sleep score (desktop 0.2.40)
 
 André, 2026-09-27, on Train Libre's Sleep Health Score: "5 yes why not".

@@ -8,6 +8,7 @@ import {
   loadEmber, saveEmber, applyLog, emberSummary, EmberData, EmberSummary, LogBody,
 } from '../services/EmberStore';
 import { syncEmberNas } from '../services/EmberSync';
+import { EmberMealModal } from '../components/EmberMealModal';
 
 // Ember - the interactive logger, matching desktop/qml/pages/EmberPage.qml (2026-08-27, André:
 // full feature parity). Fasting start/stop, one-tap coffee/water tiles with long-press menus,
@@ -47,6 +48,7 @@ export default function EmberScreen() {
     days: [], fasts: [] });
   const [now, setNow] = useState(Date.now());
   const [menu, setMenu] = useState<null | 'coffee' | 'water'>(null);
+  const [mealOpen, setMealOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -119,7 +121,7 @@ export default function EmberScreen() {
     >
       <Text style={{ color: t.text, fontSize: v3Type.title, fontWeight: '700' }}>Ember</Text>
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginBottom: v3Spacing.medium }}>
-        Tap a tile to log · long-press coffee or water for more
+        Tap a tile to log · long-press coffee or water for more · tap kcal for a meal
       </Text>
 
       <View style={styles.tiles}>
@@ -137,10 +139,11 @@ export default function EmberScreen() {
         </Pressable>
 
         {/* Calories */}
-        <View style={[styles.tile, nested]}>
+        <Pressable style={[styles.tile, nested]} onPress={() => setMealOpen(true)}>
           <Text style={[styles.val, { color: t.text }]}>{today.kcal}</Text>
           <Text style={[styles.sub, { color: t.mutedText }]}>kcal in</Text>
-        </View>
+          <Text style={{ color: t.success, fontSize: v3Type.tiny, fontWeight: '700' }}>tap + meal</Text>
+        </Pressable>
 
         {/* Coffee */}
         <Pressable style={[styles.tile, nested]}
@@ -187,6 +190,10 @@ export default function EmberScreen() {
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
         Logged here and synced with the Ember store on your other devices.
       </Text>
+
+      {/* Meal: food search (Open Food Facts + USDA), issue #20 */}
+      <EmberMealModal visible={mealOpen} fasting={fasting} onClose={() => setMealOpen(false)}
+        onLog={m => log({ type: 'meal', ...m, breaksFast: true })} />
 
       {/* Coffee / water menu */}
       <Modal visible={menu !== null} transparent animationType="fade" onRequestClose={() => setMenu(null)}>

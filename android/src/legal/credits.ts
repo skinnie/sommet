@@ -100,6 +100,16 @@ export const CREDITS: CreditEntry[] = [
     description: 'The sleep score is a port of its Sleep Health Score engine (GPL-3.0).',
   },
   {
+    name: 'Open Food Facts',
+    url: 'https://world.openfoodfacts.org/',
+    description: "Ember's meal search by name and barcode. Database © Open Food Facts contributors (ODbL).",
+  },
+  {
+    name: 'USDA FoodData Central',
+    url: 'https://fdc.nal.usda.gov/',
+    description: "Generic foods for Ember's meal search (public domain).",
+  },
+  {
     name: 'OpenStreetMap',
     url: 'https://www.openstreetmap.org/copyright',
     description:

@@ -154,6 +154,14 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   (`desktop/src/services/sleepscore.cpp`) and TypeScript (`android/src/services/SleepScore.ts`).
   Same licence as this app, so the port is a straightforward GPL-3.0 derivative, credited here.
 
+- **[Open Food Facts](https://world.openfoodfacts.org/)** - Ember's meal search (by name, and by
+  barcode) queries its public API. The database is © Open Food Facts contributors under the Open
+  Database License (ODbL); the meal dialogs show that attribution. **[USDA FoodData
+  Central](https://fdc.nal.usda.gov/)** (public domain / CC0) supplies the generic foods ("Bananas,
+  raw"). The idea of pairing the two for a meal logger came from
+  **[CodeWithCJ/SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness)**; none of its code is
+  used - its licence allows non-commercial use only, which cannot be combined with GPL-3.0.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 

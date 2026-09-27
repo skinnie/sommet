@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.40 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.41 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -198,6 +198,7 @@ qt_add_qml_module(ambitapp
         qml/components/PagePlaceholder.qml
         qml/components/WeatherCard.qml
         qml/components/ActivityWeather.qml
+        qml/components/EmberMealDialog.qml
         qml/components/MapView.qml
         qml/components/ActivityCard.qml
         qml/components/ActivityDetail.qml
@@ -261,6 +262,8 @@ qt_add_qml_module(ambitapp
         src/services/activityweatherservice.cpp
         src/services/sleepscore.h
         src/services/sleepscore.cpp
+        src/services/emberfoodservice.h
+        src/services/emberfoodservice.cpp
         src/services/activityservice.h
         src/services/activityservice.cpp
         src/services/gearservice.h

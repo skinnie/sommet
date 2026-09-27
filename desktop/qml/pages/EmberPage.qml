@@ -87,11 +87,13 @@ PageFlickable {
 
     // a small reusable stat tile
     component Tile: Card {
+        id: tile
         property color accent: Theme.accent
         property string value: ""
         property string sub: ""
         property string tapHint: ""
         default property alias body: hole.data
+        signal tapped()   // only wired when the tile shows a tapHint
         width: 100; height: 118; padding: Theme.spacingSmall
         Column {
             anchors.centerIn: parent; spacing: 2; width: parent.width
@@ -101,6 +103,7 @@ PageFlickable {
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: sub; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
             Text { visible: tapHint !== ""; anchors.horizontalCenter: parent.horizontalCenter; text: tapHint; color: accent; font.pixelSize: Theme.fontSizeCaption; font.bold: true; topPadding: 2 }
         }
+        MouseArea { anchors.fill: parent; enabled: tapHint !== ""; cursorShape: Qt.PointingHandCursor; onClicked: tile.tapped() }
     }
 
     Column {
@@ -148,7 +151,12 @@ PageFlickable {
                             onClicked: { if (root.fasting) stopDlg.open(); else root.postLog({ "type": "fast-start", "goalHours": 16 }) } }
             }
 
-            Tile { width: parent.cw; accent: Theme.success; value: "" + root.tToday("kcal", 0); sub: qsTr("kcal in") }
+            // kcal - tap to log a meal (food search, issue #20)
+            Tile {
+                width: parent.cw; accent: Theme.success; value: "" + root.tToday("kcal", 0); sub: qsTr("kcal in")
+                tapHint: qsTr("tap + meal")
+                onTapped: mealDlg.open()
+            }
 
             // coffee - tap anywhere on the tile to add one
             Card {
@@ -201,6 +209,12 @@ PageFlickable {
             Card { width: parent.cw
                 EmberBars { width: parent.width; label: qsTr("Water (litres)"); unit: " L"; goal: 2.5; decimals: 1; barColor: Theme.accent; series: root.daySeries("waterL") } }
         }
+    }
+
+    EmberMealDialog {
+        id: mealDlg
+        fasting: root.fasting
+        onLogMeal: (m) => root.postLog(Object.assign({ "type": "meal", "breaksFast": true }, m))
     }
 
     ThemedDialog {
