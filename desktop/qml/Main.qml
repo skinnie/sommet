@@ -83,6 +83,12 @@ ApplicationWindow {
         property: "demoRoot"
         value: DeviceService.demoGarminRoot
     }
+    // Testing mode's sample activities are listed only while Testing mode is on.
+    Binding {
+        target: ActivityService
+        property: "showDemo"
+        value: DeviceService.demoMode
+    }
     // An eTrex picked in Home's switcher stops being the pick once it's unplugged, so plugging
     // it back in later doesn't silently take over from the watch.
     Connections {

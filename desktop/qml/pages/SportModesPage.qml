@@ -559,8 +559,9 @@ PageFlickable {
                                 // not the built-in system screens - matches SuuntoLink's
                                 // own real reported counts exactly (see that module's
                                 // system_tail_length() docstring).
-                                text: qsTr("%1 display(s)").arg(
-                                    modeCard.modelData.displays.filter(d => !d.isBuiltIn).length)
+                                readonly property int nDisplays:
+                                    modeCard.modelData.displays.filter(d => !d.isBuiltIn).length
+                                text: nDisplays === 1 ? qsTr("1 display") : qsTr("%1 displays").arg(nDisplays)
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.fontSizeCaption
                             }

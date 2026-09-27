@@ -64,7 +64,10 @@ Item {
                     var yMin = ys[0], yMax = ys[0];
                     for (var j = 1; j < ys.length; ++j) { if (ys[j] < yMin) yMin = ys[j]; if (ys[j] > yMax) yMax = ys[j]; }
                     if (root.goal > 0) { if (root.goal > yMax) yMax = root.goal; if (root.goal < yMin) yMin = root.goal; }
+                    var dataMin = yMin;
                     var pad = Math.max(1, (yMax - yMin) * 0.15); yMin -= pad; yMax += pad;
+                    // Counts, weights, heart rates never go below zero - the axis shouldn't either.
+                    if (dataMin >= 0 && yMin < 0) yMin = 0;
                     var padL = 46, padR = 12, padT = 12, padB = 22, pW = W - padL - padR, pH = H - padT - padB;
                     function px(t) { return padL + (t - xMin) / (xMax - xMin) * pW; }
                     function py(v) { return padT + (1 - (v - yMin) / (yMax - yMin)) * pH; }
@@ -76,9 +79,13 @@ Item {
                         ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
                         ctx.fillText(Math.round(vy).toString(), padL - 6, y);
                     }
-                    ctx.textAlign = "center"; ctx.textBaseline = "top";
-                    ctx.fillText(s[0].date, padL, H - padB + 4);
-                    ctx.fillText(s[s.length - 1].date, W - padR, H - padB + 4);
+                    // dd/mm/yyyy like the rest of the app; the end labels hug their edges so the
+                    // last one isn't clipped by the card.
+                    function dmy(iso) { var p = String(iso).slice(0, 10).split("-");
+                                        return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso; }
+                    ctx.textBaseline = "top";
+                    ctx.textAlign = "left"; ctx.fillText(dmy(s[0].date), padL, H - padB + 4);
+                    ctx.textAlign = "right"; ctx.fillText(dmy(s[s.length - 1].date), W - padR, H - padB + 4);
                     ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.5);
                     ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
                     ctx.strokeStyle = root.lineColor; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
@@ -139,7 +146,7 @@ Item {
                         anchors.centerIn: parent
                         spacing: 1
                         readonly property var p: parent.pt
-                        Text { text: tipCol.p ? tipCol.p.date : ""
+                        Text { text: tipCol.p ? String(tipCol.p.date).slice(0, 10).split("-").reverse().join("/") : ""
                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeTiny }
                         Text { text: tipCol.p ? (Math.round(tipCol.p.value * 10) / 10) + root.unit : ""
                                color: root.lineColor; font.pixelSize: Theme.fontSizeCaption; font.bold: true }

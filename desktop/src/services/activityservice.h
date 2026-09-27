@@ -58,6 +58,9 @@ class ActivityService : public QObject
     // startTime (ISO string, from the first track point, empty if none),
     // track: [{lat, lon, ele}, ...], gpxText, fitBase64}
     Q_PROPERTY(QVariantList activities READ activities NOTIFY activitiesChanged)
+    // Testing mode's sample moves (device "demo") are listed only while this is on - bound to
+    // DeviceService.demoMode in main.qml.
+    Q_PROPERTY(bool showDemo READ showDemo WRITE setShowDemo NOTIFY activitiesChanged)
 
 public:
     explicit ActivityService(QObject *parent = nullptr);
@@ -69,6 +72,11 @@ public:
     QVariantList activities() const { return m_activities; }
 
     Q_INVOKABLE void refresh();
+    // A GPX track built from the stored GPS points, for moves that came without a GPX/FIT file
+    // (intervals.icu imports): positions and elevation only, no timestamps. Empty if no track.
+    Q_INVOKABLE QString trackGpx(int idx, const QString &device, const QString &name) const;
+    bool showDemo() const { return m_showDemo; }
+    void setShowDemo(bool on) { if (on == m_showDemo) return; m_showDemo = on; dbLoadAll(); emit activitiesChanged(); }
 
     // One activity's decimated GPS track ({track: [{lat,lon}...], count: int}), parsed on demand
     // from the DB. Tracks are no longer loaded up front (that cost ~3 s for a big history); the
@@ -260,6 +268,7 @@ private:
                   const QString &gpxText, const QString &fitBase64,
                   const QString &ruleOutputsJson);
     bool dbLoadAll();
+    bool m_showDemo = false;
     QVariantMap fetchTrack(int idx, const QString &device);
     // Extracts the resting-HRV readings (5+5 / lie-still tests, hrvResting == 1) from the
     // loaded activities and persists them to QSettings health/watchHrv as [{date,value}], where

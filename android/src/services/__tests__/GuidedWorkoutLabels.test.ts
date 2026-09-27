@@ -10,6 +10,6 @@ test('withDefaultLabels fills only empty real steps', () => {
     { type: { typeName: 'repeatEnd' } },
   ] };
   const out = withDefaultLabels(wk);
-  expect(out.steps.map((s: any) => s.text)).toEqual(['Warmup', undefined, 'Fast', 'Recovery', undefined]);
+  expect(out.steps.map((s: any) => s.text)).toEqual(['Warm up', undefined, 'Fast', 'Recovery', undefined]);
   expect(wk.steps[0].text).toBeUndefined();  // the stored plan is left alone
 });

@@ -146,9 +146,13 @@ PageFlickable {
                     color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
                     text: SyncService.busy && !root.haveSource
                         ? qsTr("Reading…")
-                        : qsTr("Choose a saved backup to copy from, or plug in the watch you want " +
-                               "to copy the setup FROM and read it now. Reading only reads — it " +
-                               "changes nothing.")
+                        // Only mention backups when one can actually be picked below.
+                        : root.sourceBackups.length > 0
+                          ? qsTr("Choose a saved backup to copy from, or plug in the watch you want " +
+                                 "to copy the setup FROM and read it now. Reading only reads — it " +
+                                 "changes nothing.")
+                          : qsTr("Plug in the watch you want to copy the setup FROM and read it. " +
+                                 "Reading only reads — it changes nothing.")
                 }
 
                 // Read the plugged-in watch as the base. Explicit button (André, 2026-09-12:

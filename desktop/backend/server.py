@@ -1703,7 +1703,9 @@ class Handler(BaseHTTPRequestHandler):
         shrank (wrapped/reset) since the caller's known_count was recorded, old cached
         indices no longer mean the same activity, and the caller has to ask again with 0."""
         if demo_ambit():
-            self._send_json(200, demo_json("activities.json"))
+            # Tagged "demo" so the app keeps these sample moves apart from real ones (and hides
+            # them outside Testing mode) - untagged they were saved with no device, 14 times over.
+            self._send_json(200, {**demo_json("activities.json"), "device": "demo"})
             return
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         known_count = query.get("known_count", ["0"])[0]

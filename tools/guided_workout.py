@@ -108,8 +108,9 @@ UNITS_LANGUAGE_CODES = {0: "da", 1: "de", 2: "en", 3: "es", 4: "fr", 5: "it", 6:
                         15: "pl", 16: "ru"}
 
 PHASE_LABELS_BY_LANG = {
-    "en": {"warmup": "Warmup", "interval": "Interval", "recovery": "Recovery",
-           "rest": "Rest", "cooldown": "Cooldown"},
+    # Same words as the editors' step types (Warm up / Cool down), so what you pick is what shows.
+    "en": {"warmup": "Warm up", "interval": "Interval", "recovery": "Recovery",
+           "rest": "Rest", "cooldown": "Cool down"},
     # Add a language's four exact Suunto words to localize it, e.g.
     #   "pt": {"warmup": "Aquecimento", "interval": "Intervalo", "recovery": "Recuperacao",
     #          "rest": "Descanso", "cooldown": "Arrefecimento"},

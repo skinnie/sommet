@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtCore
 import AmbitApp
 
 // Training Program - real request, 2026-08-12 (André: "how can we build from scratch a
@@ -332,7 +333,33 @@ Item {
         return y + "-" + mm + "-" + dd
     }
 
-    Component.onCompleted: { TrainingProgramService.refreshPlans(); root.pollBryton() }
+    // The plan being edited survives a restart or leaving the page (André's audit, 2026-09-27:
+    // it came back empty, with nothing saying it had to be saved). Every change is kept as a
+    // draft; "Save" still stores it as a named plan.
+    Settings {
+        id: draftStore
+        category: "trainingProgram"
+        property string draft: ""
+    }
+    property bool _draftRestored: false
+    function saveDraft() {
+        if (!root._draftRestored) return
+        draftStore.draft = JSON.stringify({ name: root.planName, entries: root.entries })
+    }
+    onEntriesChanged: saveDraft()
+    onPlanNameChanged: saveDraft()
+
+    Component.onCompleted: {
+        try {
+            const d = draftStore.draft ? JSON.parse(draftStore.draft) : null
+            if (d && Array.isArray(d.entries)) {
+                if (d.name) root.planName = d.name
+                root.entries = d.entries
+            }
+        } catch (e) { /* a broken draft just starts empty */ }
+        root._draftRestored = true
+        TrainingProgramService.refreshPlans(); root.pollBryton()
+    }
 
     // ---- month navigation (CalendarPage's own model) --------------------------------
     readonly property date today: new Date()
@@ -799,12 +826,11 @@ Item {
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("One sync does both halves of a Movescount sync. Each "
-                                   + "workout installs as a native guided workout in the sport "
-                                   + "mode's WORKOUT menu (hold [Next] to pick it), rotating in "
-                                   + "as its date approaches; and every dated move is written as "
-                                   + "the watch's own “Today” planned-move card, shown "
-                                   + "on the time screen with [Next] on its day.")
+                        text: qsTr("Sync to watch puts your next workouts (5 at a time) in the "
+                                   + "watch's WORKOUT menu: start the sport, hold [Next], pick "
+                                   + "WORKOUT. It also shows a “Today” card on the time "
+                                   + "screen on each workout's day. Sync again after training to "
+                                   + "bring the next ones in.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
                     }
@@ -823,6 +849,12 @@ Item {
                             id: modePicker
                             width: parent.width * 0.3
                             model: root.workoutModes
+                            // Running by default (Suunto ActivityID 3), not whichever mode happens
+                            // to be first on the watch (Cycling on André's).
+                            currentIndex: {
+                                const run = CustomModesService.modes.find(m => m.activityId === 3)
+                                return run ? Math.max(0, root.workoutModes.indexOf(run.name)) : 0
+                            }
                             Component.onCompleted: CustomModesService.refresh()
                         }
                         Text {
@@ -1033,8 +1065,10 @@ Item {
     // ---- per-day workout editor ----------------------------------------------------
     ThemedDialog {
         id: editor
-        title: device ? qsTr("Workout for %1 · %2").arg(editDate).arg(root.deviceLabels[device])
-                      : qsTr("Workout for %1").arg(editDate)
+        // dd/mm/yyyy like the rest of the app.
+        readonly property string editDateShown: editDate.split("-").reverse().join("/")
+        title: device ? qsTr("Workout for %1 · %2").arg(editDateShown).arg(root.deviceLabels[device])
+                      : qsTr("Workout for %1").arg(editDateShown)
         anchors.centerIn: parent
         width: Math.min(parent.width - Theme.spacingLarge * 2, 720)
 
@@ -1054,8 +1088,8 @@ Item {
         // Backlight flashes only exist on the Suunto guided workout (guided_workout.py adds them
         // when compiling); the watch's own beeps aren't configurable, so they're only explained.
         readonly property bool forSuunto: device === "" || device === "suunto"
-        readonly property var phaseWord: ({ warmup: "Warmup", interval: "Interval",
-                                            recovery: "Recovery", cooldown: "Cooldown" })
+        readonly property var phaseWord: ({ warmup: "Warm up", interval: "Interval",
+                                            recovery: "Recovery", cooldown: "Cool down" })
         readonly property var limitWord: ({ hr: qsTr("HR"), pace: qsTr("pace"), speed: qsTr("speed"),
                                             power: qsTr("power"), cadence: qsTr("cadence") })
         readonly property string stepLightInfo: qsTr(
@@ -1092,7 +1126,7 @@ Item {
                                                qsTr("Until HR below (bpm)")]
         readonly property var targetKinds: ["none", "hr", "pace", "speed",
                                             "vertical_speed", "power", "cadence"]
-        readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate"),
+        readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate (bpm)"),
                                              qsTr("Pace (min/km)"), qsTr("Speed (km/h)"),
                                              qsTr("Vertical speed"), qsTr("Power (W)"),
                                              qsTr("Cadence (rpm)")]
@@ -1337,17 +1371,25 @@ Item {
                             visible: !stepRow.isRepeat
                                      && stepRow.modelData.targetKind !== "none"
                             width: parent.width * 0.08
-                            text: String(stepRow.modelData.targetMin)
+                            // Empty (not "0") until set, so the "min"/"max" hints show.
+                            text: stepRow.modelData.targetMin ? String(stepRow.modelData.targetMin) : ""
                             placeholderText: qsTr("min")
                             validator: DoubleValidator { bottom: 0 }
                             onTextEdited: editor.mutate(stepRow.index,
                                                         { targetMin: Number(text) })
                         }
+                        Text {
+                            visible: !stepRow.isRepeat
+                                     && stepRow.modelData.targetKind !== "none"
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "–"
+                            color: Theme.text
+                        }
                         RoundedTextField {
                             visible: !stepRow.isRepeat
                                      && stepRow.modelData.targetKind !== "none"
                             width: parent.width * 0.08
-                            text: String(stepRow.modelData.targetMax)
+                            text: stepRow.modelData.targetMax ? String(stepRow.modelData.targetMax) : ""
                             placeholderText: qsTr("max")
                             validator: DoubleValidator { bottom: 0 }
                             onTextEdited: editor.mutate(stepRow.index,

@@ -105,6 +105,12 @@ def do_health(days, tokens_dir):
                   ["restingHeartRate", "value"])
     steps = _series(lambda: client.get_daily_steps(start, end),
                     ["totalSteps", "steps", "value"])
+    # A day with 0 steps is a day no Garmin wearable was worn - only an Edge ride was uploaded.
+    # Garmin still fills in a "resting HR" for it, taken from the ride's heart rate (91-126 bpm
+    # seen, André 2026-09-27), and 0 steps. Neither is a daily reading, so drop both.
+    worn = {r["date"] for r in steps if r["value"]}
+    steps = [r for r in steps if r["value"]]
+    rhr = [r for r in rhr if r["date"] in worn]
 
     # HRV (last-night average): get_hrv_data_range returns a dict whose hrvSummaries hold a
     # per-day record. Best-effort - shapes vary by account/firmware, so pull defensively.

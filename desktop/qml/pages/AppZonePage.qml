@@ -205,8 +205,9 @@ PageFlickable {
                     font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("Each Suunto App on a sport mode can log its output into every "
                                 + "recorded Move - it then shows up on the activity's Charts, in "
-                                + "the exported FIT, and as an intervals.icu custom stream. On by "
-                                + "default; turn it off here for any app you don't want recorded.")
+                                + "the exported FIT, and as an intervals.icu custom stream. Apps "
+                                + "installed from Sommet start with it on; the switches below show "
+                                + "what each app on the watch does now.")
                 }
 
                 // One row per activated app, grouped visually by mode via the small mode label.

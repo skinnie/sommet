@@ -1483,7 +1483,12 @@ PageFlickable {
                     text: root.reachableCount === 0 ? qsTr("No device connected")
                           : root.reachableCount === 1 && deviceStrip.deviceCount <= 1
                             ? qsTr("1 device connected")
-                            : qsTr("%1 devices connected — tap to switch:").arg(root.reachableCount)
+                            // Asleep devices still get a chip, so say so rather than a count
+                            // that doesn't match the chips below ("2 connected" over 3 chips).
+                            : deviceStrip.deviceCount > root.reachableCount
+                              ? qsTr("%1 connected, %2 asleep — tap to switch:")
+                                    .arg(root.reachableCount).arg(deviceStrip.deviceCount - root.reachableCount)
+                              : qsTr("%1 devices connected — tap to switch:").arg(root.reachableCount)
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
@@ -2317,7 +2322,14 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingMedium
 
-                    Icon { glyph: Icons.activities; size: 28; color: Theme.primary }
+                    // The move's own sport badge (a pool swim used to show the generic runner).
+                    ActivityBadge {
+                        activityId: lastActivityColumn.activity
+                            ? ActivityTypes.displayId(lastActivityColumn.activity.name,
+                                                      lastActivityColumn.activity.sportTypeRaw) : 1
+                        size: 28
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
 
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
@@ -2343,30 +2355,25 @@ PageFlickable {
                     }
                 }
 
+                // Labelled like the "This year" card: label above, value below.
                 Row {
                     visible: !lastActivityCard.activityLoading && lastActivityColumn.activity !== null
                     width: parent.width
                     spacing: Theme.spacingLarge
-                    Text {
-                        text: lastActivityColumn.activity
-                              ? ActivityViewModel.formatDistance(lastActivityColumn.activity.distanceMeters)
-                              : ""
-                        color: Theme.text
-                        font.pixelSize: Theme.fontSizeLabel
-                    }
-                    Text {
-                        text: lastActivityColumn.activity
-                              ? ActivityViewModel.formatDuration(lastActivityColumn.activity.durationSeconds)
-                              : ""
-                        color: Theme.text
-                        font.pixelSize: Theme.fontSizeLabel
-                    }
-                    Text {
-                        text: lastActivityColumn.activity
-                              ? ActivityViewModel.formatElevation(lastActivityColumn.activity.ascentMeters)
-                              : ""
-                        color: Theme.text
-                        font.pixelSize: Theme.fontSizeLabel
+                    Repeater {
+                        model: lastActivityColumn.activity ? [
+                            { label: qsTr("Distance"),
+                              value: ActivityViewModel.formatDistance(lastActivityColumn.activity.distanceMeters) },
+                            { label: qsTr("Time"),
+                              value: ActivityViewModel.formatDuration(lastActivityColumn.activity.durationSeconds) },
+                            { label: qsTr("Ascent"),
+                              value: ActivityViewModel.formatElevation(lastActivityColumn.activity.ascentMeters) }
+                        ] : []
+                        delegate: Column {
+                            spacing: 2
+                            Text { text: modelData.label; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
+                            Text { text: modelData.value; color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
+                        }
                     }
                 }
             }

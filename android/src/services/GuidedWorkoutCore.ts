@@ -115,7 +115,7 @@ export function withSiUnits(workout: Workout): Workout {
 /** What the watch shows for a step without text: its type's word (guided_workout.py
  *  PHASE_LABELS_BY_LANG "en" - add a language there and here to localize). */
 export const PHASE_WORD: Record<string, string> = {
-  warmup: 'Warmup', interval: 'Interval', recovery: 'Recovery', rest: 'Rest', cooldown: 'Cooldown',
+  warmup: 'Warm up', interval: 'Interval', recovery: 'Recovery', rest: 'Rest', cooldown: 'Cool down',
 };
 
 /** Copy where every real step without `text` gets its type's word, so no step renders blank on

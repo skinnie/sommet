@@ -785,7 +785,7 @@ Item {
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.WordWrap
                             text: gpxName ? ("✓ " + gpxName + (routeDistanceKm > 0 ? "  ·  " + routeDistanceKm + " km" : ""))
-                                          : qsTr("Load the route you're planning — a GPX file, or the one already on the Route page.")
+                                          : qsTr("Load the GPX of the route you're planning. A route you opened in the Routes planner is used automatically.")
                             color: gpxName ? Theme.text : Theme.mutedText
                             font.pixelSize: gpxName ? Theme.fontSizeSubtitle : Theme.fontSizeBody
                         }

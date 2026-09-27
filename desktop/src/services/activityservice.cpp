@@ -20,6 +20,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 
 static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 
@@ -261,7 +262,10 @@ void ActivityService::readWatchActivities(int productId, const QString &serial,
             return;                          // this slot's finishOne fires on the retry's reply
         }
 
-        const QString device = root.value(QStringLiteral("device")).toString();
+        // A real watch always names itself (serial); only Testing mode's sample reply may not.
+        QString device = root.value(QStringLiteral("device")).toString();
+        if (device.isEmpty())
+            device = QStringLiteral("demo");
         const auto rawList = root.value(QStringLiteral("activities")).toArray();
         for (const auto &rawValue : rawList) {
             const auto rawObj = rawValue.toObject();
@@ -366,7 +370,10 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         // Which watch this response is about (backend device_key()). If it differs from the
         // watch our known_count was computed against, the backend may have skipped the wrong
         // activities - re-fetch once, scoped to the real watch, before touching the cache.
-        const QString device = root.value(QStringLiteral("device")).toString();
+        // A real watch always names itself (serial); only Testing mode's sample reply may not.
+        QString device = root.value(QStringLiteral("device")).toString();
+        if (device.isEmpty())
+            device = QStringLiteral("demo");
         if (!alreadyRetried && knownCount > 0 && !device.isEmpty()
             && device != m_lastDevice) {
             m_lastDevice = device;
@@ -506,6 +513,13 @@ void ActivityService::openDatabase()
     // be silently dropped when the re-key rebuilds the table (the bug that made a fresh DB pull 0).
     // No-op ("duplicate column") once present. Rows predating it read as 0 and push once (harmless).
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN updated_at INTEGER"));
+    // Testing mode's sample moves used to arrive with no device, so the (idx, device) key never
+    // matched and each demo sync added them again (3 moves x 14 on André's cache, 2026-09-27),
+    // and their tracks never loaded. Only that reply is device-less: keep one copy, tag it "demo".
+    q.exec(QStringLiteral(
+        "DELETE FROM activities WHERE device IS NULL AND rowid NOT IN "
+        "(SELECT MIN(rowid) FROM activities WHERE device IS NULL GROUP BY idx)"));
+    q.exec(QStringLiteral("UPDATE OR REPLACE activities SET device = 'demo' WHERE device IS NULL"));
     // Deleted-activity tombstones (André, 2026-08-25). One row per deleted activity, keyed by
     // start-time|name (the same identity dedupeActivities() collapses on), so a deleted move
     // stays gone across every future watch re-sync and intervals/Garmin re-import - the watch's
@@ -670,6 +684,9 @@ bool ActivityService::dbLoadAll()
         if (!m_sommetTombstones.isEmpty()
                 && m_sommetTombstones.contains(sommetUid(q.value(13).toString(), q.value(7).toString())))
             continue;
+        // Testing mode's sample moves only show while Testing mode is on.
+        if (!m_showDemo && q.value(13).toString() == QStringLiteral("demo"))
+            continue;
         QVariantMap parsed;
         parsed[QStringLiteral("index")] = q.value(0).toInt();
         parsed[QStringLiteral("name")] = q.value(1).toString();
@@ -758,7 +775,8 @@ QVariantMap ActivityService::fetchTrack(int idx, const QString &device)
     if (!m_db.isOpen())
         return {};
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT track_json FROM activities WHERE idx = ? AND device = ?"));
+    q.prepare(QStringLiteral(
+        "SELECT track_json FROM activities WHERE idx = ? AND COALESCE(device, '') = ?"));
     q.addBindValue(idx);
     q.addBindValue(device);
     if (!q.exec() || !q.next())
@@ -776,6 +794,47 @@ QVariantMap ActivityService::fetchTrack(int idx, const QString &device)
         track.append(arr.at(count - 1).toVariant());
     }
     return QVariantMap{{QStringLiteral("track"), track}, {QStringLiteral("count"), count}};
+}
+
+QString ActivityService::trackGpx(int idx, const QString &device, const QString &name) const
+{
+    if (!m_db.isOpen())
+        return {};
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT track_json FROM activities WHERE idx = ? AND COALESCE(device, '') = ?"));
+    q.addBindValue(idx);
+    q.addBindValue(device);
+    if (!q.exec() || !q.next())
+        return {};
+    const QJsonArray arr = QJsonDocument::fromJson(q.value(0).toString().toUtf8()).array();
+    if (arr.isEmpty())
+        return {};
+    QString out;
+    QXmlStreamWriter w(&out);
+    w.setAutoFormatting(true);
+    w.writeStartDocument();
+    w.writeStartElement(QStringLiteral("gpx"));
+    w.writeAttribute(QStringLiteral("version"), QStringLiteral("1.1"));
+    w.writeAttribute(QStringLiteral("creator"), QStringLiteral("Sommet"));
+    w.writeDefaultNamespace(QStringLiteral("http://www.topografix.com/GPX/1/1"));
+    w.writeStartElement(QStringLiteral("trk"));
+    w.writeTextElement(QStringLiteral("name"), name);
+    w.writeStartElement(QStringLiteral("trkseg"));
+    for (const auto &v : arr) {
+        const QJsonObject p = v.toObject();
+        if (!p.contains(QStringLiteral("lat")) || !p.contains(QStringLiteral("lon")))
+            continue;
+        w.writeStartElement(QStringLiteral("trkpt"));
+        w.writeAttribute(QStringLiteral("lat"), QString::number(p.value(QStringLiteral("lat")).toDouble(), 'f', 7));
+        w.writeAttribute(QStringLiteral("lon"), QString::number(p.value(QStringLiteral("lon")).toDouble(), 'f', 7));
+        if (p.contains(QStringLiteral("ele")))
+            w.writeTextElement(QStringLiteral("ele"), QString::number(p.value(QStringLiteral("ele")).toDouble(), 'f', 1));
+        w.writeEndElement();
+    }
+    w.writeEndElement(); w.writeEndElement(); w.writeEndElement();
+    w.writeEndDocument();
+    return out;
 }
 
 QVariantMap ActivityService::trackFor(int idx, const QString &device)

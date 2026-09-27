@@ -130,7 +130,7 @@ Item {
                             font.pixelSize: Theme.fontSizeDisplay
                             font.bold: true
                         }
-                        Text { text: WeightService.latestDate; color: Theme.mutedText
+                        Text { text: String(WeightService.latestDate).split("-").reverse().join("/"); color: Theme.mutedText
                                font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
@@ -242,9 +242,11 @@ Item {
                             ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
                             ctx.fillText(vy.toFixed(1), padL - 6, yy);
                         }
-                        ctx.textAlign = "center"; ctx.textBaseline = "top";
-                        ctx.fillText(s[0].date, padL, H - padB + 4);
-                        ctx.fillText(s[s.length - 1].date, W - padR, H - padB + 4);
+                        // dd/mm/yyyy like the rest of the app; end labels hug their edges.
+                        function dmy(iso) { return String(iso).slice(0, 10).split("-").reverse().join("/"); }
+                        ctx.textBaseline = "top";
+                        ctx.textAlign = "left"; ctx.fillText(dmy(s[0].date), padL, H - padB + 4);
+                        ctx.textAlign = "right"; ctx.fillText(dmy(s[s.length - 1].date), W - padR, H - padB + 4);
 
                         ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g,
                                                   Theme.mutedText.b, 0.5);
@@ -308,7 +310,7 @@ Item {
                             anchors.centerIn: parent
                             spacing: 1
                             readonly property var p: parent.pt
-                            Text { text: tipCol.p ? tipCol.p.date : ""
+                            Text { text: tipCol.p ? String(tipCol.p.date).slice(0, 10).split("-").reverse().join("/") : ""
                                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeTiny }
                             Text { text: tipCol.p ? tipCol.p.weightKg.toFixed(1) + qsTr(" kg") : ""
                                    color: Theme.text; font.pixelSize: Theme.fontSizeCaption; font.bold: true }

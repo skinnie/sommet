@@ -40,7 +40,7 @@ Item {
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("GPX files (*.gpx)")]
         currentFolder: LocalFileService.downloadsLocation
-        onAccepted: root.saveError = LocalFileService.saveText(selectedFile, activity.gpxText)
+        onAccepted: root.saveError = LocalFileService.saveText(selectedFile, root._exportGpx)
     }
     FileDialog {
         id: fitExportDialog
@@ -55,6 +55,11 @@ Item {
     // DB layer for speed (ActivityService, 2026-09-20) and fetched here the instant the activity
     // opens - one small query, so opening stays fast even with a huge history.
     property var _resolvedTrack: []
+    // GPX to save: the original file when the move has one, else a track-only GPX built from the
+    // stored GPS points (intervals.icu imports carry no file of their own).
+    property string _exportGpx: ""
+    readonly property bool _hasGpxFile: !!(activity && activity.gpxText && activity.gpxText.length > 0)
+    readonly property bool _hasFit: !!(activity && activity.fitBase64 && activity.fitBase64.length > 0)
     property int _resolvedCount: 0
     function _resolveTrack() {
         if (activity && activity.track && activity.track.length > 0) {
@@ -274,7 +279,9 @@ Item {
                 // leave it empty (the connected watch is implied), so this hides for those.
                 Text {
                     visible: activity && (activity.device || "") !== ""
-                    text: activity ? qsTr("Recorded on %1").arg(activity.device) : ""
+                    // intervals.icu repeats the brand ("SUUNTO Suunto Ambit3 Peak"): drop a doubled first word.
+                    text: activity ? qsTr("Recorded on %1").arg(
+                        String(activity.device).replace(/^(\S+)\s+(?=\1\b)/i, "")) : ""
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
                 }
@@ -310,9 +317,12 @@ Item {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: qsTr("Export as GPX")
-                        enabled: activity && activity.gpxText && activity.gpxText.length > 0
+                        text: root._hasGpxFile ? qsTr("Export as GPX") : qsTr("Export track as GPX")
+                        enabled: root._hasGpxFile || root._resolvedCount > 0
                         onClicked: {
+                            root._exportGpx = root._hasGpxFile ? activity.gpxText
+                                : ActivityService.trackGpx(activity.index, activity.device || "",
+                                                           activity.name || "")
                             const safeName = (activity.name || "activity").replace(/[\\/:*?"<>|]/g, "_")
                             gpxExportDialog.currentFile =
                                 LocalFileService.downloadsLocation + "/" + safeName + ".gpx"
@@ -331,13 +341,17 @@ Item {
                     }
                 }
                 Text {
-                    visible: activity && (!activity.fitBase64 || activity.fitBase64.length === 0)
+                    visible: activity && !root._hasFit
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("No FIT data for this activity (GPS-less entries can't be " +
-                                "converted - see exercise_log.py).")
+                    text: root._hasGpxFile ? qsTr("No FIT file for this activity - GPX only.")
+                        : root._resolvedCount > 0
+                          ? qsTr("This activity came without its original file, so there's no FIT. "
+                                 + "The GPX holds the route only: positions and elevation, no times "
+                                 + "or heart rate.")
+                          : qsTr("This activity has no GPS track and no file to export.")
                 }
                 Text {
                     visible: root.saveError.length > 0

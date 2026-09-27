@@ -211,6 +211,15 @@ PageFlickable {
                     text: (root.info.product || root.info.model || qsTr("Watch"))
                           + " — " + qsTr("firmware ") + (root.info.current_firmware || "?")
                 }
+                // Said before the button, not only in its confirm step (audit, 2026-09-27): it
+                // looked like any other button.
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.warning
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Only if the watch misbehaves. Charge the watch and this computer "
+                               + "first and don't unplug during the install - an interrupted "
+                               + "install leaves the watch needing recovery.")
+                }
                 RoundedButton {
                     text: qsTr("Reinstall firmware")
                     onClicked: confirm.show(qsTr("Reinstall the current firmware?"),
