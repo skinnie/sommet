@@ -1415,6 +1415,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_stats_to_watch(body)
         elif self.path == "/api/intervals/upload":
             self._handle_intervals_upload(body)
+        elif self.path == "/api/intervals/activity-fit":
+            self._handle_intervals_activity_fit(body)
         elif self.path == "/api/intervals/plan/upsert":
             self._handle_intervals_plan("upsert", body)
         elif self.path == "/api/intervals/plan/delete":
@@ -4757,6 +4759,47 @@ class Handler(BaseHTTPRequestHandler):
                                    + (err or out or "")).strip()[:200]})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_intervals_activity_fit(self, body):
+        """POST /api/intervals/activity-fit {api_key, id} -> {ok, fit_base64, origin}. The FIT of an
+        activity imported from intervals.icu, fetched on demand for Export (the import only keeps
+        the summary + map track). Prefers the file originally uploaded (the device's own FIT -
+        e.g. a Suunto app sync); when that isn't a FIT (an eTrex GPX, a TCX) falls back to the FIT
+        intervals.icu generates from the activity's streams. Checked live 2026-09-27: both return
+        a real FIT for an Ambit3 run (45 KB original, 44 KB generated)."""
+        import gzip
+        key, act = (body or {}).get("api_key"), (body or {}).get("id")
+        if not key or not act or not re.fullmatch(r"i?\d+", str(act)):
+            self._send_json(400, {"ok": False, "error": "need api_key and an activity id"})
+            return
+        auth = base64.b64encode(b"API_KEY:" + str(key).encode()).decode()
+
+        def fetch(kind):
+            req = urllib.request.Request(
+                f"https://intervals.icu/api/v1/activity/{act}/{kind}",
+                headers={"Authorization": "Basic " + auth, "User-Agent": "Sommet/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = r.read()
+            return gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+
+        def is_fit(data):
+            return len(data) > 12 and data[8:12] == b".FIT"
+
+        try:
+            data, origin = fetch("file"), "original"
+            if not is_fit(data):
+                data, origin = fetch("fit-file"), "intervals"
+        except urllib.error.HTTPError as e:
+            self._send_json(502, {"ok": False, "error": f"intervals.icu: HTTP {e.code}"})
+            return
+        except (urllib.error.URLError, OSError) as e:
+            self._send_json(502, {"ok": False, "error": f"couldn't reach intervals.icu ({e})"})
+            return
+        if not is_fit(data):
+            self._send_json(502, {"ok": False, "error": "intervals.icu returned no FIT for it"})
+            return
+        self._send_json(200, {"ok": True, "origin": origin,
+                              "fit_base64": base64.b64encode(data).decode("ascii")})
 
     def _handle_intervals_plan(self, action, body):
         """POST /api/intervals/plan/upsert {athlete_id, api_key, entry:{uid, date, workout, device?,

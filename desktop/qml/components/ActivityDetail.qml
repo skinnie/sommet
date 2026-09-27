@@ -48,7 +48,7 @@ Item {
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("FIT files (*.fit)")]
         currentFolder: LocalFileService.downloadsLocation
-        onAccepted: root.saveError = LocalFileService.saveBase64(selectedFile, activity.fitBase64)
+        onAccepted: root.saveError = LocalFileService.saveBase64(selectedFile, root._exportFit)
     }
 
     // GPS track is loaded on demand: recent rides keep it inline, older ones are deferred by the
@@ -60,6 +60,27 @@ Item {
     property string _exportGpx: ""
     readonly property bool _hasGpxFile: !!(activity && activity.gpxText && activity.gpxText.length > 0)
     readonly property bool _hasFit: !!(activity && activity.fitBase64 && activity.fitBase64.length > 0)
+    // intervals.icu imports carry no file: their FIT is fetched on demand (the original upload, else
+    // intervals.icu's own) and kept - see ActivityService.fetchIntervalsFit.
+    readonly property bool _fitFromIntervals: !!(activity && activity.source === "intervals")
+    property string _exportFit: ""
+    property bool _fetchingFit: false
+    property string _fitError: ""
+    function _openFitDialog() {
+        const safeName = (activity.name || "activity").replace(/[\\/:*?"<>|]/g, "_")
+        fitExportDialog.currentFile = LocalFileService.downloadsLocation + "/" + safeName + ".fit"
+        fitExportDialog.open()
+    }
+    Connections {
+        target: ActivityService
+        function onIntervalsFitReady(idx, device, fitBase64, error) {
+            if (!root.activity || idx !== root.activity.index
+                    || device !== (root.activity.device || "")) return
+            root._fetchingFit = false
+            root._fitError = error
+            if (fitBase64.length > 0) { root._exportFit = fitBase64; root._openFitDialog() }
+        }
+    }
     property int _resolvedCount: 0
     function _resolveTrack() {
         if (activity && activity.track && activity.track.length > 0) {
@@ -330,18 +351,23 @@ Item {
                         }
                     }
                     RoundedButton {
-                        text: qsTr("Export as FIT")
-                        enabled: activity && activity.fitBase64 && activity.fitBase64.length > 0
+                        text: root._fetchingFit ? qsTr("Getting FIT from intervals.icu…")
+                                                : qsTr("Export as FIT")
+                        enabled: !root._fetchingFit && (root._hasFit || root._fitFromIntervals)
                         onClicked: {
-                            const safeName = (activity.name || "activity").replace(/[\\/:*?"<>|]/g, "_")
-                            fitExportDialog.currentFile =
-                                LocalFileService.downloadsLocation + "/" + safeName + ".fit"
-                            fitExportDialog.open()
+                            root._fitError = ""
+                            if (root._hasFit) {
+                                root._exportFit = activity.fitBase64
+                                root._openFitDialog()
+                            } else {
+                                root._fetchingFit = true
+                                ActivityService.fetchIntervalsFit(activity.index, activity.device || "")
+                            }
                         }
                     }
                 }
                 Text {
-                    visible: activity && !root._hasFit
+                    visible: activity && !root._hasFit && !root._fitFromIntervals
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
@@ -352,6 +378,23 @@ Item {
                                  + "The GPX holds the route only: positions and elevation, no times "
                                  + "or heart rate.")
                           : qsTr("This activity has no GPS track and no file to export.")
+                }
+                Text {
+                    visible: root._fitFromIntervals && !root._hasFit && root._fitError.length === 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("This activity came from intervals.icu: its FIT is downloaded from there "
+                               + "when you export it (the original file when it has one), then kept here.")
+                }
+                Text {
+                    visible: root._fitError.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.error
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: root._fitError
                 }
                 Text {
                     visible: root.saveError.length > 0

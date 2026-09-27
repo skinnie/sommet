@@ -75,6 +75,9 @@ public:
     // A GPX track built from the stored GPS points, for moves that came without a GPX/FIT file
     // (intervals.icu imports): positions and elevation only, no timestamps. Empty if no track.
     Q_INVOKABLE QString trackGpx(int idx, const QString &device, const QString &name) const;
+    // An intervals.icu import keeps no file; fetch its FIT on demand (the originally uploaded one,
+    // else intervals.icu's own), store it on the row, then emit intervalsFitReady.
+    Q_INVOKABLE void fetchIntervalsFit(int idx, const QString &device);
     bool showDemo() const { return m_showDemo; }
     void setShowDemo(bool on) { if (on == m_showDemo) return; m_showDemo = on; dbLoadAll(); emit activitiesChanged(); }
 
@@ -215,6 +218,9 @@ signals:
     void trackBackfillFinished(int filled, int remaining);
     void exportFinished(int uploaded, int failed);
     void exportError(const QString &message);
+    // fitBase64 empty + error set when it couldn't be fetched.
+    void intervalsFitReady(int idx, const QString &device, const QString &fitBase64,
+                           const QString &error);
     // Sommet Sync (#SYNC-2): test probe result, and a completion/error pair for a syncNow run.
     void sommetSyncTestResult(bool ok, const QString &message);
     void sommetSyncFinished(int pulled, int pushed);

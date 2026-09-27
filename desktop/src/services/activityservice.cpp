@@ -837,6 +837,64 @@ QString ActivityService::trackGpx(int idx, const QString &device, const QString 
     return out;
 }
 
+void ActivityService::fetchIntervalsFit(int idx, const QString &device)
+{
+    const QString key = QSettings().value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    QString extId;
+    if (m_db.isOpen()) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral(
+            "SELECT external_id FROM activities WHERE idx = ? AND COALESCE(device, '') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (q.exec() && q.next())
+            extId = q.value(0).toString();
+    }
+    if (key.isEmpty() || extId.isEmpty()) {
+        emit intervalsFitReady(idx, device, QString(), key.isEmpty()
+            ? tr("Connect intervals.icu in Settings to get this activity's FIT.")
+            : tr("This activity has no intervals.icu id to fetch its FIT with."));
+        return;
+    }
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/intervals/activity-fit")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(90000);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {QStringLiteral("api_key"), key}, {QStringLiteral("id"), extId}}).toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device]() {
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString fit = o.value(QStringLiteral("fit_base64")).toString();
+        if (!o.value(QStringLiteral("ok")).toBool() || fit.isEmpty()) {
+            const QString err = o.value(QStringLiteral("error")).toString();
+            emit intervalsFitReady(idx, device, QString(),
+                                   err.isEmpty() ? reply->errorString() : err);
+            return;
+        }
+        // Keep it, so the next export (and an intervals-off day) doesn't need the network.
+        if (m_db.isOpen()) {
+            QSqlQuery u(m_db);
+            u.prepare(QStringLiteral(
+                "UPDATE activities SET fit_base64 = ? WHERE idx = ? AND COALESCE(device, '') = ?"));
+            u.addBindValue(fit);
+            u.addBindValue(idx);
+            u.addBindValue(device);
+            u.exec();
+        }
+        for (int i = 0; i < m_activities.size(); ++i) {
+            QVariantMap a = m_activities.at(i).toMap();
+            if (a.value(QStringLiteral("index")).toInt() == idx
+                    && a.value(QStringLiteral("device")).toString() == device) {
+                a[QStringLiteral("fitBase64")] = fit;
+                m_activities[i] = a;
+                break;
+            }
+        }
+        emit intervalsFitReady(idx, device, fit, QString());
+    });
+}
+
 QVariantMap ActivityService::trackFor(int idx, const QString &device)
 {
     return fetchTrack(idx, device);
