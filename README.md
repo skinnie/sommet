@@ -356,6 +356,8 @@ Services and libraries the app talks to at runtime:
 - **[ZXing-C++](https://github.com/zxing-cpp/zxing-cpp)** (Apache-2.0) — reads food barcodes from the
   webcam in Ember (desktop); built from source, its licence ships inside the app. Camera capture
   via **Qt Multimedia** (LGPLv3).
+- **[react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit)** (MIT) — the phone camera
+  barcode scan in Ember (Android: CameraX + Google ML Kit barcode scanning, bundled model; iOS: AVFoundation).
 - **[Anthropic Claude API](https://www.anthropic.com/api)** — optional, powers the Coach chat
   when you supply your own API key. The app works fully without it.
 - **[Qt](https://www.qt.io/)** (LGPLv3) — the desktop app's UI framework; **React Native** for

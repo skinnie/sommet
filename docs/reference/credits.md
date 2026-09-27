@@ -170,6 +170,11 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   webcam itself is read through **Qt Multimedia** (LGPLv3), bundled by windeployqt/macdeployqt
   like the rest of Qt.
 
+- **[teslamotors/react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit)**
+  (MIT) - the phone camera barcode scan in Ember (`android/src/components/EmberBarcodeScanner.tsx`).
+  On Android it uses CameraX and **Google ML Kit** barcode scanning (bundled on-device model,
+  used under Google's ML Kit terms; nothing leaves the phone); on iOS, Apple's AVFoundation.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 

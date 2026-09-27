@@ -33,6 +33,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Sommet uses the camera only to read a food's barcode when you log a meal in Ember. Nothing is recorded or sent.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Sommet connects to your Suunto watch over Bluetooth to sync activities, routes and settings.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

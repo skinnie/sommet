@@ -6,6 +6,7 @@ import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import {
   Food, portion, searchFoods, recentFoods, rememberFood, isBarcode,
 } from '../services/EmberFood';
+import { EmberBarcodeScanner } from './EmberBarcodeScanner';
 
 // Ember "log a meal" sheet - twin of desktop/qml/components/EmberMealDialog.qml (issue #20).
 // Search Open Food Facts + USDA by name or barcode digits (recent picks show while the box is
@@ -27,11 +28,12 @@ export function EmberMealModal({ visible, fasting, onClose, onLog }: {
   const [picked, setPicked] = useState<Food | null>(null);
   const [grams, setGrams] = useState('100');
   const [manualKcal, setManualKcal] = useState('');
+  const [scanning, setScanning] = useState(false);
   const seq = useRef(0);
 
   useEffect(() => {
     if (!visible) return;
-    setQuery(''); setResults([]); setPicked(null); setManualKcal('');
+    setQuery(''); setResults([]); setPicked(null); setManualKcal(''); setScanning(false);
     recentFoods().then(setRecent);
   }, [visible]);
 
@@ -79,8 +81,17 @@ export function EmberMealModal({ visible, fasting, onClose, onLog }: {
 
           {!picked && (
             <>
-              <TextInput style={input} value={query} onChangeText={setQuery} autoFocus
-                placeholder="Search a food or type a barcode" placeholderTextColor={t.mutedText} />
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TextInput style={[input, { flex: 1 }]} value={query} onChangeText={setQuery} autoFocus
+                  placeholder="Search a food or type a barcode" placeholderTextColor={t.mutedText} />
+                <Pressable onPress={() => setScanning(v => !v)}
+                  style={[styles.btn, { borderColor: t.border, marginLeft: v3Spacing.small }]}>
+                  <Text style={{ color: t.primary, fontWeight: '700' }}>{scanning ? 'Stop' : 'Scan'}</Text>
+                </Pressable>
+              </View>
+              {scanning && (
+                <EmberBarcodeScanner onCode={code => { setScanning(false); setQuery(code); }} />
+              )}
               <Text style={{ color: t.mutedText, fontSize: v3Type.tiny, marginTop: 4 }}>
                 {query.trim().length >= 2 ? 'Open Food Facts · USDA FoodData Central' : recent.length ? 'Recent' : ' '}
               </Text>

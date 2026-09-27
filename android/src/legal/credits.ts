@@ -110,6 +110,11 @@ export const CREDITS: CreditEntry[] = [
     description: "Generic foods for Ember's meal search (public domain).",
   },
   {
+    name: 'react-native-camera-kit',
+    url: 'https://github.com/teslamotors/react-native-camera-kit',
+    description: "Camera barcode scan in Ember (MIT). Android reads codes with Google ML Kit's on-device model.",
+  },
+  {
     name: 'OpenStreetMap',
     url: 'https://www.openstreetmap.org/copyright',
     description:

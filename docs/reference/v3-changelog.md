@@ -7,6 +7,22 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Ember - scan a food's barcode with the phone camera (Android + iOS)
+
+André, 2026-09-27: "go" (issue #20, after the desktop webcam scan).
+
+- **"Scan" next to the meal search** shows the camera inline in the sheet; the first EAN/UPC read
+  fills the search and finds the product.
+- **react-native-camera-kit 18.0.1** (MIT, one native dependency, no JS deps): CameraX + Google ML
+  Kit's bundled barcode model on Android (works without Play Services), AVFoundation on iOS.
+  Chosen over react-native-vision-camera 5, whose built-in code scanner is iOS-only and whose
+  Android scanning needs a further Nitro/worklets plugin chain.
+- **Permissions:** Android `CAMERA` (camera hardware optional, so camera-less devices can still
+  install); iOS `NSCameraUsageDescription`, and the request goes through camera-kit's native
+  module (its JS helper only checks the status).
+- Release APK builds (camera-kit + ML Kit compiled). Not yet installed: the phone dropped off
+  adb Wi-Fi. iOS needs `pod install` on the Mac before its next build.
+
 ## 2026-09-27: Ember - scan a food's barcode with the webcam (desktop 0.2.42)
 
 André, 2026-09-27: "nobody uses a bar code scanner. on the other hand everybody has a webcam. go"
