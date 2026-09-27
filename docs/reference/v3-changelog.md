@@ -7,6 +7,30 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Coach readiness without intervals.icu - on-device HR load (desktop 0.2.38)
+
+André, 2026-09-27, on taking OpenAthlete's transparent training load: "nice, but keep
+intervals.icu as the first, only when not connected".
+
+- **intervals.icu first, on both apps.** The desktop Coach used to compute fitness/fatigue only
+  from activities.db, as minutes per day; it now reads intervals.icu's own ctl/atl/rampRate
+  first, exactly like Android already did. The caption under the tiles says which source the
+  numbers came from.
+- **On-device fallback when it isn't connected (or can't be reached).** Android used to show
+  "No training load yet"; both apps now estimate locally. A move with an average HR gets
+  Banister's TRIMP (needs max/rest HR and sex, remembered each time the watch's personal
+  settings are read); a move without HR counts its minutes, as before. Same 42/7-day curves and
+  the same light thresholds.
+- **Two data guards the old minutes proxy never had.** Moves longer than 48 h are ignored (two
+  copies of a corrupt 59,841-min "Running" on 2026-06-21 put the local Fitness at 356), and one
+  move stored twice - the watch's own copy (UTC) beside its intervals.icu import (local time), or
+  two identical imports - is counted once (46 duplicates in André's last 120 days).
+- Tested on the desktop against André's real activities.db: intervals path 29 / 22 / 7, local
+  path 61 / 46 / 9, same "Fresh" light. Android: 8 new unit tests (`LocalLoad.test.ts`), full
+  suite green; not yet run on the phone.
+- Credit: formula idea from [OpenAthlete](https://github.com/openathleteorg/openathlete) (AGPL,
+  formula only - no code copied).
+
 ## 2026-09-13: Copy a watch's setup from a backup, one button per watch (0.2.36)
 
 Reworked "Copy one watch to another" end-to-end (hardware-tested on André's Ambit3 fleet: one

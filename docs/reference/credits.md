@@ -138,6 +138,13 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   documented hardware (nRF52840 SoC, ST75256 LCD, UC6226 GNSS, SPL06 baro, GD25Q256 flash) is the
   reference for what the C406 Pro actually is - cited in the Magene protocol doc.
 
+- **[openathleteorg/openathlete](https://github.com/openathleteorg/openathlete)** (AGPL-3.0) - its
+  transparent training-load service (`apps/api/src/modules/core/services/training-load.service.ts`)
+  is where the Coach's on-device fallback comes from: when intervals.icu is not connected, each
+  move's load is Banister's TRIMP from its average HR (duration when there is none), fed into
+  the same 42/7-day CTL/ATL curves. Only the published formula was taken - no code was copied,
+  since AGPL code cannot be pasted into this GPL-3.0 app without carrying the AGPL's terms.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 

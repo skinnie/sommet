@@ -1,4 +1,8 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import RNFS from 'react-native-fs';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
+import { getAllActivities } from '../database/db';
+import { computeLocalSeries, HrProfile, LocalMove } from './LocalLoad';
 import systmSample from '../data/systm-sample.json';
 
 // Coach readiness — the Android counterpart of desktop/src/services/coachservice.cpp
@@ -24,6 +28,11 @@ export interface Readiness {
   rampPerWeek: number;
   light: ReadinessLight;
   sentence: string;
+  // Where the numbers come from: intervals.icu first, the on-device estimate (LocalLoad.ts)
+  // only when it isn't connected or can't be reached (André, 2026-09-27).
+  basis: 'intervals' | 'local';
+  hrMoves?: number;
+  durationMoves?: number;
 }
 
 export interface ChartPoint {
@@ -160,15 +169,25 @@ async function recentlyDoneNames(days = 7): Promise<Set<string>> {
 // actually has ctl/atl, which is not necessarily today (intervals fills a day in once it has
 // processed it).
 export async function loadCoachData(days = 90): Promise<CoachData> {
+  if (await getIntervalsIcuCredentials()) {
+    try {
+      const fromIcu = await loadCoachDataIntervals(days);
+      if (fromIcu.readiness) return fromIcu;
+    } catch {
+      // offline / bad key - fall through to the on-device estimate rather than show nothing
+    }
+  }
+  return loadCoachDataLocal();
+}
+
+async function loadCoachDataIntervals(days: number): Promise<CoachData> {
   const rows = await fetchWellnessRaw(days);
   const withLoad = rows.filter(r => typeof r.ctl === 'number' && typeof r.atl === 'number');
   if (withLoad.length === 0) return { readiness: null, chart: [], picks: [] };
-
   const last = withLoad[withLoad.length - 1];
   const fitness = last.ctl as number;
   const fatigue = last.atl as number;
   const freshness = fitness - fatigue;
-
   // intervals publishes its own rampRate (CTL change per week). Fall back to measuring the
   // 7-day CTL delta ourselves when it is absent, which is what the desktop does.
   let rampPerWeek = typeof last.rampRate === 'number' ? last.rampRate : 0;
@@ -176,13 +195,77 @@ export async function loadCoachData(days = 90): Promise<CoachData> {
     const prev = withLoad[withLoad.length - 8];
     rampPerWeek = fitness - (prev.ctl as number);
   }
-
   const light = lightFor(freshness, rampPerWeek);
   const recentDone = await recentlyDoneNames(7);
   const picks = pickWorkouts(intensityForLight(light), 90, recentDone);
   return {
-    readiness: { fitness, fatigue, freshness, rampPerWeek, light, sentence: SENTENCES[light] },
+    readiness: { fitness, fatigue, freshness, rampPerWeek, light, sentence: SENTENCES[light], basis: 'intervals' },
     chart: withLoad.map(r => ({ date: r.date, fitness: r.ctl as number, fatigue: r.atl as number })),
+    picks,
+  };
+}
+
+// HR profile for the TRIMP load, remembered each time the watch's personal settings are read
+// (AmbitSettingsService.readAmbitSettings) - the Coach runs without a watch attached.
+const HR_PROFILE_KEY = 'coach.hrProfile';
+
+export async function rememberHrProfile(settings: { key: string; value: unknown }[]): Promise<void> {
+  const num = (k: string) => {
+    const v = settings.find(x => x.key === k)?.value;
+    return typeof v === 'number' && v > 0 ? v : null;
+  };
+  const maxHr = num('max_hr'), restHr = num('rest_hr');
+  if (!maxHr || !restHr) return;
+  const sex = settings.find(x => x.key === 'gender' || x.key === 'is_male')?.value;   // 1 = Male
+  try {
+    await AsyncStorage.setItem(HR_PROFILE_KEY, JSON.stringify({ maxHr, restHr, male: sex !== 0 }));
+  } catch { /* best-effort */ }
+}
+
+async function loadHrProfile(): Promise<HrProfile | null> {
+  try {
+    const raw = await AsyncStorage.getItem(HR_PROFILE_KEY);
+    const p = raw ? JSON.parse(raw) : null;
+    return p && p.maxHr > p.restHr && p.restHr > 0 ? p : null;
+  } catch { return null; }
+}
+
+async function loadCoachDataLocal(): Promise<CoachData> {
+  const profile = await loadHrProfile();
+  const recentSince = Date.now() - 120 * 86400 * 1000;
+  const doneSince = Date.now() - 7 * 86400 * 1000;
+  const moves: LocalMove[] = [];
+  const recentDone = new Set<string>();
+  for (const a of await getAllActivities()) {
+    const startMs = Date.parse(a.date);
+    if (!Number.isFinite(startMs)) continue;
+    let avgHr = 0;
+    // The GPX header carries the watch's <avg_hr>; only worth reading for recent moves, and only
+    // when there is a profile to turn it into TRIMP.
+    if (profile && startMs >= recentSince && a.gpx_path) {
+      try {
+        const m = /<avg_hr>(\d+)<\/avg_hr>/.exec(await RNFS.readFile(a.gpx_path, 'utf8'));
+        avgHr = m ? Number(m[1]) : 0;
+      } catch { /* file gone - duration it is */ }
+    }
+    moves.push({ startMs, durationS: a.duration_s, avgHr });
+    if (startMs >= doneSince && a.activity_type) recentDone.add(normalizeName(a.activity_type));
+  }
+  if (moves.length === 0) return { readiness: null, chart: [], picks: [] };
+  const s = computeLocalSeries(moves, profile);
+  const n = s.days.length;
+  const fitness = s.ctl[n - 1], fatigue = s.atl[n - 1];
+  const light = lightFor(s.freshness, s.rampPerWeek);
+  const picks = pickWorkouts(intensityForLight(light), 90, recentDone);
+  const keep = Math.min(42, n);
+  return {
+    readiness: {
+      fitness, fatigue, freshness: s.freshness, rampPerWeek: s.rampPerWeek, light,
+      sentence: SENTENCES[light], basis: 'local', hrMoves: s.hrMoves, durationMoves: s.durationMoves,
+    },
+    chart: s.days.slice(n - keep).map((date, i) => ({
+      date, fitness: s.ctl[n - keep + i], fatigue: s.atl[n - keep + i],
+    })),
     picks,
   };
 }

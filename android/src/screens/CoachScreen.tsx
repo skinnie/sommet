@@ -18,6 +18,10 @@ import {
 // freshness, trend chart) and the chat. The chat runs on canned replies by default and on the
 // real Claude API once the user adds their OWN Anthropic key in Settings - see CoachChat.ts.
 
+function plural(n: number): string {
+  return n === 1 ? '1 move' : `${n} moves`;
+}
+
 export default function CoachScreen() {
   const t = useV3Theme();
   const navigation = useNavigation<any>();
@@ -100,8 +104,8 @@ export default function CoachScreen() {
       {!loading && !r && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No training load yet. Connect intervals.icu — readiness is computed from
-            the fitness and fatigue it tracks.
+            No training load yet. Sync a move from the watch, or connect intervals.icu for
+            the fitness and fatigue it tracks across every device.
           </Text>
           {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
           <TouchableOpacity
@@ -172,7 +176,11 @@ export default function CoachScreen() {
           )}
 
           <Text style={[styles.caption, { color: t.mutedText }]}>
-            Fitness and fatigue come from intervals.icu, computed across every device you use.
+            {r.basis === 'intervals'
+              ? 'Fitness and fatigue come from intervals.icu, computed across every device you use.'
+              : (r.hrMoves ?? 0) > 0
+                ? `Estimated on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration for ${plural(r.durationMoves ?? 0)} without HR. Connect intervals.icu for load from every device.`
+                : 'Estimated on this phone from duration (minutes/day) — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.'}
           </Text>
         </>
       )}

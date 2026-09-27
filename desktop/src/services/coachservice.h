@@ -2,6 +2,7 @@
 
 #include <QDate>
 #include <QJsonArray>
+#include <QMap>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QQmlEngine>
@@ -46,7 +47,7 @@ class CoachService : public QObject
     QML_SINGLETON
 
     // {fitness, fatigue, freshness, rampPerWeek, light ("green"/"tempered"/"yellow"/"red"),
-    //  sentence, basis (["load"])}
+    //  sentence, basis ("intervals" | "local"), hrMoves, durationMoves}
     Q_PROPERTY(QVariantMap readiness READ readiness NOTIFY readinessChanged)
     // Last 42 days: [{date, fitness, fatigue}, ...] — for the beacon's sparkline.
     Q_PROPERTY(QVariantList chartSeries READ chartSeries NOTIFY readinessChanged)
@@ -102,7 +103,18 @@ private:
     struct CatalogueRow { QString name; double tss; double intensityFactor; int durationSec; };
 
     void openActivitiesDb();
-    void computeReadiness();                   // the real CTL/ATL/TSB pass over activities.db
+    // intervals.icu first (its own ctl/atl/rampRate, from real TSS across every device); only
+    // when it is not connected (or the fetch fails) the local pass over activities.db.
+    void computeReadiness();
+    bool intervalsConnected() const;
+    void fetchIntervalsReadiness();
+    void computeLocalReadiness();
+    // Per-day local load + the recently-done names; counts how many moves carried HR.
+    QMap<QDate, double> localLoadByDay(int *hrMoves, int *durationMoves);
+    // Shared tail: light, sentence, chart, picks, greeting. Arrays are aligned with `days`.
+    void applyReadiness(const QVector<QDate> &days, const QVector<double> &ctlArr,
+                        const QVector<double> &atlArr, double freshness, double rampPerWeek,
+                        const QVariantMap &extra);
     static QString intensityBucket(double intensityFactor);   // mirrors systmLibrary.ts bucket()
     static QString intensityForLight(const QString &light);   // mirrors coach.ts recommend()
     static QString normalizeName(const QString &s);           // for matching completed vs catalogue
@@ -126,6 +138,7 @@ private:
     QSet<QString> m_recentDone;
 
     QVariantMap m_readiness;
+    bool m_greeted = false;   // opening coach bubble sent (waits for the first readiness)
     QVariantList m_chartSeries;
     QVariantList m_todaysPicks;
     QVariantList m_messages;

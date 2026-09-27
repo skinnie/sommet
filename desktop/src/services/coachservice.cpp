@@ -13,7 +13,9 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
+#include <QRegularExpression>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVector>
 #include <algorithm>
 #include <cmath>
@@ -52,11 +54,7 @@ CoachService::CoachService(QObject *parent) : QObject(parent)
         }
     }
 
-    computeReadiness();
-    // Opening line, same as the mockup's apply('rested') seeding the transcript on load.
-    appendBubble(QStringLiteral("coach"),
-                 m_readiness.value(QStringLiteral("sentence")).toString(), pickWorkouts(
-                     intensityForLight(m_readiness.value(QStringLiteral("light")).toString()), 90));
+    computeReadiness();   // also sends the opening coach line once readiness exists
 
     if (m_catalogueSource == QStringLiteral("live") && !m_systmMcpUrl.isEmpty()) {
         refreshCatalogueLive([]() {});
@@ -80,30 +78,184 @@ void CoachService::openActivitiesDb()
 
 void CoachService::computeReadiness()
 {
-    const QDate today = QDate::currentDate();
-    const QDate doneSince = today.addDays(-7);   // "recently done" window for pickWorkouts()
-    m_recentDone.clear();
+    // intervals.icu stays the first source (André, 2026-09-27: "keep intervals.icu as the
+    // first, only when not connected" the local estimate). Its ctl/atl come from real TSS
+    // across every device; the local pass only knows what this app has stored.
+    if (intervalsConnected())
+        fetchIntervalsReadiness();
+    else
+        computeLocalReadiness();
+}
 
-    QMap<QDate, double> loadByDay;   // day -> minutes trained that day (the load proxy)
-    if (m_db.isOpen()) {
-        QSqlQuery q(QStringLiteral(
-            "SELECT start_time, duration_s, name FROM activities "
-            "WHERE start_time IS NOT NULL AND start_time != ''"), m_db);
-        while (q.next()) {
-            const QDateTime dt = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
-            if (!dt.isValid()) continue;
-            const double minutes = q.value(1).toDouble() / 60.0;
-            loadByDay[dt.date()] += minutes;
-            // Anything trained in the last 7 days is a candidate for exclusion from picks.
-            // Name-matching is best-effort: a ride recorded on the watch carries its sport-mode
-            // name, not the SYSTM session name, so this only fires when the two genuinely match
-            // (e.g. a workout named the same way) — but it never wrongly excludes.
-            if (dt.date() >= doneSince) {
-                const QString norm = normalizeName(q.value(2).toString());
-                if (!norm.isEmpty()) m_recentDone.insert(norm);
+bool CoachService::intervalsConnected() const
+{
+    const QSettings s;
+    return !s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString().isEmpty()
+        && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
+}
+
+void CoachService::fetchIntervalsReadiness()
+{
+    const QSettings s;
+    const QString athlete = s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    const QString key = s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    // Same endpoint and auth as HealthService::fetchIntervals(); this one keeps ctl/atl/rampRate.
+    QUrl url(QStringLiteral("https://intervals.icu/api/v1/athlete/%1/wellness").arg(athlete));
+    QUrlQuery q;
+    const QDate today = QDate::currentDate();
+    q.addQueryItem(QStringLiteral("oldest"), today.addDays(-90).toString(Qt::ISODate));
+    q.addQueryItem(QStringLiteral("newest"), today.toString(Qt::ISODate));
+    url.setQuery(q);
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization",
+                     "Basic " + (QByteArrayLiteral("API_KEY:") + key.toUtf8()).toBase64());
+    req.setRawHeader("User-Agent",
+                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
+    QNetworkReply *reply = m_net.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        // The recently-done names still come from activities.db, whichever source the load is.
+        int hrMoves = 0, durationMoves = 0;
+        localLoadByDay(&hrMoves, &durationMoves);
+
+        QVector<QDate> days;
+        QVector<double> ctlArr, atlArr, rampArr;
+        if (reply->error() == QNetworkReply::NoError) {
+            for (const auto &v : QJsonDocument::fromJson(reply->readAll()).array()) {
+                const auto o = v.toObject();
+                if (!o.value(QStringLiteral("ctl")).isDouble() || !o.value(QStringLiteral("atl")).isDouble())
+                    continue;
+                const QDate d = QDate::fromString(o.value(QStringLiteral("id")).toString(), Qt::ISODate);
+                if (!d.isValid()) continue;
+                days.append(d);
+                ctlArr.append(o.value(QStringLiteral("ctl")).toDouble());
+                atlArr.append(o.value(QStringLiteral("atl")).toDouble());
+                rampArr.append(o.value(QStringLiteral("rampRate")).isDouble()
+                                   ? o.value(QStringLiteral("rampRate")).toDouble() : qQNaN());
             }
         }
+        if (days.isEmpty()) {
+            // Offline, bad key, or no load processed yet - fall back rather than show nothing.
+            setLastError(reply->error() == QNetworkReply::NoError
+                             ? QString()
+                             : QStringLiteral("intervals.icu: %1 - using the local estimate").arg(reply->errorString()));
+            computeLocalReadiness();
+            return;
+        }
+        // Readiness is the most recent day intervals has filled in (not necessarily today),
+        // with its own rampRate; the 7-day CTL delta when absent - same as Android.
+        const int n = days.size();
+        double ramp = rampArr.last();
+        if (std::isnan(ramp)) ramp = n > 7 ? ctlArr[n - 1] - ctlArr[n - 8] : 0.0;
+        applyReadiness(days, ctlArr, atlArr, ctlArr.last() - atlArr.last(), ramp, QVariantMap{{QStringLiteral("basis"), QStringLiteral("intervals")}});
+    });
+}
+
+// Banister's TRIMP from a move's average HR: minutes x HRr x 0.64 e^(1.92 HRr) (men) or
+// 0.86 e^(1.67 HRr) (women), HRr = (avg - rest) / (max - rest). The published 1991
+// formulation - the same one OpenAthlete's training-load.service.ts applies per sample
+// (formula only; their code is AGPL and was not copied). Averaged-HR TRIMP lands on the same
+// scale as minutes for a moderate hour (~70 vs 60), so HR and duration-only moves can share
+// one CTL/ATL curve.
+static double banisterTrimp(double minutes, double avgHr, double restHr, double maxHr, bool male)
+{
+    if (maxHr <= restHr || avgHr <= restHr) return 0.0;
+    const double hrr = qBound(0.0, (avgHr - restHr) / (maxHr - restHr), 1.0);
+    return male ? minutes * hrr * 0.64 * std::exp(1.92 * hrr)
+                : minutes * hrr * 0.86 * std::exp(1.67 * hrr);
+}
+
+QMap<QDate, double> CoachService::localLoadByDay(int *hrMoves, int *durationMoves)
+{
+    const QDate today = QDate::currentDate();
+    const QDate doneSince = today.addDays(-7);   // "recently done" window for pickWorkouts()
+    const QDate loadSince = today.addDays(-120);  // only these need their GPX header read
+    m_recentDone.clear();
+    *hrMoves = 0;
+    *durationMoves = 0;
+
+    // Max/rest HR and sex, remembered each time the watch's personal settings are read
+    // (SettingsWriteService). Without them every move is duration-based, as before.
+    const QSettings s;
+    const double maxHr = s.value(QStringLiteral("hrProfile/max_hr")).toDouble();
+    const double restHr = s.value(QStringLiteral("hrProfile/rest_hr")).toDouble();
+    const bool male = s.value(QStringLiteral("hrProfile/is_male"), 1).toInt() != 0;
+    const bool haveProfile = maxHr > 0 && restHr > 0 && maxHr > restHr;
+    static const QRegularExpression avgHrRe(QStringLiteral("<avg_hr>(\\d+)</avg_hr>"));
+
+    QMap<QDate, double> loadByDay;
+    if (!m_db.isOpen()) return loadByDay;
+    struct Move { qint64 startSecs; double durationS; double load; bool hr; QDate day; };
+    QVector<Move> moves;
+    // gpx_text only for the recent window - the table holds years of imports.
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT start_time, duration_s, name, "
+        "CASE WHEN start_time >= ? THEN gpx_text END FROM activities "
+        "WHERE start_time IS NOT NULL AND start_time != ''"));
+    q.addBindValue(loadSince.toString(Qt::ISODate));
+    q.exec();
+    while (q.next()) {
+        const QDateTime dt = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
+        if (!dt.isValid()) continue;
+        const double durationS = q.value(1).toDouble();
+        // A move longer than two days is a watch left recording or a corrupt header, not
+        // training (real, 2026-09-27: two copies of a 59841-min "Running" on 2026-06-21 put
+        // Fitness at 356). The longest real event here, a 600 km BRM, is split into days.
+        if (durationS <= 0 || durationS > 48 * 3600) continue;
+        const double minutes = durationS / 60.0;
+        Move m{dt.toSecsSinceEpoch(), durationS, minutes, false, dt.toLocalTime().date()};
+        if (haveProfile && m.day >= loadSince) {
+            const auto hm = avgHrRe.match(q.value(3).toString());
+            const double avgHr = hm.hasMatch() ? hm.captured(1).toDouble() : 0.0;
+            const double trimp = avgHr > 0 ? banisterTrimp(minutes, avgHr, restHr, maxHr, male) : 0.0;
+            if (trimp > 0) { m.load = trimp; m.hr = true; }
+        }
+        moves.append(m);
+        // Anything trained in the last 7 days is a candidate for exclusion from picks.
+        // Name-matching is best-effort: a ride recorded on the watch carries its sport-mode
+        // name, not the SYSTM session name, so this only fires when the two genuinely match
+        // (e.g. a workout named the same way) — but it never wrongly excludes.
+        if (m.day >= doneSince) {
+            const QString norm = normalizeName(q.value(2).toString());
+            if (!norm.isEmpty()) m_recentDone.insert(norm);
+        }
     }
+
+    // One move, several rows: the watch's own copy (UTC, "…Z") beside its intervals.icu import
+    // (local time, no zone) - real, 2026-08-31 19:29:42Z / 21:29:40, 1922 s / 1921 s - or two
+    // identical imports. Same move = durations within 1% (5 s floor) and starts a whole number
+    // of hours apart (±3 min, up to 14 h - a timezone slip). Keep the richer load (HR wins).
+    std::sort(moves.begin(), moves.end(),
+              [](const Move &a, const Move &b) { return a.startSecs < b.startSecs; });
+    QVector<Move> kept;
+    for (const Move &m : moves) {
+        bool dup = false;
+        for (int k = kept.size() - 1; k >= 0 && m.startSecs - kept[k].startSecs <= 14 * 3600 + 180; --k) {
+            Move &o = kept[k];
+            const qint64 dt = m.startSecs - o.startSecs;
+            const qint64 offHour = dt - qRound64(dt / 3600.0) * 3600;
+            if (std::abs(m.durationS - o.durationS) <= qMax(5.0, 0.01 * o.durationS)
+                && std::abs(offHour) <= 180) {
+                if ((m.hr && !o.hr) || (m.hr == o.hr && m.load > o.load)) o = m;
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) kept.append(m);
+    }
+    for (const Move &m : kept) {
+        loadByDay[m.day] += m.load;
+        if (m.day >= loadSince) ++*(m.hr ? hrMoves : durationMoves);
+    }
+    return loadByDay;
+}
+
+void CoachService::computeLocalReadiness()
+{
+    const QDate today = QDate::currentDate();
+    int hrMoves = 0, durationMoves = 0;
+    const QMap<QDate, double> loadByDay = localLoadByDay(&hrMoves, &durationMoves);
 
     QDate start = today.addDays(-119);   // cap history depth - bounded, still plenty for a 42d ramp
     if (!loadByDay.isEmpty()) {
@@ -114,12 +266,12 @@ void CoachService::computeReadiness()
     }
 
     QVector<QDate> days;
-    QVector<double> ctlArr, atlArr, freshArr;
-    double ctl = 0.0, atl = 0.0;
+    QVector<double> ctlArr, atlArr;
+    double ctl = 0.0, atl = 0.0, freshness = 0.0;
     const double ac = alphaCtl(), aa = alphaAtl();
     for (QDate d = start; d <= today; d = d.addDays(1)) {
         days.append(d);
-        freshArr.append(ctl - atl);            // freshness AS OF THE START of this day
+        freshness = ctl - atl;                 // freshness AS OF THE START of this day
         const double load = loadByDay.value(d, 0.0);
         ctl = ctl * (1 - ac) + load * ac;
         atl = atl * (1 - aa) + load * aa;
@@ -128,11 +280,22 @@ void CoachService::computeReadiness()
     }
 
     const int n = days.size();
-    const double finalCtl = ctlArr.last(), finalAtl = atlArr.last(), finalTsb = freshArr.last();
-
     double rampPerWeek = 0.0;
     for (int d = n - 1; d >= qMax(7, n - 28); --d)
         rampPerWeek = qMax(rampPerWeek, ctlArr[d] - ctlArr[d - 7]);
+
+    applyReadiness(days, ctlArr, atlArr, freshness, rampPerWeek, QVariantMap{
+        {QStringLiteral("basis"), QStringLiteral("local")},
+        {QStringLiteral("hrMoves"), hrMoves}, {QStringLiteral("durationMoves"), durationMoves},
+    });
+}
+
+void CoachService::applyReadiness(const QVector<QDate> &days, const QVector<double> &ctlArr,
+                                  const QVector<double> &atlArr, double freshness,
+                                  double rampPerWeek, const QVariantMap &extra)
+{
+    const int n = days.size();
+    const double finalCtl = ctlArr.last(), finalAtl = atlArr.last(), finalTsb = freshness;
 
     QString light = finalTsb > -10 ? QStringLiteral("green")
                   : finalTsb > -25 ? QStringLiteral("yellow") : QStringLiteral("red");
@@ -152,8 +315,8 @@ void CoachService::computeReadiness()
         {QStringLiteral("fitness"), finalCtl}, {QStringLiteral("fatigue"), finalAtl},
         {QStringLiteral("freshness"), finalTsb}, {QStringLiteral("rampPerWeek"), rampPerWeek},
         {QStringLiteral("light"), light}, {QStringLiteral("sentence"), sentence},
-        {QStringLiteral("basis"), QVariantList{QStringLiteral("load")}},
     };
+    m_readiness.insert(extra);
 
     m_chartSeries.clear();
     const int keep = qMin(42, n);
@@ -166,6 +329,14 @@ void CoachService::computeReadiness()
 
     m_todaysPicks = pickWorkouts(intensityForLight(light), 90);
     emit readinessChanged();
+
+    // Opening line, same as the mockup's apply('rested') seeding the transcript on load - sent
+    // once the first readiness exists (the intervals.icu one arrives asynchronously).
+    if (!m_greeted) {
+        m_greeted = true;
+        if (m_messages.isEmpty())
+            appendBubble(QStringLiteral("coach"), sentence, m_todaysPicks);
+    }
 }
 
 QString CoachService::intensityBucket(double intensityFactor)

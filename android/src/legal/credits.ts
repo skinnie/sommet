@@ -87,6 +87,13 @@ export const CREDITS: CreditEntry[] = [
       'Independent confirmation of the structured-workout JSON schema this project targets.',
   },
   {
+    name: 'OpenAthlete',
+    url: 'https://github.com/openathleteorg/openathlete',
+    description:
+      "The on-device HR load (Banister TRIMP) the Coach falls back to when intervals.icu isn't " +
+      'connected. Formula only, no code copied (AGPL-3.0).',
+  },
+  {
     name: 'OpenStreetMap',
     url: 'https://www.openstreetmap.org/copyright',
     description:

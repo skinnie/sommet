@@ -330,6 +330,8 @@ Built on the real work of others:
   **[WSTRN/C406pro_Hack](https://github.com/WSTRN/C406pro_Hack)** — C406 Pro hardware reference.
 - **[googlarz/suunto-mcp](https://github.com/googlarz/suunto-mcp)** — workout-guide format for the Coach's Suunto sink.
 - **Eric Banister, Dr. Andrew Coggan, Hunter Allen** — the CTL / ATL / TSB training-load model behind the Coach.
+- **[openathleteorg/openathlete](https://github.com/openathleteorg/openathlete)** (AGPLv3) — the idea of an
+  on-device HR load (Banister TRIMP) when no cloud load is available; formula only, no code copied.
 - **Suunto Apps Developer Manual** (2015) — watch variables and activity ids, checked against.
 - **[mihaildemidoff/suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model)** —
   a JAXB model of Suunto's SML format, a reference for the exercise-log work.

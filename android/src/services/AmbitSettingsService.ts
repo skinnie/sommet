@@ -7,6 +7,7 @@ import {
 import { decodePersonalSettings } from './AmbitPersonalSettingsReader';
 import { writeSetting as writeSettingRaw, WriteSettingResult, WriteDevice } from './AmbitSettingsWriter';
 import { computeActivityClass } from './IntervalsStats';
+import { rememberHrProfile } from './CoachService';
 
 // The Ambit 1 / Ambit 2 family (Ambit, Ambit2, Ambit2 S, Ambit2 R) uses the older legacy
 // personal-settings mechanism, not the Ambit3/Kailash SBEM 0x1100 - a different read path
@@ -61,7 +62,13 @@ export interface ReadSettingsState {
 }
 
 /** Real, read-only (0x1100, four zero bytes) - safe any time the watch is connected. */
-export async function readAmbitSettings(onState: (s: ReadSettingsState) => void): Promise<void> {
+export async function readAmbitSettings(report: (s: ReadSettingsState) => void): Promise<void> {
+  // Every successful read also remembers max/rest HR + sex for the Coach's on-device load
+  // estimate (CoachService.rememberHrProfile), which runs without a watch attached.
+  const onState = (s: ReadSettingsState) => {
+    if (s.phase === 'done' && s.settings) rememberHrProfile(s.settings).catch(() => {});
+    report(s);
+  };
   // Over BLE the link is already open (HomeScreen owns it); the USB connect() would pop the
   // OTG prompt and tear down the BLE session. read/writeSettingsRaw act on the shared native
   // device either way. Same transport fix as CustomModesService. André, 2026-08-17.

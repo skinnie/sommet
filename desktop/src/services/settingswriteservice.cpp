@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
+#include <QSettings>
 
 static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 
@@ -98,6 +99,17 @@ void SettingsWriteService::refresh()
                 choices.append(choice);
             }
             row[QStringLiteral("choices")] = choices;
+
+            // Remember the HR profile for the Coach's local load estimate (Banister TRIMP needs
+            // max/rest HR and sex) - it runs without a watch attached, so it can't read them live.
+            // The Ambit3 schema calls sex "gender" (1 = Male), the Ambit1/2 one "is_male".
+            static const QStringList kHrProfileKeys = {QStringLiteral("max_hr"),
+                QStringLiteral("rest_hr"), QStringLiteral("is_male"), QStringLiteral("gender")};
+            if (kHrProfileKeys.contains(it.key()) && entry.value(QStringLiteral("value")).isDouble()) {
+                const QString key = it.key() == QStringLiteral("gender") ? QStringLiteral("is_male") : it.key();
+                QSettings().setValue(QStringLiteral("hrProfile/") + key,
+                                     entry.value(QStringLiteral("value")).toDouble());
+            }
 
             rows.append(row);
         }
