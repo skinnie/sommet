@@ -91,7 +91,8 @@ export const CREDITS: CreditEntry[] = [
     url: 'https://github.com/openathleteorg/openathlete',
     description:
       "The on-device HR load (Banister TRIMP) the Coach falls back to when intervals.icu isn't " +
-      'connected. Formula only, no code copied (AGPL-3.0).',
+      'connected, and the weather line on each activity. Ideas and formula only, no code copied ' +
+      '(AGPL-3.0).',
   },
   {
     name: 'OpenStreetMap',

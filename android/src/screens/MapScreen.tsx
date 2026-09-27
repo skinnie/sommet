@@ -24,6 +24,9 @@ import { LEAFLET_STYLE_TAG, LEAFLET_INJECT_JS } from '../services/leafletInline'
 import { writeMapPage, mapWebViewFileProps } from '../services/mapWebView';
 import { getCachedPois } from '../services/PoiService';
 import Icon from '../components/ui/Icon';
+import { weatherLabel } from '../components/WeatherCard';
+import { weatherEmoji } from '../services/WeatherService';
+import { fetchActivityWeather, ActivityWeather } from '../services/ActivityWeather';
 
 type Route = RouteProp<RootStackParamList, 'Map'>;
 type Nav   = NativeStackNavigationProp<RootStackParamList, 'Map'>;
@@ -310,6 +313,18 @@ export default function MapScreen() {
   }, [activity.gpx_path]);
 
   const stats = useMemo(() => computeElevationStats(points), [points]);
+
+  // The weather it was done in (André, 2026-09-27) - same line as the desktop's ActivityWeather.qml.
+  const [weather, setWeather] = useState<ActivityWeather | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setWeather(null);
+    if (points.length === 0) return;
+    const track = points.map(p => ({ lat: p.latitude, lon: p.longitude }));
+    fetchActivityWeather(activity.id, Date.parse(activity.date), activity.duration_s, track)
+      .then(w => { if (alive) setWeather(w); });
+    return () => { alive = false; };
+  }, [points, activity.id, activity.date, activity.duration_s]);
 
   // Determine mode (time vs distance) based on whether timestamps exist
   const replayMode = useMemo(() => {
@@ -730,6 +745,11 @@ export default function MapScreen() {
           <StatChip styles={styles} label="D-" value={`${stats.dMinus} m`} />
           <StatChip styles={styles} label={t.avgSpeed} value={formatSpeed(activity.duration_s, stats.totalDistance)} />
         </View>
+        {weather && (
+          <Text style={styles.weatherLine} numberOfLines={2}>
+            {weatherLine(weather)}
+          </Text>
+        )}
       </View>
 
       {/* ── Bouton téléchargement hors-ligne ── */}
@@ -827,6 +847,17 @@ export default function MapScreen() {
 
 // ─── Helpers Components ───────────────────────────────────────────────────────
 
+function weatherLine(w: ActivityWeather): string {
+  const lo = Math.round(w.tempMin), hi = Math.round(w.tempMax);
+  const temp = lo === hi ? `${hi} °C` : `${lo}–${hi} °C`;
+  const rain = w.rainMm >= 0.2 ? ` · ${w.rainMm.toFixed(1)} mm rain` : '';
+  const pct = (x?: number) => Math.round((x ?? 0) * 100);
+  const share = w.headShare !== undefined
+    ? ` · headwind ${pct(w.headShare)}% · crosswind ${pct(w.crossShare)}% · tailwind ${pct(w.tailShare)}%` : '';
+  return `${weatherEmoji(w.code)} ${weatherLabel(w.code)} · ${temp}${rain} · 💨 ${Math.round(w.windKmh)} km/h ${w.windCompass} (gusts ${Math.round(w.gustKmh)})${share}`;
+}
+
+
 function ExportMenuItem({ styles, label, onPress }: { styles: ReturnType<typeof createStyles>; label: string; onPress: () => void }) {
   return (
     <TouchableOpacity style={styles.exportItem} onPress={onPress}>
@@ -873,6 +904,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     chip: { alignItems: 'center', flex: 1 },
     chipLabel: { fontSize: 10, color: t.mutedText, marginBottom: 2 },
     chipValue: { fontSize: 13, fontWeight: '700', color: t.text },
+    weatherLine: { fontSize: 11, color: t.mutedText, textAlign: 'center' },
     // No-GPS (indoor) detail: a plain summary + the same export controls, instead of a map.
     noGpsContent: { flex: 1, padding: 16, gap: 16 },
     noGpsTitle: { fontSize: 20, fontWeight: '700', color: t.text },

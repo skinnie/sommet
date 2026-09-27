@@ -9,7 +9,7 @@ import { t, dateLocale } from '../i18n';
 // WeatherViewModel.qml labelFor() - kept here (not in WeatherService.ts) so it can use this
 // screen's own i18n strings directly instead of threading the whole `t` object through a
 // generic-record parameter.
-function weatherLabel(code: number): string {
+export function weatherLabel(code: number): string {
   if (code === 0) return t.weatherClear;
   if (code === 1) return t.weatherMainlyClear;
   if (code === 2) return t.weatherPartlyCloudy;
