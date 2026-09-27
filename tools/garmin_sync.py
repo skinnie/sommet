@@ -142,8 +142,9 @@ def do_health(days, tokens_dir):
 
 
 def do_sleep(days, tokens_dir):
-    """Nightly sleep hours from Garmin. get_sleep_data is per-day, so this loops the window
-    (kept modest); returns [{date, value(hours)}]. Best-effort - a day with no sleep record is
+    """Nightly sleep from Garmin. get_sleep_data is per-day, so this loops the window
+    (kept modest); returns [{date, value(hours), deepMin?, lightMin?, remMin?, awakeMin?,
+    onsetHour?}]. Best-effort - a day with no sleep record is
     skipped."""
     client = _client(tokens_dir)
     if client is None:
@@ -157,8 +158,20 @@ def do_sleep(days, tokens_dir):
             dto = data.get("dailySleepDTO") or {}
             secs = dto.get("sleepTimeSeconds")
             if secs:
-                out.append({"date": dto.get("calendarDate") or d,
-                            "value": round(secs / 3600.0, 2)})
+                night = {"date": dto.get("calendarDate") or d,
+                         "value": round(secs / 3600.0, 2)}
+                # Stages, awake time and bed time for the sleep score (desktop sleepscore.cpp,
+                # Train Libre's engine). Minutes; onsetHour = local clock hour of sleep onset
+                # (sleepStartTimestampLocal is epoch-ms of the LOCAL wall clock, read as UTC).
+                for key, field in (("deepMin", "deepSleepSeconds"), ("lightMin", "lightSleepSeconds"),
+                                   ("remMin", "remSleepSeconds"), ("awakeMin", "awakeSleepSeconds")):
+                    if isinstance(dto.get(field), (int, float)):
+                        night[key] = round(dto[field] / 60.0, 1)
+                start_local = dto.get("sleepStartTimestampLocal")
+                if isinstance(start_local, (int, float)):
+                    t = datetime.datetime.fromtimestamp(start_local / 1000.0, datetime.timezone.utc)
+                    night["onsetHour"] = round(t.hour + t.minute / 60.0, 3)
+                out.append(night)
         except Exception:
             continue
     out.sort(key=lambda r: r["date"])

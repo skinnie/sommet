@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.39 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.40 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -259,6 +259,8 @@ qt_add_qml_module(ambitapp
         src/services/weatherservice.cpp
         src/services/activityweatherservice.h
         src/services/activityweatherservice.cpp
+        src/services/sleepscore.h
+        src/services/sleepscore.cpp
         src/services/activityservice.h
         src/services/activityservice.cpp
         src/services/gearservice.h

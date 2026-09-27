@@ -147,6 +147,13 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   processor is also where the per-activity weather line comes from (historical Open-Meteo for the
   hours a move spans) - again the idea only.
 
+- **[rfivesix/train-libre](https://github.com/rfivesix/train-libre)** (GPL-3.0) - the sleep score
+  is a port of its Sleep Health Score engine (`lib/features/sleep/domain/scoring/
+  sleep_scoring_engine.dart` and `documentation/features/sleep_scoring_engine.md`): the five
+  domains, their curves and weights, and the bottleneck multipliers, re-written in C++
+  (`desktop/src/services/sleepscore.cpp`) and TypeScript (`android/src/services/SleepScore.ts`).
+  Same licence as this app, so the port is a straightforward GPL-3.0 derivative, credited here.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 

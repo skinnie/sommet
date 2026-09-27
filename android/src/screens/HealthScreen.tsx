@@ -32,6 +32,8 @@ const METRICS: Metric[] = [
   { key: 'restingHR', label: 'Resting heart rate', unit: ' bpm', decimals: 0 },
   { key: 'hrv',       label: 'HRV',                unit: ' ms',  decimals: 0 },
   { key: 'sleepHours',label: 'Sleep',              unit: ' h',   decimals: 1 },
+  // Train Libre's sleep health score (SleepScore.ts) - from duration alone here, see WellnessService.
+  { key: 'sleepScore', label: 'Sleep score',       unit: '',     decimals: 0 },
   { key: 'steps',     label: 'Steps',              unit: '',     decimals: 0 },
   { key: 'vo2max',    label: 'VO₂max',             unit: '',     decimals: 0 },
 ];

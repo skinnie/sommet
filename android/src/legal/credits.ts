@@ -95,6 +95,11 @@ export const CREDITS: CreditEntry[] = [
       '(AGPL-3.0).',
   },
   {
+    name: 'Train Libre',
+    url: 'https://github.com/rfivesix/train-libre',
+    description: 'The sleep score is a port of its Sleep Health Score engine (GPL-3.0).',
+  },
+  {
     name: 'OpenStreetMap',
     url: 'https://www.openstreetmap.org/copyright',
     description:

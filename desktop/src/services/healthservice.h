@@ -47,6 +47,11 @@ class HealthService : public QObject
     Q_PROPERTY(double latestHrv READ latestHrv NOTIFY changed)
     Q_PROPERTY(double latestBodyBattery READ latestBodyBattery NOTIFY changed)
     Q_PROPERTY(double latestSleep READ latestSleep NOTIFY changed)
+    // Sleep score 0-100 per night (sleepscore.cpp, Train Libre's engine) over the chosen sleep
+    // source: every domain for Garmin nights (stages, awake time, bed time), duration only for
+    // intervals.icu. [{date, value, completeness}]
+    Q_PROPERTY(QVariantList sleepScore READ sleepScore NOTIFY changed)
+    Q_PROPERTY(double latestSleepScore READ latestSleepScore NOTIFY changed)
     // One-tap "Install HRV app": installs the 5+5 HRV Suunto App onto an HRV sport mode via the
     // backend (/api/hrv/install). hrvInstalling drives the button's busy state; hrvInstallMessage
     // is the last result/error to show the user.
@@ -87,6 +92,8 @@ public:
     double latestHrv() const { return lastValue(m_hrv); }
     double latestBodyBattery() const { return lastValue(m_bodyBattery); }
     double latestSleep() const { return lastValue(m_sleep); }
+    QVariantList sleepScore() const { return m_sleepScore; }
+    double latestSleepScore() const { return lastValue(m_sleepScore); }
 
     bool hrvInstalling() const { return m_hrvInstalling; }
     QString hrvInstallMessage() const { return m_hrvInstallMessage; }
@@ -118,6 +125,8 @@ private:
     int m_pending = 0;
     QString m_lastError;
     QVariantList m_rhr, m_steps, m_hrv, m_bodyBattery, m_sleep;   // merged / selected results
+    QVariantList m_sleepScore;
+    static QVariantList buildSleepScores(const QVariantList &nights);
     QVariantList m_hrvAmbit;                                      // Ambit3 morning-HRV (own line)
     bool m_hrvInstalling = false;
     QString m_hrvInstallMessage;

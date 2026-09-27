@@ -1,4 +1,5 @@
 #include "healthservice.h"
+#include "sleepscore.h"
 
 #include <QDate>
 #include <QJsonArray>
@@ -197,6 +198,7 @@ void HealthService::rebuild()
     m_sleep = (sp == QStringLiteral("intervals")) ? m_iSleep
             : (sp == QStringLiteral("garmin"))    ? m_gSleep
                                                   : QVariantList{};
+    m_sleepScore = buildSleepScores(m_sleep);
     emit changed();
 }
 
@@ -471,4 +473,47 @@ void HealthService::readStrapHrv(int seconds)
         }
         emit changed();
     });
+}
+
+// Nightly sleep score over the chosen source's nights (ascending by date). Garmin nights carry
+// stages/awake minutes and a local onset hour (tools/garmin_sync.py do_sleep); intervals.icu
+// nights only their duration (`value`, hours). Regularity = spread of mid-sleep over up to the
+// 14 previous nights that had an onset time (needs 5+, as in Train Libre).
+QVariantList HealthService::buildSleepScores(const QVariantList &nights)
+{
+    QVariantList out;
+    QVector<double> midSleeps;   // previous nights' mid-sleep clock hours
+    for (const auto &v : nights) {
+        const auto m = v.toMap();
+        const double hours = m.value(QStringLiteral("value")).toDouble();
+        if (hours <= 0) continue;
+        SleepScore::Night n;
+        n.durationMin = hours * 60.0;
+        auto opt = [&](const char *key) -> std::optional<double> {
+            const auto x = m.value(QString::fromLatin1(key));
+            return x.isValid() && !x.isNull() ? std::optional<double>(x.toDouble()) : std::nullopt;
+        };
+        const auto deep = opt("deepMin"), light = opt("lightMin"), rem = opt("remMin"), awake = opt("awakeMin");
+        if (deep && light && rem) {
+            n.deepPct = *deep / *n.durationMin * 100.0;
+            n.lightPct = *light / *n.durationMin * 100.0;
+            n.remPct = *rem / *n.durationMin * 100.0;
+        }
+        if (awake) {
+            n.wasoMin = *awake;
+            n.efficiencyPct = *n.durationMin / (*n.durationMin + *awake) * 100.0;
+        }
+        n.onsetHourLocal = opt("onsetHour");
+        if (n.onsetHourLocal) {
+            const QVector<double> window = midSleeps.mid(qMax(0, midSleeps.size() - 14));
+            n.midSleepSdHours = SleepScore::midSleepSd(window);
+            n.regularityDays = window.size();
+            midSleeps.append(SleepScore::midSleepHour(*n.onsetHourLocal, *n.durationMin));
+        }
+        if (const auto r = SleepScore::compute(n))
+            out.append(QVariantMap{{QStringLiteral("date"), m.value(QStringLiteral("date"))},
+                                   {QStringLiteral("value"), r->score},
+                                   {QStringLiteral("completeness"), r->completeness}});
+    }
+    return out;
 }

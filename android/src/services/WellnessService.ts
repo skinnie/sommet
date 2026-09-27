@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { computeSleepScore } from './SleepScore';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 
 // intervals.icu wellness feed — the single source behind BOTH the Weight and Health screens
@@ -28,6 +29,9 @@ export interface WellnessDay {
   hrv?: number;
   steps?: number;
   sleepHours?: number;
+  // Sleep score 0-100 (SleepScore.ts, Train Libre's engine). intervals.icu only carries the
+  // night's duration, so this is the duration-based score - no stages or bed time from here.
+  sleepScore?: number;
   vo2max?: number;
 }
 
@@ -72,7 +76,11 @@ export async function fetchWellness(days = 365): Promise<WellnessDay[]> {
     if (typeof r.hrv === 'number') day.hrv = r.hrv;
     if (typeof r.steps === 'number') day.steps = r.steps;
     if (typeof r.vo2max === 'number') day.vo2max = r.vo2max;
-    if (typeof r.sleepSecs === 'number') day.sleepHours = r.sleepSecs / 3600;
+    if (typeof r.sleepSecs === 'number') {
+      day.sleepHours = r.sleepSecs / 3600;
+      const sc = computeSleepScore({ durationMin: r.sleepSecs / 60 });
+      if (sc) day.sleepScore = sc.score;
+    }
     out.push(day);
   }
   out.sort((a, b) => a.date.localeCompare(b.date));

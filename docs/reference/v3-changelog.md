@@ -7,6 +7,29 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Sleep score (desktop 0.2.40)
+
+André, 2026-09-27, on Train Libre's Sleep Health Score: "5 yes why not".
+
+- **A 0-100 sleep score per night**, ported from [Train Libre](https://github.com/rfivesix/train-libre)'s
+  engine (SHS v3.5, GPL-3.0 like this app): duration, continuity (sleep efficiency + awake
+  time), architecture (deep/REM minutes, light-sleep share), circadian timing (mid-sleep near
+  03:30) and regularity (spread of mid-sleep over the last nights), weighted 30/20/25/15/10 and
+  renormalised over what the source provides, then multiplied by the worst bottleneck (short
+  REM, short deep, short night, late mid-sleep). One deliberate difference: no duration, no
+  score (Train Libre's fallback would still produce one).
+- **Sources.** Garmin nights now carry stages, awake time and bed time (`garmin_sync.py
+  --sleep`: deepMin/lightMin/remMin/awakeMin/onsetHour), so they use all five parts;
+  intervals.icu nights only their duration. Desktop: tile + trend on Health. Android: a "Sleep
+  score" chart on Health (intervals.icu, duration-based).
+- Engine twice, kept in step: `desktop/src/services/sleepscore.cpp` and
+  `android/src/services/SleepScore.ts` (7 unit tests; the C++ checked against the same cases -
+  a 5.47 h night scores 36.55 on both).
+- Honest limits: on André's data the last night with sleep is 2026-08-27 (intervals.icu, from the
+  Suunto; Garmin has none), outside Health's 30-day window, so nothing shows yet. Duration-only
+  scoring is harsher than Suunto's own (5.47 h: 37 vs 74). The Polar band's overnight
+  recordings have no sleep/wake detection yet, so they don't feed it.
+
 ## 2026-09-27: The weather each move was done in (desktop 0.2.39)
 
 André, 2026-09-27, on OpenAthlete attaching weather history to every activity: "2 super nice".

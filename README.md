@@ -333,6 +333,8 @@ Built on the real work of others:
 - **[openathleteorg/openathlete](https://github.com/openathleteorg/openathlete)** (AGPLv3) — the idea of an
   on-device HR load (Banister TRIMP) when no cloud load is available, and weather history on each
   activity; ideas and formula only, no code copied.
+- **[rfivesix/train-libre](https://github.com/rfivesix/train-libre)** (GPLv3) — its Sleep Health Score engine,
+  ported for the sleep score.
 - **Suunto Apps Developer Manual** (2015) — watch variables and activity ids, checked against.
 - **[mihaildemidoff/suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model)** —
   a JAXB model of Suunto's SML format, a reference for the exercise-log work.

@@ -120,6 +120,15 @@ Item {
                         Text { text: HealthService.latestSleep.toFixed(1) + qsTr(" h")
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
                     }
+                    Column {
+                        spacing: 2
+                        // Train Libre's sleep health score (sleepscore.cpp), 0-100.
+                        visible: HealthService.sleepScore.length > 0
+                        Text { text: qsTr("Sleep score"); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeLabel }
+                        Text { text: Math.round(HealthService.latestSleepScore)
+                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                    }
                 }
             }
 
@@ -236,6 +245,21 @@ Item {
                     label: qsTr("Sleep")
                     unit: qsTr(" h")
                     series: HealthService.sleep
+                }
+            }
+            Card {
+                width: parent.width
+                visible: HealthService.sleepScore.length > 1
+                variant: "flat"   // trend chart
+                height: 220
+                MetricChart {
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacingSmall
+                    // Duration-only for intervals.icu nights; Garmin nights add stages, awake
+                    // time, bed time and regularity (Train Libre's Sleep Health Score).
+                    label: qsTr("Sleep score")
+                    unit: ""
+                    series: HealthService.sleepScore
                 }
             }
 
