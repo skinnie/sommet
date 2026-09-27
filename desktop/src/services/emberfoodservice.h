@@ -27,11 +27,21 @@ class EmberFoodService : public QObject
     // [{source, id, name, brand, kcal100, protein100, carbs100, fat100, servingG}]
     Q_PROPERTY(QVariantList results READ results NOTIFY resultsChanged)
     Q_PROPERTY(QVariantList recent READ recent NOTIFY recentChanged)
+    // Built with Qt Multimedia + ZXing (CMake SOMMET_HAS_WEBCAM_SCAN): the dialog offers "Scan".
+    Q_PROPERTY(bool webcamScanAvailable READ webcamScanAvailable CONSTANT)
 public:
     explicit EmberFoodService(QObject *parent = nullptr);
     bool searching() const { return m_pending > 0; }
     QVariantList results() const { return m_results; }
     QVariantList recent() const { return m_recent; }
+    bool webcamScanAvailable() const
+    {
+#ifdef SOMMET_HAS_WEBCAM_SCAN
+        return true;
+#else
+        return false;
+#endif
+    }
 
     Q_INVOKABLE void search(const QString &query);   // name, or 8-14 digits = barcode
     Q_INVOKABLE void clear();

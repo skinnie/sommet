@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Ember - scan a food's barcode with the webcam (desktop 0.2.42)
+
+André, 2026-09-27: "nobody uses a bar code scanner. on the other hand everybody has a webcam. go"
+(issue #20).
+
+- **"Scan" in the meal dialog** opens a live webcam preview with an aiming box. The first barcode
+  read on two frames in a row is filled into the search, and the product appears.
+- **How:** Qt Multimedia captures the camera; ZXing-C++ v3.1.1 (Apache-2.0, fetched and built
+  static) decodes EAN-13/8 and UPC-A/E on a worker thread, one frame at a time (frames arriving
+  while it works are skipped). A frame that fails is tried once more sharpened (unsharp mask):
+  fixed-focus laptop webcams blur the bars. On synthetic 720p frames (tilted 7°, noise, 1.6 px
+  blur) the sharpen pass is what makes a 4.5 px-bar EAN-13 readable; 3 px bars under that blur
+  stay unreadable, hence the on-screen hint: 15-25 cm, good light.
+- **Optional at build time:** a Qt kit without Qt Multimedia still builds, just without the Scan
+  button. CI/release now install the module (install-qt-action `modules: qtmultimedia`, aqt
+  `-m qtmultimedia`); windeployqt/macdeployqt bundle it. macOS: Info.plist gains
+  NSCameraUsageDescription (template `desktop/macos/Info.plist.in`), and the view asks for the
+  camera permission. The ZXing licence is embedded in the app.
+- Local: Qt Multimedia 6.12.0 added to the kit with aqtinstall (module only). Not yet read from a
+  real pack in front of the webcam.
+
 ## 2026-09-27: Ember - log a meal from a food database (desktop 0.2.41)
 
 André, 2026-09-27: "go for ember" (issue #20).

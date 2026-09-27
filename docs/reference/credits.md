@@ -162,6 +162,14 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   **[CodeWithCJ/SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness)**; none of its code is
   used - its licence allows non-commercial use only, which cannot be combined with GPL-3.0.
 
+- **[zxing-cpp/zxing-cpp](https://github.com/zxing-cpp/zxing-cpp)** (Apache-2.0) - the barcode
+  decoder behind Ember's webcam scan on the desktop (EAN-13/8, UPC-A/E). Fetched at build time
+  (v3.1.1) and linked statically; its licence is embedded in the app
+  (`desktop/licenses/zxing-cpp-LICENSE.txt`). Sommet's own code around it (frame handling, the
+  sharpen-and-retry pass, the two-frame agreement) is `desktop/src/services/barcode*.cpp`. The
+  webcam itself is read through **Qt Multimedia** (LGPLv3), bundled by windeployqt/macdeployqt
+  like the rest of Qt.
+
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
 

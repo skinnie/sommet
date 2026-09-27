@@ -68,7 +68,7 @@ jobs:
             'fallbacks :',
             '    https://download.qt.io'
           ) | Set-Content -Path aqt_settings.ini -Encoding ascii
-          python -m aqt -c aqt_settings.ini install-qt windows desktop 6.10.3 win64_msvc2022_64 `
+          python -m aqt -c aqt_settings.ini install-qt windows desktop 6.10.3 win64_msvc2022_64 -m qtmultimedia `
             --outputdir "$env:RUNNER_WORKSPACE\Qt"
           $qt = "$env:RUNNER_WORKSPACE\Qt\6.10.3\msvc2022_64"
           "$qt\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
@@ -186,6 +186,8 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.12.0"
+          # Webcam barcode scanning in Ember (issue #20); macdeployqt bundles its plugins.
+          modules: "qtmultimedia"
 
       # -DCMAKE_OSX_DEPLOYMENT_TARGET pins the app's minimum macOS. Without it, CMake stamps
       # LSMinimumSystemVersion with the *build runner's* macOS (now newer than many users'

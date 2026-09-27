@@ -58,6 +58,8 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: "6.12.0"
+          # Webcam barcode scanning in Ember (issue #20). CMake builds without it too.
+          modules: "qtmultimedia"
       - name: Install Ninja + the OpenGL/Wayland headers Qt needs on a headless machine
         # Qt 6.12's Gui component pulls in a Wayland plugin (Qt6DmaBufServerBuffer ->
         # Qt6WaylandClient -> Wayland); without the Wayland dev libs on the runner, find_package

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.41 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.42 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,6 +7,50 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2
     Network Sql)
+
+# Webcam barcode scanning for Ember meals (André, 2026-09-27; issue #20): Qt Multimedia grabs the
+# webcam, ZXing-C++ (Apache-2.0, fetched and built static here) reads EAN/UPC. Optional - a kit
+# without Qt Multimedia still builds, the meal dialog just has no Scan button. CI/release installs
+# the module (install-qt-action `modules: qtmultimedia`, aqt `-m qtmultimedia`).
+option(SOMMET_WEBCAM_SCAN "Webcam barcode scanning in Ember (needs Qt Multimedia)" ON)
+set(SOMMET_HAS_WEBCAM_SCAN OFF)
+set(SOMMET_SCAN_QML "")
+set(SOMMET_SCAN_SOURCES "")
+if(SOMMET_WEBCAM_SCAN)
+    find_package(Qt6 QUIET COMPONENTS Multimedia)
+    if(TARGET Qt6::Multimedia)
+        include(FetchContent)
+        set(ZXING_READERS ON CACHE BOOL "" FORCE)
+        set(ZXING_WRITERS OFF CACHE STRING "" FORCE)
+        set(ZXING_C_API OFF CACHE BOOL "" FORCE)
+        set(ZXING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(ZXING_BLACKBOX_TESTS OFF CACHE BOOL "" FORCE)
+        set(ZXING_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+        set(ZXING_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
+        set(_sommet_shared ${BUILD_SHARED_LIBS})
+        set(BUILD_SHARED_LIBS OFF)   # static: nothing extra to ship next to the app
+        # ZXing's own sources need C++20 (its public headers are C++17, which the app stays on).
+        set(CMAKE_CXX_STANDARD 20)
+        # ...and it is plain C++: our AUTOMOC would try to moc its optional ZXingQt.h.
+        set(_sommet_automoc ${CMAKE_AUTOMOC})
+        set(CMAKE_AUTOMOC OFF)
+        FetchContent_Declare(zxing
+            GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
+            GIT_TAG v3.1.1
+            GIT_SHALLOW TRUE)
+        FetchContent_MakeAvailable(zxing)
+        set(BUILD_SHARED_LIBS ${_sommet_shared})
+        set(CMAKE_CXX_STANDARD 17)
+        set(CMAKE_AUTOMOC ${_sommet_automoc})
+        set(SOMMET_HAS_WEBCAM_SCAN ON)
+        set(SOMMET_SCAN_QML qml/components/EmberScanView.qml)
+        set(SOMMET_SCAN_SOURCES src/services/barcodescanner.h src/services/barcodescanner.cpp
+            src/services/barcodedecode.h src/services/barcodedecode.cpp)
+        message(STATUS "Webcam barcode scanning: ON (Qt Multimedia + ZXing-C++ v3.1.1)")
+    else()
+        message(STATUS "Webcam barcode scanning: OFF (Qt Multimedia not in this Qt kit)")
+    endif()
+endif()
 
 # Optional, local-only extensions. OFF by default, so the public app and every CI/release
 # build contain nothing from it. Turn ON (-DSOMMET_PERSONAL=ON) to compile in private modules
@@ -58,6 +102,8 @@ set_target_properties(ambitapp PROPERTIES
     # apart when reporting bugs. Stamp the full project version into both version keys.
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    # Qt's default keys + NSCameraUsageDescription for the webcam barcode scanner.
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in
 )
 
 # OS-level app icon (Finder/Dock on macOS, .exe/Explorer/taskbar on Windows). Both slots are
@@ -199,6 +245,7 @@ qt_add_qml_module(ambitapp
         qml/components/WeatherCard.qml
         qml/components/ActivityWeather.qml
         qml/components/EmberMealDialog.qml
+        ${SOMMET_SCAN_QML}
         qml/components/MapView.qml
         qml/components/ActivityCard.qml
         qml/components/ActivityDetail.qml
@@ -264,6 +311,7 @@ qt_add_qml_module(ambitapp
         src/services/sleepscore.cpp
         src/services/emberfoodservice.h
         src/services/emberfoodservice.cpp
+        ${SOMMET_SCAN_SOURCES}
         src/services/activityservice.h
         src/services/activityservice.cpp
         src/services/gearservice.h
@@ -311,6 +359,9 @@ qt_add_qml_module(ambitapp
         src/services/trainingprogramservice.cpp
     RESOURCES
         assets/fonts/MaterialSymbolsRounded.ttf
+        # Apache-2.0 asks every binary to carry the licence of the ZXing-C++ code linked in
+        # (webcam barcode scan) - embedded here, so it ships inside the app on every platform.
+        licenses/zxing-cpp-LICENSE.txt
         packaging/icon.png
         # Coach's bundled catalogue (2026-08-21) - a copy of coach/data/systm-sample.json.
         # coach/ itself is gitignored / not part of this public repo (its own README says
@@ -329,6 +380,10 @@ target_link_libraries(ambitapp PRIVATE
     Qt6::Network
     Qt6::Sql
 )
+if(SOMMET_HAS_WEBCAM_SCAN)
+    target_link_libraries(ambitapp PRIVATE Qt6::Multimedia ZXing::ZXing)
+    target_compile_definitions(ambitapp PRIVATE SOMMET_HAS_WEBCAM_SCAN)
+endif()
 
 # qt_add_qml_module's auto-generated type-registration file (ambitapp_qmltyperegistrations.cpp)
 # looks up each QML_ELEMENT header by bare filename (__has_include(<deviceservice.h>)), not by

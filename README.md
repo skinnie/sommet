@@ -353,6 +353,9 @@ Services and libraries the app talks to at runtime:
   (public domain) — the food search behind Ember's meal logging. The idea came from
   [SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness); none of its code is used (its
   licence is non-commercial, incompatible with GPL-3.0).
+- **[ZXing-C++](https://github.com/zxing-cpp/zxing-cpp)** (Apache-2.0) — reads food barcodes from the
+  webcam in Ember (desktop); built from source, its licence ships inside the app. Camera capture
+  via **Qt Multimedia** (LGPLv3).
 - **[Anthropic Claude API](https://www.anthropic.com/api)** — optional, powers the Coach chat
   when you supply your own API key. The app works fully without it.
 - **[Qt](https://www.qt.io/)** (LGPLv3) — the desktop app's UI framework; **React Native** for

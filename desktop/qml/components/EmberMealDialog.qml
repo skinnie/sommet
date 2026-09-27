@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import AmbitApp
 
-// Ember "log a meal" - search Open Food Facts + USDA by name, or type/scan a barcode (a USB
-// scanner types the digits here), pick a food, set the grams, log. Recent picks show while the
+// Ember "log a meal" - search Open Food Facts + USDA by name, or by barcode: typed, or read by
+// the webcam ("Scan", EmberScanView.qml), pick a food, set the grams, log. Recent picks show while the
 // box is empty (offline too); "Just kcal" logs a number when nothing matches. Issue #20, twin of
 // android/src/components/EmberMealModal.tsx.
 ThemedDialog {
@@ -13,14 +13,17 @@ ThemedDialog {
 
     property bool fasting: false
     property var picked: null
+    property bool scanning: false
     signal logMeal(var meal)   // {name, kcal, protein, carbs, fat}
 
     readonly property real grams: Number(gramsField.text.replace(",", "."))
     readonly property var portionNow: picked && grams > 0 ? EmberFoodService.portion(picked, grams) : null
     readonly property bool _searchingText: searchField.text.trim().length >= 2
 
+    onClosed: scanning = false
     onOpened: {
         picked = null
+        scanning = false
         searchField.text = ""
         manualField.text = ""
         EmberFoodService.clear()
@@ -50,13 +53,41 @@ ThemedDialog {
             spacing: Theme.spacingSmall
             visible: root.picked === null
 
-            RoundedTextField {
-                id: searchField
+            Row {
                 width: parent.width
-                horizontalAlignment: TextInput.AlignLeft
-                placeholderText: qsTr("Search a food, or type / scan a barcode")
-                onTextChanged: debounce.restart()
-                onAccepted: { debounce.stop(); EmberFoodService.search(text) }
+                spacing: Theme.spacingSmall
+                RoundedTextField {
+                    id: searchField
+                    width: parent.width - (scanBtn.visible ? scanBtn.width + parent.spacing : 0)
+                    horizontalAlignment: TextInput.AlignLeft
+                    placeholderText: qsTr("Search a food, or type a barcode")
+                    onTextChanged: debounce.restart()
+                    onAccepted: { debounce.stop(); EmberFoodService.search(text) }
+                }
+                // Webcam barcode scan (builds with Qt Multimedia only).
+                RoundedButton {
+                    id: scanBtn
+                    visible: EmberFoodService.webcamScanAvailable
+                    text: root.scanning ? qsTr("Stop") : qsTr("Scan")
+                    onClicked: root.scanning = !root.scanning
+                }
+            }
+            Loader {
+                width: parent.width
+                active: root.scanning
+                visible: active
+                source: Qt.resolvedUrl("EmberScanView.qml")
+                onLoaded: item.width = width
+                Connections {
+                    target: parent.item
+                    ignoreUnknownSignals: true
+                    function onDetected(code) {
+                        root.scanning = false
+                        searchField.text = code
+                        debounce.stop()
+                        EmberFoodService.search(code)
+                    }
+                }
             }
             Text {
                 text: root._searchingText ? qsTr("Open Food Facts · USDA FoodData Central")
