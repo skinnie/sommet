@@ -537,9 +537,9 @@ def read_entry_at(data, mem_size, entry_address, mem_start):
     header = parse_log_header(data, off, tmp_len)
     off += tmp_len
 
-    # NOTE: parse_sample() reads directly from `data` at absolute/wrapped-logical offsets -
-    # correct as long as no single sample's bytes straddle the mem_size -> WRAP_START_OFFSET
-    # boundary. True for anything but a multi-megabyte single entry, not guarded further.
+    # NOTE: parse_sample() reads directly from `data` at absolute/wrapped-logical offsets. A
+    # sample straddling the mem_size -> WRAP_START_OFFSET boundary is covered by the wrap margin
+    # walk_entries() appends to a full-region buffer (GitHub #19).
     samples = []
     time_compensators = []
     logical_off = off
@@ -576,6 +576,13 @@ def walk_entries(data, mem_start=EXERCISE_LOG_BASE, mem_size=EXERCISE_LOG_SIZE, 
     master = parse_master_header(data)
     if master["entries"] == 0:
         return
+    # A full region read of a log that has wrapped can hold a sample straddling the end of the
+    # region -> WRAP_START_OFFSET; parse_sample() reads it by plain offset, so give the buffer the
+    # same 0x10000 wrap margin openambit's pmem20.c allocates (the region's first bytes copied
+    # after its end). Done once here, not per entry (GitHub #19, aerodynamics-py).
+    if len(data) >= mem_size:
+        margin = min(0x10000, mem_size - WRAP_START_OFFSET)
+        data = data[:mem_size] + data[WRAP_START_OFFSET:WRAP_START_OFFSET + margin]
     current = mem_start
     nxt = master["first_entry"]
     skipped = 0
@@ -1477,7 +1484,9 @@ def main():
             try:
                 entries = list(walk_entries(data, mem_start=log_base, mem_size=log_size,
                                             skip_count=args.known_count))
-            except (IndexError, struct.error) as exc:
+            # ValueError too: an entry the linked list points at beyond the shortened read comes
+            # back as "no PMEM magic" (GitHub #19, aerodynamics-py, on a wrapped Ambit3 log).
+            except (IndexError, struct.error, ValueError) as exc:
                 print(f"  fast read parsed incompletely ({exc}) - falling back to a full "
                       f"region read")
                 data = read_flash(link, log_base, log_size, label="ExerciseLog")
