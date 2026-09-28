@@ -67,7 +67,7 @@ from ble_pklg import Message
 # d0fd6b80-e62e-11e3-a2e9-0002a5d5c51b byte-for-byte reproduces the old NOTIFY_CHAR_UUID
 # value exactly, confirming the mix-up. A live scan filtered on the old (wrong)
 # SERVICE_UUID found nothing even with the watch advertising right next to the adapter
-# (confirmed separately, unfiltered, seeing `Ambit3 1849100781` with
+# (confirmed separately, unfiltered, seeing `Ambit3 XXXXXXXXXX` with
 # uuids=['98ae7120-e62e-11e3-badd-0002a5d5c51b']) - this fix is what made it visible.
 SERVICE_UUID = "98ae7120-e62e-11e3-badd-0002a5d5c51b"
 WRITE_CHAR_UUID = "c6339440-e62e-11e3-a5b3-0002a5d5c51b"

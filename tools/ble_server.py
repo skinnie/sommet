@@ -265,7 +265,7 @@ class ControlSocketServer:
 NAME_PREFIXES = ("Ambit3", "Traverse", "Suunto NSP", "Kailash")
 
 # Suunto's OUI. Confirmed 2026-08-11 from a raw btmon capture of a real "Pair Mobile App"
-# press: the advertiser was 0C:8C:DC:2A:58:28. The same prefix this project already strips
+# press: the advertiser was 0C:8C:DC:XX:XX:XX. The same prefix this project already strips
 # from Android's bond config when forgetting a pairing, so it is Suunto's across the family.
 #
 # Matching on it is a backstop for the case a watch advertises with neither a recognised name
@@ -749,7 +749,7 @@ class ServerLink:
 
 
 # ambit3_get_compact_serial (ambit_pcap.py's own name for it) - the clean numeric serial
-# ("1849100781") the handshake's 0x0002 hello does NOT carry (it only has the hello's own
+# ("XXXXXXXXXX") the handshake's 0x0002 hello does NOT carry (it only has the hello's own
 # raw id string, e.g. "8A153C5111000900" - see ServerLink._handle_handshake_frame's own
 # comment). Found by decoding the real working Suunto app's own capture directly,
 # 2026-08-11 (assets/ble 2026-08-09/btsnoop_suuntoapp_2026-08-09.log, via tshark + this
@@ -771,7 +771,7 @@ COMPACT_SERIAL_REQUEST = bytes.fromhex("00000000f90858ee017e00000892c98538")
 def parse_compact_serial(payload):
     """Byte 8 is some flag (0x01 in the real capture, meaning unconfirmed); the serial
     itself is a null-terminated ASCII string starting at byte 9 - confirmed decoding
-    "1849100781" out of the real capture's reply, which matches this project's own
+    "XXXXXXXXXX" out of the real capture's reply, which matches this project's own
     independently-recorded real serial for the same watch (HANDOFF.md)."""
     if len(payload) < 10:
         return None
@@ -998,7 +998,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
     # cached - which is any watch used once before - re-appears as a PROPERTY UPDATE on the
     # existing object instead, so a listener on InterfacesAdded alone goes deaf to exactly
     # the devices most likely to be ours. Real miss, 2026-08-11: an earlier run found
-    # "Ambit3 1849100781" straight from the cache, then a later run with a freshness check
+    # "Ambit3 XXXXXXXXXX" straight from the cache, then a later run with a freshness check
     # saw nine other devices and never the watch, because by then it was cached and only
     # ever emitted RSSI updates. Both signals are needed.
     def on_props(interface, changed, invalidated, path=None):
@@ -1042,7 +1042,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         # defaults - which can exclude LE-only advertisers and de-duplicate repeats - so a
         # watch that btmon shows advertising never reaches a D-Bus client at all. Real miss,
         # 2026-08-11: btmon captured the Ambit3 advertising the NSP UUID (AD type 0x07) from
-        # 0C:8C:DC:2A:58:28 while this scan, running at the same time, reported nothing.
+        # 0C:8C:DC:XX:XX:XX while this scan, running at the same time, reported nothing.
         #
         # Transport "le" asks for LE advertisements explicitly; DuplicateData keeps repeat
         # adverts coming (a watch advertises the same payload over and over, and without this

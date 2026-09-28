@@ -517,7 +517,7 @@ block for detail.
 - New `POST /api/ble/passkey` endpoint.
 - **Built clean on the first try, then confirmed live**: André paired a fresh Ambit3
   through the app's own dialog - screenshot shows `Suunto Ambit 3 Peak, Connected`,
-  battery 100%, firmware 2.4.17, hardware 70.2.17414, serial 1849100781. Three more real
+  battery 100%, firmware 2.4.17, hardware 70.2.17414, serial XXXXXXXXXX. Three more real
   bugs fixed along the way, found only by testing this live: a startup-timing race in
   `/api/ble/connect`'s status reporting, an orphaned daemon process silently blocking new
   connect attempts from binding the control socket, and a stale pairing-agent log message
@@ -543,7 +543,7 @@ block for detail.
   displaying, submitted via a new control-socket op / `ble_bridge.submit_passkey()`.
   Confirmed live: watch showed a code, submitted it, pairing completed, real device data
   read straight after - no more depending on the desktop environment's own Bluetooth applet.
-- **Clean numeric serial** ("1849100781") now read via a real post-handshake `0x0b1e`
+- **Clean numeric serial** ("XXXXXXXXXX") now read via a real post-handshake `0x0b1e`
   request, reverse-engineered by decoding the real Suunto app's own capture directly
   (btsnoop + tshark). Previously only the handshake's raw hello id was available.
 - **Two real bugs fixed** that were making retries look like protocol failures: the

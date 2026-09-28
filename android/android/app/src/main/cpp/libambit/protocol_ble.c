@@ -569,7 +569,7 @@ int libambit_ble_handshake_device_info(ambit_object_t *object, ambit_device_info
         } else if (cmd == 0x0002) {
             /* hello: [model 16][id 16][versions 16...]. fw at offset 32
              * (02 04 11 = 2.4.17, the real Ambit3 Peak firmware, in the capture).
-             * The clean serial ("1849100781") only arrives later in a phone-driven
+             * The clean serial ("XXXXXXXXXX") only arrives later in a phone-driven
              * 0x0b1e exchange; for connect+identify we use the hello's own id
              * string as the serial, which is enough and needs no further round. */
             if (info) {
