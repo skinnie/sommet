@@ -65,11 +65,58 @@ The **phone is the GATT server**; the Karoo is the client. The phone advertises 
 | `2f7cabce-808d-411f-9a0c-bb92ba96c102` | media update | |
 | `9b3c81d8-57b1-4a8a-b8df-0e56f7ca51c2` | media command | |
 
-Message transport is pull-based: the Karoo writes a `ChunkRequest` (or `ResetRequest` with
-`sequenceNumber`, `receivedBytes`) to the message-event characteristic, and the phone notifies the
-next slice of at most `currentMaxMessageSize` bytes with a sequence byte that increments per chunk
-(`KarooServerMessageFragmenter`, `KarooClientMessageBuilder`). Exact header byte layout: not yet
-pinned, read the smali before building.
+### Framing (pinned 2026-09-28, `MessageEvent`, `KarooGattServer`, fragmenter/builder)
+
+Integers little-endian (`EncodedInteger16/32`) unless noted. Same framing both directions:
+
+| Bytes | Meaning | Where |
+|---|---|---|
+| `00 type:u16 len:u32` | START of a message | message-event char (write by Karoo / notify by phone) |
+| `seq:u8 data…` | chunk, `seq` from 0, +1 per chunk | Karoo→phone: write `9baf0006`; phone→Karoo: notify `9baf0007` |
+| `01 type:u16` | END | message-event |
+| `02 type:u16 received:u32 seq:u8` | RESET: resend from byte `received` with `seq` | message-event |
+| `03 type:u16 count:u8` | REQUEST: Karoo pulls `count` more chunks of the phone's message | message-event (write) |
+
+- Phone→Karoo is **pulled**: phone notifies START, then sends one chunk per chunk request, at most
+  `MTU − 4` data bytes after the seq byte. When the index reaches the length, the next request
+  gets END instead of a chunk. Messages go out one at a time, in order.
+- Karoo→phone is **pushed**: START, chunks, END. An out-of-order seq makes the phone notify RESET.
+- HTTP proxy details: `HTTP_TIMEOUT` is a **big-endian** int32; `HTTP_REQUEST_TYPE` (one byte,
+  GET=0 HEAD POST PUT DELETE PATCH CONNECT OPTIONS TRACE) completes the request. Headers are
+  `key:value` joined by `≤≥`. Reply: `HTTP_STATUS_CODE` (u16 LE), `HTTP_HEADERS`, `HTTP_TX_ID`,
+  `HTTP_BODY`; an I/O error → `HTTP_TX_ID`, `HTTP_FAILURE`. 4xx/5xx are normal replies.
+- Handshake: on subscribe, on `REQUEST_CAPABILITIES` and on the old `INTERNET_CHECK`, the phone
+  sends CAPABILITIES JSON (`version`, `supportsHttp`, `hasInternet`, `supportsInternetCheck`,
+  `displaysLiveTracking`, `internetCheckV2`, `pairingCompleted`, `clientMsgTypes`,
+  `serverMsgTypes`); `INTERNET_CHECK_V2` gets `INTERNET_CHECK_RESPONSE {"hasInternet": bool}`.
+- Pairing: the phone gets the Karoo's MAC (QR), `createBond()`s it, stores it, and its GATT server
+  **dials** the bonded Karoo (`gattServer.connect(device, autoConnect=true)`) while advertising the
+  service UUID. Only a bonded device can be the active session.
+
+## Logging proxy: `tools/karoo_proxy.py`
+
+Built 2026-09-28 from the facts above; the framing and proxy logic are covered offline by
+`tools/test_karoo_proxy.py` (14 tests, a fake Karoo drives the byte exchange). **Not yet run
+against a real Karoo.**
+
+    ./tools/karoo_proxy.py listen --karoo AA:BB:CC:DD:EE:FF      # pair/connect, proxy, log
+    ./tools/karoo_proxy.py listen --karoo … --document-synced <route id>   # also trigger a route sync
+    ./tools/karoo_proxy.py show ~/.cache/AmbitApp/karoo_proxy/<file>.jsonl --bodies
+
+Every proxied request/response lands in a 0600 JSONL capture (it holds the Karoo's own auth
+headers). BlueZ smoke test on the X230, 2026-09-28: the GATT service registers; a *connectable*
+advertisement is refused (`Invalid Parameters`) while `tools/ble_server.py` is running its
+continuous scan (a non-connectable advert registers fine), so use `--karoo` to dial, as the
+Companion itself does. Plan for the first hardware session: turn Wi-Fi off on the Karoo, close the
+Hammerhead app on the phone (or turn its Bluetooth off), run with `--karoo`, then start a route
+sync on the Karoo or pass `--document-synced` with an id from the dashboard.
+
+Plan B, raised by André the same day: Hammerhead lets developers sideload APKs on the Karoo, so an
+on-device app could take a GPX from our app directly. A quick way to size that: over ADB,
+check whether any Karoo package declares an intent filter for `.gpx`/`application/gpx+xml`
+(`adb shell dumpsys package` / `pm query-activities`). If one does, a sideloaded helper (or even
+`adb shell am start -a android.intent.action.VIEW`) could hand the file straight to the Karoo's
+own importer.
 
 Server (phone → Karoo) message types, by ordinal: CAPABILITIES 0, HTTP_STATUS_CODE 1,
 HTTP_HEADERS 2, HTTP_BODY 3, HTTP_FAILURE 4, SHARED_LOCATION 5, REQUEST_AUTH 6, HTTP_TX_ID 7,
