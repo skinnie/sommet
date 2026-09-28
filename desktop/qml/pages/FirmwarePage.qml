@@ -21,6 +21,7 @@ PageFlickable {
     property var known: []
     property string selectedSerial: ""
     property string phase: ""
+    property string suuntolinkNote: ""   // "SuuntoLink ... was closed" events during the flash
     property real percent: -1          // <0 = indeterminate (busy)
     property string doneFw: ""
     property string errorText: ""
@@ -121,7 +122,7 @@ PageFlickable {
     }
 
     function startFlash(file, expectModel) {
-        root.phase = qsTr("Starting…"); root.percent = -1; root._consumed = 0;
+        root.phase = qsTr("Starting…"); root.percent = -1; root._consumed = 0; root.suuntolinkNote = "";
         phraseTimer.i = 0; root.phrase = root.phrases[0]; phraseTimer.start();
         const xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
@@ -165,6 +166,7 @@ PageFlickable {
         case "rebooting":     root.phase = qsTr("Rebooting your watch…"); root.percent = -1; break;
         case "done":          root.mode = "done"; root.doneFw = ev.fw || ""; break;
         case "error":         root.mode = "error"; root.errorText = ev.message || qsTr("The flash failed."); break;
+        case "suuntolink":    root.suuntolinkNote = ev.message || ""; break;
         }
     }
 
@@ -346,17 +348,11 @@ PageFlickable {
                     text: qsTr("This takes about 10 minutes. Keep the watch connected and "
                                + "don't unplug or move the cable until it's done.")
                 }
-                // Mac only (GitHub #14's side note): when the watch reconnects in update mode,
-                // macOS auto-launches SuuntoLink, which takes the watch over mid-flash - that is
-                // what killed a real flash at 23.7%.
-                Text {
-                    visible: Qt.platform.os === "osx" || Qt.platform.os === "macos"
-                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.warning
-                    font.pixelSize: Theme.fontSizeLabel
-                    text: qsTr("Quit SuuntoLink first (menu bar icon → Quit). During the update "
-                               + "the watch reconnects, macOS starts SuuntoLink by itself, and it "
-                               + "can take over the watch and stop the update halfway.")
-                }
+                // Every flash, every platform (André, 2026-09-28): SuuntoLink takes the USB and,
+                // on a Mac, relaunches itself when the watch reconnects in update mode - that
+                // killed a real flash at 23.7% (GitHub #14). Live status + Quit button; the backend
+                // also closes it for the whole flash.
+                SuuntoLinkWarning { width: parent.width; context: "flash" }
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
@@ -382,6 +378,9 @@ PageFlickable {
                        font.pixelSize: Theme.fontSizeBodyLarge }
                 Text { text: root.phase; color: Theme.mutedText
                        font.pixelSize: Theme.fontSizeLabel; width: parent.width
+                       wrapMode: Text.WordWrap }
+                Text { visible: root.suuntolinkNote.length > 0; text: root.suuntolinkNote
+                       color: Theme.warning; font.pixelSize: Theme.fontSizeLabel; width: parent.width
                        wrapMode: Text.WordWrap }
 
                 // rounded progress bar (indeterminate when percent < 0)

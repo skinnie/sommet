@@ -211,8 +211,25 @@ ApplicationWindow {
             color: Theme.surface
             Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
+            // SuuntoLink warning on app open (André, 2026-09-28): only when it is installed
+            // (Mac/Windows), closable for the session; pushes the page down, never covers it.
+            SuuntoLinkWarning {
+                id: suuntoLinkBanner
+                context: "app"
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.topMargin: Theme.spacingSmall
+                anchors.leftMargin: window.navExpanded ? Theme.spacingMedium : 56   // clear of the floating ☰
+                anchors.rightMargin: Theme.spacingMedium
+            }
+
             Loader {
-                anchors.fill: parent
+                anchors.top: suuntoLinkBanner.visible ? suuntoLinkBanner.bottom : parent.top
+                anchors.topMargin: suuntoLinkBanner.visible ? Theme.spacingSmall : 0
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
                 source: window.pageSourceFor(navRail.currentPage)
             }
         }

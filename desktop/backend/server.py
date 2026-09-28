@@ -1235,6 +1235,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ble_status()
         elif self.path == "/api/ble/logs/summary":
             self._handle_ble_logs_summary()
+        elif self.path == "/api/suuntolink/status":
+            self._handle_suuntolink_status()
         elif self.path == "/api/firmware":
             self._handle_firmware_check()
         elif self.path == "/api/firmware/known":
@@ -1391,6 +1393,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_agps_update(body)
         elif self.path == "/api/firmware/download":
             self._handle_firmware_download(body)
+        elif self.path == "/api/suuntolink/quit":
+            self._handle_suuntolink_quit()
         elif self.path == "/api/firmware/flash":
             self._stream_firmware_flash(body)
         elif self.path == "/api/backup":
@@ -7660,6 +7664,25 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, info)
 
+    @staticmethod
+    def _suuntolink_guard():
+        sys.path.insert(0, str(TOOLS_DIR))
+        import suuntolink_guard
+        return suuntolink_guard
+
+    def _handle_suuntolink_status(self):
+        """GET /api/suuntolink/status - is Suunto's own desktop app installed / running / set to
+        auto-launch? It grabs the watch's USB (and relaunches itself mid-flash on a Mac), so the
+        app warns on open and the Firmware page always warns (André, 2026-09-28)."""
+        self._send_json(200, self._suuntolink_guard().status())
+
+    def _handle_suuntolink_quit(self):
+        """POST /api/suuntolink/quit - close SuuntoLink (politely, then by force)."""
+        g = self._suuntolink_guard()
+        r = g.quit_app()
+        r.update(g.status())
+        self._send_json(200, r)
+
     def _stream_firmware_flash(self, body):
         """POST /api/firmware/flash - runs the REAL flasher and streams its --json progress
         as newline-delimited JSON (one event per line) so the Firmware page shows live
@@ -7704,6 +7727,29 @@ class Handler(BaseHTTPRequestHandler):
             env.pop("AMBIT_SERIAL", None)
         events = 0
         noise = []
+        # SuuntoLink must not touch the USB during the flash: on a Mac its launch agents restart
+        # it the moment the watch re-enumerates into its bootloader, and that seized the USB and
+        # killed a real flash at 23.7% (old issue #14). Close it now, and keep closing it for as
+        # long as the flash runs; every closure is reported in the progress stream.
+        write_lock = threading.Lock()
+
+        def emit(obj):
+            with write_lock:
+                try:
+                    self.wfile.write((json.dumps(obj) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        guard = self._suuntolink_guard()
+        if guard.status()["running"]:
+            r = guard.quit_app()
+            emit({"phase": "suuntolink",
+                  "message": "SuuntoLink was running and has been closed for the flash"
+                             + (" - but it is STILL running; quit it before continuing" if r["stillRunning"] else ""),
+                  "stillRunning": r["stillRunning"]})
+        watchdog = guard.Watchdog(on_event=emit)
+        watchdog.start()
         with WATCH_LOCK:
             proc = subprocess.Popen(args, cwd=TOOLS_DIR, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
@@ -7720,13 +7766,15 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     events += 1
                     try:
-                        self.wfile.write((line + "\n").encode("utf-8"))
-                        self.wfile.flush()
+                        with write_lock:
+                            self.wfile.write((line + "\n").encode("utf-8"))
+                            self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         proc.kill()
                         break
                 proc.wait()
             finally:
+                watchdog.stop()
                 if proc.poll() is None:
                     proc.kill()
 

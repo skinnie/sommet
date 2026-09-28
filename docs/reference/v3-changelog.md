@@ -7,6 +7,31 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-28: SuuntoLink warning on app open and in every firmware flash (desktop 0.2.44)
+
+André, 2026-09-28: "suunto link warning should be present in every firmware flash or even when
+opening our app".
+
+- **Why:** SuuntoLink (Suunto's desktop app, Mac/Windows) takes any Ambit's USB; on a Mac its
+  launch agents (com.suunto.suuntolink.launcher.*) restart it whenever the watch re-enumerates,
+  including into the bootloader mid-flash - that killed a real flash at 23.7% (old GitHub #14).
+- **On app open:** a banner at the top of the page when SuuntoLink is installed ("is running" +
+  "Quit SuuntoLink" when it runs; how many auto-launch entries it has). Closable for the session;
+  re-checked every 15 s, since plugging a watch in can start it.
+- **Every firmware flash:** the confirmation always carries the warning (all platforms, live
+  status, Quit button) - replacing the Mac-only line. During the flash the backend closes
+  SuuntoLink before the flasher starts and a watchdog closes it again every time it reappears
+  (0.3 s poll; Electron takes seconds to open the USB); each closure shows under the progress.
+- **tools/suuntolink_guard.py** (stdlib): status / quit_app (polite, then forced) / Watchdog;
+  `/api/suuntolink/status`, `/api/suuntolink/quit`. Mac: /Applications/Suuntolink.app, pgrep -x
+  Suuntolink, osascript quit then pkill; Windows: %LOCALAPPDATA%\Suuntolink\Suuntolink.exe,
+  tasklist/taskkill, Run-key autostart; Linux: only a Wine-run Suuntolink.exe.
+- Tested: tools/test_suuntolink_guard.py (Mac + Windows paths against faked pgrep/osascript/pkill/
+  tasklist/taskkill; it caught a Watchdog bug - an attribute named _stop shadowed Thread's own);
+  on Linux a dummy "Suuntolink.exe" process showed the banner on app open and the quit endpoint
+  closed it. Not yet on a real Mac/Windows with SuuntoLink. Android: nothing to do (SuuntoLink
+  doesn't exist there).
+
 ## 2026-09-28: Coach local load on intervals.icu's scale; personal USDA key (desktop 0.2.43)
 
 André, 2026-09-28, on two leftovers: "let's fix these".

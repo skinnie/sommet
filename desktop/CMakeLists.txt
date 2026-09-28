@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.43 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.44 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -245,6 +245,7 @@ qt_add_qml_module(ambitapp
         qml/components/WeatherCard.qml
         qml/components/ActivityWeather.qml
         qml/components/EmberMealDialog.qml
+        qml/components/SuuntoLinkWarning.qml
         ${SOMMET_SCAN_QML}
         qml/components/MapView.qml
         qml/components/ActivityCard.qml
