@@ -1,4 +1,4 @@
-import { banisterTrimp, computeLocalSeries, dedupeMoves } from '../LocalLoad';
+import { banisterTrimp, computeLocalSeries, dedupeMoves, loadPerHour, TRIMP_TO_LOAD } from '../LocalLoad';
 
 const P = { maxHr: 190, restHr: 50, male: true };
 
@@ -52,5 +52,31 @@ describe('computeLocalSeries', () => {
     const s = computeLocalSeries([{ startMs: now - 86400000, durationS: 3600, avgHr: 150 }], null, now);
     expect(s.hrMoves).toBe(0);
     expect(s.durationMoves).toBe(1);
+  });
+});
+
+describe('calibration to intervals.icu scale (2026-09-28)', () => {
+  const now = Date.parse('2026-09-27T10:00:00Z');
+  it('rates duration-only moves by sport', () => {
+    expect(loadPerHour('Walking')).toBe(9);
+    expect(loadPerHour('Hiking')).toBe(9);
+    expect(loadPerHour('Cycling')).toBe(70);
+    expect(loadPerHour('Indoor cycling')).toBe(55);
+    expect(loadPerHour('Running')).toBe(40);
+    expect(loadPerHour('Trail Running')).toBe(40);
+    expect(loadPerHour('Pool swimming')).toBe(40);
+    expect(loadPerHour('Yoga / pilates')).toBe(15);
+    expect(loadPerHour(undefined)).toBe(30);
+  });
+  it('one 2 h ride yesterday = 140 load on the day (CTL gains 140/42-ish)', () => {
+    const s = computeLocalSeries([{ startMs: now - 86400000, durationS: 7200, name: 'Cycling' }], null, now);
+    const aCtl = 1 - Math.exp(-1 / 42);
+    expect(s.ctl[s.ctl.length - 2]).toBeCloseTo(140 * aCtl, 6);
+  });
+  it('scales TRIMP by 0.8', () => {
+    const P = { maxHr: 190, restHr: 50, male: true };
+    const s = computeLocalSeries([{ startMs: now - 86400000, durationS: 3600, avgHr: 134, name: 'Cycling' }], P, now);
+    const aCtl = 1 - Math.exp(-1 / 42);
+    expect(s.ctl[s.ctl.length - 2]).toBeCloseTo(TRIMP_TO_LOAD * banisterTrimp(60, 134, P) * aCtl, 6);
   });
 });

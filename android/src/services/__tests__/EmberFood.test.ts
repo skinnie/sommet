@@ -1,5 +1,8 @@
-jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(async () => null), setItem: jest.fn() }));
-import { foodFromOff, foodFromUsda, isBarcode, portion, rankFoods, Food } from '../EmberFood';
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(async (k: string) => (k === 'ember.usdaApiKey' ? 'MISTYPED' : null)),
+  setItem: jest.fn(), removeItem: jest.fn(),
+}));
+import { foodFromOff, foodFromUsda, isBarcode, portion, rankFoods, searchFoods, Food } from '../EmberFood';
 
 // Shapes and values from the live APIs, 2026-09-27.
 const NUTELLA = {   // world.openfoodfacts.org/api/v2/product/3017620422003 -> .product
@@ -59,5 +62,21 @@ describe('rankFoods', () => {
       f('Raw Protein Banana', 'Bombus'), f('Bananas, raw', 'USDA'),
     ], 'banana raw');
     expect(out.map(x => x.name)).toEqual(['Bananas, raw', 'Raw Protein Banana', 'Organic Banana Raw Crunch Granola', 'Proteline']);
+  });
+});
+
+describe('USDA key', () => {
+  it('uses the personal key, and falls back to DEMO_KEY when USDA refuses it (403)', async () => {
+    const urls: string[] = [];
+    (global as any).fetch = jest.fn(async (url: string) => {
+      urls.push(url);
+      if (url.includes('openfoodfacts')) return { ok: true, json: async () => ({ hits: [] }) };
+      if (url.includes('api_key=MISTYPED')) return { ok: false, status: 403, json: async () => ({}) };
+      return { ok: true, json: async () => ({ foods: [BANANA] }) };
+    });
+    const out = await searchFoods('banana raw');
+    expect(urls.some(u => u.includes('api_key=MISTYPED'))).toBe(true);
+    expect(urls.some(u => u.includes('api_key=DEMO_KEY'))).toBe(true);
+    expect(out.map(f => f.name)).toEqual(['Bananas, raw']);
   });
 });

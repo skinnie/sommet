@@ -337,6 +337,39 @@ PageFlickable {
                         onClicked: Qt.openUrlExternally(emberUrlField.text)
                     }
                 }
+                // Food search (André, 2026-09-28): a personal USDA key lifts the shared demo key's
+                // limit. Open Food Facts needs no key.
+                Text {
+                    text: qsTr("Food search")
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeLabel
+                    font.bold: true
+                    topPadding: Theme.spacingSmall
+                }
+                Text {
+                    text: qsTr("Generic foods come from USDA FoodData Central. Without your own key a shared demo key is used, limited to about 30 searches an hour. The key is free and stays on this computer.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedTextField {
+                        id: usdaKeyField
+                        width: parent.width - usdaGetBtn.width - Theme.spacingSmall
+                        text: EmberFoodService.usdaApiKey
+                        echoMode: TextInput.Password
+                        placeholderText: qsTr("USDA API key (optional)")
+                        onEditingFinished: EmberFoodService.usdaApiKey = text
+                    }
+                    RoundedButton {
+                        id: usdaGetBtn
+                        text: qsTr("Get a free key")
+                        onClicked: Qt.openUrlExternally("https://fdc.nal.usda.gov/api-key-signup")
+                    }
+                }
             }
         }
 

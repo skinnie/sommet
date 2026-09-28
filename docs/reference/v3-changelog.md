@@ -7,6 +7,26 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-28: Coach local load on intervals.icu's scale; personal USDA key (desktop 0.2.43)
+
+André, 2026-09-28, on two leftovers: "let's fix these".
+
+- **Coach local load, calibrated.** It counted 1 minute = 1 load point and read about 2x
+  intervals.icu (61 vs 29). Now, from André's own 443 intervals.icu activities of the past year:
+  a move without HR gets its sport's typical load per hour (rides 70, indoor/virtual 55, runs 40,
+  swims 40 (no samples, generic), walks/hikes 9, yoga/gym/climbing 15, unknown 30), and a move
+  with HR gets 0.80 x Banister TRIMP (intervals' load/TRIMP median, n=292). Replayed on his
+  activities.db: 44 / 27 / +14 against intervals' 29 / 22 / +7, same light. The rest of the gap
+  is real: intervals gives no load to his 91 moves without HR or power (walks, runs without a
+  strap), the local estimate still counts them. Same table on both apps (coachservice.cpp,
+  LocalLoad.ts).
+- **USDA key in Settings → Ember → Food search** (both apps): a free personal key lifts the
+  shared demo key's ~30 searches an hour; "Get a free key" opens the sign-up page. Stored on the
+  device only. A mistyped key (USDA answers 403) falls back to the demo key instead of silently
+  dropping the generic foods.
+- Tests: jest 137/137 (new: per-sport rates, TRIMP x 0.8, key fallback with mocked network).
+  Desktop builds; not re-screenshotted (André was using the desktop).
+
 ## 2026-09-27: Ember - scan a food's barcode with the phone camera (Android + iOS)
 
 André, 2026-09-27: "go" (issue #20, after the desktop webcam scan).

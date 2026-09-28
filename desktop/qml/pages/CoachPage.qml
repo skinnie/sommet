@@ -241,10 +241,10 @@ Item {
                     text: root.readiness.basis === "intervals"
                           ? qsTr("Fitness and fatigue from intervals.icu (training load from every device you sync there).")
                           : root.readiness.hrMoves > 0
-                            ? qsTr("Estimated on this computer: heart-rate load for %1, duration for %2 without HR. Connect intervals.icu for load from every device.")
+                            ? qsTr("Estimated on this computer: heart-rate load for %1, duration × sport for %2 without HR. Connect intervals.icu for load from every device.")
                                   .arg(root.readiness.hrMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.hrMoves))
                                   .arg(root.readiness.durationMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.durationMoves))
-                            : qsTr("Estimated on this computer from duration (minutes/day) — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.")
+                            : qsTr("Estimated on this computer from each move's duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeTiny
                     wrapMode: Text.WordWrap

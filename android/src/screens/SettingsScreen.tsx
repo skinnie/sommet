@@ -30,6 +30,7 @@ import {
 import { setAnthropicKey, clearAnthropicKey, hasAnthropicKey } from '../services/CoachChat';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
+import { getUsdaApiKey, setUsdaApiKey } from '../services/EmberFood';
 import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
@@ -105,6 +106,8 @@ export default function SettingsScreen() {
   const [emberSyncUrl, setEmberSyncUrl]             = useState('');
   const [emberSyncToken, setEmberSyncToken]         = useState('');
   const [savingEmberSync, setSavingEmberSync]       = useState(false);
+  // Personal USDA FoodData Central key for Ember's food search (2026-09-28); empty = DEMO_KEY.
+  const [usdaKey, setUsdaKey]                       = useState('');
   // Database (#SYNC): the user's own server/NAS is the only cross-device sync on the phone.
   const [sommetSyncUrl, setSommetSyncUrl]           = useState('');
   const [sommetSyncToken, setSommetSyncToken]       = useState('');
@@ -189,6 +192,7 @@ export default function SettingsScreen() {
     hasAnthropicKey().then(setAnthropicSaved);
     isEmberUnlocked().then(setEmberOn);
     getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
+    getUsdaApiKey().then(setUsdaKey);
     getSommetSyncCfg().then(c => {
       if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); }
     });
@@ -846,6 +850,27 @@ export default function SettingsScreen() {
             />
             <View style={styles.row}>
               <Button label={t.saveBtn} variant="filled" loading={savingEmberSync} onPress={handleSaveEmberSync} />
+            </View>
+
+            <Text style={[styles.cardTitle, { marginTop: 12 }]}>Food search</Text>
+            <Text style={styles.sectionDesc}>
+              Generic foods come from USDA FoodData Central. Without your own key a shared demo key
+              is used, limited to about 30 searches an hour. The key is free and stays on this phone.
+            </Text>
+            <FieldRow
+              icon="key"
+              value={usdaKey}
+              onChangeText={setUsdaKey}
+              placeholder="USDA API key (optional)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <View style={styles.row}>
+              <Button label="Get a free key" variant="outline"
+                onPress={() => Linking.openURL('https://fdc.nal.usda.gov/api-key-signup')} />
+              <Button label={t.saveBtn} variant="filled"
+                onPress={async () => { await setUsdaApiKey(usdaKey); Alert.alert('Ember', usdaKey.trim() ? 'USDA key saved.' : 'USDA key cleared (demo key).'); }} />
             </View>
           </View>
         )}

@@ -6,7 +6,7 @@
 //   - Open Food Facts (ODbL, attribution): packaged products, by name (search.openfoodfacts.org)
 //     or by barcode (world.openfoodfacts.org/api/v2/product/<code>). No key; identifying UA.
 //   - USDA FoodData Central (public domain / CC0): generic foods ("banana, raw"), Foundation +
-//     SR Legacy, all per 100 g. DEMO_KEY (rate-limited, fine for one person).
+//     SR Legacy, all per 100 g. The user's own free key when set in Settings, else DEMO_KEY.
 // Every result is normalised to per-100 g values; portion() scales to the grams eaten. The last
 // foods picked are kept on the device, so repeat meals work offline.
 
@@ -28,6 +28,17 @@ export interface Portion { kcal: number; protein: number; carbs: number; fat: nu
 
 const UA = 'Sommet/0.2 (https://github.com/skinnie/sommet)';
 const RECENT_KEY = 'ember.recentFoods';
+const USDA_KEY = 'ember.usdaApiKey';
+
+/** Personal USDA FoodData Central key (free, api.data.gov), set in Settings. Empty = the shared
+ *  DEMO_KEY, ~30 searches an hour per network (André, 2026-09-28). Stays on the device. */
+export async function getUsdaApiKey(): Promise<string> {
+  try { return ((await AsyncStorage.getItem(USDA_KEY)) ?? '').trim(); } catch { return ''; }
+}
+export async function setUsdaApiKey(key: string): Promise<void> {
+  const k = key.trim();
+  try { if (k) await AsyncStorage.setItem(USDA_KEY, k); else await AsyncStorage.removeItem(USDA_KEY); } catch { /* best-effort */ }
+}
 const RECENT_MAX = 30;
 
 const num = (v: unknown): number | undefined => {
@@ -117,11 +128,16 @@ export async function searchFoods(query: string): Promise<Food[]> {
   if (!q) return [];
   if (isBarcode(q)) { const f = await lookupBarcode(q); return f ? [f] : []; }
   const fields = 'code,product_name,brands,nutriments,serving_quantity';
-  const [off, usda] = await Promise.all([
+  const usdaUrl = (key: string) => `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}`
+    + `&api_key=${encodeURIComponent(key)}&pageSize=10&dataType=Foundation,SR%20Legacy`;
+  const ownKey = await getUsdaApiKey();
+  const [off, usdaOwn] = await Promise.all([
     getJson(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&page_size=20&fields=${fields}`),
-    getJson(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=DEMO_KEY`
-      + '&pageSize=10&dataType=Foundation,SR%20Legacy'),
+    getJson(usdaUrl(ownKey || 'DEMO_KEY')),
   ]);
+  // A mistyped personal key is refused (HTTP 403): fall back to the demo key rather than lose
+  // the generic foods silently.
+  const usda = usdaOwn ?? (ownKey ? await getJson(usdaUrl('DEMO_KEY')) : null);
   const out: Food[] = [];
   for (const h of off?.hits ?? []) { const f = foodFromOff(h); if (f) out.push(f); }
   for (const x of usda?.foods ?? []) { const f = foodFromUsda(x); if (f) out.push(f); }

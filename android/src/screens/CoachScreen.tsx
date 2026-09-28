@@ -179,8 +179,8 @@ export default function CoachScreen() {
             {r.basis === 'intervals'
               ? 'Fitness and fatigue come from intervals.icu, computed across every device you use.'
               : (r.hrMoves ?? 0) > 0
-                ? `Estimated on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration for ${plural(r.durationMoves ?? 0)} without HR. Connect intervals.icu for load from every device.`
-                : 'Estimated on this phone from duration (minutes/day) — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.'}
+                ? `Estimated on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration × sport for ${plural(r.durationMoves ?? 0)} without HR. Connect intervals.icu for load from every device.`
+                : 'Estimated on this phone from each move\'s duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.'}
           </Text>
         </>
       )}

@@ -248,7 +248,7 @@ async function loadCoachDataLocal(): Promise<CoachData> {
         avgHr = m ? Number(m[1]) : 0;
       } catch { /* file gone - duration it is */ }
     }
-    moves.push({ startMs, durationS: a.duration_s, avgHr });
+    moves.push({ startMs, durationS: a.duration_s, avgHr, name: a.activity_type });
     if (startMs >= doneSince && a.activity_type) recentDone.add(normalizeName(a.activity_type));
   }
   if (moves.length === 0) return { readiness: null, chart: [], picks: [] };

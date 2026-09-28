@@ -109,6 +109,18 @@ void EmberFoodService::remember(const QVariantMap &food)
     emit recentChanged();
 }
 
+QString EmberFoodService::usdaApiKey() const
+{
+    return QSettings().value(QStringLiteral("ember/usdaApiKey")).toString().trimmed();
+}
+
+void EmberFoodService::setUsdaApiKey(const QString &key)
+{
+    if (key.trimmed() == usdaApiKey()) return;
+    QSettings().setValue(QStringLiteral("ember/usdaApiKey"), key.trimmed());
+    emit usdaApiKeyChanged();
+}
+
 void EmberFoodService::clear()
 {
     ++m_seq;
@@ -118,7 +130,8 @@ void EmberFoodService::clear()
     emit searchingChanged();
 }
 
-void EmberFoodService::get(const QUrl &url, int seq, std::function<void(const QJsonObject &)> onJson)
+void EmberFoodService::get(const QUrl &url, int seq, std::function<void(const QJsonObject &)> onJson,
+                           std::function<void()> onError)
 {
     QNetworkRequest req(url);
     req.setRawHeader("User-Agent", kUserAgent);
@@ -126,12 +139,14 @@ void EmberFoodService::get(const QUrl &url, int seq, std::function<void(const QJ
     QNetworkReply *reply = m_net.get(req);
     ++m_pending;
     emit searchingChanged();
-    connect(reply, &QNetworkReply::finished, this, [this, reply, seq, onJson]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seq, onJson, onError]() {
         reply->deleteLater();
         if (seq != m_seq) return;   // a newer search superseded this one
         --m_pending;
         if (reply->error() == QNetworkReply::NoError)
             onJson(QJsonDocument::fromJson(reply->readAll()).object());
+        else if (onError)
+            onError();
         publish();
         emit searchingChanged();
     });
@@ -210,17 +225,26 @@ void EmberFoodService::search(const QString &query)
             if (!f.isEmpty()) m_offHits.append(f);
         }
     });
-    QUrl usda(QStringLiteral("https://api.nal.usda.gov/fdc/v1/foods/search"));
-    QUrlQuery uq;
-    uq.addQueryItem(QStringLiteral("query"), q);
-    uq.addQueryItem(QStringLiteral("api_key"), QStringLiteral("DEMO_KEY"));
-    uq.addQueryItem(QStringLiteral("pageSize"), QStringLiteral("10"));
-    uq.addQueryItem(QStringLiteral("dataType"), QStringLiteral("Foundation,SR Legacy"));
-    usda.setQuery(uq);
-    get(usda, seq, [this](const QJsonObject &o) {
+    auto usdaUrl = [q](const QString &key) {
+        QUrl usda(QStringLiteral("https://api.nal.usda.gov/fdc/v1/foods/search"));
+        QUrlQuery uq;
+        uq.addQueryItem(QStringLiteral("query"), q);
+        uq.addQueryItem(QStringLiteral("api_key"), key);
+        uq.addQueryItem(QStringLiteral("pageSize"), QStringLiteral("10"));
+        uq.addQueryItem(QStringLiteral("dataType"), QStringLiteral("Foundation,SR Legacy"));
+        usda.setQuery(uq);
+        return usda;
+    };
+    auto onUsda = [this](const QJsonObject &o) {
         for (const auto &x : o.value(QStringLiteral("foods")).toArray()) {
             const auto f = foodFromUsda(x.toObject());
             if (!f.isEmpty()) m_usdaHits.append(f);
         }
-    });
+    };
+    const QString key = usdaApiKey();
+    // A mistyped personal key is refused (HTTP 403): fall back to the demo key rather than lose
+    // the generic foods silently.
+    get(usdaUrl(key.isEmpty() ? QStringLiteral("DEMO_KEY") : key), seq, onUsda,
+        key.isEmpty() ? std::function<void()>{}
+                      : [this, seq, usdaUrl, onUsda]() { get(usdaUrl(QStringLiteral("DEMO_KEY")), seq, onUsda); });
 }

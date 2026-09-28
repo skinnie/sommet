@@ -2,9 +2,9 @@
 // localLoadByDay()/computeLocalReadiness(). Used ONLY when intervals.icu is not connected (or its
 // fetch fails): André, 2026-09-27, "keep intervals.icu as the first, only when not connected".
 //
-// Per move: Banister's TRIMP from the move's average HR when the watch recorded one and the HR
-// profile (max/rest HR, sex - remembered from the watch's personal settings) is known; otherwise
-// its minutes, the load proxy the desktop always used. The published 1991 formula - the same one
+// Per move: Banister's TRIMP (x 0.8) from the move's average HR when the watch recorded one and
+// the HR profile (max/rest HR, sex - remembered from the watch's personal settings) is known;
+// otherwise its duration x the sport's typical load per hour (loadPerHour below). The published 1991 formula - the same one
 // OpenAthlete's training-load.service.ts applies (formula only; their code is AGPL, not copied).
 // Pure functions, no I/O, so the maths is unit-tested (__tests__/LocalLoad.test.ts).
 
@@ -14,7 +14,26 @@ export interface LocalMove {
   startMs: number;      // epoch ms
   durationS: number;
   avgHr?: number;       // 0/undefined = no HR recorded
-  name?: string;
+  name?: string;        // sport / activity name ("Cycling", "Walking", ...) - picks the rate below
+}
+
+// Calibrated so the local estimate reads on intervals.icu's scale (André, 2026-09-28: the local
+// numbers ran ~2x intervals'). From his 443 intervals.icu activities of the past year:
+// icu_training_load = 0.80 x its own Banister TRIMP (median, n=292), and, per hour of moving
+// time, rides 72, gravel 71, virtual rides 54, runs 38 (n=14), walks/hikes 9, gym-type 13-16.
+// Swimming had no samples - a generic moderate 40. Same table as desktop coachservice.cpp.
+export const TRIMP_TO_LOAD = 0.8;
+
+export function loadPerHour(name?: string): number {
+  const n = (name ?? '').toLowerCase();
+  const has = (...keys: string[]) => keys.some(k => n.includes(k));
+  if (has('walk', 'hik', 'trek', 'nordic')) return 9;
+  if (has('indoor cycl', 'virtual', 'trainer', 'spin', 'zwift')) return 55;
+  if (has('cycl', 'bike', 'ride', 'velo', 'gravel', 'mtb')) return 70;
+  if (has('run', 'jog', 'treadmill', 'trail')) return 40;
+  if (has('swim')) return 40;
+  if (has('yoga', 'pilates', 'stretch', 'weight', 'strength', 'gym', 'climb', 'workout', 'training')) return 15;
+  return 30;
 }
 
 export interface LocalSeries {
@@ -78,7 +97,9 @@ export function computeLocalSeries(moves: LocalMove[], profile: HrProfile | null
     if (!(m.durationS > 0) || m.durationS > MAX_MOVE_S || !Number.isFinite(m.startMs)) continue;
     const minutes = m.durationS / 60;
     const trimp = profile && m.avgHr && m.avgHr > 0 ? banisterTrimp(minutes, m.avgHr, profile) : 0;
-    scored.push({ startMs: m.startMs, durationS: m.durationS, load: trimp > 0 ? trimp : minutes, hr: trimp > 0 });
+    // With HR: TRIMP on intervals' scale; without: the sport's typical load per hour.
+    const load = trimp > 0 ? TRIMP_TO_LOAD * trimp : (m.durationS / 3600) * loadPerHour(m.name);
+    scored.push({ startMs: m.startMs, durationS: m.durationS, load, hr: trimp > 0 });
   }
   const kept = dedupeMoves(scored);
 

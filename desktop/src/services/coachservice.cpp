@@ -154,15 +154,35 @@ void CoachService::fetchIntervalsReadiness()
 // Banister's TRIMP from a move's average HR: minutes x HRr x 0.64 e^(1.92 HRr) (men) or
 // 0.86 e^(1.67 HRr) (women), HRr = (avg - rest) / (max - rest). The published 1991
 // formulation - the same one OpenAthlete's training-load.service.ts applies per sample
-// (formula only; their code is AGPL and was not copied). Averaged-HR TRIMP lands on the same
-// scale as minutes for a moderate hour (~70 vs 60), so HR and duration-only moves can share
-// one CTL/ATL curve.
+// (formula only; their code is AGPL and was not copied).
 static double banisterTrimp(double minutes, double avgHr, double restHr, double maxHr, bool male)
 {
     if (maxHr <= restHr || avgHr <= restHr) return 0.0;
     const double hrr = qBound(0.0, (avgHr - restHr) / (maxHr - restHr), 1.0);
     return male ? minutes * hrr * 0.64 * std::exp(1.92 * hrr)
                 : minutes * hrr * 0.86 * std::exp(1.67 * hrr);
+}
+
+// Calibrated so the local estimate reads on intervals.icu's scale (André, 2026-09-28: the local
+// numbers ran ~2x intervals'). From his 443 intervals.icu activities of the past year:
+// icu_training_load = 0.80 x its own Banister TRIMP (median, n=292), and, per hour of moving
+// time, rides 72, gravel 71, virtual rides 54, runs 38 (n=14), walks/hikes 9, gym-type 13-16.
+// Swimming had no samples - a generic moderate 40. Same table as android LocalLoad.ts.
+static constexpr double kTrimpToLoad = 0.80;
+static double loadPerHour(const QString &name)
+{
+    const QString n = name.toLower();
+    auto has = [&](std::initializer_list<const char *> keys) {
+        for (const char *k : keys) if (n.contains(QLatin1String(k))) return true;
+        return false;
+    };
+    if (has({"walk", "hik", "trek", "nordic"})) return 9;
+    if (has({"indoor cycl", "virtual", "trainer", "spin", "zwift"})) return 55;
+    if (has({"cycl", "bike", "ride", "velo", "gravel", "mtb"})) return 70;
+    if (has({"run", "jog", "treadmill", "trail"})) return 40;
+    if (has({"swim"})) return 40;
+    if (has({"yoga", "pilates", "stretch", "weight", "strength", "gym", "climb", "workout", "training"})) return 15;
+    return 30;
 }
 
 QMap<QDate, double> CoachService::localLoadByDay(int *hrMoves, int *durationMoves)
@@ -204,12 +224,14 @@ QMap<QDate, double> CoachService::localLoadByDay(int *hrMoves, int *durationMove
         // Fitness at 356). The longest real event here, a 600 km BRM, is split into days.
         if (durationS <= 0 || durationS > 48 * 3600) continue;
         const double minutes = durationS / 60.0;
-        Move m{dt.toSecsSinceEpoch(), durationS, minutes, false, dt.toLocalTime().date()};
+        // Without HR: the sport's typical load per hour; with HR: TRIMP on intervals' scale.
+        Move m{dt.toSecsSinceEpoch(), durationS, durationS / 3600.0 * loadPerHour(q.value(2).toString()),
+               false, dt.toLocalTime().date()};
         if (haveProfile && m.day >= loadSince) {
             const auto hm = avgHrRe.match(q.value(3).toString());
             const double avgHr = hm.hasMatch() ? hm.captured(1).toDouble() : 0.0;
             const double trimp = avgHr > 0 ? banisterTrimp(minutes, avgHr, restHr, maxHr, male) : 0.0;
-            if (trimp > 0) { m.load = trimp; m.hr = true; }
+            if (trimp > 0) { m.load = kTrimpToLoad * trimp; m.hr = true; }
         }
         moves.append(m);
         // Anything trained in the last 7 days is a candidate for exclusion from picks.

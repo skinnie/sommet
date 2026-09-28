@@ -16,7 +16,8 @@
 //   - Open Food Facts (ODbL, attribution): packaged products by name (search.openfoodfacts.org)
 //     or barcode (world.openfoodfacts.org/api/v2/product/<code>); a USB barcode scanner types the
 //     digits into the search box, so it works with no extra code.
-//   - USDA FoodData Central (public domain): generic foods, Foundation + SR Legacy, DEMO_KEY.
+//   - USDA FoodData Central (public domain): generic foods, Foundation + SR Legacy; the user's own
+//     free key when set in Settings, else the rate-limited DEMO_KEY.
 // Recent picks (last 30) are kept in QSettings so repeat meals work offline.
 class EmberFoodService : public QObject
 {
@@ -29,11 +30,16 @@ class EmberFoodService : public QObject
     Q_PROPERTY(QVariantList recent READ recent NOTIFY recentChanged)
     // Built with Qt Multimedia + ZXing (CMake SOMMET_HAS_WEBCAM_SCAN): the dialog offers "Scan".
     Q_PROPERTY(bool webcamScanAvailable READ webcamScanAvailable CONSTANT)
+    // Personal USDA FoodData Central key (free, api.data.gov). Empty = the shared DEMO_KEY, which
+    // allows ~30 searches an hour per network (André, 2026-09-28). Kept in QSettings on this machine.
+    Q_PROPERTY(QString usdaApiKey READ usdaApiKey WRITE setUsdaApiKey NOTIFY usdaApiKeyChanged)
 public:
     explicit EmberFoodService(QObject *parent = nullptr);
     bool searching() const { return m_pending > 0; }
     QVariantList results() const { return m_results; }
     QVariantList recent() const { return m_recent; }
+    QString usdaApiKey() const;
+    void setUsdaApiKey(const QString &key);
     bool webcamScanAvailable() const
     {
 #ifdef SOMMET_HAS_WEBCAM_SCAN
@@ -57,6 +63,7 @@ signals:
     void searchingChanged();
     void resultsChanged();
     void recentChanged();
+    void usdaApiKeyChanged();
 
 private:
     QNetworkAccessManager m_net;
@@ -65,6 +72,7 @@ private:
     int m_pending = 0;
     int m_seq = 0;
     QString m_query;
-    void get(const QUrl &url, int seq, std::function<void(const QJsonObject &)> onJson);
+    void get(const QUrl &url, int seq, std::function<void(const QJsonObject &)> onJson,
+             std::function<void()> onError = {});
     void publish();
 };
