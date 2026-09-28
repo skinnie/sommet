@@ -111,12 +111,43 @@ Companion itself does. Plan for the first hardware session: turn Wi-Fi off on th
 Hammerhead app on the phone (or turn its Bluetooth off), run with `--karoo`, then start a route
 sync on the Karoo or pass `--document-synced` with an id from the dashboard.
 
-Plan B, raised by André the same day: Hammerhead lets developers sideload APKs on the Karoo, so an
-on-device app could take a GPX from our app directly. A quick way to size that: over ADB,
-check whether any Karoo package declares an intent filter for `.gpx`/`application/gpx+xml`
-(`adb shell dumpsys package` / `pm query-activities`). If one does, a sideloaded helper (or even
-`adb shell am start -a android.intent.action.VIEW`) could hand the file straight to the Karoo's
-own importer.
+## Plan B: a sideloaded helper APK (checked on the real Karoo 3, 2026-09-28)
+
+André's idea, same day: Hammerhead lets developers sideload APKs. Checked over ADB with the Karoo
+plugged in (model `k24`, Android 12 / SDK 32, `user` build, no root, system apps 4.215.1):
+
+- **No app opens GPX files.** `pm query-activities -a VIEW` finds nothing for
+  `application/gpx+xml`, `application/octet-stream`, `application/vnd.ant.fit` or `text/xml`.
+- **The routes app has no import entry point.** `io.hammerhead.routesapp` (pulled from
+  `/system/priv-app/routes`, jadx) declares `ADD_ROUTE` (just opens the route list; the `from`
+  extra is analytics), `CREATE_ROUTE`, `EDIT_ROUTE`, and a `MOCK_ROUTE` receiver (simulates riding
+  an *existing* `routeId`). It only displays what `datasyncservice` holds.
+- **But `datasyncservice` exposes its database to any app.** `io.hammerhead.datasyncservice.v2.
+  DataSyncService` is `exported="true"` with **no permission**, and `onBind` hands out two binders
+  by intent action: `loginController` and `databaseOperationsController`
+  (`io.hammerhead.datasyncservice.v2.DatabaseOperationsAIDL`, class `j7/k`). No
+  `getCallingUid`/permission check anywhere in its dispatcher. Transactions include:
+  - 5/22 read a document (22 = as JSON, via the type's "share reader"), chunked by transaction id
+  - 6 `putDocument(txId, docType, bytes, done)` (parcel form)
+  - 7 `deleteDocument`, 8 `documentExists`, 9 `getDocumentTypeList`, 10 count, 11 attachment
+  - 19 `getRouteController` (a further binder, not yet read)
+  - **23 `putDocumentAsJson(txId, docType, bytes, done)` → returns the new doc id**
+- The store is **Couchbase Lite**. Type `"route"` (`k7/w0`) implements the JSON reader and writer:
+  `m(json)` parses a `Route`, gives it a fresh UUID id and `createdAt`/`updatedAt`, clears one list
+  field, and saves it. Its cloud sync endpoint is `routes/sync?updatedAt=…&page=1&per_page=10`.
+- `Route` (`io.hammerhead.datamodels.routes.Route`) fields: `id, name, distance, routePolyline,
+  summaryPolyline, elevation, bounds, startLocation, endLocation, startLocationName,
+  endLocationName, waypoints, pointsOfInterest, stemSheet` (cues), `routingType, routingConfig,
+  surfaceSummary, source, sourceId, collections, isStarred, isPublic, isAutoImported,
+  imageVersion, createdAt, updatedAt`.
+
+So a small sideloaded app can very likely insert a route **locally, with no cloud and no proxy**:
+bind `DataSyncService` with action `databaseOperationsController`, call transaction 23 with
+`docType="route"` and the route JSON. Unknowns, in order: the exact JSON shape (polyline encoding
+and precision, the `elevation` object, whether turn-by-turn needs a `stemSheet`), and whether the
+next cloud sync keeps or removes a route the server has never seen. The safe first step is
+read-only: have the helper read one existing route with transaction 22 and dump its JSON.
+Transactions 9/10/22 are reads; 6/7/23 write.
 
 Server (phone → Karoo) message types, by ordinal: CAPABILITIES 0, HTTP_STATUS_CODE 1,
 HTTP_HEADERS 2, HTTP_BODY 3, HTTP_FAILURE 4, SHARED_LOCATION 5, REQUEST_AUTH 6, HTTP_TX_ID 7,
