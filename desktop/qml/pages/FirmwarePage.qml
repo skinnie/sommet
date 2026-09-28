@@ -346,6 +346,17 @@ PageFlickable {
                     text: qsTr("This takes about 10 minutes. Keep the watch connected and "
                                + "don't unplug or move the cable until it's done.")
                 }
+                // Mac only (GitHub #14's side note): when the watch reconnects in update mode,
+                // macOS auto-launches SuuntoLink, which takes the watch over mid-flash - that is
+                // what killed a real flash at 23.7%.
+                Text {
+                    visible: Qt.platform.os === "osx" || Qt.platform.os === "macos"
+                    width: parent.width; wrapMode: Text.WordWrap; color: Theme.warning
+                    font.pixelSize: Theme.fontSizeLabel
+                    text: qsTr("Quit SuuntoLink first (menu bar icon → Quit). During the update "
+                               + "the watch reconnects, macOS starts SuuntoLink by itself, and it "
+                               + "can take over the watch and stop the update halfway.")
+                }
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {

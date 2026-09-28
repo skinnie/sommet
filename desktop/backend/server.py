@@ -2786,8 +2786,8 @@ class Handler(BaseHTTPRequestHandler):
         # No master copy yet. Seed it from the WATCH's own real modes rather than a factory
         # table - the whole point of the 2026-08-23 Ambit1 work is that this family CAN be
         # read (docs/ambit1_sport_mode_format.md), so showing invented presets next to a
-        # connected watch would be showing data that isn't there. Falls back to the factory
-        # set only when there is no readable Ambit1 (no watch, or a different model).
+        # connected watch would be showing data that isn't there. When nothing readable is
+        # there, it's an error, not factory presets (GitHub #17).
         if selected_is_legacy():
             try:
                 sys.path.insert(0, str(TOOLS_DIR))
@@ -2843,12 +2843,14 @@ class Handler(BaseHTTPRequestHandler):
                         "modes": modes})
                     return
             except (RuntimeError, OSError):
-                pass    # reader unavailable or read failed - fall through to the factory set
+                pass    # reader unavailable or read failed - reported below, never faked
 
-        self._send_json(200, {
-            "ok": True, "saved": False, "source": "factory",
-            "maxModes": self.LEGACY_MAX_SPORT_MODES,
-            "modes": self.LEGACY_FACTORY_SPORT_MODES})
+        # No factory presets on a failed read (GitHub #17): they looked exactly like the watch's
+        # own modes, and a write is a full replace - saving them erased the user's real modes.
+        # Factory presets stay available only through the explicit write-presets action.
+        self._send_json(502, {
+            "ok": False, "saved": False,
+            "error": "couldn't read the sport modes off the watch - replug it and try again"})
 
     def _handle_legacy_sport_modes_save(self, body):
         """POST /api/legacy/sport-modes - replaces the host master copy. Local only; writing to
@@ -2871,7 +2873,7 @@ class Handler(BaseHTTPRequestHandler):
         """POST /api/legacy/sport-modes/write - pushes the host master copy to the watch.
         Ambit1/2 only. body {"confirm": true} for a real write; otherwise --dry-run. Writes
         whatever is in the request's own "modes" if given (so the UI can push unsaved edits),
-        else the saved master copy, else the factory set."""
+        else the saved master copy, else refuses (never the factory set - GitHub #17)."""
         if not selected_is_legacy():
             self._send_json(409, {"ok": False, "error": "the selected/connected watch is "
                                    "not an Ambit1/2"})
@@ -2883,7 +2885,11 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, json.JSONDecodeError):
                 modes = None
             if not isinstance(modes, list) or not modes:
-                modes = self.LEGACY_FACTORY_SPORT_MODES
+                # Nothing real to write: refuse rather than push factory presets over the
+                # watch's own modes (GitHub #17). write-presets is the deliberate way to do that.
+                self._send_json(400, {"ok": False, "error": "no sport modes to write - read the "
+                                       "watch first (factory presets: use write-presets)"})
+                return
         if len(modes) > self.LEGACY_MAX_SPORT_MODES:
             self._send_json(400, {
                 "ok": False,
