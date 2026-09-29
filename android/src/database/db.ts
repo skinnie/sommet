@@ -173,7 +173,116 @@ export async function getDb(): Promise<SQLiteDatabase> {
   await _db.executeSql(`ALTER TABLE activity_gear ADD COLUMN distance_m REAL NOT NULL DEFAULT 0`).catch(() => {});
   await _db.executeSql(`ALTER TABLE activity_gear ADD COLUMN time_s REAL NOT NULL DEFAULT 0`).catch(() => {});
   await _db.executeSql(`ALTER TABLE activity_gear ADD COLUMN activity_date TEXT NOT NULL DEFAULT ''`).catch(() => {});
+  // Per-activity metrics read from its GPX (HR, calories, cadence...), cached so the Activities
+  // list parses each GPX once ever instead of on every visit (André, 2026-09-29: the list parsed
+  // every GPX before showing anything, ~110 s on the tablet). One column per sortable metric so a
+  // sort by any column runs in SQL; `json` keeps the whole GpxMetadata for the cards. Rows are
+  // keyed to the activity's synced_at: a re-import makes the cached row stale.
+  await _db.executeSql(`
+    CREATE TABLE IF NOT EXISTS activity_metrics (
+      id           TEXT    PRIMARY KEY,
+      synced_at    INTEGER NOT NULL,
+      json         TEXT    NOT NULL,
+      descent      REAL, calories REAL, avgHr REAL, maxHr REAL, avgCadence REAL, maxCadence REAL,
+      avgSpeed     REAL, maxSpeed REAL, recovery REAL, peakTe REAL, maxAltitude REAL,
+      poolLengths  REAL, pace REAL
+    )
+  `);
   return _db;
+}
+
+// ─── Activities list, paged (André, 2026-09-29) ───────────────────────────────
+// "not worth to load all the 4XXX activities ... load it progressively ... I would say 30": the list
+// fetches ACTIVITY_PAGE rows at a time, filtered and sorted here in SQL, and asks for the next
+// page as the user nears the end. See LogListScreen.
+
+export const ACTIVITY_PAGE = 30;
+
+/** Metric columns cached in activity_metrics (the ones that only exist in a GPX). */
+export const GPX_METRIC_COLUMNS = ['descent', 'calories', 'avgHr', 'maxHr', 'avgCadence', 'maxCadence',
+  'avgSpeed', 'maxSpeed', 'recovery', 'peakTe', 'maxAltitude', 'poolLengths', 'pace'] as const;
+
+export type ActivityPageRow = ActivityRecord & { metrics_json: string | null; metrics_synced_at: number | null };
+
+// ORDER BY expression per sort key. Core values come from the activities table; GPX-only ones
+// from the cache (0 when never read - those sort as "no value"). Pace/avg speed prefer the GPX
+// figure and fall back to distance/duration, like buildMetrics() does.
+function orderExpr(key: string): string {
+  switch (key) {
+    case 'uploaded': return 'a.synced_at';
+    case 'distance': return 'a.distance_m';
+    case 'duration': return 'a.duration_s';
+    case 'ascent':   return 'a.d_plus';
+    case 'pace':     return `COALESCE(NULLIF(m.pace, 0), CASE WHEN a.distance_m > 0 AND a.duration_s > 0
+                             THEN a.duration_s * 1000.0 / a.distance_m ELSE 0 END)`;
+    case 'avgSpeed': return `COALESCE(NULLIF(m.avgSpeed, 0), CASE WHEN a.distance_m > 0 AND a.duration_s > 0
+                             THEN a.distance_m * 3600.0 / a.duration_s ELSE 0 END)`;
+    default:
+      return (GPX_METRIC_COLUMNS as readonly string[]).indexOf(key) >= 0 ? `COALESCE(m.${key}, 0)` : 'a.date';
+  }
+}
+
+/** One page of the activities list: sport filter ('' = all) and sort applied in SQL. */
+export async function getActivityPage(opts: { type: string; sortKey: string; desc: boolean; offset: number;
+                                              limit?: number }): Promise<ActivityPageRow[]> {
+  const db = await getDb();
+  const dir = opts.desc ? 'DESC' : 'ASC';
+  // a.id last: equal dates/upload times (bulk imports) must still come in ONE fixed order, or
+  // LIMIT/OFFSET pages overlap and a row shows twice (seen on the tablet, 2026-09-29).
+  const tie = (opts.sortKey === 'date' ? `a.synced_at ${dir}` : `a.date ${dir}, a.synced_at ${dir}`) + ', a.id';
+  const where = opts.type ? 'WHERE a.activity_type = ?' : '';
+  const args: (string | number)[] = opts.type ? [opts.type] : [];
+  const [res] = await db.executeSql(
+    `SELECT a.*, m.json AS metrics_json, m.synced_at AS metrics_synced_at
+       FROM activities a LEFT JOIN activity_metrics m ON m.id = a.id
+       ${where}
+      ORDER BY ${orderExpr(opts.sortKey)} ${dir}, ${tie}
+      LIMIT ? OFFSET ?`,
+    [...args, opts.limit ?? ACTIVITY_PAGE, opts.offset]);
+  const out: ActivityPageRow[] = [];
+  for (let i = 0; i < res.rows.length; i++) {
+    const a = res.rows.item(i);
+    a.gpx_path = rebaseToDocuments(a.gpx_path);
+    out.push(a);
+  }
+  return out;
+}
+
+/** The sport types present, for the list's filter chips (without loading every row). */
+export async function getActivityTypes(): Promise<string[]> {
+  const db = await getDb();
+  const [res] = await db.executeSql(
+    `SELECT DISTINCT activity_type FROM activities WHERE activity_type != '' ORDER BY activity_type`);
+  const out: string[] = [];
+  for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i).activity_type);
+  return out;
+}
+
+/** Caches one activity's GPX-derived metrics (values keyed as GPX_METRIC_COLUMNS). */
+export async function saveActivityMetrics(id: string, syncedAt: number, json: string,
+                                          values: Record<string, number>): Promise<void> {
+  const db = await getDb();
+  const cols = GPX_METRIC_COLUMNS as readonly string[];
+  await db.executeSql(
+    `INSERT OR REPLACE INTO activity_metrics (id, synced_at, json, ${cols.join(', ')})
+     VALUES (?, ?, ?, ${cols.map(() => '?').join(', ')})`,
+    [id, syncedAt, json, ...cols.map(c => values[c] || 0)]);
+}
+
+/** Activities with a GPX whose metrics were never cached (or are stale) - for a one-off fill
+ *  before sorting by a GPX-only column. */
+export async function getActivitiesMissingMetrics(): Promise<ActivityRecord[]> {
+  const db = await getDb();
+  const [res] = await db.executeSql(
+    `SELECT a.* FROM activities a LEFT JOIN activity_metrics m ON m.id = a.id
+      WHERE a.gpx_path != '' AND (m.id IS NULL OR m.synced_at != a.synced_at)`);
+  const out: ActivityRecord[] = [];
+  for (let i = 0; i < res.rows.length; i++) {
+    const a = res.rows.item(i);
+    a.gpx_path = rebaseToDocuments(a.gpx_path);
+    out.push(a);
+  }
+  return out;
 }
 
 // ─── API publique ─────────────────────────────────────────────────────────────

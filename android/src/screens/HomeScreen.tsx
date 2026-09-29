@@ -1047,7 +1047,7 @@ export default function HomeScreen() {
     // one Training Program screen for every device, long-press a plan row to send). Shown here
     // only when the experimental watch entry above isn't already there.
     ...((deviceType === 'bryton' || magene) && !showWatchCalendar
-      ? [{ id: 'bikeWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
+      ? [{ id: 'bikeWorkouts', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
       : []),
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
@@ -1062,6 +1062,13 @@ export default function HomeScreen() {
     { id: 'weight', label: 'Weight', icon: 'weight' as const, onPress: () => navigation.navigate('Weight'), group: 'training' as const },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },
   ];
+  // Same order as the desktop rail (NavRail.qml is the baseline - André, 2026-09-29: "the rest should
+  // be similar"). Items not listed keep their relative place, just before Settings.
+  const NAV_ORDER = ['home', 'activities', 'pois', 'routes', 'planRoute', 'racePlan', 'health', 'ember', 'weight',
+    'coach', 'workoutCalendar', 'bikeWorkouts', 'gear', 'calendar', 'totals', 'apps', 'copyToWatch',
+    'watchSettings', 'brytonProfile', 'magene', 'firmware', 'sportModes', 'smartSensor', 'trackPod', 'settings'];
+  const rank = (id: string) => { const i = NAV_ORDER.indexOf(id); return i < 0 ? NAV_ORDER.length - 1.5 : i; };
+  navItems.sort((a, b) => rank(a.id) - rank(b.id));
 
   return (
     <NavShell items={navItems} selectedId="home">

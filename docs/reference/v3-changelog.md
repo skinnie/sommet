@@ -7,6 +7,23 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-29: Android - Activities list in pages of 30; menu like the desktop (Android 0.2.39)
+
+André, 2026-09-29: "why activities take like minutes to load on android ... load 2-3 scrolls.. and
+then load it progressively ... I would say 30"; "no capitals ... the rest should be similar".
+
+- **Activities list:** measured on the tablet at ~113 s before anything showed - 5 s reading all
+  4,850 rows, then ~107 s parsing every activity's GPX for the metric columns, on every visit.
+  Now 30 rows per page (db.getActivityPage), the sport filter and every sort done in SQL, the next
+  page fetched within ~2 screens of the end, and each GPX parsed once ever: its metrics are cached
+  in a new activity_metrics table (keyed to synced_at). Sorting by a GPX-only column (HR,
+  calories...) first fills that cache for the few moves with a GPX, once. Orphan-GPX adoption runs
+  after the first page is on screen. Result: under 3 s per visit; 30 flings deep with no
+  duplicate rows (ORDER BY ends on the id so pages never overlap).
+- **Menu:** labels as on the desktop, no capitals - Activities, POIs, Sport Modes, Routes,
+  Training Program (was "Workout Calendar" / bike "Workouts"); French likewise - and the
+  desktop's order. T6/X6 stays desktop-only on purpose.
+
 ## 2026-09-27: Activity screen - more workout data, per sport, without the overload (desktop 0.2.43, Android 0.2.38)
 
 André, 2026-09-27: "plan and go" (after the mockup artifact 8KKpqaVBCdPUvDUAhzya8h and the
