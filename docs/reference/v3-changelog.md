@@ -7,6 +7,93 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-27: Activity screen - more workout data, per sport, without the overload (desktop 0.2.43, Android 0.2.38)
+
+André, 2026-09-27: "plan and go" (after the mockup artifact 8KKpqaVBCdPUvDUAhzya8h and the
+per-sport chart benchmark T9CVRh5amedT9nRA5EQbSx).
+
+- **Per-sport choice of what shows**, from one config (`shared/activity_view.json`): run, ride,
+  indoor ride, hike, walk, pool swim, open-water swim, gym and other each have their own headline
+  tiles, secondary numbers, zones and chart. Anything the file doesn't record (heart rate, power...)
+  is hidden, never faked. Watch temperature shows for swims only (roughly the water temperature).
+- **Overview tab:** tiles with an (i) explanation each, a "compared with your usual" line (same
+  sport, similar distance, last 12 months, at least 5 similar - otherwise nothing), time in
+  power/heart-rate zones from full-resolution data, and a folded "More details". NP/IF/TSS/work
+  sit behind Settings > Activities > "Advanced power numbers" (off by default).
+- **Charts tab - one overlaid chart:** pick the lines (e.g. pace + heart rate + altitude); one is
+  the main line with the scale, its average and a max flag, the others are stretched to fit. Hover
+  (or touch-scrub) for every value at once, drag or pinch to zoom into a stretch and read its
+  numbers, mouse-wheel zoom, double-click/double-tap for everything, overview strip to move
+  along. Distance on the x axis outdoors, time indoors, switchable. Walks have no chart.
+- **Colour by zone** on both the chart and the map track (green = easy/slow/flat, red =
+  hard/fast/steep, blue = downhill), with a dark casing so it reads on any map tile. The map
+  zoom follows the chart zoom and the other way round ("Linked to chart").
+- **Indoor rides:** that day's planned intervals.icu workout drawn behind the power line.
+- **Pool swims:** time or pace per length, coloured by stroke or speed, rests at the wall,
+  sets split at rests of 10 s or more, and "Longest non-stop swim" as the benchmark. Garmin
+  idle lengths are folded into the rest before them.
+- **Laps tab** only when laps were pressed (auto-laps and pool lengths don't count).
+- **Ambit pool swims now carry their lengths** (ACT-18). The watch logs a record per turn; its
+  layout was decoded on 2026-09-28 from two test swims on the Ambit3 Peak (fw 2.4.17): after the
+  running distance and length count come the length's swim time (0.1 s) and its stroke count
+  (openambit skipped these bytes), then running length counts per style. The style byte is the
+  watch's own FT_SWIM_STYLE list (0 Other, 1 Butterfly, 2 Backstroke, 3 Breaststroke,
+  4 Freestyle, 5 Drill). openambit's "time compensation" in the same record reads 1028-2544 s
+  there (two equal bytes) and clamped every turn to t=0 - now ignored above 120 s. The FIT gets
+  Garmin-style `length` messages (active per length, idle per rest at the wall), pool length and
+  active-length count, so the swim chart, sets and "longest non-stop" work for Ambit swims and
+  intervals.icu sees the lengths too. Swim times and strokes are exact; the watch writes a turn a
+  few seconds late, so starts are chained and rests are good to a few seconds. Written in
+  `tools/exercise_log.py` and its twins (Android `jni_bridge.cpp` + libambit `pmem20.c`, iOS
+  `AmbitUsbModule.mm`) - byte-identical FITs from all three on the real log dump (host-built
+  harness). Only moves read from now on get them (already-synced rows keep their old FIT). An
+  Ambit1/2 may lay these bytes out differently: an implausible length (> 30 min) writes none.
+  Python now rounds half away from zero like the C++ twin (it wrote 26 vs 27 degC for 26.5).
+- **How:** a FIT decoder in Python (`tools/activity_streams.py`, backend
+  `/api/activity/streams`) and its JavaScript twin (`shared/activity_streams.js`, Android),
+  parity-tested on 11 real files (`tools/test_activity_streams_parity.js`). The maths
+  (`shared/activity_view_logic.js`) and the canvas drawing (`shared/activity_chart_draw.js`) are
+  one source each, copied into both apps by `tools/gen_activity_view.py` (`--check` confirms
+  every copy matches). The desktop draws in a QML Canvas, Android in a WebView canvas - same code. Zones come
+  from intervals.icu sport settings (cached); the FIT is the one next to the activity, or
+  fetched from intervals.icu.
+- **Tested:** desktop on real run, ride, indoor ride (+ planned target), hike, walk and pool
+  swims (light theme). Android on the tablet (2026-09-28, JS from the branch via Metro): a ride
+  (overview, speed-coloured track, chart, hover dot on the map, chart zoom -> map zoom, tab
+  switch) and a 2021 pool swim (lengths, 31 sets, 125 m, stroke legend), portrait and
+  landscape; then a walk, a hike and a run (2026-09-29). Android 0.2.38 (debug APK rebuilt for
+  the Ambit swim-length C++).
+- **Fixed on the way (found on the tablet):**
+  - The activity map was blank on Android (main too): Leaflet arrived via
+    injectedJavaScriptBeforeContentLoaded, which Chromium WebView runs after the page script
+    -> "L is not defined". Now inline in the page head, as OfflineMapsScreen already does
+    (CoordinatePicker and RouteWeatherScreen still use the injection).
+  - Map zoomed to the max / grey on ~1 open in 3: Leaflet had cached a 0x0 box size and its
+    re-measure is a no-op before the map has a view - it now gets a provisional view, re-measures,
+    then fits; it also re-fits when the box changes size.
+  - Zone colours drawn before the map had a view threw inside Leaflet ("reading 'min'") and
+    aborted the track; they now wait and are drawn right after the track is fitted.
+  - A ride with no power or heart rate opened an empty chart: the default lines now fall back to
+    the first two the file has (both apps, AVL.defaultChannelsOn).
+  - An intervals.icu "Swimming" (not a Suunto activity name) showed as a generic sport: an
+    unknown type now takes the sport the FIT records (AVL.refineSport, both apps).
+  - Opening a move without a GPX no longer pops "Cannot read GPX file".
+  - The chart came back blank after switching tabs; the hover card's long values overlapped their
+    label; speed bands read "Faster of this activity" (now "Fast fifth of this activity").
+  - Swim bars: every stroke has its own colour and the legend lists the strokes the swim has
+    (backstroke used to be coloured and labelled as breaststroke).
+  - A chart line that never changes (a watch left on a table: altitude 27 m for 11 minutes) is
+    hidden like a missing one; with nothing left, the Charts tab goes (AVL.channelUseful).
+  - "Compared with your usual" quotes the same pace/speed as the Overview tile (it used
+    distance / list duration and could read 11:29 under a tile of 11:30).
+  - Android: the old altitude profile under the replay bar is gone (André, 2026-09-29: "a
+    residue of the beginning") - the Charts tab has altitude in the new style. It was also the
+    replay's drag-to-seek; play / rewind / forward remain.
+  - The overview strip under the chart only shows while zoomed, captioned "Whole activity · drag
+    the box to move along" instead of a bare "all" (André, 2026-09-29), both apps.
+  - Also seen right on the tablet 2026-09-29: a walk (no Charts, as designed) and a 5.2 km run
+    (pace-coloured track and legend).
+
 ## 2026-09-27: Ember - scan a food's barcode with the phone camera (Android + iOS)
 
 André, 2026-09-27: "go" (issue #20, after the desktop webcam scan).

@@ -61,6 +61,9 @@ QtObject {
         // Race Planner (BRM/ultra) — experimental, ships OPT-IN like Ember: defaults false, so
         // its sidebar entry stays off until the user turns it on in Settings. Persisted per-install.
         property bool racePlanEnabled: false
+        // Activity screen: normalized power, TSS, intensity factor and work on rides. Off by
+        // default - the average power is enough for most rides (André, 2026-09-27).
+        property bool advancedPowerNumbers: false
         // Empty by DEFAULT on purpose (2026-08-26, release prep): this used to ship André's own
         // personal trycloudflare tunnel URL, which is both ephemeral (dead for anyone else) and
         // personal infrastructure that has no business in a public release. Each user pastes
@@ -80,6 +83,7 @@ QtObject {
     property alias activityColumns: settingsId.activityColumns
     property alias emberEnabled: settingsId.emberEnabled
     property alias racePlanEnabled: settingsId.racePlanEnabled
+    property alias advancedPowerNumbers: settingsId.advancedPowerNumbers
     property alias emberUnlocked: settingsId.emberUnlocked
     property alias emberInstallUrl: settingsId.emberInstallUrl
     property alias emberSyncIntervals: settingsId.emberSyncIntervals

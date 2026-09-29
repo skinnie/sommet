@@ -1,4 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ADVANCED_POWER_KEY } from '../components/activity/ActivityPanel';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert, ScrollView, ActivityIndicator, Linking, Modal, Platform,
@@ -135,6 +137,14 @@ export default function SettingsScreen() {
   // Morning HRV from a BLE heart-rate strap - own persisted flag (StrapHrvPref.ts), default OFF.
   // Mirrors the desktop health/coospoHrvEnabled toggle so both platforms gate the strap card.
   const [strapHrvEnabled, setStrapHrvEnabledState] = useState(false);
+  // Activity screen: normalized power, TSS, IF and work on rides (desktop parity: Settings ->
+  // Activities -> Advanced power numbers). Off by default.
+  const [advancedPower, setAdvancedPower] = useState(false);
+  useEffect(() => { AsyncStorage.getItem(ADVANCED_POWER_KEY).then(v => setAdvancedPower(v === '1')).catch(() => undefined); }, []);
+  function handleToggleAdvancedPower(v: boolean) {
+    setAdvancedPower(v);
+    AsyncStorage.setItem(ADVANCED_POWER_KEY, v ? '1' : '0').catch(() => undefined);
+  }
 
   const [tileCacheBytes, setTileCacheBytes] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
@@ -513,6 +523,22 @@ export default function SettingsScreen() {
         </View>
         <Text style={styles.sectionDesc}>{t.markSyncedDesc}</Text>
 
+      </View>
+
+      {/* ── Activities - the extra power numbers most rides don't need (desktop parity). ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="activity" />
+          <Text style={styles.cardTitle}>Activities</Text>
+        </View>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>Advanced power numbers</Text>
+          <Toggle value={advancedPower} onValueChange={handleToggleAdvancedPower} />
+        </View>
+        <Text style={styles.sectionDesc}>
+          Adds normalized power, training load (TSS), intensity factor and work to rides with a power
+          meter. Uses the FTP from your intervals.icu settings.
+        </Text>
       </View>
 
       {/* ── Health - morning HRV from a BLE heart-rate strap (André, 2026-09-04). Opt-in,

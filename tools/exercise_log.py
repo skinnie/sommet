@@ -276,6 +276,11 @@ def parse_log_header(data, offset, datalen, unknown2_padding_48=FLAGS_UNKNOWN2_P
     return h
 
 
+# A swimming_turn's time compensation above this is not a compensation (see parse_sample).
+SWIM_TURN_MAX_COMP_MS = 120_000
+SWIM_LENGTH_MAX_S = 1800           # one pool length; anything longer means a misread layout
+
+
 def parse_sample(data, offset, periodic_spec_ref, samples, time_compensators):
     """Port of parse_sample() - one [u16 len][u8 type][...] framed sample, appended to
     `samples` (a list) unless it's a type-0 periodic-spec update (which just mutates
@@ -377,11 +382,23 @@ def parse_sample(data, offset, periodic_spec_ref, samples, time_compensators):
         elif episodic_type == 0x14:
             s["type"] = "swimming_turn"
             c.skip(1)
-            time_compensators.append((len(samples), 0 - c.u16() * 100))
+            # openambit reads these two bytes as a time compensation (0.1 s). On a real Ambit3
+            # Peak (fw 2.4.17, two pool swims read 2026-09-28) they are two EQUAL bytes - 0x4b4b,
+            # 0x2828, 0x6363... = 1028-2544 s, longer than the whole swim - and applying them
+            # clamps every turn to t=0. The turn's own sample time is right (it lands just
+            # after the periodic sample it follows), so an impossible value is ignored.
+            comp_ms = c.u16() * 100
+            if comp_ms <= SWIM_TURN_MAX_COMP_MS:
+                time_compensators.append((len(samples), 0 - comp_ms))
             c.skip(1)
-            s["distance"] = c.u32()
-            s["lengths"] = c.u16()
-            c.skip(18)
+            s["distance"] = c.u32()           # running total, cm
+            s["lengths"] = c.u16()            # running total
+            # Decoded 2026-09-28 from the same two swims (openambit skipped these 18 bytes):
+            # the length just finished - its swim time in 0.1 s and its stroke count. Records
+            # that repeat the previous length count carry 0 here (the watch noting a pause).
+            s["duration_ds"] = c.u32()
+            s["strokes"] = c.u16()
+            c.skip(12)                        # 4 zero bytes + running lengths per style (u16 x3) + 2
             s["classification"] = [c.u16() for _ in range(4)]
             s["style"] = c.u8()
         elif episodic_type == 0x15:
@@ -834,6 +851,12 @@ _CRC_TABLE = [
 ]
 
 
+def _round_away(x):
+    """Round half away from zero, like the Android twin's C++ (llround and its +-5/10) - Python's
+    round() goes half-to-even, which made the two write 26 vs 27 degC for the same 26.5."""
+    return int(math.floor(abs(x) + 0.5)) * (1 if x >= 0 else -1)
+
+
 def _fit_crc(data):
     crc = 0
     for byte in data:
@@ -955,7 +978,7 @@ _FIT_SENSOR_FIELDS = {
     "speed":       (6,  2, _U16, 0xFFFF,     lambda v: max(0, min(round(v * 10), 0xFFFE))),
     "power":       (7,  2, _U16, 0xFFFF,     lambda v: max(0, min(int(v), 0xFFFE))),
     "alt":         (2,  2, _U16, 0xFFFF,     lambda v: max(0, min(round((v + 500) * 5), 0xFFFE))),
-    "temperature": (13, 1, _S8,  0x7F,       lambda v: max(-128, min(round(v / 10), 127))),
+    "temperature": (13, 1, _S8,  0x7F,       lambda v: max(-128, min(_round_away(v / 10), 127))),
 }
 # Fixed field order for a move's record layout (definition + data must agree).
 _GPS_SENSOR_ORDER = ("hr", "cadence", "speed", "power", "temperature")
@@ -1217,6 +1240,81 @@ def extract_indoor_records(header, samples):
     return records
 
 
+# Ambit swim style (the watch's own FT_SWIM_STYLE list, custom_modes.py; same as openambit's
+# libambit.h) -> FIT swim_stroke. "Other" has no FIT equivalent: left invalid.
+_AMBIT_STYLE_TO_FIT_STROKE = {1: 3, 2: 1, 3: 2, 4: 0, 5: 4}   # butterfly, back, breast, free, drill
+
+
+def extract_pool_lengths(header, samples):
+    """Pool lengths from the watch's swimming_turn samples, for the FIT `length` messages that
+    let apps (intervals.icu, the activity screen) show time per length, rests and sets.
+
+    Each turn that raises the running length count closes one length and carries its swim time
+    (0.1 s) and strokes - those are exact. Its record is written a few seconds AFTER the turn (the
+    watch confirms a turn from the push-off), so start times are chained instead: a length starts
+    where the previous one ended, or at (record time - swim time) when that is later - the gap
+    being a rest at the wall. Rests are therefore good to a few seconds; swim times are exact.
+    Returns [{start, swim_s, strokes, style}] in order, start as a UTC datetime."""
+    start = datetime.datetime(
+        header["year"], header["month"], header["day"],
+        header["hour"], header["minute"], header["msec"] // 1000,
+        tzinfo=datetime.timezone.utc)
+    turns = [s for s in samples if s["type"] == "swimming_turn"]
+    out = []
+    seen = 0
+    prev_end = None
+    for s in turns:
+        if s["lengths"] <= seen or not s.get("duration_ds"):
+            continue
+        seen = s["lengths"]
+        swim = s["duration_ds"] / 10.0
+        t = s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))
+        st = t - datetime.timedelta(seconds=swim)
+        if prev_end is not None and st < prev_end:
+            st = prev_end
+        out.append({"start": st, "swim_s": swim, "strokes": s.get("strokes"), "style": s.get("style")})
+        prev_end = st + datetime.timedelta(seconds=swim)
+    # The layout above was read off an Ambit3 Peak; if another model's bytes mean something else
+    # a "length" comes out absurd - then write no lengths rather than wrong ones.
+    if any(not 0 < ln["swim_s"] <= SWIM_LENGTH_MAX_S for ln in out):
+        return []
+    return out
+
+
+def _write_pool_lengths(data, lengths):
+    """FIT `length` messages (global 101) the Garmin way: one ACTIVE length per length swum and
+    an IDLE length for each rest at the wall between two of them."""
+    _write_def(data, 7, 101, [
+        (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (3, 4, _U32), (4, 4, _U32),
+        (5, 2, _U16), (0, 1, _E), (1, 1, _E), (7, 1, _E), (12, 1, _E),
+    ])
+    idx = 0
+
+    def one(st, secs, strokes, stroke, active):
+        nonlocal idx
+        st_g = int(st.timestamp()) - GARMIN_EPOCH
+        _u8(data, 7)
+        _u16(data, idx)
+        _u32(data, st_g + _round_away(secs))  # timestamp = end of the length
+        _u32(data, st_g)                     # start_time
+        _u32(data, _round_away(secs * 1000))  # total_elapsed_time (scale 1000)
+        _u32(data, _round_away(secs * 1000))  # total_timer_time
+        _u16(data, 0xFFFF if strokes is None else strokes)
+        _u8(data, 28)                        # event = length
+        _u8(data, 1)                         # event_type = stop
+        _u8(data, 0xFF if stroke is None else stroke)
+        _u8(data, 1 if active else 0)        # length_type: 1 active, 0 idle
+        idx += 1
+
+    for k, ln in enumerate(lengths):
+        if k:
+            prev = lengths[k - 1]
+            rest = (ln["start"] - prev["start"]).total_seconds() - prev["swim_s"]
+            if rest >= 1:
+                one(prev["start"] + datetime.timedelta(seconds=prev["swim_s"]), rest, None, None, False)
+        one(ln["start"], ln["swim_s"], ln["strokes"], _AMBIT_STYLE_TO_FIT_STROKE.get(ln["style"]), True)
+
+
 def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     """FIT for a move with no GPS track (see to_fit()'s no-points branch). Same file_id /
     activity / session / lap prologue and the same logged-app developer-field mechanism as the
@@ -1282,10 +1380,13 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, 1)          # event_type = 1 (stop)
 
     # session (local 2, global 18)
+    lengths = extract_pool_lengths(header, samples)
+    pool_m = header.get("swimming_pool_length") or 0
+    swim_fields = [(44, 2, _U16), (46, 1, _E), (33, 2, _U16)] if lengths and pool_m else []
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
         (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
-    ])
+    ] + swim_fields)
     _u8(data, 2)
     _u16(data, 0)                             # message_index
     _u32(data, end_g)                         # timestamp
@@ -1299,6 +1400,10 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
     _u8(data, 1)          # event_type = 1 (stop)
+    if swim_fields:
+        _u16(data, round(pool_m * 100))       # pool_length (scale 100, m)
+        _u8(data, 0)                          # pool_length_unit = metric
+        _u16(data, len(lengths))              # num_active_lengths
 
     # lap (local 3, global 19)
     _write_def(data, 3, 19,
@@ -1312,6 +1417,10 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u32(data, round(dist_m * 100))
     _u8(data, 9)          # event = 9 (lap)
     _u8(data, 1)
+
+    # Pool swims: one length message per length (see extract_pool_lengths).
+    if lengths:
+        _write_pool_lengths(data, lengths)
 
     # Developer-data declarations for logged Suunto App outputs - identical to the GPS path.
     if rule_slots:

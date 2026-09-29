@@ -953,12 +953,20 @@ static int parse_sample(uint8_t *buf, size_t offset, uint8_t **spec, ambit_log_e
           case 0x14:
             log_entry->samples[*sample_count].type = ambit_log_sample_type_swimming_turn;
             int_offset += 1;
-            // Time compensation offset in 0.1 second format, convert to ms
-            time_compensators[*sample_count] = 0 - read16inc(buf, &int_offset) * 100;
+            // Read as a time compensation (0.1 s) upstream, but on an Ambit3 Peak (fw 2.4.17,
+            // 2026-09-28) these are two equal bytes worth 1028-2544 s - longer than the swim -
+            // which clamped every turn to t=0. Twin of tools/exercise_log.py: an impossible
+            // value (> 120 s) is ignored and the turn keeps its own sample time.
+            {
+                int32_t comp_ms = read16inc(buf, &int_offset) * 100;
+                if (comp_ms <= 120000) time_compensators[*sample_count] = 0 - comp_ms;
+            }
             int_offset += 1;
             log_entry->samples[*sample_count].u.swimming_turn.distance = read32inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.swimming_turn.lengths = read16inc(buf, &int_offset);
-            int_offset += 18;
+            log_entry->samples[*sample_count].u.swimming_turn.duration = read32inc(buf, &int_offset);
+            log_entry->samples[*sample_count].u.swimming_turn.strokes = read16inc(buf, &int_offset);
+            int_offset += 12;
             log_entry->samples[*sample_count].u.swimming_turn.classification[0] = read16inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.swimming_turn.classification[1] = read16inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.swimming_turn.classification[2] = read16inc(buf, &int_offset);

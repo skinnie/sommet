@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.42 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.43 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -195,6 +195,8 @@ qt_add_qml_module(ambitapp
         qml/DeviceCapabilities.qml
         qml/Icons.qml
         qml/ActivityTypes.qml
+        qml/ActivityViewLogic.js
+        qml/ActivityChartDraw.js
         qml/components/Card.qml
         qml/components/SommetMark.qml
         qml/components/PageFlickable.qml
@@ -249,6 +251,9 @@ qt_add_qml_module(ambitapp
         qml/components/MapView.qml
         qml/components/ActivityCard.qml
         qml/components/ActivityDetail.qml
+        qml/components/ActivityOverview.qml
+        qml/components/OverlayChart.qml
+        qml/components/SwimLengthsChart.qml
         qml/components/RuleOutputChart.qml
         qml/components/EtrexIcon.qml
         qml/components/BikeComputerIcon.qml
@@ -367,6 +372,9 @@ qt_add_qml_module(ambitapp
         # coach/ itself is gitignored / not part of this public repo (its own README says
         # so explicitly), so CoachService reads its own tracked copy here, not that path.
         assets/coach/systm-sample.json
+        # What the activity screen shows per sport - a copy of shared/activity_view.json made by
+        # tools/gen_activity_view.py (the same copy Android bundles). Edit shared/, not this.
+        assets/activity_view.json
         # assets/map/osm-raster-style.json was MapLibre's own style file - unused since the
         # 2026-08-07 switch to Qt's built-in "osm" plugin, left on disk but out of the build
 )

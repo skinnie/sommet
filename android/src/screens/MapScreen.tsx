@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, Linking, ScrollView, useWindowDimensions } from 'react-native';
 import { shareFile, saveToDownloads } from '../native/AmbitUsbModule';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { uploadFitToStrava, isAuthenticated as stravaIsAuthenticated } from '../services/ApiStrava';
@@ -13,7 +13,6 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { readGpxFile } from '../services/GpxService';
 import { parseTrackPoints, computeElevationStats, extractGpxMetadata, GpxMetadata, TrackPoint } from '../services/GpxParser';
-import ElevationChart from '../components/ElevationChart';
 import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
 import { getMapProvider, setMapProvider, MapProvider } from '../services/MapProviderService';
@@ -27,6 +26,7 @@ import Icon from '../components/ui/Icon';
 import { weatherLabel } from '../components/WeatherCard';
 import { weatherEmoji } from '../services/WeatherService';
 import { fetchActivityWeather, ActivityWeather } from '../services/ActivityWeather';
+import ActivityPanel from '../components/activity/ActivityPanel';
 
 type Route = RouteProp<RootStackParamList, 'Map'>;
 type Nav   = NativeStackNavigationProp<RootStackParamList, 'Map'>;
@@ -43,22 +43,6 @@ function formatDurationMinSec(s: number) {
   return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
 }
 
-function formatSpeed(duration_s: number, distance_m: number) {
-  if (!duration_s || !distance_m) return '-- km/h';
-  return `${((distance_m / 1000) / (duration_s / 3600)).toFixed(1)} km/h`;
-}
-
-function formatPace(duration_s: number, distance_m: number) {
-  if (!duration_s || distance_m < 10) return '--\'--"/km';
-  const paceDecimal = (duration_s / 60) / (distance_m / 1000);
-  let paceMin = Math.floor(paceDecimal);
-  let paceSec = Math.round((paceDecimal - paceMin) * 60);
-  if (paceSec === 60) {
-    paceMin += 1;
-    paceSec = 0;
-  }
-  return `${paceMin}'${paceSec.toString().padStart(2, '0')}"/km`;
-}
 
 function formatDist(m: number) {
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
@@ -84,6 +68,10 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   ${LEAFLET_STYLE_TAG}
+  <!-- Leaflet INLINE (same fix as OfflineMapsScreen, 2026-09-24): injectedJavaScriptBeforeContentLoaded
+       does not run before the page script on Android's Chromium WebView -> "L is not defined" ->
+       blank activity map (seen again on the tablet 2026-09-28, main and branch alike). -->
+  <script>${LEAFLET_INJECT_JS}</script>
   <style>* { margin:0; padding:0; } html,body,#map { width:100%; height:100%; }</style>
 </head><body>
 <div id="map"></div>
@@ -148,12 +136,26 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
       if (window.Replay.marker) map.removeLayer(window.Replay.marker);
 
       if (lls.length > 0) {
+        // The map sits in a fixed box laid out after the page loads, and Leaflet may have cached
+        // its size as 0x0 before that; invalidateSize() is a no-op until the map has a view, so
+        // give it a provisional one first, then re-measure, then fit. Without this the fit ran on
+        // a 0x0 box: max zoom, tiles in one corner, no track (tablet, 2026-09-28, ~1 run in 3).
+        if (!map._loaded) { window.__progMove = true; map.setView(lls[0], 13, { animate: false }); }
+        window.__progMove = true;
+        map.invalidateSize(false);
         line = L.polyline(lls, { color: '${trackColor}', weight: 7, opacity: 0.95 }).addTo(map);
+        // Zone colours may have arrived first: keep the plain track hidden under them.
+        if ((ovl.segs && ovl.segs.getLayers().length) || ovl.pending) line.setStyle({ opacity: 0 });
         startMarker = L.marker(lls[0], { icon: dot('#2ecc71') }).addTo(map);
         endMarker = L.marker(lls[lls.length - 1], { icon: dot('#e74c3c') }).addTo(map);
+        window.__progMove = true;
         map.fitBounds(line.getBounds(), { padding: [30, 30] });
 
         window.Replay.marker = L.marker(lls[0], { icon: playerIcon, zIndexOffset: 1000 }).addTo(map);
+        if (ovl.pending) {
+          var p = ovl.pending; ovl.pending = null;
+          setTimeout(function() { window.ActivityOverlay.setColoured(p[0], p[1]); }, 0);
+        }
       }
     },
 
@@ -246,10 +248,64 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
       window.Replay.marker.setLatLng(newPos);
       
       if (!map.getBounds().pad(-0.1).contains(newPos)) {
+        window.__progMove = true;
         map.panTo(newPos, { animate: true, duration: 0.5 });
       }
     }
   };
+
+  // Activity screen (André, 2026-09-27; desktop parity): zone-coloured route, the chart's cursor
+  // dot, the stretch selected in the chart, fitting the map to it, and "the map moved" back to RN
+  // so the chart can follow the part of the route on screen.
+  // Nothing is drawn before the map has a view: Leaflet queues such layers and adds them in the
+  // middle of the first fitBounds, before its renderer has bounds -> "reading 'min'" thrown out of
+  // Replay.init (seen on the tablet 2026-09-28: no track, no markers). Colours that arrive early
+  // wait in ovl.pending and are drawn right after Replay.init has fitted the track.
+  var ovl = { segs: null, hl: null, cur: null, pending: null };
+  window.ActivityOverlay = {
+    setColoured: function(segs, casing) {
+      if (!map._loaded) { ovl.pending = [segs, casing]; return; }
+      if (!ovl.segs) ovl.segs = L.layerGroup().addTo(map);
+      ovl.segs.clearLayers();
+      if (line) line.setStyle({ opacity: segs && segs.length ? 0 : 0.95 });
+      (segs || []).forEach(function(s) { L.polyline(s.coords, { color: casing, weight: 9, opacity: 0.9, interactive: false }).addTo(ovl.segs); });
+      (segs || []).forEach(function(s) { L.polyline(s.coords, { color: s.color, weight: 5.5, opacity: 1, interactive: false }).addTo(ovl.segs); });
+    },
+    setCursor: function(p) {
+      if (!map._loaded) return;
+      if (ovl.cur) { map.removeLayer(ovl.cur); ovl.cur = null; }
+      if (p) ovl.cur = L.circleMarker([p.lat, p.lon], { radius: 8, color: '#ffffff', weight: 3, fillColor: '#B5652F', fillOpacity: 1 }).addTo(map);
+    },
+    setHighlight: function(coords) {
+      if (!map._loaded) return;
+      if (ovl.hl) { map.removeLayer(ovl.hl); ovl.hl = null; }
+      if (coords && coords.length > 1) { ovl.hl = L.polyline(coords, { color: '#1a1d22', opacity: 0.3, weight: 18, interactive: false }).addTo(map); ovl.hl.bringToBack(); }
+    },
+    fitCoords: function(coords) {
+      if (!coords || coords.length < 2) return;
+      window.__progMove = true;
+      map.fitBounds(L.latLngBounds(coords), { padding: [24, 24] });
+    },
+    resetView: function() {
+      if (!line) return;
+      window.__progMove = true;
+      map.fitBounds(line.getBounds(), { padding: [30, 30] });
+    }
+  };
+  // The box can still change size after the replay is fitted (layout settling, rotation): follow
+  // it and fit the route again, unless the user has already moved the map.
+  var _userMoved = false;
+  window.addEventListener('resize', function() {
+    map.invalidateSize(false);
+    if (line && !_userMoved) { window.__progMove = true; map.fitBounds(line.getBounds(), { padding: [30, 30] }); }
+  });
+  map.on('moveend', function() {
+    if (window.__progMove) { window.__progMove = false; return; }
+    _userMoved = true;
+    var b = map.getBounds();
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MAP_VIEW',
+      payload: { minLat: b.getSouth(), maxLat: b.getNorth(), minLon: b.getWest(), maxLon: b.getEast() } }));
+  });
 </script>
 </body></html>`;
 }
@@ -273,13 +329,27 @@ export default function MapScreen() {
 
   // ── Replay State
   const webViewRef = useRef<WebView>(null);
-  const isScrubbingRef = useRef(false);
-  const lastSeekTimeRef = useRef(0);
+  // Activity panel <-> map (desktop parity: chart hover dot, selected stretch, zone colours, and
+  // the chart following the part of the route the user pans/zooms to).
+  const [mapView, setMapView] = useState<{ minLat: number; maxLat: number; minLon: number; maxLon: number } | null>(null);
+  const mapJs = (js: string) => webViewRef.current?.injectJavaScript(`window.ActivityOverlay && (${js}); true;`);
+  const onPanelHover = (p: { lat: number; lon: number } | null) => mapJs(`window.ActivityOverlay.setCursor(${JSON.stringify(p)})`);
+  const onPanelStretch = (coords: [number, number][] | null) => {
+    if (!coords) { mapJs('window.ActivityOverlay.setHighlight(null)'); return; }
+    mapJs(`window.ActivityOverlay.setHighlight(${JSON.stringify(coords)}), window.ActivityOverlay.fitCoords(${JSON.stringify(coords)})`);
+  };
+  // Remembered so the colours survive the map page loading after the panel computed them.
+  const colouredRef = useRef<string | null>(null);
+  const onPanelColoured = (segs: { color: string; coords: [number, number][] }[], casing: string) => {
+    colouredRef.current = `window.ActivityOverlay.setColoured(${JSON.stringify(segs)}, ${JSON.stringify(casing)})`;
+    mapJs(colouredRef.current);
+  };
+  const win = useWindowDimensions();
+  const sideBySide = win.width > win.height && win.width >= 900;   // tablet landscape: map left, panel right
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
   const [currentReplayVal, setCurrentReplayVal] = useState(0);
-  const [currentReplayDist, setCurrentReplayDist] = useState(0);
   const [isReady, setIsReady] = useState(false);
 
   // Real, 2026-08-09 ("no button to change provider, nor in the settings like the desktop
@@ -306,6 +376,9 @@ export default function MapScreen() {
   }, [leafletHtml]);
 
   useEffect(() => {
+    // No GPX at all (an intervals.icu import without a track): nothing to read - the activity
+    // panel shows it from its FIT. Reading '' only raised a "Cannot read GPX file" alert.
+    if (!activity.gpx_path) { setLoading(false); return; }
     readGpxFile(activity.gpx_path)
       .then(xml => { setPoints(parseTrackPoints(xml)); setMeta(extractGpxMetadata(xml)); })
       .catch(e => Alert.alert(t.error, t.readError + e?.message))
@@ -387,6 +460,7 @@ export default function MapScreen() {
 
   const onWebViewLoad = () => {
     setIsReady(true);
+    if (colouredRef.current) mapJs(colouredRef.current);
     // Overlay the watch's cached POIs (available offline). Best-effort — no POIs is fine.
     getCachedPois().then(pois => {
       if (!pois || pois.length === 0) return;
@@ -399,55 +473,17 @@ export default function MapScreen() {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'REPLAY_TICK') {
-        if (!isScrubbingRef.current) {
-          setCurrentReplayVal(data.payload.val);
-          setCurrentReplayDist(data.payload.dist ?? data.payload.val);
-        }
+        setCurrentReplayVal(data.payload.val);
       } else if (data.type === 'REPLAY_END') {
         setIsPlaying(false);
         setCurrentReplayVal(maxReplayVal);
-        setCurrentReplayDist(stats.totalDistance);
       } else if (data.type === 'MAP_PROVIDER_CHANGE') {
         setMapProviderState(data.provider);
         setMapProvider(data.provider);
+      } else if (data.type === 'MAP_VIEW') {
+        setMapView(data.payload);
       }
     } catch (e) {}
-  };
-
-  const onChartScrub = (progress: number) => {
-    isScrubbingRef.current = true;
-    if (isPlaying) {
-      setIsPlaying(false);
-      webViewRef.current?.injectJavaScript(`window.Replay.pause(); true;`);
-    }
-    
-    // progress is distance-based because the chart is distance-based
-    const targetDist = progress * stats.totalDistance;
-    setCurrentReplayDist(targetDist);
-    
-    // convert targetDist back to targetTime if in time mode
-    let targetVal = targetDist;
-    if (replayMode === 'time') {
-      // Find point matching targetDist to extract time
-      const ptIdx = points.findIndex(p => p.cumDist >= targetDist);
-      if (ptIdx >= 0) {
-        targetVal = points[ptIdx].cumTime;
-      } else {
-        targetVal = activity.duration_s;
-      }
-    }
-    setCurrentReplayVal(targetVal);
-
-    const now = Date.now();
-    if (now - lastSeekTimeRef.current > 50) {
-      lastSeekTimeRef.current = now;
-      webViewRef.current?.injectJavaScript(`window.Replay.seek(${targetVal}); true;`);
-    }
-  };
-
-  const onChartScrubEnd = () => {
-    isScrubbingRef.current = false;
-    webViewRef.current?.injectJavaScript(`window.Replay.seek(${currentReplayVal}); true;`);
   };
 
   // ─── Offline map download ───
@@ -648,31 +684,15 @@ export default function MapScreen() {
   if (points.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={styles.noGpsContent}>
-          <View>
+        <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
+          <View style={[styles.noGpsContent, { paddingBottom: 0 }]}>
             <Text style={styles.noGpsTitle}>{activity.activity_type || t.unknownActivity}</Text>
             <Text style={styles.noGpsSub}>{(fmtDate(activity.date) || t.unknownDate)} · {t.noTrack}</Text>
           </View>
-          <View style={styles.noGpsCard}>
-            <View style={styles.statsRow}>
-              <StatChip styles={styles} label={t.duration} value={formatDurationMinSec(activity.duration_s)} />
-              {activity.distance_m > 0 &&
-                <StatChip styles={styles} label={t.distance} value={formatDist(activity.distance_m)} />}
-              {!!meta && meta.avgHr > 0 &&
-                <StatChip styles={styles} label={t.avgHr} value={`${meta.avgHr} bpm`} />}
-            </View>
-            {!!meta && (meta.maxHr > 0 || meta.avgCadence > 0 || meta.energyKcal > 0) && (
-              <View style={styles.statsRow}>
-                {meta.maxHr > 0 &&
-                  <StatChip styles={styles} label={t.maxHr} value={`${meta.maxHr} bpm`} />}
-                {meta.avgCadence > 0 &&
-                  <StatChip styles={styles} label={t.cadence} value={`${meta.avgCadence}`} />}
-                {meta.energyKcal > 0 &&
-                  <StatChip styles={styles} label={t.energy} value={`${meta.energyKcal} kcal`} />}
-              </View>
-            )}
-          </View>
-        </View>
+          {/* Overview / Charts / Laps - the same panel as the map view (desktop parity). */}
+          <ActivityPanel activity={activity} meta={meta} hasMap={false} mapView={null}
+            onHover={() => undefined} onStretch={() => undefined} onColoured={() => undefined} />
+        </ScrollView>
 
         {/* Same export FAB + menu as the map view, so an indoor move is exportable too. */}
         <TouchableOpacity
@@ -711,8 +731,10 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      {/* ── Carte Leaflet ── */}
+    <View style={[styles.container, sideBySide && { flexDirection: 'row' }]}>
+      {/* ── Carte Leaflet ── (a fixed box now: the activity panel scrolls below, or beside it on a
+          landscape tablet) */}
+      <View style={sideBySide ? { flex: 1 } : { height: Math.round(win.height * 0.42) }}>
       {/* Loaded from a caches-dir file:// page (mapWebView.ts) with Leaflet bundled inline — no
           more android_asset dependency, so this renders on iOS too, and cached tiles read off
           disk for offline use (mapWebViewFileProps grants the read access per platform). */}
@@ -721,7 +743,6 @@ export default function MapScreen() {
         ref={webViewRef}
         style={styles.map}
         source={{ uri: mapUri }}
-        injectedJavaScriptBeforeContentLoaded={LEAFLET_INJECT_JS}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled={false}
@@ -733,24 +754,14 @@ export default function MapScreen() {
         onMessage={onMessage}
       />)}
 
-      {/* ── Infos overlay ── */}
-      <View style={styles.overlay}>
-        <View style={styles.statsRow}>
-          <StatChip styles={styles} label={t.distance} value={formatDist(stats.totalDistance)} />
-          <StatChip styles={styles} label={t.duration} value={formatDurationMinSec(activity.duration_s)} />
-          <StatChip styles={styles} label={t.pace} value={formatPace(activity.duration_s, stats.totalDistance)} />
-        </View>
-        <View style={styles.statsRow}>
-          <StatChip styles={styles} label="D+" value={`${stats.dPlus} m`} />
-          <StatChip styles={styles} label="D-" value={`${stats.dMinus} m`} />
-          <StatChip styles={styles} label={t.avgSpeed} value={formatSpeed(activity.duration_s, stats.totalDistance)} />
-        </View>
-        {weather && (
+      {/* ── Weather overlay ── (the numbers moved into the activity panel's Overview) */}
+      {weather && (
+        <View style={styles.overlay}>
           <Text style={styles.weatherLine} numberOfLines={2}>
             {weatherLine(weather)}
           </Text>
-        )}
-      </View>
+        </View>
+      )}
 
       {/* ── Bouton téléchargement hors-ligne ── */}
       <TouchableOpacity
@@ -793,6 +804,7 @@ export default function MapScreen() {
           <ExportMenuItem styles={styles} label={t.gearSetForActivity} onPress={() => { setShowExportMenu(false); setShowGearPicker(true); }} />
         </View>
       )}
+      </View>
 
       <GearPicker
         visible={showGearPicker}
@@ -803,6 +815,7 @@ export default function MapScreen() {
         onClose={() => setShowGearPicker(false)}
       />
 
+      <ScrollView style={sideBySide ? { width: Math.min(560, Math.round(win.width * 0.45)) } : { flex: 1 }}>
       {/* ── Barre de Replay ── */}
       <View style={styles.replayBar}>
         <Text style={styles.replayModeText}>{replayMode === 'time' ? t.replayTime : t.replayDist}</Text>
@@ -833,14 +846,12 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* ── Profil altimétrique ── */}
-      <ElevationChart 
-        points={points} 
-        stats={stats} 
-        externalProgress={stats.totalDistance > 0 ? currentReplayDist / stats.totalDistance : 0}
-        onScrub={onChartScrub}
-        onScrubEnd={onChartScrubEnd}
-      />
+      {/* (The old altitude profile / replay scrubber is gone, André 2026-09-29: the activity
+          panel's own chart shows altitude now; the replay keeps its play/rewind/forward buttons.) */}
+      {/* ── Overview / Charts / Laps ── (desktop parity: ActivityDetail.qml) */}
+      <ActivityPanel activity={activity} meta={meta} hasMap mapView={mapView}
+        onHover={onPanelHover} onStretch={onPanelStretch} onColoured={onPanelColoured} />
+      </ScrollView>
     </View>
   );
 }
@@ -866,14 +877,6 @@ function ExportMenuItem({ styles, label, onPress }: { styles: ReturnType<typeof 
   );
 }
 
-function StatChip({ styles, label, value }: { styles: ReturnType<typeof createStyles>; label: string; value: string }) {
-  return (
-    <View style={styles.chip}>
-      <Text style={styles.chipLabel}>{label}</Text>
-      <Text style={styles.chipValue}>{value}</Text>
-    </View>
-  );
-}
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -920,7 +923,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     },
     exportFab: {
       position: 'absolute',
-      bottom: 188,
+      bottom: 12,
       right: 16,
       width: 48,
       height: 48,
@@ -936,7 +939,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     // stacking vertically, so it can't collide with exportMenu popping up above exportFab.
     offlineFab: {
       position: 'absolute',
-      bottom: 188,
+      bottom: 12,
       right: 76,
       width: 48,
       height: 48,
@@ -951,7 +954,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     exportFabText: { fontSize: 20, color: t.primary },
     exportMenu: {
       position: 'absolute',
-      bottom: 244,
+      bottom: 68,
       right: 16,
       backgroundColor: t.card,
       borderColor: t.mutedText + '33',
