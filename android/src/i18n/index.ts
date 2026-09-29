@@ -371,7 +371,7 @@ const fr = {
     "la remplacera. C'est fait pour charger une route juste avant de partir, pas pour " +
     "la stocker durablement.",
   sendRouteConfirmBtn: 'Envoyer',
-  routeScreenTitle:   'Route',
+  routeScreenTitle:   'Routes',
   routeSendSection:   'Envoyer une route',
   routePlannerTitle:  'Planifier une route',
   routeWatchNote: 'Les routes envoyées à la montre seront effacées par SuuntoLink et ne sont pas transmises à l’app Suunto.',
@@ -1206,7 +1206,7 @@ const en: typeof fr = {
     "even just the Suunto phone app coming into Bluetooth range, will replace it. " +
     "This is for loading a route right before you go, not for permanent storage.",
   sendRouteConfirmBtn: 'Send',
-  routeScreenTitle:   'Route',
+  routeScreenTitle:   'Routes',
   routeSendSection:   'Send a route',
   routePlannerTitle:  'Plan a route',
   routeWatchNote: 'Routes that are sent to the watch will be erased by SuuntoLink and not pushed to the Suunto app.',

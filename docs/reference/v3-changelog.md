@@ -7,6 +7,24 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-29: Android - one Routes screen with a saved-routes Library, like the desktop (Android 0.2.40)
+
+André, 2026-09-29: "I see route and ROUTES what are the differences? ... good moment to check
+parity" - the desktop merged its Route planner and Routes page on 2026-09-26; Android still had two
+menu items. Plan approved incl. a Library ("yes").
+
+- **One "Routes" menu item** (the separate "Route" item is gone). The screen: the import card
+  (preview a GPX, send it to the watch / Bryton / Magene) now also has "Open planner" and "Open in
+  planner"; the list card shows one source from a drop-down - On the watch, or the Library.
+- **Library** (services/RouteLibrary.ts, desktop layout: one GPX per route + index.json): every GPX
+  imported in Routes or the planner is kept, the same file twice is one entry; each entry has a map
+  preview (a small stored polyline - no GPX parsing to draw the list), Open in planner, Send…,
+  Rename, Delete.
+- **Planner "Send to…"** returns to Routes with that route ready to send to what's connected.
+- Found on the tablet and fixed: "Send to…" stacked a second Routes screen (React Navigation 7 needs
+  pop: true to go back to the existing one), and each planner round trip re-saved a copy.
+- Not yet: a connected Garmin/eTrex still opens its own routes screen (desktop shows it as a source).
+
 ## 2026-09-29: Android - Activities list in pages of 30; menu like the desktop (Android 0.2.39)
 
 André, 2026-09-29: "why activities take like minutes to load on android ... load 2-3 scrolls.. and

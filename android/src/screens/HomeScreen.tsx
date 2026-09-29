@@ -975,11 +975,8 @@ export default function HomeScreen() {
     // (read the local activity DB, no watch needed) - like the desktop nav.
     { id: 'totals', label: 'Totals', icon: 'chart', onPress: () => navigation.navigate('Totals') },
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
-    // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
-    // The route planner (map + GPX + weather/climb along the route), a separate item from Routes —
-    // matches desktop's "Route" planner (planRoute), which is apart from the "Routes" list. It was
-    // mislabeled "Weather" on Android (André, 2026-09-25).
-    { id: 'planRoute', label: 'Route', icon: 'route', onPress: () => navigation.navigate('RouteWeather') },
+    // (The separate "Route" planner item is gone: Routes opens the one Routes screen, whose
+    // "Open planner" leads to it - desktop parity, André 2026-09-29.)
     // Offline maps lives in Settings > Maps (desktop parity — moved out of the main menu,
     // André 2026-09-24), not as a top-level item.
     // Routes is always there (André, 2026-09-25): it's where any device gets a route (watch, Bryton,
@@ -1064,7 +1061,7 @@ export default function HomeScreen() {
   ];
   // Same order as the desktop rail (NavRail.qml is the baseline - André, 2026-09-29: "the rest should
   // be similar"). Items not listed keep their relative place, just before Settings.
-  const NAV_ORDER = ['home', 'activities', 'pois', 'routes', 'planRoute', 'racePlan', 'health', 'ember', 'weight',
+  const NAV_ORDER = ['home', 'activities', 'pois', 'routes', 'racePlan', 'health', 'ember', 'weight',
     'coach', 'workoutCalendar', 'bikeWorkouts', 'gear', 'calendar', 'totals', 'apps', 'copyToWatch',
     'watchSettings', 'brytonProfile', 'magene', 'firmware', 'sportModes', 'smartSensor', 'trackPod', 'settings'];
   const rank = (id: string) => { const i = NAV_ORDER.indexOf(id); return i < 0 ? NAV_ORDER.length - 1.5 : i; };

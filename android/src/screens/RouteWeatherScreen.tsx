@@ -4,7 +4,9 @@ import {
 } from 'react-native';
 import Svg, { Path, Line, Rect, Text as SvgText } from 'react-native-svg';
 import { WebView } from 'react-native-webview';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
+import { saveToLibrary } from '../services/RouteLibrary';
+import { routeFromGpx } from '../services/NavigationService';
 import { useV3Theme, v3Spacing, v3Radius, v3Type, V3Colors } from '../theme/v3';
 import { Card } from '../components/ui/Card';
 import { Button, Chip } from '../components/ui/primitives';
@@ -38,6 +40,7 @@ export default function RouteWeatherScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
   const params = (useRoute<RouteProp<Params, 'RouteWeather'>>().params) || {};
+  const navigation = useNavigation<any>();
 
   const [start, setStart] = useState('09:00');
   const [pace, setPace] = useState('20');
@@ -78,6 +81,11 @@ export default function RouteWeatherScreen() {
       const pts: RoutePoint[] = parsed.points.map(p => ({ lat: p.latitude, lon: p.longitude, ele: p.elevation }));
       if (pts.length < 2) { Alert.alert('GPX', 'That file has no usable route points.'); return; }
       setImported({ route: pts, name: parsed.name || fallback });
+      // Kept in the Routes Library, like a GPX imported on the Routes screen (desktop parity).
+      try {
+        const r = routeFromGpx(xml, parsed.name || fallback);
+        saveToLibrary(r.name, xml, { distanceM: r.distanceM, ascentM: r.ascentM, points: r.points }).catch(() => {});
+      } catch { /* too complex for a watch route - still planned, just not kept */ }
       setResult(undefined); setError(undefined); // stale forecast is for the old route
     } catch (e: any) {
       if (e?.code === 'GPX_PICK_CANCELLED') return; // user cancelled — silent
@@ -193,6 +201,12 @@ export default function RouteWeatherScreen() {
           onPress={handleForecast} loading={loading} style={{ marginTop: v3Spacing.medium }} />
         <Button label={importing ? 'Opening…' : 'Load GPX'} icon="route" variant="outline"
           onPress={handleImportGpx} loading={importing} style={{ marginTop: v3Spacing.small }} />
+        {/* One "Send to…" (desktop parity): back to Routes with this route, ready to send to
+            whichever device is connected. Not for the built-in demo route. */}
+        {(imported || (params.route && params.route.length >= 2)) && (
+          <Button label="Send to…" icon="route" variant="outline" style={{ marginTop: v3Spacing.small }}
+            onPress={() => navigation.navigate('Route', { send: { name: routeName, points: route } }, { merge: true, pop: true })} />
+        )}
         {error && <Text style={[s.muted, { color: theme.warning, marginTop: 8 }]}>{error}</Text>}
       </Card>
 
