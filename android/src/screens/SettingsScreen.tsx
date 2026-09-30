@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isRacePlanEnabled, setRacePlanEnabled } from '../services/race/raceApi';
 import { ADVANCED_POWER_KEY } from '../components/activity/ActivityPanel';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -101,6 +102,8 @@ export default function SettingsScreen() {
   // `emberOn` mirrors the persisted flag via isEmberUnlocked/setEmberUnlocked; the storage key is
   // unchanged so an already-unlocked install keeps Ember showing.
   const [emberOn, setEmberOn]                       = useState(false);
+  const [racePlanOn, setRacePlanOn] = useState(false);
+  useEffect(() => { isRacePlanEnabled().then(setRacePlanOn); }, []);
   // Ember NAS sync config (2026-08-27): the shared store URL + token the iPhone PWA and desktop
   // use (desktop keeps it in ember/sync.json). Lets Android's interactive Ember merge across
   // devices instead of logging local-only.
@@ -825,6 +828,22 @@ export default function SettingsScreen() {
         </Text>
         <Button label={'Open backup & restore…'} icon="backup" variant="outline"
           onPress={() => navigation.navigate('Backup')} style={{ marginTop: 10 }} />
+      </View>
+
+      {/* ── Race Plan (2026-09-29, desktop parity: same card, same wording, off by default) ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="route" />
+          <Text style={styles.cardTitle}>Race Plan</Text>
+        </View>
+        <Text style={styles.sectionDesc}>
+          BRM/ultra race planner: import a GPX + roadbook, then get realistic arrival times, cutoff margins, weather, sleep and resupply along the route. Still rough — turn it on to try it.
+        </Text>
+        <Text style={[styles.sectionDesc, { color: theme.warning, marginTop: 4 }]}>Experimental</Text>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>Show Race Plan in the menu</Text>
+          <Toggle value={racePlanOn} onValueChange={async v => { await setRacePlanEnabled(v); setRacePlanOn(v); }} />
+        </View>
       </View>
 
       {/* ── Ember (2026-08-29, desktop parity): openly opt-in. The 10-tap easter egg was retired

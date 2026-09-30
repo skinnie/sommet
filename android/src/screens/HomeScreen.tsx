@@ -49,6 +49,7 @@ import { decodeDeviceLog, realTrackPoints, deviceLogToGpx, KailashDeviceLog } fr
 import { getAllActivities, ActivityRecord } from '../database/db';
 import { distanceLines } from '../services/TotalsFacts';
 import { isEmberUnlocked } from '../services/EmberUnlock';
+import { isRacePlanEnabled } from '../services/race/raceApi';
 import { APP_VERSION } from '../config/version';
 import { useDemo } from '../config/DemoContext';
 import { useExperimental } from '../config/ExperimentalContext';
@@ -175,6 +176,9 @@ export default function HomeScreen() {
   // invisible until the app was restarted (caught on the tablet, 2026-08-26).
   const [emberUnlocked, setEmberUnlockedState] = useState(false);
   useFocusEffect(useCallback(() => { isEmberUnlocked().then(setEmberUnlockedState); }, []));
+  // Race Plan is opt-in like on the desktop (Settings > Race Plan, off by default).
+  const [racePlanOn, setRacePlanOn] = useState(false);
+  useFocusEffect(useCallback(() => { isRacePlanEnabled().then(setRacePlanOn); }, []));
   const [timeSyncMsg, setTimeSyncMsg] = useState<string | null>(null);
   const handleSyncTime = useCallback(async () => {
     setTimeSyncBusy(true);
@@ -1052,6 +1056,9 @@ export default function HomeScreen() {
     // Ember: off by default, shown once the user opts in via the open toggle in Settings
     // (the 10-tap easter egg was retired 2026-08-29, matching the desktop). `emberUnlocked` is
     // that persisted opt-in flag - the storage key is unchanged, so an already-on install keeps it.
+    ...(racePlanOn
+      ? [{ id: 'racePlan', label: 'Race Plan', icon: 'route' as const, onPress: () => navigation.navigate('RacePlan'), group: 'training' as const }]
+      : []),
     ...(emberUnlocked
       ? [{ id: 'ember', label: 'Ember', icon: 'ember' as const, onPress: () => navigation.navigate('Ember'), group: 'training' as const }]
       : []),

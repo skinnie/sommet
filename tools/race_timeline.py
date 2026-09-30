@@ -498,15 +498,20 @@ def build_timeline(event: RaceEvent, athlete: Optional[AthleteInputs] = None,
         if isinstance(open_dt, datetime):
             early_s = (open_dt - arrival).total_seconds()
 
+        # With the two-process model the slowdown happens inside the walk (riding_s): report the leg as
+        # ridden, so the rows add up to the total moving time.
+        leg_move_s, leg_fac = move_s, fac
+        if alert and riding_s > 0:
+            leg_move_s, leg_fac = riding_s, fac * move_s / riding_s
         rows.append({
             "index": i,
             "label": (ctrl.label if ctrl else ("Finish" if is_finish else f"Control {i + 1}")),
             "distance_km": round(geo["end_km"], 2),
             "leg_distance_km": geo["distance_km"],
             "leg_ascent_m": geo["ascent_m"],
-            "moving_time_s": round(move_s, 1),
-            "avg_speed_kmh": round(float(lt.get("avg_speed_kmh") or 0.0) * fac, 1),
-            "fatigue_factor": round(fac, 3),
+            "moving_time_s": round(leg_move_s, 1),
+            "avg_speed_kmh": round(float(lt.get("avg_speed_kmh") or 0.0) * leg_fac, 1),
+            "fatigue_factor": round(leg_fac, 3),
             "arrival_dt": _fmt(arrival),
             "stop_s": round(stop_s, 1),
             "sleep_s": round(slp, 1),

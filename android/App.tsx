@@ -41,6 +41,7 @@ import SleepScreen from './src/screens/SleepScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import EmberScreen from './src/screens/EmberScreen';
 import RouteWeatherScreen from './src/screens/RouteWeatherScreen';
+import RacePlanScreen from './src/screens/RacePlanScreen';
 import OfflineMapsScreen from './src/screens/OfflineMapsScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
@@ -111,6 +112,7 @@ export type RootStackParamList = {
   // each point's ETA, temp-coloured profile + verdict. `route` optional (a demo route is used
   // when none is passed); no watch needed.
   RouteWeather: { route?: Array<{ lat: number; lon: number; ele?: number | null }>; name?: string } | undefined;
+  RacePlan: undefined;
   // Offline maps (2026-08-30): download any map area of the world (OruxMaps-style) for use with
   // no signal, plus a saved-areas manager. Reachable any time, no device needed.
   OfflineMaps: undefined;
@@ -273,6 +275,11 @@ function AppShell() {
             name="RouteWeather"
             component={RouteWeatherScreen}
             options={{ title: 'Weather along route' }}
+          />
+          <Stack.Screen
+            name="RacePlan"
+            component={RacePlanScreen}
+            options={{ title: 'Race Plan' }}
           />
           <Stack.Screen
             name="OfflineMaps"

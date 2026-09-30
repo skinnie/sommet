@@ -7,6 +7,63 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-29: Roadbook PDF on Android; roadbook + timeline fixes on both (Android 0.2.42, desktop 0.2.44)
+
+André, 2026-09-29, on the Race Plan open points: roadbook PDF on Android "can we implement it?",
+the two small engine quirks "fix".
+
+- **Android reads roadbook PDFs**: Import roadbook > "…or load a PDF roadbook: From PDF…" (the
+  desktop dialog's wording). The desktop runs `pdftotext -layout`; Android has no poppler, so
+  Mozilla pdf.js (6.3.289, Apache-2.0) runs in a hidden WebView with no file access
+  (components/PdfTextReader.tsx) and shared/pdf_text_layout.js rebuilds the lines like pdftotext.
+  pdf.js is inlined by tools/gen_pdfjs_inline.js (android/src/config/pdfjsInline.js, ~1.8 MB, loaded
+  only when a PDF is read). tools/test_roadbook_pdf.js checks the same controls come out as on the
+  desktop: 3 test PDFs (cairo = Word-like fonts, Ghostscript, and a hard one - rows drawn out of
+  order, uneven baselines, a wrapped name, two pages) all identical in km and times. Tablet: 6
+  controls from the hard PDF in ~10 s; a scanned (no text) PDF and a non-PDF file give a clear message.
+- **Roadbook parser, desktop + Android** (tools/roadbook_import.py and its twin): accepts "C1 − NAME"
+  (the minus sign PostScript-made PDFs put for "-") and "C1 — NAME"; a long place name wrapped in its
+  table cell (Excel puts the km and times on the second line) is joined with the next line - before,
+  that control was silently skipped on both.
+- **Timeline, desktop + Android**: with "model fatigue" on, each control's ride time and speed now
+  include the fatigue slowdown, so they add up to MOVING (a 308 km ride showed 12h49 at the finish row
+  vs 12h52 moving). Finish times unchanged.
+- **"Left for short stops"** cuts to whole minutes like every other duration (1.03 h read 1h02 there
+  but 1h01 in STOPS).
+- **Desktop: pasting a roadbook is reachable again** (André: "add it"). Step 6's "Import roadbook
+  (PDF)" went straight to the file picker and the paste dialog was never opened; now "Import
+  roadbook" opens it (paste the table, or "From PDF…"), like Android. Its three dialogs (import
+  roadbook, paste checkpoints, save scenario) were bare Dialogs - square, light-only; now
+  ThemedDialog (rounded, themed, centred over the dimmed window) with themed text boxes. Checked by
+  running the worktree build: button opens the dialog, "From PDF…" closes it and opens the picker,
+  a pasted line imports.
+- Race parity 145/145 (new roadbook text cases added).
+
+## 2026-09-29: Android - Race Plan, the whole desktop planner (Android 0.2.41)
+
+André, 2026-09-29: Race Plan on Android, "Everything in one go".
+
+- **Engine**: the desktop's Python race modules (event, timeline, calibration, stops memory,
+  scenarios, days/nights, sleep and "Suggest my sleep", weather, alerts, PitStopper POIs, roadbook
+  import) have TypeScript twins in android/src/services/race/, computed on the phone - no backend.
+  tools/test_race_parity.js runs each twin against the Python on real routes (BRM 200 Thiérache,
+  Lille-Hardelot, the 2026-06-06 BRM600 FIT) + synthetic PitStopper files: 144/144 identical.
+- **Screen** (RacePlanScreen, a port of RacePlanPage.qml): the same 6-step wizard and results -
+  verdict, per-control table with weather, planned stops, wind fold, Suggest my sleep, days &
+  nights, critical points, what-if, saved scenarios, roadbook export (share sheet).
+- **Menu + settings like the desktop**: off by default; Settings > Race Plan > "Show Race Plan in
+  the menu".
+- Differences from the desktop: the roadbook is pasted as text (no PDF reading - Android has no
+  pdftotext); "Suggest my sleep" shows its progress (plan n of 50).
+- Tested on the tablet: BRM 200 with a pasted 3-control roadbook (finish, moving time, each control
+  and margin identical to the Python), what-if, scenario save/open/delete, export; 308 km with
+  no-ride hours + fatigue (days & nights, sleep suggestion, "Suggest my sleep" in ~12 s, same
+  ranking as the Python; "Use" applies it).
+- Fixed on both desktop and Android: a sleep suggestion with no nearby control showed "near km 227 ()";
+  the brackets now only appear with a control name. Android also got the desktop's column headers
+  on saved scenarios.
+- Picking a GPX now uses the route's own `<name>` instead of "picked_route_….gpx".
+
 ## 2026-09-29: Android - one Routes screen with a saved-routes Library, like the desktop (Android 0.2.40)
 
 André, 2026-09-29: "I see route and ROUTES what are the differences? ... good moment to check
