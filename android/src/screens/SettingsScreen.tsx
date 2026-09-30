@@ -1,4 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isRacePlanEnabled, setRacePlanEnabled } from '../services/race/raceApi';
+import { ADVANCED_POWER_KEY } from '../components/activity/ActivityPanel';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, Alert, ScrollView, ActivityIndicator, Linking, Modal, Platform,
@@ -100,6 +103,8 @@ export default function SettingsScreen() {
   // `emberOn` mirrors the persisted flag via isEmberUnlocked/setEmberUnlocked; the storage key is
   // unchanged so an already-unlocked install keeps Ember showing.
   const [emberOn, setEmberOn]                       = useState(false);
+  const [racePlanOn, setRacePlanOn] = useState(false);
+  useEffect(() => { isRacePlanEnabled().then(setRacePlanOn); }, []);
   // Ember NAS sync config (2026-08-27): the shared store URL + token the iPhone PWA and desktop
   // use (desktop keeps it in ember/sync.json). Lets Android's interactive Ember merge across
   // devices instead of logging local-only.
@@ -138,6 +143,14 @@ export default function SettingsScreen() {
   // Morning HRV from a BLE heart-rate strap - own persisted flag (StrapHrvPref.ts), default OFF.
   // Mirrors the desktop health/coospoHrvEnabled toggle so both platforms gate the strap card.
   const [strapHrvEnabled, setStrapHrvEnabledState] = useState(false);
+  // Activity screen: normalized power, TSS, IF and work on rides (desktop parity: Settings ->
+  // Activities -> Advanced power numbers). Off by default.
+  const [advancedPower, setAdvancedPower] = useState(false);
+  useEffect(() => { AsyncStorage.getItem(ADVANCED_POWER_KEY).then(v => setAdvancedPower(v === '1')).catch(() => undefined); }, []);
+  function handleToggleAdvancedPower(v: boolean) {
+    setAdvancedPower(v);
+    AsyncStorage.setItem(ADVANCED_POWER_KEY, v ? '1' : '0').catch(() => undefined);
+  }
 
   const [tileCacheBytes, setTileCacheBytes] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
@@ -519,6 +532,22 @@ export default function SettingsScreen() {
 
       </View>
 
+      {/* ── Activities - the extra power numbers most rides don't need (desktop parity). ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="activity" />
+          <Text style={styles.cardTitle}>Activities</Text>
+        </View>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>Advanced power numbers</Text>
+          <Toggle value={advancedPower} onValueChange={handleToggleAdvancedPower} />
+        </View>
+        <Text style={styles.sectionDesc}>
+          Adds normalized power, training load (TSS), intensity factor and work to rides with a power
+          meter. Uses the FTP from your intervals.icu settings.
+        </Text>
+      </View>
+
       {/* ── Health - morning HRV from a BLE heart-rate strap (André, 2026-09-04). Opt-in,
           default OFF, mirroring the desktop health/coospoHrvEnabled toggle: an intervals.icu-
           only user sees nothing; a strap user turns this on and the "Measure morning HRV" card
@@ -803,6 +832,22 @@ export default function SettingsScreen() {
         </Text>
         <Button label={'Open backup & restore…'} icon="backup" variant="outline"
           onPress={() => navigation.navigate('Backup')} style={{ marginTop: 10 }} />
+      </View>
+
+      {/* ── Race Plan (2026-09-29, desktop parity: same card, same wording, off by default) ── */}
+      <View style={styles.section}>
+        <View style={styles.cardHead}>
+          <IconBadge icon="route" />
+          <Text style={styles.cardTitle}>Race Plan</Text>
+        </View>
+        <Text style={styles.sectionDesc}>
+          BRM/ultra race planner: import a GPX + roadbook, then get realistic arrival times, cutoff margins, weather, sleep and resupply along the route. Still rough — turn it on to try it.
+        </Text>
+        <Text style={[styles.sectionDesc, { color: theme.warning, marginTop: 4 }]}>Experimental</Text>
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>Show Race Plan in the menu</Text>
+          <Toggle value={racePlanOn} onValueChange={async v => { await setRacePlanEnabled(v); setRacePlanOn(v); }} />
+        </View>
       </View>
 
       {/* ── Ember (2026-08-29, desktop parity): openly opt-in. The 10-tap easter egg was retired

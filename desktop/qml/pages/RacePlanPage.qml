@@ -497,7 +497,8 @@ Item {
         var T = parseFloat(stopTotalH.text); if (isNaN(T)) return -1
         var named = 0
         for (var i = 0; i < plannedStops.length; i++) { var m = parseFloat(plannedStops[i].min); if (!isNaN(m)) named += m }
-        return Math.max(0, Math.round(T * 60 - named))
+        // whole minutes, cut like fmtDur (so 1.03 h reads 1h01 here and in STOPS)
+        return Math.max(0, Math.floor(T * 60 - named + 1e-6))
     }
 
     // Consolidated critical points: climbs (from the route) + cutoff/water/food/darkness folded in.
@@ -941,7 +942,8 @@ Item {
                                Layout.fillWidth: true; wrapMode: Text.WordWrap }
                         RowLayout {
                             Layout.fillWidth: true; spacing: Theme.spacingSmall
-                            RoundedButton { text: qsTr("Import roadbook (PDF)"); onClicked: rbPdfDialog.open() }
+                            // paste the table, or "From PDF…" inside (like Android)
+                            RoundedButton { text: qsTr("Import roadbook"); onClicked: importRoadbookDialog.open() }
                             RoundedButton { text: qsTr("+ Add"); onClicked: controlsModel.append({ label: "", km: "", hours: "", opens: "" }) }
                             Item { Layout.fillWidth: true }
                         }
@@ -1396,11 +1398,11 @@ Item {
                                     Layout.fillWidth: true; wrapMode: Text.WordWrap
                                     font.pixelSize: Theme.fontSizeCaption
                                     color: modelData.cutoff_ok ? Theme.text : marginBad
-                                    text: qsTr("Night %1: sleep %2–%3 (~%4h) near km %5 (%6) — %7%8%9")
+                                    text: qsTr("Night %1: sleep %2–%3 (~%4h) near km %5%6 — %7%8%9")
                                         .arg(modelData.night)
                                         .arg(modelData.start_local).arg(modelData.end_local)
                                         .arg((modelData.duration_s / 3600).toFixed(1))
-                                        .arg(modelData.km).arg(modelData.near_control || "")
+                                        .arg(modelData.km).arg(modelData.near_control ? " (" + modelData.near_control + ")" : "")
                                         .arg(modelData.reason)
                                         .arg(modelData.temp_c !== null ? (", " + Math.round(modelData.temp_c) + "°C") : "")
                                         .arg(modelData.cutoff_ok ? "" : qsTr("  ⚠ tightens a cutoff"))
@@ -1633,11 +1635,9 @@ Item {
         onAccepted: root.calibrateFromFit(selectedFile)
     }
 
-    Dialog {
+    ThemedDialog {
         id: saveScenarioDialog
         title: qsTr("Save scenario")
-        modal: true
-        anchors.centerIn: Overlay.overlay
         width: 380
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: if (scenarioName.text.trim().length) root.saveScenario(scenarioName.text.trim())
@@ -1649,11 +1649,9 @@ Item {
         }
     }
 
-    Dialog {
+    ThemedDialog {
         id: pasteDialog
         title: qsTr("Paste checkpoints")
-        modal: true
-        anchors.centerIn: Overlay.overlay
         width: 440
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: { root.pasteControls(pasteArea.text); pasteArea.text = "" }
@@ -1664,16 +1662,19 @@ Item {
                    color: Theme.text; font.pixelSize: Theme.fontSizeCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             ScrollView {
                 Layout.fillWidth: true; Layout.preferredHeight: 150
-                TextArea { id: pasteArea; placeholderText: qsTr("km, HH:MM per line") }
+                TextArea { id: pasteArea; placeholderText: qsTr("km, HH:MM per line")
+                    color: Theme.text; placeholderTextColor: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                    selectionColor: Theme.primary; selectedTextColor: Theme.card; wrapMode: TextEdit.NoWrap
+                    background: Rectangle { radius: Theme.radiusSmall; color: Theme.cardNested
+                                            border.width: pasteArea.activeFocus ? 2 : 1
+                                            border.color: pasteArea.activeFocus ? Theme.primary : Theme.border } }
             }
         }
     }
 
-    Dialog {
+    ThemedDialog {
         id: importRoadbookDialog
         title: qsTr("Import roadbook")
-        modal: true
-        anchors.centerIn: Overlay.overlay
         width: 480
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: { if (rbArea.text.trim().length) root.importRoadbook({ text: rbArea.text }); rbArea.text = "" }
@@ -1686,14 +1687,19 @@ Item {
             }
             ScrollView {
                 Layout.fillWidth: true; Layout.preferredHeight: 180
-                TextArea { id: rbArea; placeholderText: qsTr("C1 - FROIDCHAPELLE   …   112,5   9:19   12:30") }
+                TextArea { id: rbArea; placeholderText: qsTr("C1 - FROIDCHAPELLE   …   112,5   9:19   12:30")
+                    color: Theme.text; placeholderTextColor: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                    selectionColor: Theme.primary; selectedTextColor: Theme.card; wrapMode: TextEdit.NoWrap
+                    background: Rectangle { radius: Theme.radiusSmall; color: Theme.cardNested
+                                            border.width: rbArea.activeFocus ? 2 : 1
+                                            border.color: rbArea.activeFocus ? Theme.primary : Theme.border } }
             }
             RowLayout {
                 Layout.fillWidth: true
                 Text { text: qsTr("…or load a PDF roadbook:"); color: Theme.mutedText
                        font.pixelSize: Theme.fontSizeCaption }
                 Item { Layout.fillWidth: true }
-                RoundedButton { text: qsTr("From PDF…"); onClicked: rbPdfDialog.open() }
+                RoundedButton { text: qsTr("From PDF…"); onClicked: { importRoadbookDialog.close(); rbPdfDialog.open() } }
             }
         }
     }

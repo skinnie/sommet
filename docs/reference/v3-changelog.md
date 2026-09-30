@@ -7,6 +7,101 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-09-29: Roadbook PDF on Android; roadbook + timeline fixes on both (Android 0.2.42, desktop 0.2.45)
+
+Merged into main 2026-09-30 as desktop 0.2.45: main had used 0.2.43 and 0.2.44 for other work (Coach,
+SuuntoLink warning) while this branch used them for the activity screen and this entry.
+
+André, 2026-09-29, on the Race Plan open points: roadbook PDF on Android "can we implement it?",
+the two small engine quirks "fix".
+
+- **Android reads roadbook PDFs**: Import roadbook > "…or load a PDF roadbook: From PDF…" (the
+  desktop dialog's wording). The desktop runs `pdftotext -layout`; Android has no poppler, so
+  Mozilla pdf.js (6.3.289, Apache-2.0) runs in a hidden WebView with no file access
+  (components/PdfTextReader.tsx) and shared/pdf_text_layout.js rebuilds the lines like pdftotext.
+  pdf.js is inlined by tools/gen_pdfjs_inline.js (android/src/config/pdfjsInline.js, ~1.8 MB, loaded
+  only when a PDF is read). tools/test_roadbook_pdf.js checks the same controls come out as on the
+  desktop: 3 test PDFs (cairo = Word-like fonts, Ghostscript, and a hard one - rows drawn out of
+  order, uneven baselines, a wrapped name, two pages) all identical in km and times. Tablet: 6
+  controls from the hard PDF in ~10 s; a scanned (no text) PDF and a non-PDF file give a clear message.
+- **Roadbook parser, desktop + Android** (tools/roadbook_import.py and its twin): accepts "C1 − NAME"
+  (the minus sign PostScript-made PDFs put for "-") and "C1 — NAME"; a long place name wrapped in its
+  table cell (Excel puts the km and times on the second line) is joined with the next line - before,
+  that control was silently skipped on both.
+- **Timeline, desktop + Android**: with "model fatigue" on, each control's ride time and speed now
+  include the fatigue slowdown, so they add up to MOVING (a 308 km ride showed 12h49 at the finish row
+  vs 12h52 moving). Finish times unchanged.
+- **"Left for short stops"** cuts to whole minutes like every other duration (1.03 h read 1h02 there
+  but 1h01 in STOPS).
+- **Desktop: pasting a roadbook is reachable again** (André: "add it"). Step 6's "Import roadbook
+  (PDF)" went straight to the file picker and the paste dialog was never opened; now "Import
+  roadbook" opens it (paste the table, or "From PDF…"), like Android. Its three dialogs (import
+  roadbook, paste checkpoints, save scenario) were bare Dialogs - square, light-only; now
+  ThemedDialog (rounded, themed, centred over the dimmed window) with themed text boxes. Checked by
+  running the worktree build: button opens the dialog, "From PDF…" closes it and opens the picker,
+  a pasted line imports.
+- Race parity 145/145 (new roadbook text cases added).
+
+## 2026-09-29: Android - Race Plan, the whole desktop planner (Android 0.2.41)
+
+André, 2026-09-29: Race Plan on Android, "Everything in one go".
+
+- **Engine**: the desktop's Python race modules (event, timeline, calibration, stops memory,
+  scenarios, days/nights, sleep and "Suggest my sleep", weather, alerts, PitStopper POIs, roadbook
+  import) have TypeScript twins in android/src/services/race/, computed on the phone - no backend.
+  tools/test_race_parity.js runs each twin against the Python on real routes (BRM 200 Thiérache,
+  Lille-Hardelot, the 2026-06-06 BRM600 FIT) + synthetic PitStopper files: 144/144 identical.
+- **Screen** (RacePlanScreen, a port of RacePlanPage.qml): the same 6-step wizard and results -
+  verdict, per-control table with weather, planned stops, wind fold, Suggest my sleep, days &
+  nights, critical points, what-if, saved scenarios, roadbook export (share sheet).
+- **Menu + settings like the desktop**: off by default; Settings > Race Plan > "Show Race Plan in
+  the menu".
+- Differences from the desktop: the roadbook is pasted as text (no PDF reading - Android has no
+  pdftotext); "Suggest my sleep" shows its progress (plan n of 50).
+- Tested on the tablet: BRM 200 with a pasted 3-control roadbook (finish, moving time, each control
+  and margin identical to the Python), what-if, scenario save/open/delete, export; 308 km with
+  no-ride hours + fatigue (days & nights, sleep suggestion, "Suggest my sleep" in ~12 s, same
+  ranking as the Python; "Use" applies it).
+- Fixed on both desktop and Android: a sleep suggestion with no nearby control showed "near km 227 ()";
+  the brackets now only appear with a control name. Android also got the desktop's column headers
+  on saved scenarios.
+- Picking a GPX now uses the route's own `<name>` instead of "picked_route_….gpx".
+
+## 2026-09-29: Android - one Routes screen with a saved-routes Library, like the desktop (Android 0.2.40)
+
+André, 2026-09-29: "I see route and ROUTES what are the differences? ... good moment to check
+parity" - the desktop merged its Route planner and Routes page on 2026-09-26; Android still had two
+menu items. Plan approved incl. a Library ("yes").
+
+- **One "Routes" menu item** (the separate "Route" item is gone). The screen: the import card
+  (preview a GPX, send it to the watch / Bryton / Magene) now also has "Open planner" and "Open in
+  planner"; the list card shows one source from a drop-down - On the watch, or the Library.
+- **Library** (services/RouteLibrary.ts, desktop layout: one GPX per route + index.json): every GPX
+  imported in Routes or the planner is kept, the same file twice is one entry; each entry has a map
+  preview (a small stored polyline - no GPX parsing to draw the list), Open in planner, Send…,
+  Rename, Delete.
+- **Planner "Send to…"** returns to Routes with that route ready to send to what's connected.
+- Found on the tablet and fixed: "Send to…" stacked a second Routes screen (React Navigation 7 needs
+  pop: true to go back to the existing one), and each planner round trip re-saved a copy.
+- Not yet: a connected Garmin/eTrex still opens its own routes screen (desktop shows it as a source).
+
+## 2026-09-29: Android - Activities list in pages of 30; menu like the desktop (Android 0.2.39)
+
+André, 2026-09-29: "why activities take like minutes to load on android ... load 2-3 scrolls.. and
+then load it progressively ... I would say 30"; "no capitals ... the rest should be similar".
+
+- **Activities list:** measured on the tablet at ~113 s before anything showed - 5 s reading all
+  4,850 rows, then ~107 s parsing every activity's GPX for the metric columns, on every visit.
+  Now 30 rows per page (db.getActivityPage), the sport filter and every sort done in SQL, the next
+  page fetched within ~2 screens of the end, and each GPX parsed once ever: its metrics are cached
+  in a new activity_metrics table (keyed to synced_at). Sorting by a GPX-only column (HR,
+  calories...) first fills that cache for the few moves with a GPX, once. Orphan-GPX adoption runs
+  after the first page is on screen. Result: under 3 s per visit; 30 flings deep with no
+  duplicate rows (ORDER BY ends on the id so pages never overlap).
+- **Menu:** labels as on the desktop, no capitals - Activities, POIs, Sport Modes, Routes,
+  Training Program (was "Workout Calendar" / bike "Workouts"); French likewise - and the
+  desktop's order. T6/X6 stays desktop-only on purpose.
+
 ## 2026-09-28: SuuntoLink warning on app open and in every firmware flash (desktop 0.2.44)
 
 André, 2026-09-28: "suunto link warning should be present in every firmware flash or even when
@@ -51,6 +146,93 @@ André, 2026-09-28, on two leftovers: "let's fix these".
   dropping the generic foods.
 - Tests: jest 137/137 (new: per-sport rates, TRIMP x 0.8, key fallback with mocked network).
   Desktop builds; not re-screenshotted (André was using the desktop).
+
+## 2026-09-27: Activity screen - more workout data, per sport, without the overload (desktop 0.2.43, Android 0.2.38)
+
+André, 2026-09-27: "plan and go" (after the mockup artifact 8KKpqaVBCdPUvDUAhzya8h and the
+per-sport chart benchmark T9CVRh5amedT9nRA5EQbSx).
+
+- **Per-sport choice of what shows**, from one config (`shared/activity_view.json`): run, ride,
+  indoor ride, hike, walk, pool swim, open-water swim, gym and other each have their own headline
+  tiles, secondary numbers, zones and chart. Anything the file doesn't record (heart rate, power...)
+  is hidden, never faked. Watch temperature shows for swims only (roughly the water temperature).
+- **Overview tab:** tiles with an (i) explanation each, a "compared with your usual" line (same
+  sport, similar distance, last 12 months, at least 5 similar - otherwise nothing), time in
+  power/heart-rate zones from full-resolution data, and a folded "More details". NP/IF/TSS/work
+  sit behind Settings > Activities > "Advanced power numbers" (off by default).
+- **Charts tab - one overlaid chart:** pick the lines (e.g. pace + heart rate + altitude); one is
+  the main line with the scale, its average and a max flag, the others are stretched to fit. Hover
+  (or touch-scrub) for every value at once, drag or pinch to zoom into a stretch and read its
+  numbers, mouse-wheel zoom, double-click/double-tap for everything, overview strip to move
+  along. Distance on the x axis outdoors, time indoors, switchable. Walks have no chart.
+- **Colour by zone** on both the chart and the map track (green = easy/slow/flat, red =
+  hard/fast/steep, blue = downhill), with a dark casing so it reads on any map tile. The map
+  zoom follows the chart zoom and the other way round ("Linked to chart").
+- **Indoor rides:** that day's planned intervals.icu workout drawn behind the power line.
+- **Pool swims:** time or pace per length, coloured by stroke or speed, rests at the wall,
+  sets split at rests of 10 s or more, and "Longest non-stop swim" as the benchmark. Garmin
+  idle lengths are folded into the rest before them.
+- **Laps tab** only when laps were pressed (auto-laps and pool lengths don't count).
+- **Ambit pool swims now carry their lengths** (ACT-18). The watch logs a record per turn; its
+  layout was decoded on 2026-09-28 from two test swims on the Ambit3 Peak (fw 2.4.17): after the
+  running distance and length count come the length's swim time (0.1 s) and its stroke count
+  (openambit skipped these bytes), then running length counts per style. The style byte is the
+  watch's own FT_SWIM_STYLE list (0 Other, 1 Butterfly, 2 Backstroke, 3 Breaststroke,
+  4 Freestyle, 5 Drill). openambit's "time compensation" in the same record reads 1028-2544 s
+  there (two equal bytes) and clamped every turn to t=0 - now ignored above 120 s. The FIT gets
+  Garmin-style `length` messages (active per length, idle per rest at the wall), pool length and
+  active-length count, so the swim chart, sets and "longest non-stop" work for Ambit swims and
+  intervals.icu sees the lengths too. Swim times and strokes are exact; the watch writes a turn a
+  few seconds late, so starts are chained and rests are good to a few seconds. Written in
+  `tools/exercise_log.py` and its twins (Android `jni_bridge.cpp` + libambit `pmem20.c`, iOS
+  `AmbitUsbModule.mm`) - byte-identical FITs from all three on the real log dump (host-built
+  harness). Only moves read from now on get them (already-synced rows keep their old FIT). An
+  Ambit1/2 may lay these bytes out differently: an implausible length (> 30 min) writes none.
+  Python now rounds half away from zero like the C++ twin (it wrote 26 vs 27 degC for 26.5).
+- **How:** a FIT decoder in Python (`tools/activity_streams.py`, backend
+  `/api/activity/streams`) and its JavaScript twin (`shared/activity_streams.js`, Android),
+  parity-tested on 11 real files (`tools/test_activity_streams_parity.js`). The maths
+  (`shared/activity_view_logic.js`) and the canvas drawing (`shared/activity_chart_draw.js`) are
+  one source each, copied into both apps by `tools/gen_activity_view.py` (`--check` confirms
+  every copy matches). The desktop draws in a QML Canvas, Android in a WebView canvas - same code. Zones come
+  from intervals.icu sport settings (cached); the FIT is the one next to the activity, or
+  fetched from intervals.icu.
+- **Tested:** desktop on real run, ride, indoor ride (+ planned target), hike, walk and pool
+  swims (light theme). Android on the tablet (2026-09-28, JS from the branch via Metro): a ride
+  (overview, speed-coloured track, chart, hover dot on the map, chart zoom -> map zoom, tab
+  switch) and a 2021 pool swim (lengths, 31 sets, 125 m, stroke legend), portrait and
+  landscape; then a walk, a hike and a run (2026-09-29). Android 0.2.38 (debug APK rebuilt for
+  the Ambit swim-length C++).
+- **Fixed on the way (found on the tablet):**
+  - The activity map was blank on Android (main too): Leaflet arrived via
+    injectedJavaScriptBeforeContentLoaded, which Chromium WebView runs after the page script
+    -> "L is not defined". Now inline in the page head, as OfflineMapsScreen already does
+    (CoordinatePicker and RouteWeatherScreen still use the injection).
+  - Map zoomed to the max / grey on ~1 open in 3: Leaflet had cached a 0x0 box size and its
+    re-measure is a no-op before the map has a view - it now gets a provisional view, re-measures,
+    then fits; it also re-fits when the box changes size.
+  - Zone colours drawn before the map had a view threw inside Leaflet ("reading 'min'") and
+    aborted the track; they now wait and are drawn right after the track is fitted.
+  - A ride with no power or heart rate opened an empty chart: the default lines now fall back to
+    the first two the file has (both apps, AVL.defaultChannelsOn).
+  - An intervals.icu "Swimming" (not a Suunto activity name) showed as a generic sport: an
+    unknown type now takes the sport the FIT records (AVL.refineSport, both apps).
+  - Opening a move without a GPX no longer pops "Cannot read GPX file".
+  - The chart came back blank after switching tabs; the hover card's long values overlapped their
+    label; speed bands read "Faster of this activity" (now "Fast fifth of this activity").
+  - Swim bars: every stroke has its own colour and the legend lists the strokes the swim has
+    (backstroke used to be coloured and labelled as breaststroke).
+  - A chart line that never changes (a watch left on a table: altitude 27 m for 11 minutes) is
+    hidden like a missing one; with nothing left, the Charts tab goes (AVL.channelUseful).
+  - "Compared with your usual" quotes the same pace/speed as the Overview tile (it used
+    distance / list duration and could read 11:29 under a tile of 11:30).
+  - Android: the old altitude profile under the replay bar is gone (André, 2026-09-29: "a
+    residue of the beginning") - the Charts tab has altitude in the new style. It was also the
+    replay's drag-to-seek; play / rewind / forward remain.
+  - The overview strip under the chart only shows while zoomed, captioned "Whole activity · drag
+    the box to move along" instead of a bare "all" (André, 2026-09-29), both apps.
+  - Also seen right on the tablet 2026-09-29: a walk (no Charts, as designed) and a 5.2 km run
+    (pace-coloured track and legend).
 
 ## 2026-09-27: Ember - scan a food's barcode with the phone camera (Android + iOS)
 

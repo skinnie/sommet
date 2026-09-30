@@ -49,6 +49,7 @@ import { decodeDeviceLog, realTrackPoints, deviceLogToGpx, KailashDeviceLog } fr
 import { getAllActivities, ActivityRecord } from '../database/db';
 import { distanceLines } from '../services/TotalsFacts';
 import { isEmberUnlocked } from '../services/EmberUnlock';
+import { isRacePlanEnabled } from '../services/race/raceApi';
 import { APP_VERSION } from '../config/version';
 import { useDemo } from '../config/DemoContext';
 import { useExperimental } from '../config/ExperimentalContext';
@@ -175,6 +176,9 @@ export default function HomeScreen() {
   // invisible until the app was restarted (caught on the tablet, 2026-08-26).
   const [emberUnlocked, setEmberUnlockedState] = useState(false);
   useFocusEffect(useCallback(() => { isEmberUnlocked().then(setEmberUnlockedState); }, []));
+  // Race Plan is opt-in like on the desktop (Settings > Race Plan, off by default).
+  const [racePlanOn, setRacePlanOn] = useState(false);
+  useFocusEffect(useCallback(() => { isRacePlanEnabled().then(setRacePlanOn); }, []));
   const [timeSyncMsg, setTimeSyncMsg] = useState<string | null>(null);
   const handleSyncTime = useCallback(async () => {
     setTimeSyncBusy(true);
@@ -975,11 +979,8 @@ export default function HomeScreen() {
     // (read the local activity DB, no watch needed) - like the desktop nav.
     { id: 'totals', label: 'Totals', icon: 'chart', onPress: () => navigation.navigate('Totals') },
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onPress: () => navigation.navigate('Calendar') },
-    // Weather along a route — sun/moon + Open-Meteo forecast at each point's ETA (no watch needed).
-    // The route planner (map + GPX + weather/climb along the route), a separate item from Routes —
-    // matches desktop's "Route" planner (planRoute), which is apart from the "Routes" list. It was
-    // mislabeled "Weather" on Android (André, 2026-09-25).
-    { id: 'planRoute', label: 'Route', icon: 'route', onPress: () => navigation.navigate('RouteWeather') },
+    // (The separate "Route" planner item is gone: Routes opens the one Routes screen, whose
+    // "Open planner" leads to it - desktop parity, André 2026-09-29.)
     // Offline maps lives in Settings > Maps (desktop parity — moved out of the main menu,
     // André 2026-09-24), not as a top-level item.
     // Routes is always there (André, 2026-09-25): it's where any device gets a route (watch, Bryton,
@@ -1047,7 +1048,7 @@ export default function HomeScreen() {
     // one Training Program screen for every device, long-press a plan row to send). Shown here
     // only when the experimental watch entry above isn't already there.
     ...((deviceType === 'bryton' || magene) && !showWatchCalendar
-      ? [{ id: 'bikeWorkouts', label: 'Workouts', icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
+      ? [{ id: 'bikeWorkouts', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
       : []),
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
     // like Gear they need no connected watch and sit unconditionally in this list.
@@ -1055,6 +1056,9 @@ export default function HomeScreen() {
     // Ember: off by default, shown once the user opts in via the open toggle in Settings
     // (the 10-tap easter egg was retired 2026-08-29, matching the desktop). `emberUnlocked` is
     // that persisted opt-in flag - the storage key is unchanged, so an already-on install keeps it.
+    ...(racePlanOn
+      ? [{ id: 'racePlan', label: 'Race Plan', icon: 'route' as const, onPress: () => navigation.navigate('RacePlan'), group: 'training' as const }]
+      : []),
     ...(emberUnlocked
       ? [{ id: 'ember', label: 'Ember', icon: 'ember' as const, onPress: () => navigation.navigate('Ember'), group: 'training' as const }]
       : []),
@@ -1062,6 +1066,13 @@ export default function HomeScreen() {
     { id: 'weight', label: 'Weight', icon: 'weight' as const, onPress: () => navigation.navigate('Weight'), group: 'training' as const },
     { id: 'settings', label: t.settingsTitle, icon: 'settings', onPress: () => navigation.navigate('Settings') },
   ];
+  // Same order as the desktop rail (NavRail.qml is the baseline - André, 2026-09-29: "the rest should
+  // be similar"). Items not listed keep their relative place, just before Settings.
+  const NAV_ORDER = ['home', 'activities', 'pois', 'routes', 'racePlan', 'health', 'ember', 'weight',
+    'coach', 'workoutCalendar', 'bikeWorkouts', 'gear', 'calendar', 'totals', 'apps', 'copyToWatch',
+    'watchSettings', 'brytonProfile', 'magene', 'firmware', 'sportModes', 'smartSensor', 'trackPod', 'settings'];
+  const rank = (id: string) => { const i = NAV_ORDER.indexOf(id); return i < 0 ? NAV_ORDER.length - 1.5 : i; };
+  navItems.sort((a, b) => rank(a.id) - rank(b.id));
 
   return (
     <NavShell items={navItems} selectedId="home">

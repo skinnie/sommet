@@ -389,6 +389,10 @@ typedef struct ambit_log_sample_s {
         struct {
             uint32_t distance;                  /* Total distance, meters scale: 0.01 */
             uint16_t lengths;                   /* Total pool lengths */
+            uint32_t duration;                  /* Swim time of the length just finished, 0.1 s
+                                                   (0 on a record repeating the previous count) -
+                                                   decoded 2026-09-28 on an Ambit3 Peak */
+            uint16_t strokes;                   /* Strokes in that length */
             uint16_t classification[4];
             uint8_t  style;                     /* (style of previous length)
                                                    0x00 = Other,

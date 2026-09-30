@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 
 # A control line: "C1 - FROIDCHAPELLE", "CP3 - ...", "Control 3 - ...". Case-insensitive on the
 # keyword; the number is the control ordinal.
-_CTRL_RE = re.compile(r"^\s*(?:C|CP|CONTROL|CONTRÔLE|CTRL)\s*(\d+)\s*[-–:]\s*(.+)$", re.IGNORECASE)
+_CTRL_RE = re.compile(r"^\s*(?:C|CP|CONTROL|CONTRÔLE|CTRL)\s*(\d+)\s*[-–—:]\s*(.+)$", re.IGNORECASE)
 _TIME_RE = re.compile(r"\b(\d{1,2}[:hH]\d{2})\b")
 # a distance token: 112,5 / 112.5 / 112 (comma or dot decimal, European roadbooks use comma)
 _KM_RE = re.compile(r"\b(\d{1,4}(?:[.,]\d+)?)\b")
@@ -86,12 +86,21 @@ def _parse_control_line(num: int, rest: str) -> Optional[Dict[str, Any]]:
 def parse_roadbook(text: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     seen = set()
-    for line in text.splitlines():
+    # PDFs made through PostScript often turn "-" into the minus sign U+2212 ("C1 − NAME").
+    text = text.replace("\u2212", "-")
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
         m = _CTRL_RE.match(line)
         if not m:
             continue
         num = int(m.group(1))
-        c = _parse_control_line(num, m.group(2))
+        rest = m.group(2)
+        c = _parse_control_line(num, rest)
+        # A long place name wrapped in its table cell, the km and times on the next line
+        # ("C3 - CHÂLONS-" / "EN-CHAMPAGNE   Mairie   143,2   264,7   13:21   2:39"): join the two.
+        if c is None and not _TIME_RE.search(rest) and i + 1 < len(lines) and not _CTRL_RE.match(lines[i + 1]):
+            head = rest.rstrip()
+            c = _parse_control_line(num, head + ("" if head.endswith("-") else " ") + lines[i + 1].strip())
         if c and (c["label"], c["km"]) not in seen:
             seen.add((c["label"], c["km"]))
             out.append(c)

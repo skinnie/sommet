@@ -1,0 +1,182 @@
+{
+  "_about": "What the activity screen shows, per sport - ONE file for desktop and Android (claude.md parity). Edit here, then run tools/gen_activity_view.py to copy it into both apps (--check fails on drift). Sports are matched by Suunto activity id (assets/activity_types.json, via ActivityTypes.displayId). A metric the move doesn't have is left out, never replaced (André, 2026-09-27). Designed in the mockup artifact 8KKpqaVBCdPUvDUAhzya8h.",
+  "version": 1,
+
+  "metrics": {
+    "distance":          {"label": "Distance",            "fmt": "distance"},
+    "moving_time":       {"label": "Moving time",         "fmt": "duration"},
+    "duration":          {"label": "Duration",            "fmt": "duration"},
+    "elapsed_time":      {"label": "Elapsed time",        "fmt": "duration"},
+    "avg_pace":          {"label": "Avg pace",            "fmt": "pace_km"},
+    "max_pace":          {"label": "Best pace",           "fmt": "pace_km"},
+    "avg_pace_100m":     {"label": "Avg pace",            "fmt": "pace_100m"},
+    "avg_speed":         {"label": "Avg speed",           "fmt": "speed"},
+    "max_speed":         {"label": "Max speed",           "fmt": "speed"},
+    "avg_hr":            {"label": "Avg heart rate",      "fmt": "bpm"},
+    "max_hr":            {"label": "Max heart rate",      "fmt": "bpm"},
+    "avg_cad":           {"label": "Avg cadence",         "fmt": "cadence", "info": "cadence_foot"},
+    "max_cad":           {"label": "Max cadence",         "fmt": "cadence"},
+    "avg_power":         {"label": "Avg power",           "fmt": "watts"},
+    "max_power":         {"label": "Max power",           "fmt": "watts"},
+    "np":                {"label": "Normalized power",    "fmt": "watts",   "info": "np",  "advanced": true},
+    "tss":               {"label": "Training load (TSS)", "fmt": "int",     "info": "tss", "advanced": true},
+    "intensity":         {"label": "Intensity factor",    "fmt": "dec2",    "info": "if",  "advanced": true},
+    "work":              {"label": "Work",                "fmt": "kj",      "advanced": true},
+    "elevation_gain":    {"label": "Elevation gain",      "fmt": "elev_up"},
+    "elevation_loss":    {"label": "Elevation loss",      "fmt": "elev_down"},
+    "max_altitude":      {"label": "Max altitude",        "fmt": "meters"},
+    "min_altitude":      {"label": "Lowest point",        "fmt": "meters"},
+    "climb_rate":        {"label": "Climb rate",          "fmt": "m_per_h", "info": "climb_rate"},
+    "energy":            {"label": "Energy",              "fmt": "kcal"},
+    "pte":               {"label": "Peak Training Effect","fmt": "dec1",    "info": "pte"},
+    "recovery_time":     {"label": "Recovery time",       "fmt": "hours_min", "info": "recovery"},
+    "pool_lengths":      {"label": "Pool lengths",        "fmt": "int"},
+    "pool_length":       {"label": "Pool length",         "fmt": "meters"},
+    "strokes_per_length":{"label": "Strokes per length",  "fmt": "int"},
+    "swolf":             {"label": "SWOLF",               "fmt": "int",     "info": "swolf"},
+    "rest_time":         {"label": "Rest at the wall",    "fmt": "duration"},
+    "time_swimming":     {"label": "Time swimming",       "fmt": "duration"},
+    "longest_nonstop":   {"label": "Longest non-stop",    "fmt": "meters",  "info": "longest_nonstop"},
+    "water_temp":        {"label": "Water temperature (approx.)", "fmt": "temp_range", "info": "water_temp"}
+  },
+
+  "info": {
+    "cadence_foot":   "Steps per minute. The file stores one foot's strides, so the app doubles it.",
+    "np":             "Normalized power: the steady power that would have cost your body the same as this ride's ups and downs.",
+    "tss":            "Training Stress Score: how hard this was. One hour at your FTP = 100.",
+    "if":             "Intensity factor: normalized power divided by your FTP.",
+    "climb_rate":     "Elevation gain divided by moving time.",
+    "pte":            "The watch's 1-5 score for how much this session trains your aerobic fitness.",
+    "recovery":       "How long the watch suggests you rest before another hard session.",
+    "swolf":          "Seconds plus strokes for one length. Lower means more efficient; compare it only with your own swims in the same pool.",
+    "longest_nonstop":"The longest distance you swam without resting at the wall. For a newer swimmer it's the number that should grow first.",
+    "water_temp":     "Measured by the watch's sensor. In the pool it sits in the water, so it roughly follows the water temperature."
+  },
+
+  "sports": {
+    "run": {
+      "ids": [3, 82, 93, 75, 81],
+      "headline":  ["distance", "moving_time", "avg_pace", "avg_hr"],
+      "secondary": ["max_hr", "avg_cad", "energy", "pte"],
+      "more":      ["max_pace", "elapsed_time", "elevation_gain", "elevation_loss", "recovery_time"],
+      "zones": ["hr"],
+      "chart": {"channels": ["pace", "hr", "cad", "alt"], "on": ["pace", "hr"], "x": "dist"},
+      "colour": ["hrz", "pace"]
+    },
+    "ride": {
+      "ids": [4, 5],
+      "headline":  ["distance", "moving_time", "avg_speed", "elevation_gain"],
+      "secondary": ["avg_power", "avg_hr", "max_hr", "energy"],
+      "advanced":  ["avg_power", "np", "avg_hr", "tss"],
+      "more":      ["elapsed_time", "max_speed", "elevation_loss", "max_altitude", "max_power", "avg_cad", "intensity", "work"],
+      "zones": ["power", "hr"],
+      "chart": {"channels": ["pw", "hr", "speed", "cad", "alt"], "on": ["pw", "hr"], "x": "dist"},
+      "colour": ["pwz", "hrz", "speed"]
+    },
+    "indoor_ride": {
+      "ids": [17],
+      "headline":  ["duration", "avg_power", "avg_hr", "energy"],
+      "secondary": ["max_hr", "avg_cad", "max_power"],
+      "advanced":  ["max_hr", "avg_cad", "np", "tss"],
+      "more":      ["max_cad", "intensity", "work"],
+      "zones": ["power", "hr"],
+      "chart": {"channels": ["pw", "hr", "cad"], "on": ["pw", "hr"], "x": "time"},
+      "colour": ["pwz", "hrz"],
+      "planned_workout": true
+    },
+    "hike": {
+      "ids": [11, 96, 74, 85],
+      "headline":  ["distance", "moving_time", "elevation_gain", "avg_hr"],
+      "secondary": ["max_hr", "max_altitude", "climb_rate", "energy"],
+      "more":      ["elapsed_time", "elevation_loss", "min_altitude", "avg_pace", "avg_cad"],
+      "zones": ["hr"],
+      "chart": {"channels": ["alt", "hr", "pace", "cad"], "on": ["alt", "hr"], "x": "dist"},
+      "colour": ["slope", "hrz"]
+    },
+    "walk": {
+      "ids": [12, 84],
+      "headline":  ["distance", "duration", "avg_pace", "avg_hr"],
+      "secondary": ["max_hr", "avg_cad", "energy", "elevation_gain"],
+      "more":      ["max_speed", "elevation_loss"],
+      "zones": ["hr"],
+      "chart": null,
+      "colour": []
+    },
+    "pool_swim": {
+      "ids": [6],
+      "headline":  ["distance", "duration", "avg_pace_100m", "pool_lengths"],
+      "secondary": ["avg_hr", "max_hr", "energy", "rest_time", "pte", "recovery_time"],
+      "more":      ["time_swimming", "pool_length", "longest_nonstop", "strokes_per_length", "swolf", "water_temp"],
+      "zones": [],
+      "chart": {"kind": "lengths"},
+      "colour": []
+    },
+    "open_swim": {
+      "ids": [83],
+      "headline":  ["distance", "duration", "avg_pace_100m", "avg_hr"],
+      "secondary": ["max_hr", "energy", "pte", "recovery_time"],
+      "more":      ["water_temp"],
+      "zones": ["hr"],
+      "chart": {"channels": ["pace100", "hr"], "on": ["pace100", "hr"], "x": "dist"},
+      "colour": []
+    },
+    "gym": {
+      "ids": [23, 10, 18, 64, 71, 79, 87, 90, 9, 67, 65, 38, 39, 95],
+      "headline":  ["duration", "avg_hr", "max_hr", "energy"],
+      "secondary": [],
+      "more":      [],
+      "zones": ["hr"],
+      "chart": {"channels": ["hr", "pw", "cad"], "on": ["hr"], "x": "time"},
+      "colour": []
+    },
+    "other": {
+      "ids": [],
+      "headline":  ["distance", "duration", "avg_speed", "avg_hr"],
+      "secondary": ["max_hr", "elevation_gain", "energy"],
+      "more":      ["max_speed", "elevation_loss", "max_altitude"],
+      "zones": ["hr"],
+      "chart": {"channels": ["hr", "speed", "alt", "pw", "cad"], "on": ["hr", "speed"], "x": "time"},
+      "colour": ["hrz"]
+    }
+  },
+
+  "channels": {
+    "hr":      {"label": "Heart rate", "unit": "bpm",    "key": "hr",   "color": "hard"},
+    "pace":    {"label": "Pace",       "unit": "/km",    "key": "v",    "color": "primary", "pace": 1000},
+    "pace100": {"label": "Pace",       "unit": "/100 m", "key": "v",    "color": "primary", "pace": 100},
+    "speed":   {"label": "Speed",      "unit": "km/h",   "key": "v",    "color": "primary", "mul": 3.6},
+    "pw":      {"label": "Power",      "unit": "W",      "key": "pw",   "color": "warning"},
+    "cad":     {"label": "Cadence",    "unit": "",       "key": "cad",  "color": "secondary", "min": 20},
+    "alt":     {"label": "Altitude",   "unit": "m",      "key": "alt",  "color": "accent", "min_span": 60}
+  },
+
+  "colour_modes": {
+    "hrz":   {"label": "Heart-rate zones", "key": "hr"},
+    "pwz":   {"label": "Power zones",      "key": "pw"},
+    "pace":  {"label": "Pace",             "key": "v", "fifths": true},
+    "speed": {"label": "Speed",            "key": "v", "fifths": true},
+    "slope": {"label": "Slope",            "key": "alt", "cuts_pct": [3, 8, 15, 25], "downhill_pct": -3, "window_m": 150}
+  },
+
+  "palette": {
+    "_about": "Green = easy/slow/flat, red = hard/fast/steep (André, 2026-09-27). Checked with the dataviz palette validator: adjacent colour-blind separation >= 9 and normal-vision >= 15 in both themes; zone names always shown next to the colours.",
+    "zones_light": ["#137A4C", "#86B332", "#EFC530", "#F2851F", "#D2302E", "#8A1639", "#5E43A8"],
+    "zones_dark":  ["#249E5A", "#97CB3D", "#FADF6A", "#FA8E30", "#EC4744", "#BE3C92", "#8C7BE0"],
+    "downhill_light": "#3F7FC4",
+    "downhill_dark":  "#6FA8E8",
+    "casing_light": "rgba(26,29,34,0.55)",
+    "casing_dark":  "rgba(0,0,0,0.75)"
+  },
+
+  "compare_usual": {
+    "_about": "One plain line under the headline: this session vs the median of similar ones.",
+    "window_days": 365,
+    "similar_ratio": [0.75, 1.33],
+    "min_similar": 5,
+    "min_pct": 5,
+    "min_bpm": 5
+  },
+
+  "swim": {"rest_split_s": 10},
+  "sentinels": [255, 32767, 65535]
+}

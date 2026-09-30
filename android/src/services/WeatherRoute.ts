@@ -44,7 +44,7 @@ function cumulativeDistances(pts: Array<[number, number]>): number[] {
   return out;
 }
 
-function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const p1 = (lat1 * Math.PI) / 180, p2 = (lat2 * Math.PI) / 180;
   const dl = ((lon2 - lon1) * Math.PI) / 180;
   const y = Math.sin(dl) * Math.cos(p2);
