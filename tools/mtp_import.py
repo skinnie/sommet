@@ -182,7 +182,9 @@ def _adb(*args, serial=None, timeout=30):
         return -1, ""
     cmd = [exe] + (["-s", serial] if serial else []) + list(args)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # stdin=DEVNULL: `adb shell` forwards stdin to the device and would eat --only-stdin input.
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                             stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return -1, ""
     return out.returncode, out.stdout.replace("\r", "")

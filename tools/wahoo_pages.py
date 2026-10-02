@@ -96,7 +96,10 @@ def _adb(*args, serial=None, timeout=30):
     if not exe:
         raise RuntimeError("adb not found - install android-tools / platform-tools")
     cmd = [exe] + (["-s", serial] if serial else []) + list(args)
-    out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    # stdin=DEVNULL: `adb shell` forwards our stdin to the device, so without it the first adb
+    # call swallowed the page list the backend pipes in (found 2026-10-02).
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                         stdin=subprocess.DEVNULL)
     return out.returncode, out.stdout.replace("\r", "")
 
 
@@ -268,11 +271,13 @@ def main():
                    "groups": [{"group": g, "fields": [{"id": i, "name": n} for i, n in f]}
                               for g, f in FIELDS]}
         else:
+            wanted = None
+            if args.command == "set-custom":
+                wanted = json.loads(args.pages if args.pages is not None else sys.stdin.read())
             serial = find_serial(args.serial)
-            if args.command == "list":
+            if wanted is None:
                 out = dict(read_layout(serial), ok=True)
             else:
-                wanted = json.loads(args.pages if args.pages is not None else sys.stdin.read())
                 out = dict(set_custom(serial, wanted), ok=True)
             out["serial"] = serial
     except Exception as e:                     # noqa: BLE001 - one JSON error line for the UI
