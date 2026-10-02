@@ -828,7 +828,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
-                     "route_library.py", "bryton_tracks.py"}
+                     "route_library.py", "bryton_tracks.py", "wahoo_pages.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1195,6 +1195,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_import()
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(None)
+        elif self.path == "/api/wahoo/pages":
+            self._handle_wahoo_pages(None)
         elif self.path == "/api/library":
             self._handle_library("list", {})
         elif self.path == "/api/bryton/tracks":
@@ -1437,6 +1439,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_device_select(body)
         elif self.path == "/api/mtp/import":
             self._handle_mtp_import(body)
+        elif self.path == "/api/wahoo/pages":
+            self._handle_wahoo_pages(body)
         elif self.path == "/api/bryton/profile/compare":
             self._handle_bryton_profile_compare(body)
         elif self.path == "/api/bryton/profile/apply":
@@ -1959,6 +1963,26 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_grid.py failed"}
         payload["groups"] = cat.get("groups", [])
         payload["gridTable"] = cat.get("gridTable", {})
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    WAHOO_PAGES_LOCK = threading.Lock()
+
+    def _handle_wahoo_pages(self, body):
+        """GET /api/wahoo/pages - the Wahoo ELEMNT's data pages (read over adb from its live config
+        backup) + the field catalogue. POST {"custom": [[field ids], ...]} - make the custom pages
+        exactly that list (built-in pages are never touched). tools/wahoo_pages.py. One edit at
+        a time: each page change is an adb broadcast plus a wait for the device to save."""
+        _c, out, _e = run_tool("wahoo_pages.py", ["fields"])
+        cat = self._parse_last_json_line(out) or {}
+        with self.WAHOO_PAGES_LOCK:
+            if body is None:
+                code, out, err = run_tool("wahoo_pages.py", ["list"], timeout=120)
+            else:
+                code, out, err = run_tool("wahoo_pages.py", ["set-custom"], timeout=300,
+                                          stdin=json.dumps(body.get("custom") or []))
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_pages.py failed"}
+        payload["groups"] = cat.get("groups", [])
+        payload["maxFields"] = cat.get("maxFields", 11)
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_bryton_info(self):

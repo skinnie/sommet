@@ -11,6 +11,7 @@ import AmbitApp
 //   both:    Profile - reconcile with intervals.icu (BrytonProfileDialog, per-device apiBase)
 //   Bryton:  Data screens (System/Grid.ini)                              - BrytonScreensPanel
 //   Magene:  Data screens, Device settings (BLE), Altitude calibration   - Magene*Panel
+//   Wahoo:   Data pages over adb (no profile sync yet)                     - WahooScreensPanel
 // The Magene is Bluetooth: each panel reads on its own short connection when the page opens.
 PageFlickable {
     id: root
@@ -22,11 +23,13 @@ PageFlickable {
     readonly property bool isMagene: root.kind === "c406"
     // The Aero 60 over Bluetooth (2026-09-26): profile + device settings, no USB data screens.
     readonly property bool isBrytonBle: root.kind === "brytonble"
+    // The Wahoo ELEMNT over USB/adb (2026-10-02): data pages only for now.
+    readonly property bool isWahoo: root.kind === "wahoo"
     readonly property string brytonBleAddress: BikeDevices.brytonBle ? BikeDevices.brytonBle.address : ""
     readonly property string mageneAddress: BikeDevices.magene ? BikeDevices.magene.address : ""
     readonly property string deviceName: root.isMagene
         ? (BikeDevices.magene && BikeDevices.magene.name ? BikeDevices.magene.name : qsTr("Magene C406"))
-        : qsTr("Bryton Aero 60")
+        : root.isWahoo ? qsTr("Wahoo ELEMNT") : qsTr("Bryton Aero 60")
 
     // Same store Home's one-time ProfileSyncPrompt answers into ("auto" / "manual").
     Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
@@ -88,9 +91,10 @@ PageFlickable {
             }
         }
 
-        // ---- Profile (both) ----
+        // ---- Profile (Bryton + Magene) ----
         Card {
             width: parent.width
+            visible: !root.isWahoo
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -126,10 +130,11 @@ PageFlickable {
             visible: !root.isBrytonBle
             Loader {
                 width: parent.width
-                sourceComponent: root.isMagene ? mageneScreens : brytonScreens
+                sourceComponent: root.isMagene ? mageneScreens : root.isWahoo ? wahooScreens : brytonScreens
             }
         }
         Component { id: brytonScreens; BrytonScreensPanel { } }
+        Component { id: wahooScreens; WahooScreensPanel { } }
         Component { id: mageneScreens; MageneScreensPanel { address: root.mageneAddress; shared: true; preloaded: root.mageneConfig } }
 
         // ---- Bryton over Bluetooth: device settings ----
