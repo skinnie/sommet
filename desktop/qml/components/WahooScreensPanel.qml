@@ -2,13 +2,13 @@ import QtQuick
 import QtQuick.Controls
 import AmbitApp
 
-// Wahoo ELEMNT data pages over the USB cable (tools/wahoo_pages.py, /api/wahoo/pages). The
-// built-in pages (Workout, Lap, Elevation, Map, ...) are listed read-only: over adb the ELEMNT
-// only lets us add a custom page at the end or remove the last one, so changing a built-in
-// page needs Bluetooth. Custom pages can be added, edited, reordered and deleted freely - the
-// tool pops them off the end and re-adds them in order. Changes show on the ELEMNT right away.
-// A panel on the GPS settings page, like the Bryton/Magene screens (André, 2026-10-02: "2nd step
-// change screens, I prefer cable than bluetooth").
+// Wahoo ELEMNT data pages - the whole layout, built-in pages included (tools/wahoo_pages.py,
+// /api/wahoo/pages). The ELEMNT takes a complete layout over either link: the USB cable (adb
+// root: its settings file) or Bluetooth (the companion app's display-config message), so the
+// panel saves through "Auto" (cable when plugged, else Bluetooth) or a link picked by hand
+// (André, 2026-10-02: "why cant we do BLE and Cable for page editing?"). Every page can have its
+// fields picked and reordered, be shown or hidden and moved; Workout, Lap and custom pages can
+// gain or lose fields; only custom pages can be deleted. Each save is read back and compared.
 Column {
     id: root
     spacing: Theme.spacingMedium
@@ -19,14 +19,16 @@ Column {
     property bool saving: false
     property string error: ""
     property string msg: ""
-    property var builtins: []          // [{typeName, fields:[{id,name}]}]
-    property var custom: []            // [[field id, ...], ...] - the editable part
+    property string via: "auto"          // auto | usb | ble
+    property string lastVia: ""          // the link the last read/save actually used
+    property var pages: []               // [{id, typeName, custom, resizable, enabled, isNew, fields:[ids]}]
     property string original: "[]"
     property int maxFields: 11
     property var fieldIds: []
     property var fieldNames: []
     property var nameById: ({})
-    readonly property bool changed: JSON.stringify(root.custom) !== root.original
+    readonly property bool changed: JSON.stringify(root.pages) !== root.original
+    readonly property var viaOptions: ["auto", "usb", "ble"]
 
     function api(method, body, done) {
         const xhr = new XMLHttpRequest()
@@ -36,7 +38,7 @@ Column {
             try { r = JSON.parse(xhr.responseText) } catch (e) { r = { ok: false } }
             done(r)
         }
-        xhr.open(method, "http://127.0.0.1:8766/api/wahoo/pages")
+        xhr.open(method, "http://127.0.0.1:8766/api/wahoo/pages" + (method === "GET" ? "?via=" + root.via : ""))
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.send(body ? JSON.stringify(body) : null)
     }
@@ -45,12 +47,21 @@ Column {
         const ids = [], names = [], byId = {}
         for (const g of (r.groups || []))
             for (const f of g.fields) { ids.push(f.id); names.push(g.group + " · " + f.name); byId[f.id] = f.name }
+        // Fields the catalogue doesn't list (rare built-in ones) stay selectable under their own name.
+        for (const p of (r.pages || []))
+            for (const f of p.fields)
+                if (byId[f.id] === undefined) { ids.push(f.id); names.push(f.name); byId[f.id] = f.name }
         root.fieldIds = ids; root.fieldNames = names; root.nameById = byId
         root.maxFields = r.maxFields || 11
-        const pages = r.pages || []
-        root.builtins = pages.filter(p => !p.custom)
-        root.custom = pages.filter(p => p.custom).map(p => p.fields.map(f => f.id))
-        root.original = JSON.stringify(root.custom)
+        root.lastVia = r.via || ""
+        root.pages = (r.pages || []).map(p => ({ id: p.id, typeName: p.typeName, custom: p.custom,
+                                                 resizable: p.resizable, enabled: p.enabled, isNew: false,
+                                                 fields: p.fields.map(f => f.id) }))
+        root.original = JSON.stringify(root.pages)
+    }
+
+    function viaLabel(v) {
+        return v === "usb" ? qsTr("USB cable") : v === "ble" ? qsTr("Bluetooth") : qsTr("Auto")
     }
 
     function load() {
@@ -63,27 +74,56 @@ Column {
     }
 
     function mutate(fn) {
-        const next = JSON.parse(JSON.stringify(root.custom))
+        const next = JSON.parse(JSON.stringify(root.pages))
         fn(next)
-        root.custom = next
+        root.pages = next
     }
 
     function save() {
         root.saving = true; root.msg = ""
-        root.api("POST", { custom: root.custom }, function (r) {
+        const body = { via: root.via,
+                       pages: root.pages.map(p => p.isNew ? { new: true, fields: p.fields, enabled: p.enabled }
+                                                          : { id: p.id, fields: p.fields, enabled: p.enabled }) }
+        root.api("POST", body, function (r) {
             root.saving = false
-            if (r.ok) { root.take(r); root.msg = qsTr("Saved to the ELEMNT ✓ — the pages are live on the device.") }
-            else root.msg = r.error || qsTr("Couldn't change the ELEMNT's pages.")
+            if (r.ok) {
+                root.take(r)
+                root.msg = qsTr("Saved to the ELEMNT over %1 ✓ — read back and checked.").arg(root.viaLabel(r.via))
+            } else {
+                root.msg = r.error || qsTr("Couldn't change the ELEMNT's pages.")
+            }
         })
     }
 
-    Text {
-        text: qsTr("Data pages")
-        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+    Row {
+        spacing: Theme.spacingSmall
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Data pages")
+            color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Link:")
+            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+        }
+        RoundedComboBox {
+            width: 150
+            enabled: !root.saving && !root.loading
+            model: root.viaOptions.map(v => root.viaLabel(v))
+            currentIndex: root.viaOptions.indexOf(root.via)
+            onActivated: (i) => { root.via = root.viaOptions[i]; if (!root.changed) root.load() }
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.lastVia.length > 0 && !root.loading
+            text: qsTr("(read over %1)").arg(root.viaLabel(root.lastVia))
+            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+        }
     }
     Text {
         visible: root.loading
-        text: qsTr("Reading the ELEMNT…")
+        text: root.via === "ble" ? qsTr("Reading the ELEMNT over Bluetooth…") : qsTr("Reading the ELEMNT…")
         color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
     }
     Text {
@@ -97,60 +137,27 @@ Column {
         width: parent.width
         spacing: Theme.spacingMedium
 
-        // ---- Built-in pages: read-only over the cable ----
         Text {
             width: parent.width; wrapMode: Text.WordWrap
-            text: qsTr("Built-in pages — shown as they are; changing these needs Bluetooth.")
+            text: qsTr("Pages in the order the ELEMNT shows them. Built-in pages keep their number of fields; Workout, Lap and custom pages can have 1–%1.").arg(root.maxFields)
             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-        }
-        Repeater {
-            model: root.builtins
-            delegate: Rectangle {
-                required property var modelData
-                width: parent.width
-                height: builtinCol.implicitHeight + Theme.spacingSmall * 2
-                radius: Theme.radiusSmall
-                color: Theme.cardNested
-                border.width: 1; border.color: Theme.border
-                Column {
-                    id: builtinCol
-                    anchors.fill: parent; anchors.margins: Theme.spacingSmall
-                    spacing: 2
-                    Text {
-                        text: modelData.typeName
-                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
-                    }
-                    Text {
-                        width: parent.width; wrapMode: Text.WordWrap
-                        text: modelData.fields.map(f => f.name).join(" · ")
-                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                    }
-                }
-            }
         }
 
-        // ---- Custom pages: editable ----
-        Text {
-            width: parent.width; wrapMode: Text.WordWrap
-            text: root.custom.length === 0
-                  ? qsTr("No custom pages yet — add one with the fields you want.")
-                  : qsTr("Custom pages — they come after the built-in pages on the ELEMNT.")
-            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-        }
         Repeater {
-            model: root.custom
+            model: root.pages
             delegate: Rectangle {
                 id: card
                 required property var modelData
                 required property int index
                 width: parent.width
-                height: customRow.implicitHeight + Theme.spacingMedium * 2
+                height: pageRow.implicitHeight + Theme.spacingMedium * 2
                 radius: Theme.radiusSmall
                 color: Theme.cardNested
                 border.width: 1; border.color: Theme.border
+                opacity: card.modelData.enabled ? 1 : 0.6
 
                 Row {
-                    id: customRow
+                    id: pageRow
                     anchors.fill: parent
                     anchors.margins: Theme.spacingMedium
                     spacing: Theme.spacingMedium
@@ -163,12 +170,12 @@ Column {
                         Column {
                             anchors.fill: parent; anchors.margins: 3
                             Repeater {
-                                model: card.modelData
+                                model: card.modelData.fields
                                 delegate: Rectangle {
                                     required property var modelData
                                     required property int index
                                     width: parent.width
-                                    height: (parent.height) / Math.max(1, card.modelData.length)
+                                    height: parent.height / Math.max(1, card.modelData.fields.length)
                                     color: "transparent"
                                     border.width: 1; border.color: Theme.border
                                     Text {
@@ -191,20 +198,31 @@ Column {
                             spacing: Theme.spacingSmall
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("Custom page %1").arg(card.index + 1)
+                                text: card.modelData.custom ? qsTr("Custom page") : card.modelData.typeName
                                 color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                            }
+                            RoundedSwitch {
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: card.modelData.enabled
+                                enabled: !root.saving
+                                onToggled: root.mutate(p => { p[card.index].enabled = checked })
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: card.modelData.enabled ? qsTr("shown") : qsTr("hidden")
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             }
                             RoundedButton {
                                 text: "↑"; visible: card.index > 0; enabled: !root.saving
-                                onClicked: root.mutate(c => { const t = c[card.index]; c[card.index] = c[card.index - 1]; c[card.index - 1] = t })
+                                onClicked: root.mutate(p => { const t = p[card.index]; p[card.index] = p[card.index - 1]; p[card.index - 1] = t })
                             }
                             RoundedButton {
-                                text: "↓"; visible: card.index < root.custom.length - 1; enabled: !root.saving
-                                onClicked: root.mutate(c => { const t = c[card.index]; c[card.index] = c[card.index + 1]; c[card.index + 1] = t })
+                                text: "↓"; visible: card.index < root.pages.length - 1; enabled: !root.saving
+                                onClicked: root.mutate(p => { const t = p[card.index]; p[card.index] = p[card.index + 1]; p[card.index + 1] = t })
                             }
                             RoundedButton {
-                                text: qsTr("Delete page"); enabled: !root.saving
-                                onClicked: root.mutate(c => c.splice(card.index, 1))
+                                text: qsTr("Delete page"); visible: card.modelData.custom; enabled: !root.saving
+                                onClicked: root.mutate(p => p.splice(card.index, 1))
                             }
                         }
 
@@ -212,7 +230,7 @@ Column {
                             width: parent.width
                             spacing: Theme.spacingSmall
                             Repeater {
-                                model: card.modelData
+                                model: card.modelData.fields
                                 delegate: Row {
                                     id: cell
                                     required property var modelData
@@ -222,21 +240,26 @@ Column {
                                         width: 200
                                         model: root.fieldNames
                                         currentIndex: root.fieldIds.indexOf(cell.modelData)
-                                        onActivated: (i) => root.mutate(c => { c[card.index][cell.index] = root.fieldIds[i] })
+                                        enabled: !root.saving
+                                        onActivated: (i) => root.mutate(p => { p[card.index].fields[cell.index] = root.fieldIds[i] })
+                                    }
+                                    RoundedButton {
+                                        text: "‹"; visible: cell.index > 0; enabled: !root.saving
+                                        onClicked: root.mutate(p => { const f = p[card.index].fields; const t = f[cell.index]; f[cell.index] = f[cell.index - 1]; f[cell.index - 1] = t })
                                     }
                                     RoundedButton {
                                         text: "✕"
-                                        visible: card.modelData.length > 1
+                                        visible: card.modelData.resizable && card.modelData.fields.length > 1
                                         enabled: !root.saving
-                                        onClicked: root.mutate(c => c[card.index].splice(cell.index, 1))
+                                        onClicked: root.mutate(p => p[card.index].fields.splice(cell.index, 1))
                                     }
                                 }
                             }
                             RoundedButton {
                                 text: qsTr("+ Field")
-                                visible: card.modelData.length < root.maxFields
+                                visible: card.modelData.resizable && card.modelData.fields.length < root.maxFields
                                 enabled: !root.saving
-                                onClicked: root.mutate(c => c[card.index].push(201))
+                                onClicked: root.mutate(p => p[card.index].fields.push(201))
                             }
                         }
                     }
@@ -247,7 +270,8 @@ Column {
         RoundedButton {
             text: qsTr("+ Add custom page")
             enabled: !root.saving
-            onClicked: root.mutate(c => c.push([201, 70, 60]))   // Speed, Heart rate, Cadence
+            onClicked: root.mutate(p => p.push({ id: -1, typeName: "Custom", custom: true, resizable: true,
+                                                 enabled: true, isNew: true, fields: [201, 70, 60] }))
         }
     }
 
@@ -265,14 +289,14 @@ Column {
         width: parent.width
         visible: !root.loading && root.error.length === 0
         RoundedButton {
-            text: root.saving ? qsTr("Saving… (a few seconds per page)") : qsTr("Save to ELEMNT")
+            text: root.saving ? qsTr("Saving…") : qsTr("Save to ELEMNT")
             enabled: root.changed && !root.saving
             onClicked: root.save()
         }
         RoundedButton {
             visible: root.changed
             text: qsTr("Undo changes"); enabled: !root.saving
-            onClicked: root.custom = JSON.parse(root.original)
+            onClicked: root.pages = JSON.parse(root.original)
         }
         RoundedButton {
             visible: !root.changed

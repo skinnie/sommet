@@ -1195,7 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_import()
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(None)
-        elif self.path == "/api/wahoo/pages":
+        elif self.path == "/api/wahoo/pages" or self.path.startswith("/api/wahoo/pages?"):
             self._handle_wahoo_pages(None)
         elif self.path == "/api/library":
             self._handle_library("list", {})
@@ -1968,18 +1968,23 @@ class Handler(BaseHTTPRequestHandler):
     WAHOO_PAGES_LOCK = threading.Lock()
 
     def _handle_wahoo_pages(self, body):
-        """GET /api/wahoo/pages - the Wahoo ELEMNT's data pages (read over adb from its live config
-        backup) + the field catalogue. POST {"custom": [[field ids], ...]} - make the custom pages
-        exactly that list (built-in pages are never touched). tools/wahoo_pages.py. One edit at
-        a time: each page change is an adb broadcast plus a wait for the device to save."""
+        """GET /api/wahoo/pages[?via=auto|usb|ble] - the Wahoo ELEMNT's whole page layout (built-in
+        and custom pages) + the field catalogue. POST {"pages": [...], "via": ...} - write a new
+        layout (display order; built-in pages keep their field count, custom pages are free),
+        read back and verified. "auto" uses the USB cable when the ELEMNT is on adb, else
+        Bluetooth. tools/wahoo_pages.py. One edit at a time."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        via = (body or {}).get("via") or query.get("via", ["auto"])[0]
+        if via not in ("auto", "usb", "ble"):
+            via = "auto"
         _c, out, _e = run_tool("wahoo_pages.py", ["fields"])
         cat = self._parse_last_json_line(out) or {}
         with self.WAHOO_PAGES_LOCK:
             if body is None:
-                code, out, err = run_tool("wahoo_pages.py", ["list"], timeout=120)
+                code, out, err = run_tool("wahoo_pages.py", ["list", "--via", via], timeout=120)
             else:
-                code, out, err = run_tool("wahoo_pages.py", ["set-custom"], timeout=300,
-                                          stdin=json.dumps(body.get("custom") or []))
+                code, out, err = run_tool("wahoo_pages.py", ["set", "--via", via], timeout=180,
+                                          stdin=json.dumps({"pages": body.get("pages") or []}))
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_pages.py failed"}
         payload["groups"] = cat.get("groups", [])
         payload["maxFields"] = cat.get("maxFields", 11)
