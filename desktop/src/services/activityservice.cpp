@@ -950,7 +950,7 @@ void ActivityService::dedupeActivities()
     // WINDOW instead (André, 2026-09-04: "huge chance some rides are already in our library").
     // Rules:
     //   * A duplicate is kept once, as its highest-priority source (direct device beats the
-    //     intervals aggregator). watch > garmin > edge > karoo > bryton > c406 > suunto > etrex > intervals.
+    //     intervals aggregator). watch > garmin > edge > karoo > bryton > wahoo > c406 > suunto > etrex > intervals.
     //   * Two DIFFERENT physical watches recording at the same time are NOT duplicates (a Peak
     //     and a Sport on one ride) - both kept, keyed by device.
     //   * Two rides that start close together but have very different durations are treated as
@@ -961,6 +961,7 @@ void ActivityService::dedupeActivities()
         if (src == QStringLiteral("edge")) return 76;      // direct-from-Edge (USB/MTP)
         if (src == QStringLiteral("karoo")) return 75;     // direct-from-Karoo (USB/MTP)
         if (src == QStringLiteral("bryton")) return 74;    // direct-from-Bryton (USB mass storage)
+        if (src == QStringLiteral("wahoo")) return 74;     // direct-from-Wahoo ELEMNT (USB/adb)
         if (src == QStringLiteral("c406")) return 73;      // direct-from-Magene C406 (BLE)
         if (src == QStringLiteral("suunto")) return 70;
         if (src == QStringLiteral("etrex")) return 60;
@@ -1922,7 +1923,7 @@ void ActivityService::exportToIntervals()
         return;
     }
     // Activities with a FIT we haven't already uploaded: the watch's own moves, plus bike
-    // computers (Edge/Karoo/Magene/Bryton) whose device FIT we now keep - uploaded verbatim so
+    // computers (Edge/Karoo/Magene/Bryton/Wahoo) whose device FIT we now keep - uploaded verbatim so
     // intervals reads sport/sub_sport straight from the device (Cycling vs Indoor Cycling etc.).
     // Rows that came FROM a cloud -
     // source='intervals' (this very service) or 'garmin' - are never pushed back; whitelisting
@@ -1930,7 +1931,7 @@ void ActivityService::exportToIntervals()
     QList<QPair<int, QByteArray>> items;
     QSqlQuery q(QStringLiteral(
         "SELECT idx, fit_base64 FROM activities "
-        "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406','bryton')) "
+        "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406','bryton','wahoo')) "
         "AND fit_base64 IS NOT NULL AND fit_base64 <> '' "
         "AND (exported IS NULL OR exported = 0)"), m_db);
     while (q.next()) {

@@ -7,6 +7,10 @@ it - rough direct-USB import, no settings, read-only. Two transports, one device
   * Mass storage (Bryton Aero 60 and its siblings): the unit shows up as a plain USB drive that
     udisks mounts under /media|/run/media (or /Volumes on macOS), so it's a normal filesystem
     copy - no gio needed (confirmed against a real Aero 60, 2026-09-24).
+  * ADB (Wahoo ELEMNT / BOLT / ROAM): the units run Android, and ADB is the documented way in
+    (press power twice, re-plug USB). Rides are /sdcard/exports/*.fit - the folder WaoStats and
+    elemntary pull from. Needs `adb` on PATH. Lets André drop the Wahoo companion app for rides
+    (André, 2026-10-02: "the aim is to be independent of wahoo companion app").
 
     ./tools/mtp_import.py --list                 # JSON: which USB bike computers are connected
     ./tools/mtp_import.py --pull <dest-dir>      # copy every activity .fit into dest-dir
@@ -18,6 +22,7 @@ would need libmtp). Kept dependency-free on the box it runs on.
 Activity locations, confirmed/observed:
   * Garmin Edge  : "<mount>/<store>/Garmin/Activities/*.fit"   (store e.g. "Internal Storage")
   * Hammerhead   : "<mount>/<store>/FitFiles/*.fit"            (Karoo, MTP enabled in dev options)
+  * Wahoo ELEMNT : "/sdcard/exports/*.fit" over adb (or "<store>/exports" if it mounts as MTP)
   * Bryton Aero  : "<mount>/*.fit"  (rides sit at the volume ROOT, YYMMDDHHMMSS.fit; PlanTrip/
     System/ hold routes, planned workouts and tests - NOT rides, so root-only is the rule).
 The Garmin/Hammerhead names are YYYY-MM-DD-HH-MM-SS.fit; Bryton's are YYMMDDHHMMSS.fit. Either
@@ -41,6 +46,8 @@ DEVICE_KINDS = [
     ("edge",       "edge",  "Garmin/Activities"),
     ("hammerhead", "karoo", "FitFiles"),
     ("karoo",      "karoo", "FitFiles"),
+    ("wahoo",      "wahoo", "exports"),
+    ("elemnt",     "wahoo", "exports"),
 ]
 
 
@@ -159,6 +166,79 @@ def _mass_storage_devices():
             break                           # one kind per mount
     return devices
 
+# --- ADB bike computers (Wahoo ELEMNT family) ------------------------------------------------
+# A Wahoo is an Android box running the com.wahoofitness.bolt app. That package is the marker,
+# so an unrelated phone with USB debugging on is never taken for a bike computer. The original
+# ELEMNT enumerates as 0bb4:0c02 "WahooFitness ELEMNT" (seen 2026-10-02); the BOLT v1 runs the
+# same firmware in a smaller case.
+WAHOO_PACKAGE = "com.wahoofitness.bolt"
+WAHOO_EXPORTS = "/sdcard/exports"
+
+
+def _adb(*args, serial=None, timeout=30):
+    """Run adb, returning (returncode, stdout). (-1, "") if adb is missing or hangs."""
+    exe = shutil.which("adb")
+    if not exe:
+        return -1, ""
+    cmd = [exe] + (["-s", serial] if serial else []) + list(args)
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return -1, ""
+    return out.returncode, out.stdout.replace("\r", "")
+
+
+def _adb_serials():
+    """[(serial, state)] from `adb devices` - state is device / unauthorized / offline."""
+    code, out = _adb("devices", timeout=15)
+    if code != 0:
+        return []
+    rows = []
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2:
+            rows.append((parts[0], parts[1]))
+    return rows
+
+
+def _adb_devices():
+    devices = []
+    for serial, state in _adb_serials():
+        if state != "device":
+            # Not usable yet (RSA prompt not accepted, or still booting). Only report it when
+            # we can't tell what it is - the UI can say "accept the prompt / re-plug".
+            devices.append({
+                "kind": "wahoo", "host": serial, "name": "Wahoo ELEMNT (adb %s)" % state,
+                "mount": "", "activitiesDir": "", "activityCount": 0, "files": [],
+                "transport": "adb", "serial": serial, "state": state,
+            })
+            continue
+        # One round trip: is it a Wahoo, and what rides does it hold?
+        code, out = _adb("shell", "pm list packages %s; echo ===; ls %s"
+                         % (WAHOO_PACKAGE, WAHOO_EXPORTS), serial=serial)
+        if code != 0 or "===" not in out:
+            continue
+        head, _sep, listing = out.partition("===")
+        if "package:" + WAHOO_PACKAGE not in head:
+            continue                        # some other Android device - not ours
+        fits = sorted(ln.strip() for ln in listing.splitlines()
+                      if ln.strip().lower().endswith(".fit"))
+        _c, model = _adb("shell", "getprop ro.product.model", serial=serial, timeout=10)
+        model = model.strip() or "ELEMNT"
+        devices.append({
+            "kind": "wahoo",
+            "host": serial,
+            "name": model if model.lower().startswith("wahoo") else "Wahoo " + model,
+            "mount": "",
+            "activitiesDir": WAHOO_EXPORTS,
+            "activityCount": len(fits),
+            "files": fits,
+            "transport": "adb",
+            "serial": serial,
+            "state": state,
+        })
+    return devices
+
 
 def discover():
     devices = []
@@ -180,6 +260,9 @@ def discover():
             "transport": "mtp",
         })
     devices.extend(_mass_storage_devices())
+    # A Wahoo seen over MTP already is the same unit - don't list it twice via adb.
+    if not any(d["kind"] == "wahoo" for d in devices):
+        devices.extend(_adb_devices())
     return devices
 
 
@@ -196,7 +279,8 @@ def pull(dest, since=None, only=None):
         adir = dev["activitiesDir"]
         if not adir:
             continue
-        for name in sorted(os.listdir(adir)):
+        names = dev["files"] if dev.get("transport") == "adb" else sorted(os.listdir(adir))
+        for name in names:
             if not name.lower().endswith(".fit"):
                 continue
             if only is not None and (dev["kind"], name) not in only:
@@ -207,7 +291,13 @@ def pull(dest, since=None, only=None):
             # Namespaced by kind so an Edge and a Karoo file of the same timestamp can't collide.
             out = os.path.join(dest, f"{dev['kind']}__{name}")
             try:
-                if dev.get("transport") == "mass":
+                if dev.get("transport") == "adb":
+                    # Remote path, not a local one: adb pull (a ride file is ~100-500 KB).
+                    code, _o = _adb("pull", f"{adir}/{name}", out, serial=dev["serial"],
+                                    timeout=120)
+                    if code != 0 or not os.path.isfile(out):
+                        continue
+                elif dev.get("transport") == "mass":
                     # A real local filesystem (Bryton) - a plain copy, no gvfs in the way.
                     shutil.copy2(src, out)
                 else:

@@ -503,6 +503,7 @@ PageFlickable {
         case "c406":   return qsTr("Magene C406 Pro");
         case "bryton": return qsTr("Bryton Aero 60");
         case "brytonble": return qsTr("Bryton Aero 60 (Bluetooth)");
+        case "wahoo":  return bike.name || qsTr("Wahoo ELEMNT");
         default:       return bike.name || bike.kind || "";
         }
     }

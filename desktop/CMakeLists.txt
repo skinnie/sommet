@@ -263,6 +263,7 @@ qt_add_qml_module(ambitapp
         qml/components/BrytonScreensPanel.qml
         qml/components/RouteLibraryView.qml
         qml/components/BrytonIcon.qml
+        qml/components/WahooIcon.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
         qml/PlanStore.qml
