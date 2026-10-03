@@ -57,43 +57,43 @@ PAGE_TYPES = {0: "Workout", 1: "Lap", 2: "Elevation", 3: "Map", 4: "KICKR", 5: "
 # Field catalog: Wahoo's CruxDefnType ids, cycling-relevant ones only (no swim/run/treadmill),
 # grouped the way the picker shows them.
 FIELDS = [
-    ("Speed", [(201, "Speed"), (158, "Speed (vs avg)"), (2, "Avg speed"), (5, "Max speed"),
-               (1, "Lap avg speed"), (155, "Lap avg speed (vs avg)"), (6, "Lap max speed"),
-               (3, "Last lap avg speed"), (4, "Best avg speed"), (373, "Min speed")]),
-    ("Distance", [(10, "Distance"), (11, "Lap distance"), (254, "Last lap distance")]),
-    ("Time", [(30, "Time of day"), (32, "Ride time"), (31, "Total time"), (33, "Paused time"),
-              (34, "Lap time"), (35, "Last lap time"), (36, "Best lap time"), (141, "Start time")]),
-    ("Climbing", [(45, "Elevation"), (40, "Ascent"), (41, "Descent"), (44, "Grade"),
-                  (47, "Vertical speed"), (46, "Max elevation"), (237, "Min elevation"),
-                  (257, "Avg grade"), (42, "Lap ascent"), (43, "Lap descent"),
-                  (258, "Lap avg grade"), (255, "Last lap ascent"), (256, "Last lap descent")]),
-    ("Heart rate", [(70, "Heart rate"), (71, "Avg HR"), (73, "Max HR"), (72, "Lap avg HR"),
-                    (74, "Lap max HR"), (268, "Last lap avg HR"), (342, "Last lap max HR"),
-                    (75, "HR zone"), (76, "HR % of max")]),
-    ("Cadence", [(60, "Cadence"), (61, "Avg cadence"), (63, "Max cadence"),
-                 (62, "Lap avg cadence"), (64, "Lap max cadence"), (269, "Last lap avg cadence")]),
-    ("Power", [(180, "Power 3s"), (392, "Power"), (161, "Power 5s"), (162, "Power 20s"),
-               (163, "Power 30s"), (164, "Power 1min"), (165, "Power 5min"), (166, "Power 20min"),
-               (102, "Avg power"), (104, "Max power"), (103, "Lap avg power"),
-               (105, "Lap max power"), (260, "Last lap avg power"), (107, "Normalized power"),
-               (272, "Lap NP"), (108, "Intensity factor"), (106, "TSS"), (310, "Variability index"),
-               (101, "Power/weight"), (273, "% FTP"), (277, "% FTP 3s"), (244, "Power zone"),
-               (109, "L/R balance"), (282, "Pedal smoothness"), (286, "Torque effectiveness"),
-               (91, "Work (kJ)"), (157, "Power (vs avg)"), (156, "Lap avg power (vs avg)")]),
-    ("Navigation", [(20, "Distance to destination"), (21, "Distance to next turn"),
-                    (22, "ETA"), (23, "Time to destination"), (433, "Ascent remaining"),
+    ("Speed", [(201, "Current Speed"), (158, "Current Speed (vs workout avg)"), (2, "Avg Speed (workout)"), (5, "Max Speed (workout)"),
+               (1, "Avg Speed (lap)"), (155, "Current Speed (vs lap avg)"), (6, "Max Speed (lap)"),
+               (3, "Avg Speed (last lap)"), (4, "Avg Speed (fastest lap)"), (373, "Min speed")]),
+    ("Distance", [(10, "Distance (workout)"), (11, "Distance (lap)"), (254, "Distance (last lap)")]),
+    ("Time", [(30, "Time of Day"), (32, "Active Time (workout)"), (31, "Total Time (overall)"), (33, "Paused Time (workout)"),
+              (34, "Current Lap Active Time"), (35, "Last lap time"), (36, "Best lap time"), (141, "Workout Start Time")]),
+    ("Climbing", [(45, "Current Elevation"), (40, "Total Ascent (workout)"), (41, "Total Descent (workout)"), (44, "Grade"),
+                  (47, "VAM (m/hr)"), (46, "Max Elevation (workout)"), (237, "Min Elevation (workout)"),
+                  (257, "Avg Grade (workout)"), (42, "Total Ascent (lap)"), (43, "Total Descent (lap)"),
+                  (258, "Avg Grade (lap)"), (255, "Total Ascent (last lap)"), (256, "Total Descent (last lap)")]),
+    ("Heart rate", [(70, "Heart Rate"), (71, "Avg Heart Rate (workout)"), (73, "Max Heart Rate (workout)"), (72, "Avg Heart Rate (lap)"),
+                    (74, "Max Heart Rate (lap)"), (268, "Avg Heart Rate (last lap)"), (342, "Max Heart Rate (last lap)"),
+                    (75, "Heart Rate Zone"), (76, "HR % of max")]),
+    ("Cadence", [(60, "Cadence"), (61, "Avg Cadence (workout)"), (63, "Max Cadence (workout)"),
+                 (62, "Avg Cadence (lap)"), (64, "Max Cadence (lap)"), (269, "Avg Cadence (last lap)")]),
+    ("Power", [(180, "Avg Power (3 sec)"), (392, "Power"), (161, "Avg Power (5 sec)"), (162, "Avg Power (20 sec)"),
+               (163, "Avg Power (30 sec)"), (164, "Avg Power (1 min)"), (165, "Avg Power (5 min)"), (166, "Avg Power (20 min)"),
+               (102, "Avg Power (workout)"), (104, "Max Power (workout)"), (103, "Avg Power (lap)"),
+               (105, "Max Power (lap)"), (260, "Avg Power (last lap)"), (107, "Normalized Power"),
+               (272, "Lap NP"), (108, "Intensity Factor"), (106, "Training Stress Score"), (310, "Variability Index"),
+               (101, "Power To Weight (Watts/Kg)"), (273, "Power/FTP % (workout)"), (277, "Power (3 sec)/FTP %"), (244, "Power Zone"),
+               (109, "Left/Right Balance"), (282, "Pedal Smoothness"), (286, "Torque Effectiveness"),
+               (91, "Kilojoules (workout)"), (157, "Power (vs workout avg)"), (156, "Power (vs lap avg)")]),
+    ("Navigation", [(20, "Distance Remaining (route)"), (21, "Distance Next Cue"),
+                    (22, "ETA"), (23, "Time to destination"), (433, "Ascent Remaining (route)"),
                     (24, "Heading")]),
-    ("Climb", [(427, "Climb ascent left"), (428, "Climb distance left"),
-               (429, "Climb time left"), (431, "Climb avg grade"), (435, "Climb grade left")]),
+    ("Climb", [(427, "Ascent Remaining (summit)"), (428, "Distance Remaining (summit)"),
+               (429, "Climb time left"), (431, "Avg Grade (summit)"), (435, "Avg Grade Remaining (summit)")]),
     ("Segment", [(238, "Segment time"), (239, "Segment ahead/behind"), (240, "Segment target time"),
                  (241, "Segment distance left"), (242, "Segment estimated time")]),
-    ("Lap", [(154, "Lap number")]),
-    ("Workout", [(294, "Target power"), (295, "Target cadence"), (296, "Target HR"),
+    ("Lap", [(154, "Lap Number")]),
+    ("Workout", [(294, "Target Power"), (295, "Target Cadence"), (296, "Target Heartrate"),
                  (297, "Interval time left"), (298, "Workout time left"),
-                 (299, "Interval count")]),
-    ("Other", [(90, "Calories"), (50, "Temperature"), (53, "Avg temperature"),
-               (130, "ELEMNT battery"), (210, "Gear"), (216, "Gear (visual)"),
-               (217, "Gear ratio"), (316, "Tyre pressure")]),
+                 (299, "Interval Count")]),
+    ("Other", [(90, "Calories (workout)"), (50, "Temperature"), (53, "Avg Temperature (workout)"),
+               (130, "Battery"), (210, "Current Gear"), (216, "Current Gear (visual)"),
+               (217, "Current Gear Ratio"), (316, "Tyre Pressure")]),
 ]
 FIELD_NAMES = {fid: name for _g, fields in FIELDS for fid, name in fields}
 
@@ -193,6 +193,11 @@ def apply_edit(current, wanted):
                 raise ValueError("%s page keeps %d fields" % (p["typeName"], len(p["fields"])))
         p["fields"] = fields
         p["enabled"] = bool(w.get("enabled", p["enabled"]))
+        if "name" in w:                       # "" = the ELEMNT's default name for the page type
+            name = str(w["name"]).strip()
+            if len(name.encode("utf-8")) > 30:
+                raise ValueError("page names are at most 30 characters")
+            p["name"] = name
         pages.append(p)
     missing = [p for pid, p in by_id.items() if pid not in seen and not p["custom"]]
     if missing:
@@ -377,9 +382,46 @@ def write(wanted, via="auto", serial=None):
     return dict(decode_layout(back), via=how, changed=True)
 
 
+def reset(via="auto", serial=None):
+    """Put the ELEMNT's pages back to Wahoo's default layout (custom pages are dropped).
+    USB: the device app's own adb broadcast BADisplayCfgManager.RESET; BLE: BoltBT's "07"."""
+    how, s = _pick(via, serial)
+    if how == "usb":
+        _adb("shell", "am broadcast -a com.wahoofitness.bolt.service.displaycfg."
+                      "BADisplayCfgManager.RESET", serial=s)
+        time.sleep(3)
+        return dict(decode_layout(usb_read(s)), via=how)
+    asyncio.run(_ble_reset())
+    return dict(decode_layout(ble_read()), via=how)
+
+
+async def _ble_reset():
+    from bleak import BleakClient, BleakScanner
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, ad: bool(d.name) and d.name.upper().startswith("ELEMNT"), timeout=20)
+    if dev is None:
+        raise RuntimeError("no ELEMNT advertising over Bluetooth (on? not connected to a phone?)")
+    got = asyncio.Event()
+    reply = {}
+
+    def on_cfg(_s, data):
+        b = bytes(data)
+        if b[:1] == b"\x07":
+            reply["b"] = b
+            got.set()
+
+    async with BleakClient(dev, timeout=20) as c:
+        await c.start_notify(BLE_CFG, on_cfg)
+        await c.write_gatt_char(BLE_KEEPALIVE, b"\x00", response=False)
+        await c.write_gatt_char(BLE_CFG, b"\x07", response=False)
+        await asyncio.wait_for(got.wait(), 10)
+    if len(reply["b"]) > 1 and reply["b"][1] != 0:
+        raise RuntimeError("the ELEMNT refused the reset (%s)" % reply["b"].hex())
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["list", "fields", "set"])
+    ap.add_argument("command", choices=["list", "fields", "set", "reset"])
     ap.add_argument("layout", nargs="?", help="set: JSON {\"pages\": [...]} (else stdin)")
     ap.add_argument("--via", choices=["auto", "usb", "ble"], default="auto")
     ap.add_argument("--serial")
@@ -391,6 +433,8 @@ def main():
                               for g, f in FIELDS]}
         elif args.command == "list":
             out = dict(read(args.via, args.serial), ok=True)
+        elif args.command == "reset":
+            out = dict(reset(args.via, args.serial), ok=True)
         else:
             spec = json.loads(args.layout if args.layout is not None else sys.stdin.read())
             out = dict(write(spec["pages"], args.via, args.serial), ok=True)

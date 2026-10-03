@@ -56,8 +56,19 @@ Column {
         root.lastVia = r.via || ""
         root.pages = (r.pages || []).map(p => ({ id: p.id, typeName: p.typeName, custom: p.custom,
                                                  resizable: p.resizable, enabled: p.enabled, isNew: false,
-                                                 fields: p.fields.map(f => f.id) }))
+                                                 name: p.name || "", fields: p.fields.map(f => f.id) }))
         root.original = JSON.stringify(root.pages)
+    }
+
+    // Reset to Wahoo's default pages (custom pages are dropped) - asks first.
+    property bool confirmReset: false
+    function resetPages() {
+        root.confirmReset = false; root.saving = true; root.msg = ""
+        root.api("POST", { via: root.via, reset: true }, function (r) {
+            root.saving = false
+            if (r.ok) { root.take(r); root.msg = qsTr("Pages reset to Wahoo's default over %1 ✓").arg(root.viaLabel(r.via)) }
+            else root.msg = r.error || qsTr("Couldn't reset the ELEMNT's pages.")
+        })
     }
 
     function viaLabel(v) {
@@ -82,8 +93,8 @@ Column {
     function save() {
         root.saving = true; root.msg = ""
         const body = { via: root.via,
-                       pages: root.pages.map(p => p.isNew ? { new: true, fields: p.fields, enabled: p.enabled }
-                                                          : { id: p.id, fields: p.fields, enabled: p.enabled }) }
+                       pages: root.pages.map(p => p.isNew ? { new: true, fields: p.fields, enabled: p.enabled, name: p.name }
+                                                          : { id: p.id, fields: p.fields, enabled: p.enabled, name: p.name }) }
         root.api("POST", body, function (r) {
             root.saving = false
             if (r.ok) {
@@ -196,10 +207,16 @@ Column {
 
                         Row {
                             spacing: Theme.spacingSmall
-                            Text {
+                            // The page's name on the ELEMNT; empty = Wahoo's default for the type.
+                            RoundedTextField {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: card.modelData.custom ? qsTr("Custom page") : card.modelData.typeName
-                                color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                                width: 200
+                                text: card.modelData.name
+                                placeholderText: card.modelData.custom ? qsTr("Custom page") : card.modelData.typeName
+                                maximumLength: 30
+                                enabled: !root.saving
+                                onEditingFinished: if (text !== card.modelData.name)
+                                                       root.mutate(p => { p[card.index].name = text.trim() })
                             }
                             RoundedSwitch {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -288,11 +305,34 @@ Column {
             }
         }
 
-        RoundedButton {
-            text: qsTr("+ Add custom page")
-            enabled: !root.saving
-            onClicked: root.mutate(p => p.push({ id: -1, typeName: "Custom", custom: true, resizable: true,
-                                                 enabled: true, isNew: true, fields: [201, 70, 60] }))
+        Row {
+            spacing: Theme.spacingSmall
+            RoundedButton {
+                text: qsTr("+ Add custom page")
+                enabled: !root.saving
+                onClicked: root.mutate(p => p.push({ id: -1, typeName: "Custom", custom: true, resizable: true,
+                                                     enabled: true, isNew: true, name: "", fields: [201, 70, 60] }))
+            }
+            RoundedButton {
+                visible: !root.confirmReset
+                text: qsTr("Reset all pages to Wahoo default…")
+                enabled: !root.saving && !root.changed
+                onClicked: root.confirmReset = true
+            }
+            Text {
+                visible: root.confirmReset
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Custom pages will be deleted. Reset?")
+                color: Theme.error; font.pixelSize: Theme.fontSizeCaption
+            }
+            RoundedButton {
+                visible: root.confirmReset
+                text: qsTr("Yes, reset"); onClicked: root.resetPages()
+            }
+            RoundedButton {
+                visible: root.confirmReset
+                text: qsTr("Cancel"); onClicked: root.confirmReset = false
+            }
         }
     }
 

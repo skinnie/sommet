@@ -1987,6 +1987,8 @@ class Handler(BaseHTTPRequestHandler):
         with self.WAHOO_PAGES_LOCK:
             if body is None:
                 code, out, err = run_tool("wahoo_pages.py", ["list", "--via", via], timeout=120)
+            elif body.get("reset"):
+                code, out, err = run_tool("wahoo_pages.py", ["reset", "--via", via], timeout=180)
             else:
                 code, out, err = run_tool("wahoo_pages.py", ["set", "--via", via], timeout=180,
                                           stdin=json.dumps({"pages": body.get("pages") or []}))
