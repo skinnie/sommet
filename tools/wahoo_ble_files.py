@@ -12,13 +12,14 @@ bluetooth").
 
 Protocol (characteristic a026e036, all multi-packet messages framed "cmd id seq <=17 bytes"):
   06/07  start transfer = 00 <op> <utf-8 path> 00 <offset u32> - 01 pull (the ELEMNT sends the
-         file, raw), 02 push (we send it, gzipped chunks). A pull answers "08 id <seq> 00 01 01
+         file, raw), 03 pull compressed (each chunk <size u32><gzip>, used by default), 02 push (we
+         send it, gzipped chunks). A pull answers "08 id <seq> 00 01 01
          <result> <size u32>" (result 0 = OK, 1 = no such file), then streams the file in 4096-byte
          chunks - "0a id seq <data>" packets, "0b" closing each chunk, seq restarting per chunk, no
          acks - and ends "09 00 id 00" (2026-10-03: a 7900-byte ride and a 300 KB file came back
          byte-identical; ~2 KB/s). Keep-alive writes every 5 s or the link drops at ~80 s.
-         Not used: 03 also pulls, gzipped; some other values delete the file (a push from offset 0
-         deletes the old file first) - not pinned down, so there is no BLE delete here.
+         Some other values delete the file (probably a push from offset 0 deleting the old file
+         first) - not pinned down, so there is no BLE delete here.
   08     "more than one chunk follows" = 08 id 00 01 02 00 00 00 00 00
   0a/0b  each 4096-byte chunk, gzipped, prefixed 00 01 00 00 (or, for the last chunk, the size
          of that chunk as u32 LE); the ELEMNT answers each chunk "0c id ..."
@@ -34,6 +35,7 @@ import gzip
 import json
 import os
 import struct
+import zlib
 import sys
 
 SUF = "-0a7d-4ab3-97fa-f1500f9feb8b"
@@ -158,8 +160,10 @@ async def _find():
     return dev
 
 
-async def pull(remote, local=None, msg_id=0x23, client=None):
-    """The ELEMNT's file `remote` -> bytes (also written to `local` when given)."""
+async def pull(remote, local=None, msg_id=0x23, client=None, gz=True):
+    """The ELEMNT's file `remote` -> bytes (also written to `local` when given). gz: ask for the
+    compressed form (op 03) - each 4 KB chunk comes as <original size u32><gzip>, about 1.6x
+    faster on a real ride (2026-10-03: 374 KB in 115 s instead of ~185 s)."""
     from bleak import BleakClient
     rsp, chunks, cur, done = {}, [], [], asyncio.Event()
     got_rsp = asyncio.Event()
@@ -174,8 +178,11 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
         elif b[0] in (0x0a, 0x0b):
             cur.append(b[3:])
             if b[0] == 0x0b:
-                chunks.append(b"".join(cur))
+                chunk = b"".join(cur)
                 cur.clear()
+                if gz:
+                    chunk = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(chunk[4:])
+                chunks.append(chunk)
         elif b[0] == 0x09 and len(b) >= 3 and b[2] == msg_id:
             done.set()
 
@@ -185,7 +192,7 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
         try:
             await c.write_gatt_char(KEEPALIVE, b"\x00", response=False)
             await asyncio.sleep(0.3)
-            await _start(c, 1, remote, msg_id)
+            await _start(c, 3 if gz else 1, remote, msg_id)
             await asyncio.wait_for(got_rsp.wait(), 20)
             if rsp["result"] != 0:
                 raise FileNotFoundError("the ELEMNT has no %s (result %d)" % (remote, rsp["result"]))
