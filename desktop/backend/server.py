@@ -828,7 +828,8 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
-                     "route_library.py", "bryton_tracks.py", "wahoo_pages.py"}
+                     "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
+                     "wahoo_settings.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1197,6 +1198,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_grid(None)
         elif self.path == "/api/wahoo/pages" or self.path.startswith("/api/wahoo/pages?"):
             self._handle_wahoo_pages(None)
+        elif self.path == "/api/wahoo/settings" or self.path.startswith("/api/wahoo/settings?"):
+            self._handle_wahoo_settings(None)
         elif self.path == "/api/library":
             self._handle_library("list", {})
         elif self.path == "/api/bryton/tracks":
@@ -1441,6 +1444,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_import(body)
         elif self.path == "/api/wahoo/pages":
             self._handle_wahoo_pages(body)
+        elif self.path == "/api/wahoo/settings":
+            self._handle_wahoo_settings(body)
         elif self.path == "/api/bryton/profile/compare":
             self._handle_bryton_profile_compare(body)
         elif self.path == "/api/bryton/profile/apply":
@@ -1988,6 +1993,28 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_pages.py failed"}
         payload["groups"] = cat.get("groups", [])
         payload["maxFields"] = cat.get("maxFields", 11)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_wahoo_settings(self, body):
+        """GET /api/wahoo/settings[?via=] - the ELEMNT's device settings (backlight, LEDs, sounds,
+        auto pause/lap, ...) + their schema. POST {"settings": {key: value}, "via": ...} - write
+        only those keys and read everything back. tools/wahoo_settings.py. Shares the pages lock:
+        both talk to the one ELEMNT over the same links."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        via = (body or {}).get("via") or query.get("via", ["auto"])[0]
+        if via not in ("auto", "usb", "ble"):
+            via = "auto"
+        _c, out, _e = run_tool("wahoo_settings.py", ["schema"])
+        schema = self._parse_last_json_line(out) or {}
+        with self.WAHOO_PAGES_LOCK:
+            if body is None:
+                code, out, err = run_tool("wahoo_settings.py", ["get", "--via", via], timeout=120)
+            else:
+                code, out, err = run_tool("wahoo_settings.py", ["set", "--via", via], timeout=180,
+                                          stdin=json.dumps(body.get("settings") or {}))
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_settings.py failed"}
+        payload["schema"] = schema.get("settings", {})
+        payload["autoPauseOn"] = schema.get("autoPauseOn", 0.447)
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_bryton_info(self):

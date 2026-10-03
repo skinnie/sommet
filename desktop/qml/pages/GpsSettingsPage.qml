@@ -11,7 +11,7 @@ import AmbitApp
 //   both:    Profile - reconcile with intervals.icu (BrytonProfileDialog, per-device apiBase)
 //   Bryton:  Data screens (System/Grid.ini)                              - BrytonScreensPanel
 //   Magene:  Data screens, Device settings (BLE), Altitude calibration   - Magene*Panel
-//   Wahoo:   Data pages over adb (no profile sync yet)                     - WahooScreensPanel
+//   Wahoo:   Data pages + Device settings (cable or Bluetooth)            - Wahoo*Panel
 // The Magene is Bluetooth: each panel reads on its own short connection when the page opens.
 PageFlickable {
     id: root
@@ -151,6 +151,24 @@ PageFlickable {
                         color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
                     }
                     BrytonBleSettingsPanel { width: parent.width; address: root.brytonBleAddress }
+                }
+            }
+        }
+
+        // ---- Wahoo only: device settings ----
+        Card {
+            width: parent.width
+            visible: root.isWahoo
+            Loader {
+                width: parent.width
+                active: root.isWahoo
+                sourceComponent: Column {
+                    spacing: Theme.spacingSmall
+                    Text {
+                        text: qsTr("Device settings")
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                    }
+                    WahooSettingsPanel { width: parent.width }
                 }
             }
         }

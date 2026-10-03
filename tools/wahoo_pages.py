@@ -360,7 +360,7 @@ def main():
     ap.add_argument("layout", nargs="?", help="set: JSON {\"pages\": [...]} (else stdin)")
     ap.add_argument("--via", choices=["auto", "usb", "ble"], default="auto")
     ap.add_argument("--serial")
-    args = ap.parse_args()
+    args = ap.parse_intermixed_args()
     try:
         if args.command == "fields":
             out = {"ok": True, "maxFields": MAX_FIELDS,
