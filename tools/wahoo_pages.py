@@ -101,16 +101,30 @@ FIELD_NAMES = {fid: name for _g, fields in FIELDS for fid, name in fields}
 # ---- layout codec (V0, identical on USB and BLE) ---------------------------------------------
 
 def decode_layout(blob):
-    if not blob or blob[0] != 0:
+    """V0 (Bluetooth; the settings file until the app re-saves it) or V1 (what the ELEMNT app
+    writes to its settings file after a restart - seen 2026-10-03). Same page body; V1 adds a
+    total length after the version and a length after each page's record version."""
+    if not blob or blob[0] not in (0, 1):
         raise ValueError("unknown layout version %r" % (blob[:1],))
-    next_id, = struct.unpack_from("<H", blob, 1)
-    count = blob[3]
-    o = 4
+    fmt = blob[0]
+    o = 1
+    if fmt == 1:
+        total, = struct.unpack_from("<H", blob, o)
+        if total != len(blob) - 3:
+            raise ValueError("layout V1: length %d, have %d" % (total, len(blob) - 3))
+        o += 2
+    next_id, = struct.unpack_from("<H", blob, o)
+    count = blob[o + 2]
+    o += 3
     pages = []
     for _ in range(count):
-        if blob[o] != 0:
-            raise ValueError("unknown page record version %d at %d" % (blob[o], o))
+        if blob[o] != fmt:
+            raise ValueError("page record version %d at %d (layout V%d)" % (blob[o], o, fmt))
         o += 1
+        if fmt == 1:
+            plen, = struct.unpack_from("<H", blob, o)
+            o += 2
+            end = o + plen
         pid, = struct.unpack_from("<H", blob, o)
         ptype, b4, enabled, name_len = blob[o + 2], blob[o + 3], blob[o + 4], blob[o + 5]
         name = blob[o + 6:o + 6 + name_len].decode("utf-8", "replace")
@@ -119,6 +133,8 @@ def decode_layout(blob):
         k = blob[o + 2]
         fields = list(struct.unpack_from("<%dH" % k, blob, o + 3))
         o += 3 + 2 * k
+        if fmt == 1 and o != end:
+            raise ValueError("layout V1: page %d length mismatch" % pid)
         pages.append({
             "id": pid, "type": ptype, "typeName": PAGE_TYPES.get(ptype, "Page type %d" % ptype),
             "custom": ptype == CUSTOM_PAGE_TYPE, "resizable": ptype in RESIZABLE_TYPES,
@@ -127,19 +143,26 @@ def decode_layout(blob):
         })
     if o != len(blob):
         raise ValueError("layout: %d trailing bytes" % (len(blob) - o))
-    return {"nextPageId": next_id, "pages": pages}
+    return {"format": fmt, "nextPageId": next_id, "pages": pages}
 
 
-def encode_layout(layout):
-    out = bytearray([0]) + struct.pack("<H", layout["nextPageId"]) + bytes([len(layout["pages"])])
+def encode_layout(layout, fmt=None):
+    """Encode in `fmt` (0 or 1; default: the format the layout was read in)."""
+    fmt = layout.get("format", 0) if fmt is None else fmt
+    body = bytearray()
     for p in layout["pages"]:
         name = p.get("name", "").encode("utf-8")
         fields = [f["id"] if isinstance(f, dict) else int(f) for f in p["fields"]]
-        out += bytes([0]) + struct.pack("<H", p["id"])
-        out += bytes([p["type"], p["b4"], 1 if p["enabled"] else 0, len(name)]) + name
-        out += struct.pack("<H", p["link"]) + bytes([len(fields)])
-        out += struct.pack("<%dH" % len(fields), *fields)
-    return bytes(out)
+        rec = struct.pack("<H", p["id"])
+        rec += bytes([p["type"], p["b4"], 1 if p["enabled"] else 0, len(name)]) + name
+        rec += struct.pack("<H", p["link"]) + bytes([len(fields)])
+        rec += struct.pack("<%dH" % len(fields), *fields)
+        body += bytes([fmt]) + (struct.pack("<H", len(rec)) if fmt == 1 else b"") + rec
+    head = struct.pack("<H", layout["nextPageId"]) + bytes([len(layout["pages"])])
+    out = head + body
+    if fmt == 1:
+        return bytes([1]) + struct.pack("<H", len(out)) + out
+    return bytes([0]) + out
 
 
 def apply_edit(current, wanted):
@@ -177,7 +200,7 @@ def apply_edit(current, wanted):
                          % ", ".join(p["typeName"] for p in missing))
     if not any(p["enabled"] for p in pages):
         raise ValueError("at least one page must stay enabled")
-    return {"nextPageId": next_id, "pages": pages}
+    return {"format": current.get("format", 0), "nextPageId": next_id, "pages": pages}
 
 
 # ---- USB (adb, root shell on the ELEMNT) -------------------------------------------------------
