@@ -157,3 +157,6 @@ desktop/*.exitcode
 # Never commit the compiler x-functions-key (local override; public default lives in workout.py)
 tools/.compile_key
 .compile_key
+
+# Personal activity export (GPS tracks) - never commit
+/garmin-import/
