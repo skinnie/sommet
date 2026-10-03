@@ -256,7 +256,8 @@ def _adb_devices():
         if code != 0 or "===" not in out:
             continue
         head, _sep, listing = out.partition("===")
-        if "package:" + WAHOO_PACKAGE not in head:
+        # Whole line - the companion app com.wahoofitness.boltcompanion shares the prefix.
+        if "package:" + WAHOO_PACKAGE not in [ln.strip() for ln in head.splitlines()]:
             continue                        # some other Android device - not ours
         fits = sorted(ln.strip() for ln in listing.splitlines()
                       if ln.strip().lower().endswith(".fit"))

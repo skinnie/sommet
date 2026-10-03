@@ -244,7 +244,9 @@ def find_serial(serial=None, _retry=True):
         if len(parts) < 2 or parts[1] != "device" or (serial and parts[0] != serial):
             continue
         _c, pk = _adb("shell", "pm list packages " + WAHOO_PACKAGE, serial=parts[0])
-        if "package:" + WAHOO_PACKAGE in pk:
+        # Whole line: "pm list packages X" is a prefix filter, and the Wahoo companion app
+        # (com.wahoofitness.boltcompanion, e.g. on a tablet over Wi-Fi adb) must not count.
+        if "package:" + WAHOO_PACKAGE in [ln.strip() for ln in pk.splitlines()]:
             return parts[0]
     # Seen on André's X230 (2026-10-02/03): the ELEMNT is on the USB bus with its adb interface
     # up, but an adb server started earlier never picks it up. Restart the server once.
