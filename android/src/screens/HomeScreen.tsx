@@ -22,6 +22,7 @@ import {
   setDateTime,
 } from '../native/AmbitUsbModule';
 import RNFS from 'react-native-fs';
+import { backfillIntervalsImportOnce } from '../services/IntervalsImport';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   scanAndConnect as bleScanAndConnect, scanAndConnectTo as bleScanAndConnectTo,
@@ -645,6 +646,9 @@ export default function HomeScreen() {
   // Arm the one-time post-upgrade FIT re-import (see FitReimport.ts) once at mount. No-op on every
   // launch after the first for this build generation.
   useEffect(() => { initFitReimport(); }, []);
+  // Calories + shared sport names for what was imported from intervals.icu before 2026-10-03.
+  // Once, in the background; must never get in the way of the screen.
+  useEffect(() => { backfillIntervalsImportOnce().catch(() => {}); }, []);
 
   useEffect(() => {
     return onBleDisconnected(() => {

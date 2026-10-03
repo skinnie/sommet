@@ -5,7 +5,7 @@ import {
 import { useRoute } from '@react-navigation/native';
 import { Card } from '../components/ui/Card';
 import { useV3Theme } from '../theme/v3';
-import { t } from '../i18n';
+import { t, fmtDate } from '../i18n';
 import { Workout } from '../services/WorkoutSource';
 import { parseCompiledApp, CompiledApp, COMPILE_SITE_URL } from '../services/IntervalsService';
 import { pickFile } from '../services/CatalogService';
@@ -468,7 +468,7 @@ export default function WorkoutCalendarScreen() {
             return (
               // Long press = the desktop's right-click day menu; the ⋯ opens the same menu.
               <Pressable key={i} style={s.planRow} onLongPress={() => setMenuIndex(i)} delayLongPress={350}>
-                <Text style={[s.planDate, isPast && { color: theme.error }]}>{e.date}</Text>
+                <Text style={[s.planDate, isPast && { color: theme.error }]}>{fmtDate(e.date) || e.date}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={s.planName}>{e.workoutName}</Text>
                   <Text style={s.desc}>{sub}</Text>

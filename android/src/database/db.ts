@@ -1,5 +1,6 @@
 import SQLite, { SQLiteDatabase } from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
+import { canonicalSportName, isJunkActivity } from '../services/SportNames';
 
 SQLite.enablePromise(true);
 
@@ -31,6 +32,9 @@ export interface ActivityRecord {
   // ("GARMIN FR965", "SUUNTO Suunto Race S"); moves read off the connected watch leave it empty,
   // because the watch is implied.
   device?: string;
+  // Calories, when the source gives them (2026-10-03: intervals.icu sends them for every
+  // activity; a move rebuilt from a GPX has none, the GPX carries no energy).
+  energy_kcal?: number;
   // Sommet Sync (#SYNC-3): last-modified time (ms), drives last-writer-wins against the shared
   // self-hosted store. Defaults to synced_at on a watch read; a pulled row carries the origin's.
   updated_at?: number;
@@ -81,6 +85,10 @@ export async function getDb(): Promise<SQLiteDatabase> {
   await _db.executeSql(
     `ALTER TABLE activities ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`
   ).catch(() => {});
+  await _db.executeSql(
+    `ALTER TABLE activities ADD COLUMN energy_kcal INTEGER NOT NULL DEFAULT 0`
+  ).catch(() => {});
+  await tidyImportedActivities(_db).catch(() => {});
   // ── Gear tracker (v3) — see gearDb.ts. Local-first, mirrored to intervals.icu. ──
   // A component (part) is a gear row with parent_id set. remote_id is the intervals.icu id
   // once mirrored (null for local-only, not-yet-pushed rows). last_synced_at + a stored
@@ -217,6 +225,7 @@ function orderExpr(key: string): string {
                              THEN a.duration_s * 1000.0 / a.distance_m ELSE 0 END)`;
     case 'avgSpeed': return `COALESCE(NULLIF(m.avgSpeed, 0), CASE WHEN a.distance_m > 0 AND a.duration_s > 0
                              THEN a.distance_m * 3600.0 / a.duration_s ELSE 0 END)`;
+    case 'calories': return 'COALESCE(NULLIF(m.calories, 0), a.energy_kcal, 0)';
     default:
       return (GPX_METRIC_COLUMNS as readonly string[]).indexOf(key) >= 0 ? `COALESCE(m.${key}, 0)` : 'a.date';
   }
@@ -306,13 +315,59 @@ export async function isActivityDeleted(id: string): Promise<boolean> {
   return result.rows.length > 0;
 }
 
+// Tidy-up of what earlier builds stored (André, 2026-10-03). Runs at every open and is a no-op
+// once done:
+//   * junk/test entries - under a minute AND under 100 m - are removed; the desktop has skipped
+//     them at import since 2026-08-24 ("it was tests for our app"), Android never did;
+//   * sport types stored raw ("EMountainBikeRide"), under an old spelling or with stray spaces
+//     get Suunto's name (SportNames.canonicalSportName).
+async function tidyImportedActivities(db: SQLiteDatabase): Promise<void> {
+  // Blacklisted, not just deleted: a watch move's GPX is still on disk and the watch still has
+  // it, so a plain delete came straight back at the next orphan scan / watch read (seen on the
+  // tablet, 2026-10-03). deleted_activities is what every import path already honours. No
+  // Sommet Sync tombstone - this is a local view rule, not a delete to push to other devices.
+  await db.executeSql(
+    `INSERT OR IGNORE INTO deleted_activities (id, deleted_at)
+       SELECT id, ? FROM activities WHERE duration_s < 60 AND distance_m < 100`, [Date.now()]);
+  await db.executeSql('DELETE FROM activities WHERE duration_s < 60 AND distance_m < 100');
+  const [res] = await db.executeSql(`SELECT DISTINCT activity_type FROM activities WHERE activity_type != ''`);
+  for (let i = 0; i < res.rows.length; i++) {
+    const from: string = res.rows.item(i).activity_type;
+    const to = canonicalSportName(from);
+    if (to && to !== from)
+      await db.executeSql('UPDATE activities SET activity_type = ? WHERE activity_type = ?', [to, from]);
+  }
+}
+
+/**
+ * True (and the id is blacklisted so it is never offered again) when a move about to be stored is
+ * a junk/test entry - under a minute AND under 100 m. For the import paths that read the watch
+ * or adopt a GPX file.
+ */
+export async function rejectJunkActivity(id: string, durationS: number, distanceM: number): Promise<boolean> {
+  if (!isJunkActivity(durationS, distanceM)) return false;
+  const db = await getDb();
+  await db.executeSql('INSERT OR IGNORE INTO deleted_activities (id, deleted_at) VALUES (?, ?)', [id, Date.now()]);
+  return true;
+}
+
+/** What a later intervals.icu import may correct on a row it already has: sport name, calories. */
+export async function updateImportedActivity(id: string, fields: { activity_type?: string; energy_kcal?: number }): Promise<void> {
+  const db = await getDb();
+  if (fields.activity_type !== undefined)
+    await db.executeSql('UPDATE activities SET activity_type = ? WHERE id = ?', [fields.activity_type, id]);
+  if (fields.energy_kcal !== undefined)
+    await db.executeSql('UPDATE activities SET energy_kcal = ? WHERE id = ?', [fields.energy_kcal, id]);
+}
+
 /** Enregistre une activité synchronisée dans la base. */
 export async function markActivitySynced(record: ActivityRecord): Promise<void> {
   const db = await getDb();
   await db.executeSql(
     `INSERT OR REPLACE INTO activities
-       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device, updated_at,
+        energy_kcal)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.synced_at,
@@ -324,6 +379,7 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
       record.activity_type,
       record.device ?? '',
       record.updated_at ?? record.synced_at,
+      Math.round(record.energy_kcal ?? 0) || 0,
     ]
   );
 }
@@ -365,19 +421,20 @@ export async function deleteActivitiesByUid(uid: string): Promise<void> {
 /** The local row (updated_at + gpx_path) for a uid, or null if we don't have it. */
 export async function getActivityByUid(
   uid: string
-): Promise<{ id: string; updated_at: number; gpx_path: string } | null> {
+): Promise<{ id: string; updated_at: number; gpx_path: string; energy_kcal: number; activity_type: string } | null> {
   const bar = uid.indexOf('|');
   if (bar < 0) return null;
   const device = uid.slice(0, bar);
   const minute = uid.slice(bar + 1);
   const db = await getDb();
   const [r] = await db.executeSql(
-    'SELECT id, updated_at, gpx_path FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
+    'SELECT id, updated_at, gpx_path, energy_kcal, activity_type FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
     [device, minute]
   );
   if (r.rows.length === 0) return null;
   const row = r.rows.item(0);
-  return { id: row.id, updated_at: Number(row.updated_at || 0), gpx_path: row.gpx_path };
+  return { id: row.id, updated_at: Number(row.updated_at || 0), gpx_path: row.gpx_path,
+    energy_kcal: Number(row.energy_kcal || 0), activity_type: String(row.activity_type || '') };
 }
 
 /** Retourne toutes les activités triées par date décroissante. */

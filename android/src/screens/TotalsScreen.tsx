@@ -5,7 +5,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { ActivityRecord, getAllActivities } from '../database/db';
 import { activityForName, colorForName } from '../services/ActivityColors';
-import { distanceLines, hoursLines } from '../services/TotalsFacts';
+import { distanceLines, hoursLines, energyLines } from '../services/TotalsFacts';
 import { Card } from '../components/ui/Card';
 import { useV3Theme } from '../theme/v3';
 import { t } from '../i18n';
@@ -16,11 +16,10 @@ import { t } from '../i18n';
 // local DB (the one source Android already syncs every device into), so it is correct the
 // moment Activities is - no new device traffic, exactly like the desktop page.
 //
-// One honest divergence from desktop: Android's activity rows carry no kcal (they are rebuilt
-// from the synced GPX, which has no energy channel - see db.ts's ActivityRecord and
-// GpxParser.extractGpxMetadata), so the "Energy spent" card degrades to a short note rather
-// than showing a false 0. The desktop reads energyKcal off the watch's ExerciseLog; when
-// Android grows that read, TotalsFacts.energyLines() is already ported and the card lights up.
+// Energy: calories come with every activity from intervals.icu and through Sommet Sync from the
+// desktop (2026-10-03: "that may come from intervals and not need a watch plugged"); a move
+// rebuilt from a watch GPX alone has none. The card sums what is there and says how many
+// activities it covers; with nothing recorded for the year it shows a short note, not a false 0.
 
 function yearOf(a: ActivityRecord): number {
   if (!a.date) return 0;
@@ -78,6 +77,9 @@ export default function TotalsScreen() {
     [withTrack],
   );
 
+  const withEnergy = useMemo(() => yearActivities.filter(a => (a.energy_kcal || 0) > 0), [yearActivities]);
+  const energyKcal = useMemo(() => withEnergy.reduce((s, a) => s + (a.energy_kcal || 0), 0), [withEnergy]);
+
   // Distance grouped by resolved activity id - the automatic grouping desktop's header
   // comment describes: "Running" and "Trail running" land in one bucket on their own, a
   // renamed custom mode still resolves through the same table (activityForName).
@@ -117,7 +119,6 @@ export default function TotalsScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>{t.totalsTitle}</Text>
         <View style={styles.yearRow}>
           {years.map(y => (
             <TouchableOpacity
@@ -186,11 +187,21 @@ export default function TotalsScreen() {
             />
           ))}
 
-          {/* Energy - not captured from GPX on Android (see file header) */}
-          <Card>
-            <Text style={styles.cardTitle}>{t.totalsEnergyTitle}</Text>
-            <Text style={styles.cardDesc}>{t.totalsEnergyUnavailable}</Text>
-          </Card>
+          {/* Energy spent */}
+          {energyKcal > 0 ? (
+            <TotalsCard
+              theme={theme}
+              title={t.totalsEnergyTitle}
+              headline={`${Math.round(energyKcal).toLocaleString('en-GB')} kcal`}
+              subtitle={t.totalsEnergySubtitle(withEnergy.length, yearActivities.length)}
+              lines={energyLines(energyKcal)}
+            />
+          ) : (
+            <Card>
+              <Text style={styles.cardTitle}>{t.totalsEnergyTitle}</Text>
+              <Text style={styles.cardDesc}>{t.totalsEnergyUnavailable}</Text>
+            </Card>
+          )}
         </>
       )}
     </ScrollView>

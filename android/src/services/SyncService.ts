@@ -2,7 +2,7 @@ import { DeviceProvider } from './devices/DeviceProvider';
 import { ambitDeviceProvider } from './devices/AmbitDeviceProvider';
 import { writeGpxFile, writeFitFile } from './GpxService';
 import { extractGpxMetadata } from './GpxParser';
-import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, clearDeletedActivities } from '../database/db';
+import { isActivitySynced, isActivityDeleted, markActivitySynced, getAllSyncedIds, clearDeletedActivities, rejectJunkActivity } from '../database/db';
 import { isMarkSyncedEnabled } from './MarkSynced';
 import { attributeMoveToGear } from './GearAutoAssign';
 
@@ -139,6 +139,8 @@ export async function runSync(
     // user-DELETED activity is never resurrected.
     if (await isActivityDeleted(id)) continue;
     if (!refresh && await isActivitySynced(id)) continue;
+    // Junk/test entries (under a minute AND under 100 m) are not kept - same rule as the desktop.
+    if (await rejectJunkActivity(id, meta.durationS, meta.distanceM)) continue;
 
     const gpxPath = await writeGpxFile(id, gpxXml, refresh);
     if (!gpxPath) continue;

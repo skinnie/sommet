@@ -8,7 +8,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import {
-  ActivityRecord, markActivitySynced, getAllSyncedIds,
+  ActivityRecord, markActivitySynced, getAllSyncedIds, rejectJunkActivity,
   deleteActivity, isActivityDeleted,
   ActivityPageRow, getActivityPage, getActivityTypes, saveActivityMetrics, getActivitiesMissingMetrics,
   ACTIVITY_PAGE, GPX_METRIC_COLUMNS,
@@ -21,6 +21,7 @@ import { useV3Theme } from '../theme/v3';
 import { ActivityThumbnail } from '../components/ActivityThumbnail';
 import Icon, { IconName } from '../components/ui/Icon';
 import { activityIconName } from '../services/ActivityColors';
+import { isFootSport } from '../services/SportNames';
 import {
   getViewMode, setViewMode as persistViewMode, getActivityColumns, setActivityColumns, ViewMode,
 } from '../services/ListViewPrefs';
@@ -46,7 +47,7 @@ function buildMetrics(a: ActivityRecord, gpx?: GpxMetadata): MetricValues {
     distanceM, durationS,
     ascentM: a.d_plus || 0,
     descentM: gpx?.descentM || 0,
-    energyKcal: gpx?.energyKcal || 0,
+    energyKcal: gpx?.energyKcal || a.energy_kcal || 0,
     avgHr: gpx?.avgHr || 0,
     maxHr: gpx?.maxHr || 0,
     avgCadence: gpx?.avgCadence || 0,
@@ -57,7 +58,10 @@ function buildMetrics(a: ActivityRecord, gpx?: GpxMetadata): MetricValues {
     peakTe: gpx?.peakTe || 0,
     poolLengths: gpx?.poolLengths || 0,
     maxAltM: gpx?.maxAltM || 0,
-    paceSecPerKm: gpx?.paceSecPerKm || (distanceM > 0 && durationS > 0 ? durationS / (distanceM / 1000) : 0),
+    // Pace only means something on foot (André, 2026-10-03: "There is no 'pace' on bike, but avg
+    // speed km/h") - same rule as the desktop's activity screen. 0 = the card skips it.
+    paceSecPerKm: !isFootSport(a.activity_type) ? 0
+      : gpx?.paceSecPerKm || (distanceM > 0 && durationS > 0 ? durationS / (distanceM / 1000) : 0),
   };
 }
 
@@ -220,6 +224,7 @@ export default function LogListScreen() {
       if (!id || known.has(id) || await isActivityDeleted(id)) continue;
       try {
         const meta = extractGpxMetadata(await readGpxFile(path));
+        if (await rejectJunkActivity(id, meta.durationS, meta.distanceM)) continue;
         await markActivitySynced({
           id, synced_at: Date.now(), gpx_path: path, date: meta.date, duration_s: meta.durationS,
           distance_m: meta.distanceM, d_plus: meta.dPlus, activity_type: meta.activityType,

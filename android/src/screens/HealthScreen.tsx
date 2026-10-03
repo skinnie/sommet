@@ -5,6 +5,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
+import { fmtDate } from '../i18n';
 import { fetchWellness, WellnessDay } from '../services/WellnessService';
 import { isHrStrapAvailable, measureHrv, type HrStrapReading } from '../services/HrStrapService';
 import { isStrapHrvEnabled } from '../services/StrapHrvPref';
@@ -204,7 +205,7 @@ export default function HealthScreen() {
                   <Text style={[styles.big, { color: t.text }]}>
                     {last.value.toFixed(m.decimals)}{m.unit}
                   </Text>
-                  <Text style={[styles.caption, { color: t.mutedText }]}>{last.date}</Text>
+                  <Text style={[styles.caption, { color: t.mutedText }]}>{fmtDate(last.date) || last.date}</Text>
                 </View>
               );
             })}

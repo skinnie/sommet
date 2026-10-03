@@ -119,7 +119,6 @@ export default function EmberScreen() {
       contentContainerStyle={{ padding: v3Spacing.medium }}
       refreshControl={<RefreshControl refreshing={syncing} onRefresh={refresh} tintColor={t.primary} />}
     >
-      <Text style={{ color: t.text, fontSize: v3Type.title, fontWeight: '700' }}>Ember</Text>
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginBottom: v3Spacing.medium }}>
         Tap a tile to log · long-press coffee or water for more · tap kcal for a meal
       </Text>

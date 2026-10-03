@@ -113,8 +113,6 @@ export default function CalendarScreen() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{t.calendarTitle}</Text>
-
       <Card>
         {/* Month nav */}
         <View style={styles.navRow}>

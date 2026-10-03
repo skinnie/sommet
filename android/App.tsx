@@ -46,7 +46,7 @@ import OfflineMapsScreen from './src/screens/OfflineMapsScreen';
 import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
-import { t, dateLocale } from './src/i18n';
+import { t, dateLocale, fmtDate } from './src/i18n';
 
 // ─── Types de navigation ──────────────────────────────────────────────────────
 
@@ -195,10 +195,12 @@ function AppShell() {
           <Stack.Screen
             name="Map"
             component={MapScreen}
+            // Sport and day, once (André, 2026-10-03: "The activity page shows the date three
+            // times. Fix it") - the page itself no longer repeats either. Day-first like every
+            // other date in the app.
             options={({ route }) => ({
-              title: route.params.activity.date
-                ? new Date(route.params.activity.date).toLocaleDateString(dateLocale)
-                : t.mapFallback,
+              title: [route.params.activity.activity_type, fmtDate(route.params.activity.date)]
+                .filter(Boolean).join(' · ') || t.mapFallback,
             })}
           />
           <Stack.Screen

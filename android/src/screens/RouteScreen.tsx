@@ -288,7 +288,10 @@ export default function RouteScreen() {
         </View>
         <View style={[styles.row, { marginTop: v3Spacing.small }]}>
           <Button label={t.routeIdle} variant="filled" loading={picking} disabled={picking || sendBusy} onPress={handlePick} />
-          <Button label="Open planner" variant="text" grow={false} onPress={() => navigation.navigate('RouteWeather')} />
+          {/* A real button, not bare text (André, 2026-10-03: "'Open planner' looks like plain
+              text"); the first one says what it does - it opens the file picker - instead of
+              repeating the card's title. */}
+          <Button label="Open planner" variant="outline" onPress={() => navigation.navigate('RouteWeather')} />
         </View>
 
         {pending && (

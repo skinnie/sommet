@@ -137,6 +137,14 @@ export default function GearScreen() {
     ]);
   }
 
+  // A reminder used to vanish on one tap of a small icon; it asks first now, like gear does.
+  function confirmDeleteReminder(owner: LocalGear, r: LocalReminder) {
+    Alert.alert(r.name, t.gearDeleteReminder + '?', [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.gearDelete, style: 'destructive', onPress: async () => { await deleteReminderNow(owner, r); await reload(); } },
+    ]);
+  }
+
   // ── Reminders ───────────────────────────────────────────────────────────────
   const [reminderFor, setReminderFor] = useState<LocalGear | null>(null);
   const [remName, setRemName] = useState('');
@@ -210,8 +218,9 @@ export default function GearScreen() {
                       : null; })()}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setPrimary(g)}><Icon name="check" size={18} color={g.isPrimary ? theme.primary : theme.mutedText} /></TouchableOpacity>
-                <TouchableOpacity onPress={() => confirmDelete(g)} style={{ marginLeft: 14 }}><Icon name="delete" size={18} color={theme.mutedText} /></TouchableOpacity>
+                {/* Delete is no longer an icon beside this one (André, 2026-10-03: "easy to hit by
+                    mistake") - it is the last, separate action at the bottom of the card. */}
+                <TouchableOpacity onPress={() => setPrimary(g)} hitSlop={10}><Icon name="check" size={18} color={g.isPrimary ? theme.primary : theme.mutedText} /></TouchableOpacity>
               </View>
 
               {/* Parts */}
@@ -219,7 +228,7 @@ export default function GearScreen() {
                 <View key={p.id} style={s.partRow}>
                   <TouchableOpacity style={{ flex: 1 }} onPress={() => rename(p)}><Text style={s.partName}>• {p.name}</Text></TouchableOpacity>
                   <TouchableOpacity onPress={() => openReminder(p)}><Text style={s.smallLink}>{t.gearAddReminder}</Text></TouchableOpacity>
-                  <TouchableOpacity onPress={() => confirmDelete(p)} style={{ marginLeft: 12 }}><Icon name="delete" size={15} color={theme.mutedText} /></TouchableOpacity>
+                  <TouchableOpacity onPress={() => confirmDelete(p)} style={s.rowDelete} hitSlop={8}><Icon name="delete" size={15} color={theme.mutedText} /></TouchableOpacity>
                 </View>
               ))}
 
@@ -233,7 +242,7 @@ export default function GearScreen() {
                       <Icon name="warning" size={13} color={color} />
                       <Text style={[s.remText, { color }]}>{r.name} · {reminderLabel(r)}{st ? ` · ${st === 'due' ? t.gearDue : t.gearDueSoon}` : ''}</Text>
                       <TouchableOpacity onPress={() => snoozeReminderNow(owner, r, 30).then(reload)}><Text style={s.smallLink}>{t.gearSnooze}</Text></TouchableOpacity>
-                      <TouchableOpacity onPress={() => deleteReminderNow(owner, r).then(reload)} style={{ marginLeft: 10 }}><Icon name="delete" size={14} color={theme.mutedText} /></TouchableOpacity>
+                      <TouchableOpacity onPress={() => confirmDeleteReminder(owner, r)} style={s.rowDelete} hitSlop={8}><Icon name="delete" size={14} color={theme.mutedText} /></TouchableOpacity>
                     </View>
                   );
                 })}
@@ -243,6 +252,8 @@ export default function GearScreen() {
                 <TouchableOpacity onPress={() => addPart(g)}><Text style={s.smallLink}>＋ {t.gearAddPart}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => openReminder(g)}><Text style={s.smallLink}>＋ {t.gearAddReminder}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => toggleRetired(g)}><Text style={s.smallLink}>{g.retired ? t.gearUnretire : t.gearRetire}</Text></TouchableOpacity>
+                <View style={{ flex: 1 }} />
+                <TouchableOpacity onPress={() => confirmDelete(g)} hitSlop={8}><Text style={[s.smallLink, { color: theme.error }]}>{t.gearDelete}</Text></TouchableOpacity>
               </View>
             </Card>
           ))}
@@ -336,6 +347,8 @@ const styles = (th: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   remRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, paddingLeft: 4 },
   remText: { flex: 1, fontSize: 12 },
   gearActions: { flexDirection: 'row', gap: 18, marginTop: 12, flexWrap: 'wrap' },
+  // a row's bin sits well clear of the action next to it
+  rowDelete: { marginLeft: 28, paddingHorizontal: 4 },
   assignRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: th.mutedText + '22' },
   assignSport: { fontSize: 14, color: th.text },
   assignGear: { fontSize: 13, fontWeight: '700' },

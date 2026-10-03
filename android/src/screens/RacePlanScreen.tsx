@@ -553,7 +553,6 @@ export default function RacePlanScreen() {
   return (
     <ScrollView ref={scrollRef} style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
       <View>
-        <Body size={v3Type.title} bold>Race Planner</Body>
         <Cap>Plan when you'll reach each checkpoint — and whether you'll beat the time limits.</Cap>
       </View>
 

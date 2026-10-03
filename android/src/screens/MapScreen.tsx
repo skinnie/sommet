@@ -686,8 +686,8 @@ export default function MapScreen() {
       <View style={styles.container}>
         <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
           <View style={[styles.noGpsContent, { paddingBottom: 0 }]}>
-            <Text style={styles.noGpsTitle}>{activity.activity_type || t.unknownActivity}</Text>
-            <Text style={styles.noGpsSub}>{(fmtDate(activity.date) || t.unknownDate)} · {t.noTrack}</Text>
+            {/* Sport and date are the screen's header (App.tsx); only what is new goes here. */}
+            <Text style={styles.noGpsSub}>{t.noTrack}</Text>
           </View>
           {/* Overview / Charts / Laps - the same panel as the map view (desktop parity). */}
           <ActivityPanel activity={activity} meta={meta} hasMap={false} mapView={null}

@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Path, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
+import { fmtDate } from '../i18n';
+import { niceTicks } from './chartTicks';
 
 // A small line chart for a dated metric series — the Android counterpart of the desktop's
 // MetricChart.qml, used by the Weight and Health screens (André, 2026-08-26: "port everything
@@ -68,14 +70,14 @@ export function MetricChart({
       ) : (
         <>
           <Chart series={series} geom={geom} height={height} color={t.primary} grid={t.border}
-            goal={goal} goalColor={t.mutedText} unit={unit} />
+            goal={goal} goalColor={t.mutedText} unit={unit} labelColor={t.mutedText} />
           {/* Axis dates live OUTSIDE the SVG on purpose. The chart stretches to the card width
               via preserveAspectRatio="none", which scales glyphs horizontally too - dates drawn
               inside it came out visibly squashed. Found by actually driving the app, 2026-08-26.
               The year is kept: slicing it off made both ends of a 365-day window read "08-26". */}
           <View style={styles.axis}>
-            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{series[0].date}</Text>
-            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{series[series.length - 1].date}</Text>
+            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{fmtDate(series[0].date) || series[0].date}</Text>
+            <Text style={[styles.axisLabel, { color: t.mutedText }]}>{fmtDate(series[series.length - 1].date) || series[series.length - 1].date}</Text>
           </View>
         </>
       )}
@@ -84,7 +86,7 @@ export function MetricChart({
 }
 
 function Chart({
-  series, geom, height, color, grid, goal = 0, goalColor = grid, unit = '',
+  series, geom, height, color, grid, goal = 0, goalColor = grid, unit = '', labelColor = grid,
 }: {
   series: MetricPoint[];
   geom: { min: number; max: number };
@@ -94,6 +96,7 @@ function Chart({
   goal?: number;
   goalColor?: string;
   unit?: string;
+  labelColor?: string;
 }) {
   // The viewBox matches the REAL laid-out width, measured via onLayout, rather than a fixed 300
   // stretched with preserveAspectRatio="none". Stretching scaled the horizontal axis about 4x on
@@ -102,7 +105,12 @@ function Chart({
   // Measuring costs one extra render on first layout and keeps strokes a true 2px everywhere.
   const [w, setW] = useState(0);
   const H = height;
-  const padL = 4, padR = 4, padT = 8, padB = 6;
+  // Vertical scale (2026-10-03): a few round values down the left, each with a faint line, so
+  // the curve can be read and not just looked at. The gutter is sized for the widest label.
+  const { ticks, decimals: tickDec } = niceTicks(geom.min, geom.max);
+  const tickText = (v: number) => v.toFixed(tickDec);
+  const padL = 8 + Math.max(0, ...ticks.map(v => tickText(v).length)) * 6;
+  const padR = 4, padT = 8, padB = 6;
   const W = w || 300;
 
   const x = (i: number) => padL + (W - padL - padR) * (series.length === 1 ? 0.5 : i / (series.length - 1));
@@ -116,13 +124,19 @@ function Chart({
       <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
         {/* baseline only - a faint reference, not a full grid, so the line stays the subject */}
         <Line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
+        {ticks.map(v => (
+          <React.Fragment key={v}>
+            <Line x1={padL} y1={y(v)} x2={W - padR} y2={y(v)} stroke={grid} strokeOpacity={0.5} strokeWidth={1} />
+            <SvgText x={padL - 5} y={y(v) + 3} fill={labelColor} fontSize={10} textAnchor="end">{tickText(v)}</SvgText>
+          </React.Fragment>
+        ))}
         <Path d={d} stroke={color} strokeWidth={1.6} fill="none" />
         {/* optional dashed goal line + label */}
         {goal > 0 && (
           <>
             <Line x1={padL} y1={y(goal)} x2={W - padR} y2={y(goal)}
               stroke={goalColor} strokeOpacity={0.6} strokeWidth={1.5} strokeDasharray="4,4" />
-            <SvgText x={padL + 2} y={y(goal) - 3} fill={goalColor} fontSize={9} textAnchor="start">
+            <SvgText x={W - padR - 2} y={y(goal) - 3} fill={goalColor} fontSize={9} textAnchor="end">
               {goal}{unit} goal
             </SvgText>
           </>

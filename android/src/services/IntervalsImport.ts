@@ -1,8 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { backfillIntervalsTracks } from './IntervalsTracks';
 import {
-  markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord,
+  markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord, updateImportedActivity,
 } from '../database/db';
+import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from './SportNames';
 
 // Import activities FROM intervals.icu INTO the app's local DB (André, 2026-08-18: "I would
 // prefer to have all activities living on my app"). Pull-only. Brings in EVERY activity as a
@@ -17,18 +19,16 @@ import {
 // distance) is skipped so it never double-counts a move already synced off the watch.
 const API_BASE = 'https://intervals.icu/api/v1';
 
-// intervals.icu activity `type` -> this app's activity_type label (matches the watch-side
-// labels used for gear auto-assign etc.). Unknown types pass through as-is.
-const TYPE_MAP: Record<string, string> = {
+// What this file's own table produced before 2026-10-03 (a short private copy that had drifted
+// from the desktop's). Kept only to recognise rows it wrote, so a re-import can give them the
+// shared name without touching a sport the user changed by hand.
+const OLD_TYPE_MAP: Record<string, string> = {
   Ride: 'Cycling', VirtualRide: 'Cycling', MountainBikeRide: 'Mountain biking',
   GravelRide: 'Cycling', CyclocrossRide: 'Cycling', TrackRide: 'Cycling',
   Run: 'Running', VirtualRun: 'Running', TrailRun: 'Trail running',
   Walk: 'Walking', Hike: 'Hiking', Swim: 'Swimming', OpenWaterSwim: 'Swimming',
 };
-
-function mapType(t: string): string {
-  return TYPE_MAP[t] || t || 'Other';
-}
+const oldMapType = (t: string) => OLD_TYPE_MAP[t] || t || 'Other';
 
 export interface ImportResult {
   imported: number;
@@ -56,18 +56,40 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
   if (!Array.isArray(acts)) return { imported: 0, skipped: 0 };
 
   const knownIds = new Set(await getAllSyncedIds());
-  const watchActs = (await getAllActivities()).filter(e => !e.id.startsWith('icu:'));
+  const all = await getAllActivities();
+  const watchActs = all.filter(e => !e.id.startsWith('icu:'));
+  const icuById = new Map(all.filter(e => e.id.startsWith('icu:')).map(e => [e.id, e] as [string, ActivityRecord]));
 
   let imported = 0;
   let skipped = 0;
   for (const a of acts) {
     const icuId = `icu:${a?.id}`;
-    if (!a?.id || knownIds.has(icuId)) { skipped++; continue; }
+    if (!a?.id) { skipped++; continue; }
+    const rawType = String(a.type || '');
+    const type = sportNameForIntervalsType(rawType);
+    const energy_kcal = Math.round(Number(a.calories ?? 0)) || 0;
+    if (knownIds.has(icuId)) {
+      // Already here. Bring an earlier import up to date: calories (never stored before
+      // 2026-10-03) and the shared sport name - the latter only where the row still holds what
+      // the old import wrote, so a sport the user changed by hand stays.
+      const have = icuById.get(icuId);
+      if (have) {
+        const fix: { activity_type?: string; energy_kcal?: number } = {};
+        if (energy_kcal > 0 && !have.energy_kcal) fix.energy_kcal = energy_kcal;
+        if (have.activity_type !== type
+            && (have.activity_type === oldMapType(rawType) || have.activity_type === canonicalSportName(oldMapType(rawType))))
+          fix.activity_type = type;
+        if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
+          await updateImportedActivity(icuId, fix);
+      }
+      skipped++; continue;
+    }
 
     const date = String(a.start_date_local || a.start_date || '').slice(0, 19);
     const distance_m = Math.round(Number(a.icu_distance ?? a.distance ?? 0)) || 0;
     const duration_s = Math.round(Number(a.moving_time ?? a.elapsed_time ?? 0)) || 0;
-    const type = mapType(String(a.type || ''));
+    // Junk/test entries never come in (desktop rule since 2026-08-24).
+    if (isJunkActivity(duration_s, distance_m)) { skipped++; continue; }
 
     // Skip if this is really a watch move already synced locally (same day, type, ~distance).
     const day = date.slice(0, 10);
@@ -91,6 +113,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       d_plus: Math.round(Number(a.total_elevation_gain ?? a.icu_elevation_gain ?? 0)) || 0,
       activity_type: type,
       device,
+      energy_kcal,
     };
     await markActivitySynced(record);
     knownIds.add(icuId);
@@ -108,4 +131,15 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
   }
 
   return { imported, skipped };
+}
+
+// One quiet re-import after the 2026-10-03 update, so activities imported earlier get their
+// calories and the shared sport names without the user finding the button in Settings. No-op
+// when intervals.icu is not connected (it then runs on the first launch after connecting).
+const BACKFILL_KEY = 'intervals.import.backfill.kcal1';
+export async function backfillIntervalsImportOnce(): Promise<void> {
+  if (await AsyncStorage.getItem(BACKFILL_KEY)) return;
+  if (!(await getIntervalsIcuCredentials())) return;
+  await importActivitiesFromIntervals();
+  await AsyncStorage.setItem(BACKFILL_KEY, '1');
 }

@@ -107,10 +107,9 @@ export function NavShell({
 
   const navList = (
     <View style={{ flex: 1 }}>
-      <View style={[styles.navHead, { borderBottomColor: t.border }]}>
-        <Text style={[styles.navBrand, { color: t.text }]}>Sommet</Text>
-        <Text style={[styles.navVer, { color: t.mutedText }]}>v{APP_VERSION}</Text>
-      </View>
+      {/* No brand header here: the app bar right above already says "Sommet" next to the ☰ that
+          opens and closes this menu (André, 2026-10-03: the menu and the hamburger read as two
+          menus). The version moved into the app bar. */}
       {home && <View style={styles.pin}><Row item={home} /></View>}
       {/* Flat list, no groups (André 2026-08-29: "why you introduced advanced ... don't introduce
           stuff without me asking"). Home is pinned above; everything else - Settings included, as
@@ -131,6 +130,7 @@ export function NavShell({
           <View style={[styles.bar, { backgroundColor: t.text }]} />
         </TouchableOpacity>
         <Text style={[styles.appBrand, { color: t.text }]}>Sommet</Text>
+        <Text style={[styles.navVer, { color: t.mutedText, marginLeft: 8 }]}>v{APP_VERSION}</Text>
       </View>
 
       <View style={styles.bodyRow}>

@@ -6,6 +6,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { MetricChart } from '../components/MetricChart';
+import { fmtDate } from '../i18n';
 import {
   loadWeightSeries, addManualWeight, removeManualWeight, WeightPoint,
 } from '../services/WellnessService';
@@ -54,15 +55,20 @@ export default function WeightScreen() {
     const kg = parseFloat(kgInput.replace(',', '.'));
     // #10 (André, 2026-09-02): tell the user why, instead of silently doing nothing.
     // WeightScreen uses plain literals (no i18n import), so keep these literal.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-      Alert.alert('Invalid date', 'Enter the date as YYYY-MM-DD (for example 2026-09-02).');
+    // Day-first like every other date in the app (André, 2026-10-03: "Use only the first for
+    // everything"); the stored key stays ISO. The old YYYY-MM-DD typing is still understood.
+    const dm = dateInput.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+    const iso = dm ? `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`
+      : /^\d{4}-\d{2}-\d{2}$/.test(dateInput.trim()) ? dateInput.trim() : '';
+    if (!iso || isNaN(new Date(iso).getTime())) {
+      Alert.alert('Invalid date', 'Enter the date as DD/MM/YYYY (for example 02/09/2026).');
       return;
     }
     if (!(kg > 0)) {
       Alert.alert('Invalid weight', 'Enter a valid weight in kg.');
       return;
     }
-    await addManualWeight(dateInput, kg);
+    await addManualWeight(iso, kg);
     setShowAdd(false); setKgInput('');
     refresh();
   }
@@ -105,7 +111,7 @@ export default function WeightScreen() {
             <View>
               <Text style={[styles.label, { color: t.mutedText }]}>Latest</Text>
               <Text style={[styles.big, { color: t.text }]}>{latest.weightKg.toFixed(1)} kg</Text>
-              <Text style={[styles.caption, { color: t.mutedText }]}>{latest.date}</Text>
+              <Text style={[styles.caption, { color: t.mutedText }]}>{fmtDate(latest.date) || latest.date}</Text>
             </View>
             {change !== null && (
               <View style={{ marginLeft: v3Spacing.large * 2 }}>
@@ -135,7 +141,7 @@ export default function WeightScreen() {
       {!showAdd ? (
         <TouchableOpacity
           onPress={() => {
-            setDateInput(new Date().toISOString().slice(0, 10));
+            setDateInput(fmtDate(new Date()));
             setShowAdd(true);
           }}
           style={[styles.button, { backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]}
@@ -148,7 +154,7 @@ export default function WeightScreen() {
             <TextInput
               value={dateInput}
               onChangeText={setDateInput}
-              placeholder="YYYY-MM-DD"
+              placeholder="DD/MM/YYYY"
               placeholderTextColor={t.mutedText}
               style={[styles.input, { color: t.text, backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small, flex: 1.4 }]}
             />
@@ -185,7 +191,7 @@ export default function WeightScreen() {
           <Text style={[styles.label, { color: t.mutedText, marginBottom: v3Spacing.small }]}>Manual entries</Text>
           {series.filter(p => p.source === 'manual').reverse().map(p => (
             <View key={p.date} style={[styles.row, { justifyContent: 'space-between', paddingVertical: 6 }]}>
-              <Text style={{ color: t.text, fontSize: v3Type.body }}>{p.date}</Text>
+              <Text style={{ color: t.text, fontSize: v3Type.body }}>{fmtDate(p.date) || p.date}</Text>
               <Text style={{ color: t.text, fontSize: v3Type.body }}>{p.weightKg.toFixed(1)} kg</Text>
               <TouchableOpacity onPress={async () => { await removeManualWeight(p.date); refresh(); }} hitSlop={8}>
                 <Text style={{ color: t.error, fontSize: v3Type.body }}>Remove</Text>

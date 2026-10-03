@@ -1,4 +1,5 @@
 #include "activityservice.h"
+#include "sport_names_generated.h"
 #include "apppaths.h"
 
 #include <QDebug>
@@ -1473,51 +1474,29 @@ static QString friendlySource(const QString &source)
     return source;  // unknown connector: show it verbatim rather than nothing
 }
 
+// A readable form of a sport type no table knows: "EMountainBikeRide" -> "E mountain bike ride",
+// "resort_skiing" -> "Resort skiing". Never the raw key (André, 2026-10-03: the list showed
+// "EMountainBikeRide" and "HighIntensityIntervalTraining").
+static QString humanizeSportType(const QString &type)
+{
+    QString out;
+    for (int i = 0; i < type.size(); ++i) {
+        const QChar c = type.at(i);
+        if (c == QLatin1Char('_')) { out += QLatin1Char(' '); continue; }
+        if (c.isUpper() && i > 0 && !out.endsWith(QLatin1Char(' ')))
+            out += QLatin1Char(' ');
+        out += (i == 0) ? c.toUpper() : c.toLower();
+    }
+    out = out.simplified();
+    return out.isEmpty() ? QStringLiteral("Unspecified sport") : out;
+}
+
+// intervals.icu activity type -> Suunto's sport name. The table is shared/sport_names.json (the
+// same one Android uses), so a move reads the same in both apps whatever recorded it.
 static QString sportNameForIntervalsType(const QString &type)
 {
-    static const QHash<QString, QString> map = {
-        {QStringLiteral("Run"), QStringLiteral("Running")},
-        {QStringLiteral("TrailRun"), QStringLiteral("Trail running")},
-        {QStringLiteral("VirtualRun"), QStringLiteral("Treadmill")},
-        {QStringLiteral("Ride"), QStringLiteral("Cycling")},
-        {QStringLiteral("VirtualRide"), QStringLiteral("Indoor cycling")},
-        {QStringLiteral("GravelRide"), QStringLiteral("Cycling")},
-        {QStringLiteral("EBikeRide"), QStringLiteral("Cycling")},
-        {QStringLiteral("MountainBikeRide"), QStringLiteral("Mountain biking")},
-        {QStringLiteral("Walk"), QStringLiteral("Walking")},
-        {QStringLiteral("Hike"), QStringLiteral("Hiking")},
-        {QStringLiteral("Swim"), QStringLiteral("Pool swimming")},
-        {QStringLiteral("OpenWaterSwim"), QStringLiteral("Openwater swimming")},
-        {QStringLiteral("Rowing"), QStringLiteral("Indoor rowing")},
-        {QStringLiteral("Kayaking"), QStringLiteral("Kayaking")},
-        {QStringLiteral("StandUpPaddling"), QStringLiteral("Standup paddling")},
-        {QStringLiteral("WeightTraining"), QStringLiteral("Weight training")},
-        {QStringLiteral("Workout"), QStringLiteral("Indoor training")},
-        {QStringLiteral("Elliptical"), QStringLiteral("Crosstrainer")},
-        {QStringLiteral("Yoga"), QStringLiteral("Yoga / pilates")},
-        {QStringLiteral("NordicSki"), QStringLiteral("Cross-country skiing")},
-        {QStringLiteral("BackcountrySki"), QStringLiteral("Ski touring")},
-        {QStringLiteral("AlpineSki"), QStringLiteral("Alpine skiing")},
-        {QStringLiteral("Snowboard"), QStringLiteral("Snowboarding")},
-        {QStringLiteral("Snowshoe"), QStringLiteral("Snow shoeing")},
-        {QStringLiteral("Golf"), QStringLiteral("Golf")},
-        {QStringLiteral("Tennis"), QStringLiteral("Tennis")},
-        {QStringLiteral("Soccer"), QStringLiteral("Soccer / football")},
-        {QStringLiteral("Climbing"), QStringLiteral("Climbing")},
-        {QStringLiteral("RockClimbing"), QStringLiteral("Climbing")},
-        {QStringLiteral("Rowing"), QStringLiteral("Indoor rowing")},
-        {QStringLiteral("Canoeing"), QStringLiteral("Canoeing")},
-        {QStringLiteral("Badminton"), QStringLiteral("Badminton")},
-        {QStringLiteral("Skateboard"), QStringLiteral("Unspecified sport")},
-        {QStringLiteral("Surfing"), QStringLiteral("Surfing")},
-        {QStringLiteral("Windsurf"), QStringLiteral("Windsurfing")},
-        {QStringLiteral("Kitesurf"), QStringLiteral("Kitesurfing / kiting")},
-        {QStringLiteral("Sail"), QStringLiteral("Sailing")},
-    };
-    const QString mapped = map.value(type);
-    if (!mapped.isEmpty())
-        return mapped;
-    return type.isEmpty() ? QStringLiteral("Unspecified sport") : type;
+    const QString mapped = SportNames::intervals().value(type);
+    return mapped.isEmpty() ? humanizeSportType(type) : mapped;
 }
 
 void ActivityService::importActivitiesInto(const QJsonArray &arr)
@@ -1614,34 +1593,11 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     backfillIntervalsTracks(150);
 }
 
-// Garmin activity typeKey -> this app's canonical sport name (same idea as
-// sportNameForIntervalsType, but Garmin's keys). Falls back to a readable form of the key.
+// Garmin activity typeKey -> Suunto's sport name (shared/sport_names.json, "garmin").
 static QString sportNameForGarminType(const QString &typeKey)
 {
-    static const QHash<QString, QString> map = {
-        {QStringLiteral("running"), QStringLiteral("Running")},
-        {QStringLiteral("trail_running"), QStringLiteral("Trail running")},
-        {QStringLiteral("treadmill_running"), QStringLiteral("Running")},
-        {QStringLiteral("cycling"), QStringLiteral("Cycling")},
-        {QStringLiteral("road_biking"), QStringLiteral("Cycling")},
-        {QStringLiteral("mountain_biking"), QStringLiteral("Mountain biking")},
-        {QStringLiteral("indoor_cycling"), QStringLiteral("Indoor cycling")},
-        {QStringLiteral("walking"), QStringLiteral("Walking")},
-        {QStringLiteral("hiking"), QStringLiteral("Trekking")},
-        {QStringLiteral("lap_swimming"), QStringLiteral("Pool swimming")},
-        {QStringLiteral("open_water_swimming"), QStringLiteral("Openwater swim")},
-        {QStringLiteral("strength_training"), QStringLiteral("Gym training")},
-        {QStringLiteral("fitness_equipment"), QStringLiteral("Indoor training")},
-        {QStringLiteral("mountaineering"), QStringLiteral("Mountaineering")},
-        {QStringLiteral("resort_skiing_snowboarding"), QStringLiteral("Alpine skiing")},
-        {QStringLiteral("cross_country_skiing"), QStringLiteral("Cross country skiing")},
-    };
-    const QString mapped = map.value(typeKey);
-    if (!mapped.isEmpty())
-        return mapped;
-    QString s = typeKey;
-    s.replace(QLatin1Char('_'), QLatin1Char(' '));
-    return s.isEmpty() ? QStringLiteral("Unspecified sport") : s;
+    const QString mapped = SportNames::garmin().value(typeKey);
+    return mapped.isEmpty() ? humanizeSportType(typeKey) : mapped;
 }
 
 void ActivityService::importFromGarmin(int days)

@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getAllActivities, markActivitySynced, getSommetTombstones, addSommetTombstone,
-  deleteActivitiesByUid, getActivityByUid, sommetUid,
+  deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
 } from '../database/db';
+import { canonicalSportName, isJunkActivity } from './SportNames';
 import { readGpxFile, writeGpxFile } from './GpxService';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
@@ -15,6 +16,9 @@ import { readGpxFile, writeGpxFile } from './GpxService';
 
 const CFG_KEY = 'sommet.sync.cfg';
 const LASTPULL_KEY = 'sommet.sync.lastPull';
+// One full pull after the 2026-10-03 update, so rows pulled earlier get their calories and the
+// shared sport names (a normal pull only asks for what changed since the last one).
+const REPULL_KEY = 'sommet.sync.repull.kcal1';
 const PUSHED_KEY = 'sommet.sync.blobsPushed';
 
 export interface SommetSyncCfg { url: string; token: string; }
@@ -107,7 +111,8 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
   let pulled = 0;
 
   // ── PULL ──────────────────────────────────────────────────────────────────────
-  const since = Number((await AsyncStorage.getItem(LASTPULL_KEY)) || '0');
+  const repullDone = await AsyncStorage.getItem(REPULL_KEY);
+  const since = repullDone ? Number((await AsyncStorage.getItem(LASTPULL_KEY)) || '0') : 0;
   const remote = await sommetHttp(url, token, 'GET', { c: 'activities', since: String(since) });
   if (remote === null) return { pulled: 0, pushed: 0, ok: false }; // unreachable: leave local alone
 
@@ -126,7 +131,21 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
     if (tombstones.has(uid)) continue;
     const remoteUpdated = Number(rec.updated_at || 0);
     const existing = await getActivityByUid(uid);
-    if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path) continue; // ours is newer & has track
+    const sport = canonicalSportName(String(rec.activity_type || rec.name || ''));
+    const energy = Math.round(Number(rec.energy_kcal || 0)) || 0;
+    // Junk/test entries (under a minute AND under 100 m) are not kept - same rule as the
+    // desktop's import; they reach the shared store from a watch read on the desktop.
+    if (isJunkActivity(Number(rec.duration_s || 0), Number(rec.distance_m || 0))) continue;
+    if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path) { // ours is newer & has track
+      // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
+      const fix: { activity_type?: string; energy_kcal?: number } = {};
+      if (energy > 0 && !existing.energy_kcal) fix.energy_kcal = energy;
+      if (sport && existing.activity_type !== sport
+          && canonicalSportName(existing.activity_type) === sport) fix.activity_type = sport;
+      if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
+        await updateImportedActivity(existing.id, fix);
+      continue;
+    }
 
     const id = idFromDate(start, uid);
     let gpxPath = existing?.gpx_path ?? '';
@@ -142,13 +161,15 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
       duration_s: Number(rec.duration_s || 0),
       distance_m: Number(rec.distance_m || 0),
       d_plus: Number(rec.ascent_m || 0),
-      activity_type: String(rec.activity_type || rec.name || ''),
+      activity_type: sport,
       device,
+      energy_kcal: energy,
       updated_at: remoteUpdated || Date.now(),
     });
     pulled++;
   }
   if (remote.now) await AsyncStorage.setItem(LASTPULL_KEY, String(remote.now));
+  if (!repullDone) await AsyncStorage.setItem(REPULL_KEY, '1');
 
   // ── PUSH ──────────────────────────────────────────────────────────────────────
   const acts = await getAllActivities();
@@ -172,6 +193,7 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
       duration_s: a.duration_s,
       distance_m: a.distance_m,
       ascent_m: a.d_plus,
+      energy_kcal: a.energy_kcal || 0,
       source: a.id.startsWith('icu:') ? 'intervals' : 'watch',
       has_track: !!gpx,
       track_fmt: 'gpx',

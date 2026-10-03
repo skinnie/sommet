@@ -12,6 +12,8 @@ Two sources, one place to edit:
                                  checked by tools/test_activity_streams_parity.js)
   shared/activity_chart_draw.js  how the charts are DRAWN (canvas calls), used by the desktop's QML
                                  Canvas and by the Android WebView chart page alike
+  shared/sport_names.json        every source's sport type -> Suunto's sport name (intervals.icu,
+                                 Garmin, ...), so one activity reads the same in both apps
 Copies: the desktop embeds desktop/assets/activity_view.json (Qt resource) and imports
 desktop/qml/ActivityViewLogic.js (QML needs a ".pragma library" first line, added here);
 Android's bundler (Metro) only sees files inside android/, so it gets android/src/config/.
@@ -26,15 +28,38 @@ JSON_SRC = ROOT / "shared" / "activity_view.json"
 LOGIC_SRC = ROOT / "shared" / "activity_view_logic.js"
 STREAMS_SRC = ROOT / "shared" / "activity_streams.js"
 DRAW_SRC = ROOT / "shared" / "activity_chart_draw.js"
+SPORTS_SRC = ROOT / "shared" / "sport_names.json"
 PRAGMA = b".pragma library\n// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 HEADER = b"// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 
 
+def sport_names_header(d):
+    """The sport table as C++ (the desktop's importers are C++ and run before any QML exists)."""
+    def lit(x):
+        return 'QStringLiteral("%s")' % x.replace("\\", "\\\\").replace('"', '\\"')
+    out = ["// GENERATED from shared/sport_names.json by tools/gen_activity_view.py - edit that file.",
+           "#pragma once", "#include <QHash>", "#include <QSet>", "#include <QString>", "",
+           "namespace SportNames {"]
+    for sec in ("intervals", "garmin", "aliases"):
+        out.append("inline const QHash<QString, QString> &%s()\n{" % sec)
+        out.append("    static const QHash<QString, QString> map = {")
+        out += ["        {%s, %s}," % (lit(k), lit(v)) for k, v in d[sec].items()]
+        out += ["    };", "    return map;", "}", ""]
+    out.append("inline const QSet<QString> &foot()\n{")
+    out.append("    static const QSet<QString> set = {%s};" % ", ".join(lit(f) for f in d["foot"]))
+    out += ["    return set;", "}", "}  // namespace SportNames", ""]
+    return "\n".join(out).encode()
+
+
 def targets():
     j = JSON_SRC.read_bytes()
+    sports = SPORTS_SRC.read_bytes()
+    sports_d = json.loads(sports)                 # refuse to copy invalid JSON
     json.loads(j)                                 # refuse to copy invalid JSON
     logic = LOGIC_SRC.read_bytes()
-    return [(ROOT / "desktop" / "assets" / "activity_view.json", j),
+    return [(ROOT / "android" / "src" / "config" / "sport_names.json", sports),
+            (ROOT / "desktop" / "src" / "services" / "sport_names_generated.h", sport_names_header(sports_d)),
+            (ROOT / "desktop" / "assets" / "activity_view.json", j),
             (ROOT / "android" / "src" / "config" / "activity_view.json", j),
             (ROOT / "desktop" / "qml" / "ActivityViewLogic.js", PRAGMA + logic),
             (ROOT / "android" / "src" / "config" / "activityViewLogic.js", HEADER + logic),

@@ -3,7 +3,9 @@ import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl,
   TextInput, TouchableOpacity,
 } from 'react-native';
-import Svg, { Path, Line } from 'react-native-svg';
+import Svg, { Path, Line, Text as SvgText } from 'react-native-svg';
+import { niceTicks } from '../components/chartTicks';
+import { fmtDate } from '../i18n';
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { loadCoachData, CoachData, ReadinessLight, WorkoutPick } from '../services/CoachService';
@@ -171,7 +173,8 @@ export default function CoachScreen() {
                 <View style={[styles.swatch, { backgroundColor: t.mutedText, opacity: 0.6 }]} />
                 <Text style={[styles.tileLabel, { color: t.mutedText }]}>Fatigue</Text>
               </View>
-              <FitnessChart chart={data.chart} fitnessColor={t.primary} fatigueColor={t.mutedText} grid={t.border} />
+              <FitnessChart chart={data.chart} fitnessColor={t.primary} fatigueColor={t.mutedText} grid={t.border}
+                labelColor={t.mutedText} />
             </View>
           )}
 
@@ -257,24 +260,28 @@ export default function CoachScreen() {
 }
 
 function FitnessChart({
-  chart, fitnessColor, fatigueColor, grid,
+  chart, fitnessColor, fatigueColor, grid, labelColor,
 }: {
   chart: { date: string; fitness: number; fatigue: number }[];
   fitnessColor: string;
   fatigueColor: string;
   grid: string;
+  labelColor: string;
 }) {
   // Real measured width, not a stretched fixed viewBox - see MetricChart.tsx for why
   // (preserveAspectRatio="none" scales strokes with the axis and renders them thick/blocky).
   const [w, setW] = useState(0);
-  const H = 110, padT = 6, padB = 6, padX = 2;
+  const H = 110, padT = 6, padB = 6, padR = 2;
   const W = w || 300;
   // Both series share ONE scale, otherwise the fitness/fatigue crossover - the whole point of
   // this chart - would be a meaningless artefact of two different axes.
   const all = chart.flatMap(p => [p.fitness, p.fatigue]);
   const max = Math.max(...all) * 1.1 || 1;
+  // Vertical scale (2026-10-03): round load values down the left, same as MetricChart.
+  const { ticks } = niceTicks(0, max);
+  const padX = 8 + Math.max(1, ...ticks.map(v => String(Math.round(v)).length)) * 6;
 
-  const x = (i: number) => padX + (W - padX * 2) * (i / (chart.length - 1));
+  const x = (i: number) => padX + (W - padX - padR) * (i / (chart.length - 1));
   const y = (v: number) => padT + (H - padT - padB) * (1 - v / max);
   const path = (sel: (p: typeof chart[0]) => number) =>
     chart.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(sel(p)).toFixed(1)}`).join(' ');
@@ -282,11 +289,23 @@ function FitnessChart({
   return (
     <View onLayout={e => setW(Math.round(e.nativeEvent.layout.width))} style={{ width: '100%' }}>
       <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-        <Line x1={padX} y1={H - padB} x2={W - padX} y2={H - padB} stroke={grid} strokeWidth={1} />
+        <Line x1={padX} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
+        {ticks.filter(v => v > 0).map(v => (
+          <React.Fragment key={v}>
+            <Line x1={padX} y1={y(v)} x2={W - padR} y2={y(v)} stroke={grid} strokeOpacity={0.5} strokeWidth={1} />
+            <SvgText x={padX - 5} y={y(v) + 3} fill={labelColor} fontSize={10} textAnchor="end">{Math.round(v)}</SvgText>
+          </React.Fragment>
+        ))}
         <Path d={path(p => p.fatigue)} stroke={fatigueColor} strokeWidth={1.2} fill="none"
               strokeDasharray="3,3" opacity={0.7} />
         <Path d={path(p => p.fitness)} stroke={fitnessColor} strokeWidth={1.8} fill="none" />
       </Svg>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, paddingLeft: padX }}>
+        <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>{fmtDate(chart[0].date) || chart[0].date}</Text>
+        <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>
+          {fmtDate(chart[chart.length - 1].date) || chart[chart.length - 1].date}
+        </Text>
+      </View>
     </View>
   );
 }
