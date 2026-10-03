@@ -60,6 +60,9 @@ desktop/assets/fonts/*
 !desktop/assets/coach/
 desktop/assets/coach/*
 !desktop/assets/coach/systm-sample.json
+# The activity screen's config (2026-09-27) - a generated copy of shared/activity_view.json
+# (tools/gen_activity_view.py); compiled into the app as a resource, so it must be tracked.
+!desktop/assets/activity_view.json
 full-assets/
 # Flash-region dumps from the watch — carry the watch serial number; never commit.
 backups/

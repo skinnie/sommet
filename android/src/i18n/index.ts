@@ -63,7 +63,7 @@ const fr = {
   done:         (n: number) => `${n} log${n !== 1 ? 's' : ''} importé${n !== 1 ? 's' : ''}`,
   error:        'Erreur',
   unknownError: 'Erreur inconnue',
-  viewActivities: 'Voir les activités',
+  viewActivities: 'Activités',
   homeNavHome: 'Accueil',
   homeConnVia: (via: string) => `via ${via}`,
   homeConnViaUsb: 'USB',
@@ -120,7 +120,7 @@ const fr = {
   homeBleReadyBtn: 'Prêt',
   homeConnectingBle: 'Connexion Bluetooth…',
   homeActivitiesBtn: 'ACTIVITÉS',
-  homeRoutesBtn:     'ROUTES',
+  homeRoutesBtn:     'Routes',
   homePoisBtn:       'POI',
   homeSyncActivitiesBtn: 'SYNC ACTIVITÉS',
   homeBatteryLabel: 'batterie',
@@ -371,7 +371,7 @@ const fr = {
     "la remplacera. C'est fait pour charger une route juste avant de partir, pas pour " +
     "la stocker durablement.",
   sendRouteConfirmBtn: 'Envoyer',
-  routeScreenTitle:   'Route',
+  routeScreenTitle:   'Routes',
   routeSendSection:   'Envoyer une route',
   routePlannerTitle:  'Planifier une route',
   routeWatchNote: 'Les routes envoyées à la montre seront effacées par SuuntoLink et ne sont pas transmises à l’app Suunto.',
@@ -474,7 +474,7 @@ const fr = {
   ephemerisGpsOnlyInfo: 'Cette montre peut aussi utiliser les satellites GLONASS et dispose de sa propre mémoire pour leurs données orbitales. Les logiciels Suunto ne les lui envoient jamais, donc ces satellites démarrent « à froid » à chaque fois. Sommet envoie les données orbitales GPS et GLONASS, ce qui peut accélérer l\'acquisition d\'une position. Cochez pour n\'envoyer que le GPS.',
 
   // SportModesScreen — Ambit3 CustomModes (2026-08-08), Ambit3-only, pas disponible sur Kailash
-  sportModesButton:      'MODES SPORT',
+  sportModesButton:      'Modes sport',
   sportModesScreenTitle: 'Modes sport',
   sportModesDesc:
     'Modifie les modes sport de la montre : noms, autolap, limites FC, capteurs et les écrans.',
@@ -749,7 +749,7 @@ const fr = {
   experimentalIntervalsDesc: 'Créer une séance d’intervalles (Suunto App ou séance planifiée).',
   experimentalSmartSensor: 'Smart Sensor',
   experimentalSmartSensorDesc: 'Ceinture cardio Suunto Smart Sensor via Bluetooth.',
-  experimentalWorkoutCalendar: 'Calendrier d’entraînement',
+  experimentalWorkoutCalendar: 'Programme d’entraînement',
   experimentalWorkoutCalendarDesc: 'Séances datées dans le menu WORKOUT, nommées « jj/mm_nom ».',
   smartSensorScreenTitle: 'Smart Sensor',
   appZoneScreenTitle: 'App Zone',
@@ -915,7 +915,7 @@ const en: typeof fr = {
   done:         (n: number) => `${n} log${n !== 1 ? 's' : ''} imported`,
   error:        'Error',
   unknownError: 'Unknown error',
-  viewActivities: 'View activities',
+  viewActivities: 'Activities',
   homeNavHome: 'Home',
   homeConnVia: (via: string) => `via ${via}`,
   homeConnViaUsb: 'USB',
@@ -972,8 +972,8 @@ const en: typeof fr = {
   homeBleReadyBtn: 'Ready',
   homeConnectingBle: 'Connecting via Bluetooth…',
   homeActivitiesBtn: 'ACTIVITIES',
-  homeRoutesBtn:     'ROUTES',
-  homePoisBtn:       'POIS',
+  homeRoutesBtn:     'Routes',
+  homePoisBtn:       'POIs',
   homeSyncActivitiesBtn: 'SYNC ACTIVITIES',
   homeBatteryLabel: 'battery',
   homeHwLabel:      'hardware',
@@ -1206,7 +1206,7 @@ const en: typeof fr = {
     "even just the Suunto phone app coming into Bluetooth range, will replace it. " +
     "This is for loading a route right before you go, not for permanent storage.",
   sendRouteConfirmBtn: 'Send',
-  routeScreenTitle:   'Route',
+  routeScreenTitle:   'Routes',
   routeSendSection:   'Send a route',
   routePlannerTitle:  'Plan a route',
   routeWatchNote: 'Routes that are sent to the watch will be erased by SuuntoLink and not pushed to the Suunto app.',
@@ -1309,7 +1309,7 @@ const en: typeof fr = {
   ephemerisGpsOnlyInfo: 'This watch can also use GLONASS satellites, and has its own storage for their orbital data. Suunto\'s software never sends it to this model, so those satellites start cold every time. Sommet sends both GPS and GLONASS orbital data, which can speed up getting a fix. Tick this to send GPS only.',
 
   // SportModesScreen — Ambit3 CustomModes (2026-08-08), Ambit3-only, not available on Kailash
-  sportModesButton:      'SPORT MODES',
+  sportModesButton:      'Sport Modes',
   sportModesScreenTitle: 'Sport Modes',
   sportModesDesc:
     'Edit the watch\'s sport modes: names, autolap, HR limits, sensors and the display screens.',
@@ -1580,7 +1580,7 @@ const en: typeof fr = {
   experimentalIntervalsDesc: 'Build an interval workout (Suunto App or a planned move).',
   experimentalSmartSensor: 'Smart Sensor',
   experimentalSmartSensorDesc: 'Suunto Smart Sensor heart-rate belt over Bluetooth.',
-  experimentalWorkoutCalendar: 'Workout Calendar',
+  experimentalWorkoutCalendar: 'Training Program',
   experimentalWorkoutCalendarDesc: 'Dated workouts in the WORKOUT menu, named "dd/mm_name".',
   smartSensorScreenTitle: 'Smart Sensor',
   appZoneScreenTitle: 'App Zone',

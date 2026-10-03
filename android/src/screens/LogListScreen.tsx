@@ -8,8 +8,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import {
-  ActivityRecord, getAllActivities, markActivitySynced,
-  deleteActivity, updateActivityType, isActivityDeleted,
+  ActivityRecord, markActivitySynced, getAllSyncedIds,
+  deleteActivity, isActivityDeleted,
+  ActivityPageRow, getActivityPage, getActivityTypes, saveActivityMetrics, getActivitiesMissingMetrics,
+  ACTIVITY_PAGE, GPX_METRIC_COLUMNS,
 } from '../database/db';
 import { readGpxFile, listGpxFiles } from '../services/GpxService';
 import { extractGpxMetadata, GpxMetadata } from '../services/GpxParser';
@@ -36,7 +38,6 @@ const ALL = t.all;
 // An activity plus its richer metrics (re-parsed from the move's GPX for the configurable
 // columns). Cached module-wide by id+synced_at so re-focusing the screen doesn't re-read files.
 type EnrichedActivity = ActivityRecord & { metrics: MetricValues };
-const _metricsCache = new Map<string, GpxMetadata>();
 
 function buildMetrics(a: ActivityRecord, gpx?: GpxMetadata): MetricValues {
   const distanceM = a.distance_m || 0;
@@ -58,6 +59,25 @@ function buildMetrics(a: ActivityRecord, gpx?: GpxMetadata): MetricValues {
     maxAltM: gpx?.maxAltM || 0,
     paceSecPerKm: gpx?.paceSecPerKm || (distanceM > 0 && durationS > 0 ? durationS / (distanceM / 1000) : 0),
   };
+}
+
+// Parses one activity's GPX for the list's metric columns and caches the result in the DB
+// (activity_metrics), so that GPX is never parsed again for the list. Undefined if unreadable.
+async function cacheGpxMetrics(a: ActivityRecord): Promise<GpxMetadata | undefined> {
+  if (!a.gpx_path) return undefined;
+  try {
+    const gpx = extractGpxMetadata(await readGpxFile(a.gpx_path));
+    const v: Record<string, number> = {
+      descent: gpx.descentM || 0, calories: gpx.energyKcal || 0, avgHr: gpx.avgHr || 0, maxHr: gpx.maxHr || 0,
+      avgCadence: gpx.avgCadence || 0, maxCadence: gpx.maxCadence || 0, avgSpeed: gpx.avgSpeedMh || 0,
+      maxSpeed: gpx.maxSpeedMh || 0, recovery: gpx.recoveryS || 0, peakTe: gpx.peakTe || 0,
+      maxAltitude: gpx.maxAltM || 0, poolLengths: gpx.poolLengths || 0, pace: gpx.paceSecPerKm || 0,
+    };
+    await saveActivityMetrics(a.id, a.synced_at, JSON.stringify(gpx), v).catch(() => {});
+    return gpx;
+  } catch {
+    return undefined;
+  }
 }
 
 export default function LogListScreen() {
@@ -126,64 +146,100 @@ export default function LogListScreen() {
     });
   }, [navigation, theme, styles]);
 
-  const load = useCallback(async () => {
+  // ─── Paged loading (André, 2026-09-29) ─────────────────────────────────────
+  // "not worth to load all the 4XXX activities ... load it progressively ... I would say 30". The
+  // list used to read every row AND parse every GPX before showing anything (~110 s on the tablet).
+  // Now: ACTIVITY_PAGE rows at a time, sport filter + sort done in SQL (db.getActivityPage), the
+  // next page asked for when the user is within ~2 screens of the end (onEndReachedThreshold), and
+  // a row's GPX is parsed only when its page loads - once ever, cached in activity_metrics.
+  const [types, setTypes] = useState<string[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [preparing, setPreparing] = useState('');         // "Reading 12 of 138…" before a GPX-metric sort
+  const reqRef = React.useRef(0);                          // drops a page answer that arrives after a reset
+  const listRef = React.useRef<FlatList<EnrichedActivity>>(null);
+  const busyRef = React.useRef(false);
+  const filterArg = activeFilter === ALL ? '' : activeFilter;
+
+  // The metrics a row's card needs: from the cache, or its GPX (parsed now, then cached).
+  async function enrich(rows: ActivityPageRow[]): Promise<EnrichedActivity[]> {
+    return Promise.all(rows.map(async r => {
+      let gpx: GpxMetadata | undefined;
+      if (r.metrics_json && r.metrics_synced_at === r.synced_at) {
+        try { gpx = JSON.parse(r.metrics_json); } catch { gpx = undefined; }
+      }
+      if (!gpx && r.gpx_path) gpx = await cacheGpxMetrics(r);
+      const { metrics_json: _j, metrics_synced_at: _s, ...a } = r;
+      return { ...a, metrics: buildMetrics(a, gpx) };
+    }));
+  }
+
+  async function loadPage(reset: boolean) {
+    if (!reset && (busyRef.current || !hasMore)) return;
+    const req = reset ? ++reqRef.current : reqRef.current;
+    busyRef.current = true;
+    if (!reset) setLoadingMore(true);
     try {
-      // 1. Reconstruire depuis GPX orphelins — en ignorant la liste noire
-      const [gpxPaths, existing] = await Promise.all([listGpxFiles(), getAllActivities()]);
-      const dbIds = new Set(existing.map(a => a.id));
-      for (const path of gpxPaths) {
-        const id = path.split('/').pop()?.replace('.gpx', '') ?? '';
-        if (!id || dbIds.has(id)) continue;
-        if (await isActivityDeleted(id)) continue;   // ← liste noire
-        try {
-          const xml  = await readGpxFile(path);
-          const meta = extractGpxMetadata(xml);
-          await markActivitySynced({
-            id,
-            synced_at: Date.now(),
-            gpx_path: path,
-            date:       meta.date,
-            duration_s: meta.durationS,
-            distance_m: meta.distanceM,
-            d_plus:     meta.dPlus,
-            activity_type: meta.activityType,
-          });
-        } catch (_) {}
-      }
-      // 2. Charger + réparer les activity_type manquants
-      const data = await getAllActivities();
-      for (const a of data) {
-        if (a.activity_type) continue;
-        try {
-          const xml  = await readGpxFile(a.gpx_path);
-          const meta = extractGpxMetadata(xml);
-          if (meta.activityType) {
-            await updateActivityType(a.id, meta.activityType);
-            a.activity_type = meta.activityType;
-          }
-        } catch (_) {}
-      }
-      // Enrich each activity with its richer metrics for the configurable columns. Read from
-      // the move's own GPX (the DB only stores the core four); cached by id+synced_at so
-      // re-focusing doesn't re-read the files. Reads run in parallel and never fail the list.
-      const enriched: EnrichedActivity[] = await Promise.all(data.map(async a => {
-        const cacheKey = `${a.id}:${a.synced_at}`;
-        let gpx = _metricsCache.get(cacheKey);
-        if (!gpx && a.gpx_path) {
-          try {
-            gpx = extractGpxMetadata(await readGpxFile(a.gpx_path));
-            _metricsCache.set(cacheKey, gpx);
-          } catch { /* keep whatever the DB core gives */ }
-        }
-        return { ...a, metrics: buildMetrics(a, gpx) };
-      }));
-      setActivities(enriched);
+      const offset = reset ? 0 : activities.length;
+      const rows = await getActivityPage({ type: filterArg, sortKey, desc: sortDesc, offset });
+      const enriched = await enrich(rows);
+      if (req !== reqRef.current) return;                  // filter/sort changed meanwhile
+      setActivities(prev => {
+        if (reset) return enriched;
+        const seen = new Set(prev.map(a => a.id));      // belt and braces: never the same row twice
+        return prev.concat(enriched.filter(a => !seen.has(a.id)));
+      });
+      setHasMore(rows.length === ACTIVITY_PAGE);
     } catch (e) {
       Alert.alert(t.loadError, String(e));
     } finally {
-      setLoading(false);   // first load done - the empty state below now means "genuinely none"
+      if (req === reqRef.current) { busyRef.current = false; setLoadingMore(false); setLoading(false); }
     }
-  }, []);
+  }
+
+  // Sorting by a column that only exists in a GPX (HR, calories...) needs every GPX's value: fill
+  // the cache for the ones never read (at most the few moves that have a GPX; once, ever).
+  async function prepareGpxSort(key: string) {
+    if ((GPX_METRIC_COLUMNS as readonly string[]).indexOf(key) < 0) return;
+    const missing = await getActivitiesMissingMetrics();
+    for (let i = 0; i < missing.length; i++) {
+      setPreparing(`Reading ${i + 1} of ${missing.length}…`);
+      await cacheGpxMetrics(missing[i]);
+    }
+    setPreparing('');
+  }
+
+  // Background upkeep, after the first page is on screen: GPX files the DB doesn't know yet
+  // (orphans from an interrupted sync) become rows. Only re-pages when it actually added some.
+  async function adoptOrphanGpx() {
+    const [gpxPaths, ids] = await Promise.all([listGpxFiles(), getAllSyncedIds()]);
+    const known = new Set(ids);
+    let added = 0;
+    for (const path of gpxPaths) {
+      const id = path.split('/').pop()?.replace('.gpx', '') ?? '';
+      if (!id || known.has(id) || await isActivityDeleted(id)) continue;
+      try {
+        const meta = extractGpxMetadata(await readGpxFile(path));
+        await markActivitySynced({
+          id, synced_at: Date.now(), gpx_path: path, date: meta.date, duration_s: meta.durationS,
+          distance_m: meta.distanceM, d_plus: meta.dPlus, activity_type: meta.activityType,
+        });
+        added++;
+      } catch (_) {}
+    }
+    return added;
+  }
+
+  // A new filter or sort starts from the top of the list (not wherever the old one was scrolled).
+  useEffect(() => { listRef.current?.scrollToOffset({ offset: 0, animated: false }); }, [filterArg, sortKey, sortDesc]);
+
+  const load = useCallback(async () => {
+    getActivityTypes().then(setTypes).catch(() => {});
+    await prepareGpxSort(sortKey);
+    await loadPage(true);
+    adoptOrphanGpx().then(n => { if (n > 0) { getActivityTypes().then(setTypes).catch(() => {}); loadPage(true); } })
+      .catch(() => {});
+  }, [filterArg, sortKey, sortDesc]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -227,35 +283,9 @@ export default function LogListScreen() {
 
   // ─── Filtres ────────────────────────────────────────────────────────────────
 
-  const filterTypes = useMemo(() => {
-    const types = new Set(activities.map(a => a.activity_type).filter(Boolean));
-    return [ALL, ...Array.from(types).sort()];
-  }, [activities]);
-
-  const filtered = useMemo(() => {
-    const base = (activeFilter === ALL
-      ? activities
-      : activities.filter(a => a.activity_type === activeFilter)).slice();
-    // Sort by the chosen metric column, else by the activity's own date (default), else upload
-    // time. Dates are stored ISO (GpxParser metadata/time) so Date.parse orders them
-    // chronologically; a move with an unparseable date falls back to its upload time.
-    base.sort((a, b) => {
-      let c: number;
-      if (sortKey === 'date') {
-        c = (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0);
-        if (c === 0) c = (a.synced_at || 0) - (b.synced_at || 0);
-      } else if (sortKey === 'uploaded') {
-        c = (a.synced_at || 0) - (b.synced_at || 0);
-        // Tie-break by the activity's own date, so a bulk re-import (every move stamped with the
-        // same synced_at) still lists newest-activity-first instead of arbitrary order.
-        if (c === 0) c = (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0);
-      } else {
-        c = metricRaw(a.metrics, sortKey) - metricRaw(b.metrics, sortKey);
-      }
-      return sortDesc ? -c : c;
-    });
-    return base;
-  }, [activities, activeFilter, sortKey, sortDesc]);
+  // Chips list every sport in the DB (not just the loaded rows); the list itself arrives filtered
+  // and sorted from SQL, a page at a time.
+  const filterTypes = useMemo(() => [ALL, ...types], [types]);
 
   // ─── Rendu ──────────────────────────────────────────────────────────────────
 
@@ -270,7 +300,7 @@ export default function LogListScreen() {
     );
   }
 
-  if (activities.length === 0) {
+  if (activities.length === 0 && activeFilter === ALL && !preparing) {
     return (
       <View style={styles.empty}>
         {/* 2026-08-11 (André, A1): was a raw mailbox emoji, which Android renders
@@ -353,16 +383,22 @@ export default function LogListScreen() {
       </ScrollView>
 
       <FlatList
+        ref={listRef}
         style={styles.list}
-        data={filtered}
+        data={activities}
+        onEndReached={() => loadPage(false)}
+        onEndReachedThreshold={2}
         keyExtractor={item => item.id}
         ListEmptyComponent={
           <View style={styles.emptyFilter}>
             <Text style={styles.emptyFilterText}>{t.noFilter}</Text>
           </View>
         }
+        ListHeaderComponent={preparing ? <Text style={styles.deleteHint}>{preparing}</Text> : null}
         ListFooterComponent={
-          <Text style={styles.deleteHint}>{t.deleteHint}</Text>
+          loadingMore
+            ? <ActivityIndicator style={{ marginVertical: 16 }} color={theme.primary} />
+            : <Text style={styles.deleteHint}>{t.deleteHint}</Text>
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.text} />}
         renderItem={({ item }) => (

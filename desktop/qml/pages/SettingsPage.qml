@@ -244,6 +244,28 @@ PageFlickable {
             }
         }
 
+        // Activity screen: the extra power numbers most rides don't need (André, 2026-09-27).
+        Card {
+            width: parent.width
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Text { text: qsTr("Activities"); font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge; color: Theme.text }
+                RoundedSwitch {
+                    text: qsTr("Advanced power numbers")
+                    checked: Theme.advancedPowerNumbers
+                    onToggled: Theme.advancedPowerNumbers = checked
+                }
+                Text {
+                    text: qsTr("Adds normalized power, training load (TSS), intensity factor and work to rides with a power meter. Uses the FTP from your intervals.icu settings.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeBody
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
         // Ember - fast & calorie tracking companion (André, 2026-08-25). The switch shows/hides
         // the Ember page in the sidebar; the link opens the phone app to Add to Home Screen.
         // 2026-08-28 (André): the card is now openly in Settings instead of hidden behind the

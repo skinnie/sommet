@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QJsonArray>
+#include <QHash>
+#include <functional>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QQmlEngine>
@@ -61,6 +63,12 @@ class ActivityService : public QObject
     // Testing mode's sample moves (device "demo") are listed only while this is on - bound to
     // DeviceService.demoMode in main.qml.
     Q_PROPERTY(bool showDemo READ showDemo WRITE setShowDemo NOTIFY activitiesChanged)
+    // What the activity screen shows per sport (shared/activity_view.json, bundled as a
+    // resource - the same file Android bundles). Read once at startup.
+    Q_PROPERTY(QVariantMap viewConfig READ viewConfig CONSTANT)
+    // intervals.icu per-sport settings (HR zones, FTP, power zones...), cached in QSettings so
+    // the zone bars and zone colours work offline. See requestZones().
+    Q_PROPERTY(QVariantList zoneGroups READ zoneGroups NOTIFY zoneGroupsChanged)
 
 public:
     explicit ActivityService(QObject *parent = nullptr);
@@ -85,6 +93,18 @@ public:
     // from the DB. Tracks are no longer loaded up front (that cost ~3 s for a big history); the
     // list eager-loads the first screens and asks for the rest here as they're opened/shown.
     Q_INVOKABLE QVariantMap trackFor(int idx, const QString &device);
+
+    // The activity screen's charts, laps and pool lengths (André, 2026-09-27): decodes this
+    // activity's FIT through the backend (tools/activity_streams.py) and emits streamsReady.
+    // An intervals.icu import keeps no file, so its FIT is fetched first (and kept on the row,
+    // as Export does). A small in-memory cache makes reopening instant.
+    Q_INVOKABLE void requestStreams(int idx, const QString &device);
+    // Refresh zoneGroups from intervals.icu (no-op without a connection; the cache stays).
+    Q_INVOKABLE void requestZones();
+    // Structured workouts planned on intervals.icu for a day ("YYYY-MM-DD") -> plannedReady.
+    Q_INVOKABLE void requestPlanned(const QString &date);
+    QVariantMap viewConfig() const { return m_viewConfig; }
+    QVariantList zoneGroups() const { return m_zoneGroups; }
 
     // Delete one activity (André, 2026-08-25). Removes it from the local database AND remembers
     // it (a tombstone keyed by start-time|name) so re-syncing the watch or re-importing from
@@ -224,6 +244,12 @@ signals:
     // fitBase64 empty + error set when it couldn't be fetched.
     void intervalsFitReady(int idx, const QString &device, const QString &fitBase64,
                            const QString &error);
+    // requestStreams() result: `streams` is tools/activity_streams.py's JSON (empty + error
+    // set when there is nothing to decode or the decode failed).
+    void streamsReady(int idx, const QString &device, const QVariantMap &streams,
+                      const QString &error);
+    void zoneGroupsChanged();
+    void plannedReady(const QString &date, const QVariantList &workouts);
     // Sommet Sync (#SYNC-2): test probe result, and a completion/error pair for a syncNow run.
     void sommetSyncTestResult(bool ok, const QString &message);
     void sommetSyncFinished(int pulled, int pushed);
@@ -235,6 +261,15 @@ private:
                            const QString &address, const QStringList &files);
     QNetworkAccessManager m_network;
     QSqlDatabase m_db;
+    // Fetch an intervals.icu import's FIT, store it on the row, then call `done(fit, error)`.
+    // Shared by Export (fetchIntervalsFit) and the charts (requestStreams).
+    void fetchIntervalsFitThen(int idx, const QString &device,
+                               std::function<void(const QString &, const QString &)> done);
+    void decodeStreams(int idx, const QString &device, const QString &fitBase64);
+    QVariantMap m_viewConfig;
+    QVariantList m_zoneGroups;
+    QHash<QString, QVariantMap> m_streamsCache;   // "idx|device" -> decoded streams
+    QStringList m_streamsOrder;                   // oldest first, for a small LRU
     bool m_loading = false;
     bool m_ok = false;
     bool m_showingCachedData = false;

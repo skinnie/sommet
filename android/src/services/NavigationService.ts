@@ -99,6 +99,13 @@ export interface PendingRoute {
 // intermediate parsed route is now a real value the caller can render before committing to
 // a write, instead of being hidden inside one function.
 export async function pickAndParseRoute(): Promise<PendingRoute | null> {
+  const picked = await pickRouteGpx();
+  return picked ? routeFromGpx(picked.xml, picked.name) : null;
+}
+
+/** Lets the user pick a GPX file; its text and a fallback name (the file name), or null if
+ *  cancelled. Split out so the Routes screen can also keep the GPX in its library. */
+export async function pickRouteGpx(): Promise<{ xml: string; name: string } | null> {
   let gpxPath: string;
   try {
     gpxPath = await pickGpxFile();
@@ -106,9 +113,12 @@ export async function pickAndParseRoute(): Promise<PendingRoute | null> {
     if (e?.code === 'GPX_PICK_CANCELLED') return null;
     throw new Error(e?.message ?? 'Sélection du fichier annulée');
   }
-
   const xml = await RNFS.readFile(gpxPath, 'utf8');
-  const fallbackName = (gpxPath.split('/').pop() ?? 'Route').replace(/\.gpx$/i, '');
+  return { xml, name: (gpxPath.split('/').pop() ?? 'Route').replace(/\.gpx$/i, '') };
+}
+
+/** A GPX text as a route ready to preview/send (simplified to what the watch accepts). */
+export function routeFromGpx(xml: string, fallbackName: string): PendingRoute {
   const parsed = parseRouteGpx(xml, fallbackName);
 
   const kept = simplifyRoute(

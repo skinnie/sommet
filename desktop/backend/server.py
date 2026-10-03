@@ -1441,6 +1441,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_upload(body)
         elif self.path == "/api/intervals/activity-fit":
             self._handle_intervals_activity_fit(body)
+        elif self.path == "/api/activity/streams":
+            self._handle_activity_streams(body)
+        elif self.path == "/api/intervals/zones":
+            self._handle_intervals_zones(body)
+        elif self.path == "/api/intervals/planned":
+            self._handle_intervals_planned(body)
         elif self.path == "/api/intervals/plan/upsert":
             self._handle_intervals_plan("upsert", body)
         elif self.path == "/api/intervals/plan/delete":
@@ -5155,6 +5161,92 @@ class Handler(BaseHTTPRequestHandler):
                                    + (err or out or "")).strip()[:200]})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_activity_streams(self, body):
+        """POST /api/activity/streams {fit_base64, points?} -> tools/activity_streams.py output:
+        the chart streams (time, distance, heart rate, power, cadence, speed, altitude, position,
+        temperature), laps (+ whether they were pressed or automatic), pool lengths and sets, and
+        the session totals. Decoded in-process (no watch involved, so no WATCH_LOCK)."""
+        fit_b64 = (body or {}).get("fit_base64") or ""
+        points = int((body or {}).get("points") or 2000)
+        try:
+            data = base64.b64decode(fit_b64, validate=False)
+        except (ValueError, TypeError):
+            self._send_json(400, {"ok": False, "error": "fit_base64 is not base64"})
+            return
+        if not data:
+            self._send_json(400, {"ok": False, "error": "need fit_base64"})
+            return
+        sys.path.insert(0, str(TOOLS_DIR))
+        import activity_streams
+        try:
+            out = activity_streams.streams_from_fit(data, max(100, min(points, 10000)))
+        except (ValueError, struct.error, IndexError) as e:
+            self._send_json(422, {"ok": False, "error": f"couldn't read this FIT ({e})"})
+            return
+        self._send_json(200, out)
+
+    _zones_cache = {}   # api_key -> (fetched_at, groups)
+
+    def _handle_intervals_zones(self, body):
+        """POST /api/intervals/zones {athlete_id, api_key} -> {ok, groups:[{types, ftp,
+        power_zones (% of FTP), power_zone_names, hr_zones (bpm upper bounds), hr_zone_names, lthr,
+        max_hr, threshold_pace, pace_zones}]}. intervals.icu's per-sport settings, which the
+        activity screen's zone bars and zone colours use. Cached for an hour per key."""
+        aid, key = (body or {}).get("athlete_id"), (body or {}).get("api_key")
+        if not aid or not key:
+            self._send_json(400, {"ok": False, "error": "need athlete_id and api_key"})
+            return
+        hit = Handler._zones_cache.get(key)
+        if hit and time.time() - hit[0] < 3600:
+            self._send_json(200, {"ok": True, "groups": hit[1], "cached": True})
+            return
+        auth = base64.b64encode(b"API_KEY:" + str(key).encode()).decode()
+        req = urllib.request.Request(
+            f"https://intervals.icu/api/v1/athlete/{urllib.parse.quote(str(aid))}/sport-settings",
+            headers={"Authorization": "Basic " + auth, "User-Agent": "Sommet/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                raw = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            self._send_json(502, {"ok": False, "error": f"intervals.icu: HTTP {e.code}"})
+            return
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            self._send_json(502, {"ok": False, "error": f"couldn't reach intervals.icu ({e})"})
+            return
+        keep = ("types", "ftp", "power_zones", "power_zone_names", "hr_zones", "hr_zone_names",
+                "lthr", "max_hr", "threshold_pace", "pace_zones", "pace_zone_names")
+        groups = [{k: g.get(k) for k in keep} for g in (raw if isinstance(raw, list) else [])]
+        Handler._zones_cache[key] = (time.time(), groups)
+        self._send_json(200, {"ok": True, "groups": groups})
+
+    def _handle_intervals_planned(self, body):
+        """POST /api/intervals/planned {athlete_id, api_key, date: "YYYY-MM-DD"} -> {ok, workouts:
+        [{name, type, workout_doc}]}: the structured workouts planned on intervals.icu for that day
+        (category WORKOUT, with steps). The activity screen draws their power targets behind an
+        indoor ride's power line (shared ActivityViewLogic.workoutBlocks)."""
+        aid, key, day = (body or {}).get("athlete_id"), (body or {}).get("api_key"), (body or {}).get("date")
+        if not aid or not key or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(day or "")):
+            self._send_json(400, {"ok": False, "error": "need athlete_id, api_key and date"})
+            return
+        auth = base64.b64encode(b"API_KEY:" + str(key).encode()).decode()
+        req = urllib.request.Request(
+            f"https://intervals.icu/api/v1/athlete/{urllib.parse.quote(str(aid))}/events"
+            f"?oldest={day}&newest={day}&category=WORKOUT",
+            headers={"Authorization": "Basic " + auth, "User-Agent": "Sommet/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                events = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            self._send_json(502, {"ok": False, "error": f"intervals.icu: HTTP {e.code}"})
+            return
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            self._send_json(502, {"ok": False, "error": f"couldn't reach intervals.icu ({e})"})
+            return
+        out = [{"name": e.get("name"), "type": e.get("type"), "workout_doc": e.get("workout_doc")}
+               for e in (events if isinstance(events, list) else [])
+               if (e.get("workout_doc") or {}).get("steps")]
+        self._send_json(200, {"ok": True, "workouts": out})
 
     def _handle_intervals_activity_fit(self, body):
         """POST /api/intervals/activity-fit {api_key, id} -> {ok, fit_base64, origin}. The FIT of an

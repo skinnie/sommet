@@ -430,12 +430,69 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     b.u8(0); b.u8(4); b.u16(255); b.u16(0); b.u32(start_g);
     b.def(1, 34, {{253,4,FU32},{1,2,FU16},{2,1,FE},{3,1,FE},{4,1,FE}});
     b.u8(1); b.u32(end_g); b.u16(1); b.u8(0); b.u8(26); b.u8(1);
-    b.def(2, 18, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
-                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}});
+    // Pool swims: the lengths from the watch's swimming_turn samples (twin of the desktop
+    // extract_pool_lengths). Each turn that raises the running count closes one length and
+    // carries its exact swim time (0.1 s) and strokes; the record is written a few seconds after
+    // the turn, so starts are chained - a length starts where the previous one ended, or at
+    // (record time - swim time) when later, the gap being a rest at the wall.
+    struct Len { double start; double swim; uint16_t strokes; uint8_t style; };
+    std::vector<Len> lens;
+    {
+        uint16_t seen = 0; double prev_end = -1;
+        bool sane = true;
+        for (uint32_t i = 0; i < entry->samples_count; i++) {
+            const ambit_log_sample_t &s = entry->samples[i];
+            if (s.type != ambit_log_sample_type_swimming_turn) continue;
+            if (s.u.swimming_turn.lengths <= seen || s.u.swimming_turn.duration == 0) continue;
+            seen = s.u.swimming_turn.lengths;
+            double swim = s.u.swimming_turn.duration / 10.0;
+            if (swim > 1800) sane = false;       // not this layout on this model: write none
+            double t  = (double)start_epoch + s.time / 1000.0;
+            double st = t - swim;
+            if (prev_end >= 0 && st < prev_end) st = prev_end;
+            lens.push_back({st, swim, s.u.swimming_turn.strokes, s.u.swimming_turn.style});
+            prev_end = st + swim;
+        }
+        if (!sane) lens.clear();
+    }
+    bool pool = !lens.empty() && h.swimming_pool_length > 0;
+
+    // session (local 2, global 18)
+    std::vector<Buf::F> sfields = {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
+                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}};
+    if (pool) { sfields.push_back({44,2,FU16}); sfields.push_back({46,1,FE}); sfields.push_back({33,2,FU16}); }
+    b.def(2, 18, sfields);
     b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
     b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(sub_sport); b.u8(8); b.u8(1);
+    if (pool) { b.u16(h.swimming_pool_length * 100); b.u8(0); b.u16((uint32_t)lens.size()); }
     b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
     b.u8(3); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dist_cm); b.u8(9); b.u8(1);
+
+    // length (local 7, global 101), the Garmin way: an ACTIVE length per length swum and an IDLE
+    // length for each rest at the wall between two of them. Ambit style -> FIT swim_stroke
+    // (0 Other has none: invalid).
+    if (!lens.empty()) {
+        b.def(7, 101, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{3,4,FU32},{4,4,FU32},
+                       {5,2,FU16},{0,1,FE},{1,1,FE},{7,1,FE},{12,1,FE}});
+        static const uint8_t STROKE[6] = {0xFF, 3, 1, 2, 0, 4};  // other, fly, back, breast, free, drill
+        uint16_t idx = 0;
+        auto one = [&](double st, double secs, uint32_t strokes, uint8_t stroke, bool active) {
+            uint32_t st_g = (uint32_t)((long)st - (long)GARMIN_EPOCH);
+            b.u8(7); b.u16(idx++);
+            b.u32(st_g + (uint32_t)llround(secs)); b.u32(st_g);
+            b.u32((uint32_t)llround(secs * 1000)); b.u32((uint32_t)llround(secs * 1000));
+            b.u16(strokes); b.u8(28); b.u8(1); b.u8(stroke); b.u8(active ? 1 : 0);
+        };
+        for (size_t k = 0; k < lens.size(); k++) {
+            if (k) {
+                const Len &p = lens[k - 1];
+                double rest = lens[k].start - p.start - p.swim;
+                if (rest >= 1) one(p.start + p.swim, rest, 0xFFFF, 0xFF, false);
+            }
+            const Len &l = lens[k];
+            one(l.start, l.swim, l.strokes, l.style < 6 ? STROKE[l.style] : 0xFF, true);
+        }
+    }
 
     std::vector<Buf::F> rfields;
     rfields.push_back({253,4,FU32});

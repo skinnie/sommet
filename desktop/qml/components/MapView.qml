@@ -66,6 +66,55 @@ Item {
     // length. Empty by default, so every existing MapView caller renders exactly as before.
     property var coloredSegments: []
 
+    // Activity screen (André, 2026-09-27) - all additive, empty/false by default:
+    //  - cursorPoint {lat, lon}: a dot that follows the chart's cursor along the track.
+    //  - highlightCoords [[lat, lon], ...]: a soft band under the track marking the stretch
+    //    selected in the chart.
+    //  - zoomAtCursor: the wheel zooms around the pointer (the point under it stays put),
+    //    instead of around the centre.
+    //  - viewportChanged() fires (debounced) whenever the view pans/zooms, and
+    //    visibleBounds() gives the lat/lon box on screen, so the chart can follow the map.
+    property var cursorPoint: null
+    property var highlightCoords: []
+    property bool zoomAtCursor: false
+    signal viewportChanged()
+    function visibleBounds() {
+        return { minLat: latAtY(originY + height), maxLat: latAtY(originY),
+                 minLon: lonAtX(originX), maxLon: lonAtX(originX + width) }
+    }
+    // Zoom by whole steps keeping the point at (px, py) in view coordinates where it is.
+    function zoomAt(steps, px, py) {
+        const next = Math.max(1, Math.min(19, currentZoom + steps))
+        if (next === currentZoom)
+            return
+        const f = Math.pow(2, next - currentZoom)
+        panX = f * (panX + px - width / 2) - px + width / 2
+        panY = f * (panY + py - height / 2) - py + height / 2
+        userControlled = true
+        currentZoom = next
+    }
+    // Fit the view to a list of [lat, lon] points (a selected stretch). Picks the highest zoom
+    // that shows the whole stretch with some room around it, centred on it.
+    function fitToCoords(coords) {
+        if (!coords || coords.length < 2 || width <= 0 || height <= 0)
+            return
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180
+        for (const c of coords) {
+            minLat = Math.min(minLat, c[0]); maxLat = Math.max(maxLat, c[0])
+            minLon = Math.min(minLon, c[1]); maxLon = Math.max(maxLon, c[1])
+        }
+        const b = { minLat, maxLat, minLon, maxLon }
+        let z = 18
+        for (; z > 1; z--) {
+            const span = _spanPxAt(z, b)
+            if (span.w <= width * 0.8 && span.h <= height * 0.8) break
+        }
+        userControlled = true
+        currentZoom = z
+        panX = lonToWorldX((minLon + maxLon) / 2) - lonToWorldX(_centerLon)
+        panY = latToWorldY((minLat + maxLat) / 2) - latToWorldY(_centerLat)
+    }
+
     // Wind arrows overlay (PlanRoutePage weather layer) - one short arrow per sampled point,
     // pointing the way the wind blows (meteorological "from" direction + 180), sized by speed
     // and coloured by its relation to your heading (head/cross/tail), each labelled with its
@@ -169,7 +218,7 @@ Item {
         if (minC < 0) return    // route not on screen - leave the graphs where they are
         routeVisibleRange(minC / total, maxC / total)
     }
-    Timer { id: _rangeTimer; interval: 50; onTriggered: root._emitVisibleRange() }
+    Timer { id: _rangeTimer; interval: 50; onTriggered: { root._emitVisibleRange(); root.viewportChanged() } }
     onOriginXChanged: _rangeTimer.restart()
     onOriginYChanged: _rangeTimer.restart()
 
@@ -326,7 +375,9 @@ Item {
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         // Up (positive angleDelta) zooms in, down zooms out - the direction every map
         // application uses.
-        onWheel: (event) => root.zoomBy(event.angleDelta.y > 0 ? 1 : -1)
+        onWheel: (event) => root.zoomAtCursor
+            ? root.zoomAt(event.angleDelta.y > 0 ? 1 : -1, event.x, event.y)
+            : root.zoomBy(event.angleDelta.y > 0 ? 1 : -1)
     }
 
     // Trackpad pinch to zoom (André, 2026-08-29: "allow zoom by trackpad pinch"). macOS
@@ -416,6 +467,38 @@ Item {
     // Drawn twice on the same path (a white halo, then the real color on top) - a real
     // cartography technique, not decoration: a flat Theme.primary teal was found to blend
     // into OSM/CyclOSM's own parks-and-water palette, real bug reported 2026-08-07.
+    // Selected stretch (highlightCoords): a wide soft band drawn under the track.
+    Canvas {
+        id: stretchCanvas
+        anchors.fill: parent
+        visible: root.highlightCoords.length > 1
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const pts = root.highlightCoords
+            if (pts.length < 2) return
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            ctx.beginPath()
+            for (let i = 0; i < pts.length; i++) {
+                const px = root.lonToWorldX(pts[i][1]) - root.originX
+                const py = root.latToWorldY(pts[i][0]) - root.originY
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            ctx.strokeStyle = "rgba(26, 29, 34, 0.30)"
+            ctx.lineWidth = 16
+            ctx.stroke()
+        }
+        Connections {
+            target: root
+            function onHighlightCoordsChanged() { stretchCanvas.requestPaint() }
+            function onOriginXChanged() { stretchCanvas.requestPaint() }
+            function onOriginYChanged() { stretchCanvas.requestPaint() }
+            function onWidthChanged() { stretchCanvas.requestPaint() }
+            function onHeightChanged() { stretchCanvas.requestPaint() }
+        }
+    }
+
     Canvas {
         id: trackCanvas
         anchors.fill: parent
@@ -905,6 +988,17 @@ Item {
                 anchors.bottomMargin: 9
             }
         }
+    }
+
+    // Chart cursor (cursorPoint): a dot on the track at the point hovered in the chart.
+    Rectangle {
+        visible: root.cursorPoint !== null && root.cursorPoint !== undefined
+        width: 16; height: 16; radius: 8
+        x: visible ? root.lonToWorldX(root.cursorPoint.lon) - root.originX - width / 2 : 0
+        y: visible ? root.latToWorldY(root.cursorPoint.lat) - root.originY - height / 2 : 0
+        color: Theme.hard
+        border.color: "white"
+        border.width: 3
     }
 
     // Real request 2026-08-07: "missing the zoom + and zoom -" - opt-in (showZoomControls)

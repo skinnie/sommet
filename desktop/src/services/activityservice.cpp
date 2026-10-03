@@ -4,6 +4,8 @@
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,6 +29,14 @@ static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 ActivityService::ActivityService(QObject *parent) : QObject(parent)
 {
     openDatabase();
+    QFile cfg(QStringLiteral(":/qt/qml/AmbitApp/assets/activity_view.json"));
+    if (cfg.open(QIODevice::ReadOnly))
+        m_viewConfig = QJsonDocument::fromJson(cfg.readAll()).object().toVariantMap();
+    else
+        qWarning() << "activity_view.json missing from resources";
+    const QByteArray zones = QSettings().value(QStringLiteral("activity/zoneGroups")).toByteArray();
+    if (!zones.isEmpty())
+        m_zoneGroups = QJsonDocument::fromJson(zones).array().toVariantList();
 }
 
 void ActivityService::setLoading(bool value)
@@ -839,6 +849,14 @@ QString ActivityService::trackGpx(int idx, const QString &device, const QString 
 
 void ActivityService::fetchIntervalsFit(int idx, const QString &device)
 {
+    fetchIntervalsFitThen(idx, device, [this, idx, device](const QString &fit, const QString &err) {
+        emit intervalsFitReady(idx, device, fit, err);
+    });
+}
+
+void ActivityService::fetchIntervalsFitThen(int idx, const QString &device,
+                                            std::function<void(const QString &, const QString &)> done)
+{
     const QString key = QSettings().value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
     QString extId;
     if (m_db.isOpen()) {
@@ -851,7 +869,7 @@ void ActivityService::fetchIntervalsFit(int idx, const QString &device)
             extId = q.value(0).toString();
     }
     if (key.isEmpty() || extId.isEmpty()) {
-        emit intervalsFitReady(idx, device, QString(), key.isEmpty()
+        done(QString(), key.isEmpty()
             ? tr("Connect intervals.icu in Settings to get this activity's FIT.")
             : tr("This activity has no intervals.icu id to fetch its FIT with."));
         return;
@@ -862,14 +880,13 @@ void ActivityService::fetchIntervalsFit(int idx, const QString &device)
     const QByteArray body = QJsonDocument(QJsonObject{
         {QStringLiteral("api_key"), key}, {QStringLiteral("id"), extId}}).toJson(QJsonDocument::Compact);
     QNetworkReply *reply = m_network.post(req, body);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device, done]() {
         reply->deleteLater();
         const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
         const QString fit = o.value(QStringLiteral("fit_base64")).toString();
         if (!o.value(QStringLiteral("ok")).toBool() || fit.isEmpty()) {
             const QString err = o.value(QStringLiteral("error")).toString();
-            emit intervalsFitReady(idx, device, QString(),
-                                   err.isEmpty() ? reply->errorString() : err);
+            done(QString(), err.isEmpty() ? reply->errorString() : err);
             return;
         }
         // Keep it, so the next export (and an intervals-off day) doesn't need the network.
@@ -891,7 +908,138 @@ void ActivityService::fetchIntervalsFit(int idx, const QString &device)
                 break;
             }
         }
-        emit intervalsFitReady(idx, device, fit, QString());
+        done(fit, QString());
+    });
+}
+
+void ActivityService::requestStreams(int idx, const QString &device)
+{
+    const QString key = QString::number(idx) + QLatin1Char('|') + device;
+    if (m_streamsCache.contains(key)) {
+        const QVariantMap cached = m_streamsCache.value(key);
+        QTimer::singleShot(0, this, [this, idx, device, cached]() {
+            emit streamsReady(idx, device, cached, QString());
+        });
+        return;
+    }
+    QString fit, source;
+    for (const QVariant &v : std::as_const(m_activities)) {
+        const QVariantMap a = v.toMap();
+        if (a.value(QStringLiteral("index")).toInt() == idx
+                && a.value(QStringLiteral("device")).toString() == device) {
+            fit = a.value(QStringLiteral("fitBase64")).toString();
+            source = a.value(QStringLiteral("source")).toString();
+            break;
+        }
+    }
+    if (fit.isEmpty() && m_db.isOpen()) {        // rows past the eager-loaded screens
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT fit_base64, COALESCE(source, '') FROM activities "
+                                 "WHERE idx = ? AND COALESCE(device, '') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (q.exec() && q.next()) {
+            fit = q.value(0).toString();
+            source = q.value(1).toString();
+        }
+    }
+    if (!fit.isEmpty()) {
+        decodeStreams(idx, device, fit);
+        return;
+    }
+    if (source == QStringLiteral("intervals")) {
+        fetchIntervalsFitThen(idx, device, [this, idx, device](const QString &f, const QString &err) {
+            if (f.isEmpty())
+                emit streamsReady(idx, device, QVariantMap(), err);
+            else
+                decodeStreams(idx, device, f);
+        });
+        return;
+    }
+    QTimer::singleShot(0, this, [this, idx, device]() {
+        emit streamsReady(idx, device, QVariantMap(),
+                          tr("This activity has no recorded data to chart."));
+    });
+}
+
+void ActivityService::decodeStreams(int idx, const QString &device, const QString &fitBase64)
+{
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/activity/streams")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(60000);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {QStringLiteral("fit_base64"), fitBase64}, {QStringLiteral("points"), 2000}})
+        .toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device]() {
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!o.value(QStringLiteral("ok")).toBool()) {
+            const QString err = o.value(QStringLiteral("error")).toString();
+            emit streamsReady(idx, device, QVariantMap(),
+                              err.isEmpty() ? reply->errorString() : err);
+            return;
+        }
+        const QVariantMap streams = o.toVariantMap();
+        const QString key = QString::number(idx) + QLatin1Char('|') + device;
+        m_streamsCache.insert(key, streams);
+        m_streamsOrder.removeAll(key);
+        m_streamsOrder.append(key);
+        while (m_streamsOrder.size() > 12)
+            m_streamsCache.remove(m_streamsOrder.takeFirst());
+        emit streamsReady(idx, device, streams, QString());
+    });
+}
+
+void ActivityService::requestZones()
+{
+    QSettings settings;
+    const QString key = settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    const QString athlete =
+        settings.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    if (key.isEmpty() || athlete.isEmpty())
+        return;                                   // keep whatever is cached
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/intervals/zones")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(40000);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {QStringLiteral("athlete_id"), athlete}, {QStringLiteral("api_key"), key}})
+        .toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonArray groups = o.value(QStringLiteral("groups")).toArray();
+        if (!o.value(QStringLiteral("ok")).toBool() || groups.isEmpty())
+            return;                               // offline or not connected: keep the cache
+        m_zoneGroups = groups.toVariantList();
+        QSettings().setValue(QStringLiteral("activity/zoneGroups"),
+                             QJsonDocument(groups).toJson(QJsonDocument::Compact));
+        emit zoneGroupsChanged();
+    });
+}
+
+void ActivityService::requestPlanned(const QString &date)
+{
+    QSettings settings;
+    const QString key = settings.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+    const QString athlete =
+        settings.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
+    if (key.isEmpty() || athlete.isEmpty() || date.size() != 10)
+        return;
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/intervals/planned")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(40000);
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {QStringLiteral("athlete_id"), athlete}, {QStringLiteral("api_key"), key},
+        {QStringLiteral("date"), date}}).toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, date]() {
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!o.value(QStringLiteral("ok")).toBool())
+            return;
+        emit plannedReady(date, o.value(QStringLiteral("workouts")).toArray().toVariantList());
     });
 }
 
