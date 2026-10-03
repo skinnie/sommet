@@ -829,7 +829,8 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "magene_device.py", "magene_route.py", "magene_workout.py",
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
-                     "wahoo_settings.py", "wahoo_profile.py"}
+                     "wahoo_settings.py", "wahoo_profile.py", "wahoo_routes.py",
+                     "wahoo_ble_files.py", "wahoo_workout.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1200,6 +1201,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_pages(None)
         elif self.path == "/api/wahoo/settings" or self.path.startswith("/api/wahoo/settings?"):
             self._handle_wahoo_settings(None)
+        elif self.path == "/api/wahoo/routes" or self.path.startswith("/api/wahoo/routes?"):
+            self._handle_wahoo_routes("list", None)
+        elif self.path == "/api/wahoo/workouts" or self.path.startswith("/api/wahoo/workouts?"):
+            self._handle_wahoo_workouts("list", None)
         elif self.path == "/api/library":
             self._handle_library("list", {})
         elif self.path == "/api/bryton/tracks":
@@ -1446,6 +1451,14 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_pages(body)
         elif self.path == "/api/wahoo/settings":
             self._handle_wahoo_settings(body)
+        elif self.path == "/api/wahoo/route":
+            self._handle_wahoo_routes("send", body)
+        elif self.path == "/api/wahoo/routes/delete":
+            self._handle_wahoo_routes("delete", body)
+        elif self.path == "/api/wahoo/workout":
+            self._handle_wahoo_workouts("send", body)
+        elif self.path == "/api/wahoo/workouts/delete":
+            self._handle_wahoo_workouts("delete", body)
         elif self.path == "/api/bryton/profile/compare":
             self._handle_bryton_profile_compare(body)
         elif self.path == "/api/bryton/profile/apply":
@@ -2021,6 +2034,70 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_settings.py failed"}
         payload["schema"] = schema.get("settings", {})
         payload["autoPauseOn"] = schema.get("autoPauseOn", 0.447)
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_wahoo_routes(self, action, body):
+        """Routes on the ELEMNT (tools/wahoo_routes.py). GET /api/wahoo/routes[?via=] - list;
+        POST /api/wahoo/route {name, gpx, via?} - send (USB: imported and confirmed; Bluetooth:
+        the file is on the ELEMNT, the rider presses SYNC on its Routes screen);
+        POST /api/wahoo/routes/delete {name} - delete (USB only: edits the ELEMNT's database)."""
+        body = body or {}
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        via = body.get("via") or query.get("via", ["auto"])[0]
+        if via not in ("auto", "usb", "ble"):
+            via = "auto"
+        with self.WAHOO_PAGES_LOCK:
+            if action == "list":
+                code, out, err = run_tool("wahoo_routes.py", ["list", "--via", via], timeout=240)
+            elif action == "delete":
+                code, out, err = run_tool("wahoo_routes.py", ["delete", "--via", via, str(body.get("name") or "")],
+                                          timeout=300)
+            else:
+                gpx = body.get("gpx") or ""
+                if "<gpx" not in gpx:
+                    self._send_json(400, {"ok": False, "error": "no GPX to send"})
+                    return
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = os.path.join(tmp, "route.gpx")
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(gpx)
+                    code, out, err = run_tool("wahoo_routes.py",
+                                              ["send", "--via", via, path, str(body.get("name") or "Sommet route")],
+                                              timeout=300)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_routes.py failed"}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_wahoo_workouts(self, action, body):
+        """Planned workouts on the ELEMNT (tools/wahoo_workout.py). POST /api/wahoo/workout
+        {workout, name?, via?} - same body as /api/magene/workout (project schema); over USB it is
+        imported and confirmed, over Bluetooth it imports when the ELEMNT next refreshes its
+        workouts. GET /api/wahoo/workouts[?via=] - list; POST /api/wahoo/workouts/delete {name}
+        (USB only, Sommet's own workouts)."""
+        body = body or {}
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        via = body.get("via") or query.get("via", ["auto"])[0]
+        if via not in ("auto", "usb", "ble"):
+            via = "auto"
+        with self.WAHOO_PAGES_LOCK:
+            if action == "list":
+                code, out, err = run_tool("wahoo_workout.py", ["list", "--via", via], timeout=240)
+            elif action == "delete":
+                code, out, err = run_tool("wahoo_workout.py", ["delete", "--via", via, str(body.get("name") or "")],
+                                          timeout=300)
+            else:
+                workout = body.get("workout")
+                if not workout:
+                    self._send_json(400, {"ok": False, "error": "no workout"})
+                    return
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = os.path.join(tmp, "workout.json")
+                    with open(path, "w", encoding="utf-8") as fh:
+                        json.dump(workout, fh)
+                    args = ["send", "--via", via, path]
+                    if body.get("name"):
+                        args += ["--name", str(body["name"])]
+                    code, out, err = run_tool("wahoo_workout.py", args, timeout=300)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_workout.py failed"}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     # The ELEMNT keeps FTP / max HR / weight / height (no LTHR, no MAP); gender and birthday

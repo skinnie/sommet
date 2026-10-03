@@ -156,7 +156,7 @@ Item {
 
     // Restore whatever was loaded before the page was navigated away from (the Loader destroys
     // it), and write back after every change - see PlanStore's header.
-    Component.onCompleted: { restoreFromStore(); probeBryton() }
+    Component.onCompleted: { restoreFromStore(); probeBryton(); probeWahoo() }
 
     function restoreFromStore() {
         startTime = PlanStore.startTime; paceText = PlanStore.paceText; planDate = PlanStore.planDate
@@ -243,6 +243,29 @@ Item {
     property bool brytonHere: false
     function probeBryton() {
         api("GET", "/api/bryton/info", null, function(status, res) { root.brytonHere = !!(res && res.ok) })
+    }
+    // Wahoo ELEMNT (2026-10-03): on the cable it's imported right away; once Sommet has seen it,
+    // it can also be sent over Bluetooth (the rider then presses SYNC on the ELEMNT's Routes screen).
+    property bool wahooUsb: false
+    Settings { id: wahooSeen; category: "wahoo"; property bool seen: false }
+    function probeWahoo() {
+        api("GET", "/api/mtp/devices", null, function(status, res) {
+            root.wahooUsb = !!(res && res.devices && res.devices.some(d => d.kind === "wahoo" && d.transport === "adb"))
+            if (root.wahooUsb) wahooSeen.seen = true
+        })
+    }
+    function sendToWahoo(via) {
+        busy = true
+        statusMsg = via === "ble" ? qsTr("Sending to the ELEMNT over Bluetooth… keep it on and close")
+                                  : qsTr("Sending to the ELEMNT…")
+        api("POST", "/api/wahoo/route", { name: cleanName(), gpx: plannedGpx, via: via }, function(status, res) {
+            busy = false
+            if (res && res.ok)
+                statusMsg = via === "ble" ? qsTr("On the ELEMNT — open Routes there and press SYNC to import it.")
+                                          : qsTr("On the ELEMNT — it's in its Routes list.")
+            else
+                statusMsg = res && res.error ? res.error : qsTr("Send to ELEMNT failed")
+        })
     }
     // Only a C406 that's actually on (BikeDevices' scan / last answer), not just remembered.
     readonly property bool mageneHere: BikeDevices.magene !== null && BikeDevices.mageneReachable
@@ -630,7 +653,7 @@ Item {
     // One "Send to…" for every device - only the connected ones show - plus the eTrex / GPX files.
     ThemedMenu {
         id: sendMenu
-        onAboutToShow: root.probeBryton()
+        onAboutToShow: { root.probeBryton(); root.probeWahoo() }
         // One row per plugged watch, named (three Peaks -> three rows, told apart by serial).
         Instantiator {
             model: HomeViewModel.routeWatches
@@ -644,6 +667,9 @@ Item {
         }
         ThemedMenuItem { text: qsTr("Bryton"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
         ThemedMenuItem { text: qsTr("Magene C406"); visible: root.mageneHere; onTriggered: root.sendToMagene() }
+        ThemedMenuItem { text: qsTr("Wahoo ELEMNT"); visible: root.wahooUsb; onTriggered: root.sendToWahoo("usb") }
+        ThemedMenuItem { text: qsTr("Wahoo ELEMNT (Bluetooth)"); visible: !root.wahooUsb && wahooSeen.seen
+                         onTriggered: root.sendToWahoo("ble") }
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
         // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
         ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")
@@ -654,6 +680,7 @@ Item {
                          onTriggered: root.exportForEtrex("route", true) }
         ThemedMenuItem { text: qsTr("No device connected"); enabled: false
                          visible: !root.watchCanTakeRoute && !root.brytonHere && !root.mageneHere
+                                  && !root.wahooUsb && !wahooSeen.seen
                                   && !(GarminService.connected && GarminService.hasSdCard) }
     }
 

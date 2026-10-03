@@ -36,13 +36,17 @@ Item {
         var xhr = new XMLHttpRequest()
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
-            var found = false
+            var found = false, wahoo = false
             try {
                 var r = JSON.parse(xhr.responseText)
-                for (var i = 0; i < (r.devices || []).length; i++)
+                for (var i = 0; i < (r.devices || []).length; i++) {
                     if (r.devices[i].kind === "bryton") found = true
+                    if (r.devices[i].kind === "wahoo" && r.devices[i].transport === "adb") wahoo = true
+                }
             } catch (e) {}
             root.brytonConnected = found
+            root.wahooUsb = wahoo
+            if (wahoo) wahooSeen.seen = true
         }
         xhr.open("GET", "http://127.0.0.1:8766/api/mtp/devices")
         xhr.send()
@@ -81,19 +85,27 @@ Item {
     // One screen for every device: right-click (or long-press) a day. The Magene C406 is
     // Bluetooth-only, so it counts as "connected" once Home's pair scan found it (BikeDevices).
     readonly property bool mageneConnected: BikeDevices.magene !== null
+    // Wahoo ELEMNT (2026-10-03): on the cable the workout is imported right away
+    // (tools/wahoo_workout.py); once Sommet has seen it, it can go over Bluetooth too and the
+    // ELEMNT imports it when its Workouts list refreshes. Same "seen" flag as the Routes page.
+    property bool wahooUsb: false
+    Settings { id: wahooSeen; category: "wahoo"; property bool seen: false }
+    readonly property bool wahooConnected: root.wahooUsb || wahooSeen.seen
     readonly property bool watchConnected: HomeViewModel.anyDevice
     property string sendMsg: ""
     property bool sending: false
 
     readonly property var deviceLabels: ({ "suunto": qsTr("Suunto watch"),
                                            "bryton": qsTr("Bryton"),
-                                           "magene": qsTr("Magene C406") })
+                                           "magene": qsTr("Magene C406"),
+                                           "wahoo": qsTr("Wahoo ELEMNT") })
 
     function sendDay(target, entry) {
         if (!entry || root.sending) return
         const nm = entry.workout.name || ("Workout " + entry.date)
         const body = { workout: entry.workout, name: nm }
         if (target === "magene" && BikeDevices.magene) body.address = BikeDevices.magene.address
+        if (target === "wahoo") body.via = root.wahooUsb ? "usb" : "ble"
         root.sending = true
         root.sendMsg = qsTr("Sending “%1” to %2…").arg(nm).arg(root.deviceLabels[target])
         const xhr = new XMLHttpRequest()
@@ -101,7 +113,9 @@ Item {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
             root.sending = false
             let r = {}; try { r = JSON.parse(xhr.responseText) } catch (e) {}
-            root.sendMsg = r.ok ? qsTr("Sent “%1” to %2 ✓").arg(nm).arg(root.deviceLabels[target])
+            root.sendMsg = r.ok && r.workout && r.workout.pendingSync
+                                ? qsTr("Sent “%1” to %2 ✓ — on the ELEMNT, open Workouts and press SYNC (or it imports at next power-on).").arg(nm).arg(root.deviceLabels[target])
+                         : r.ok ? qsTr("Sent “%1” to %2 ✓").arg(nm).arg(root.deviceLabels[target])
                                 : qsTr("%1: %2").arg(root.deviceLabels[target])
                                       .arg(r.error || qsTr("send failed"))
         }
@@ -117,6 +131,10 @@ Item {
     function capsFor(device) {
         if (device === "magene")
             return { durations: ["time_min", "time_s"], targets: ["none", "power", "cadence"] }
+        // ELEMNT .plan: time or distance steps, watts / bpm / rpm ranges (tools/wahoo_workout.py).
+        if (device === "wahoo")
+            return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
+                     targets: ["none", "power", "hr", "cadence"] }
         if (device === "bryton")
             return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
                      targets: ["none", "power", "hr", "speed", "cadence"] }
@@ -151,6 +169,12 @@ Item {
             onTriggered: root.sendDay("magene", dayMenu.entry)
         }
         ThemedMenuItem {
+            visible: dayMenu.entry !== null && root.wahooConnected
+            enabled: !root.sending
+            text: root.wahooUsb ? qsTr("Send to Wahoo ELEMNT") : qsTr("Send to Wahoo ELEMNT (Bluetooth)")
+            onTriggered: root.sendDay("wahoo", dayMenu.entry)
+        }
+        ThemedMenuItem {
             visible: dayMenu.entry !== null
             text: qsTr("Remove workout")
             onTriggered: root.removeEntry(dayMenu.iso)
@@ -172,8 +196,14 @@ Item {
             onTriggered: editor.openFor(dayMenu.iso, "magene")
         }
         ThemedMenuItem {
+            visible: dayMenu.entry === null && root.wahooConnected
+            text: qsTr("Create workout for Wahoo ELEMNT")
+            onTriggered: editor.openFor(dayMenu.iso, "wahoo")
+        }
+        ThemedMenuItem {
             visible: dayMenu.entry === null
                      && !root.watchConnected && !root.brytonConnected && !root.mageneConnected
+                     && !root.wahooConnected
             text: qsTr("Create workout")
             onTriggered: editor.openFor(dayMenu.iso, "")
         }
@@ -1511,6 +1541,7 @@ Item {
                     readonly property bool canSend:
                         (editor.device === "bryton" && root.brytonConnected)
                         || (editor.device === "magene" && root.mageneConnected)
+                        || (editor.device === "wahoo" && root.wahooConnected)
                     visible: canSend
                     text: qsTr("Save & send to %1").arg(root.deviceLabels[editor.device] || "")
                     enabled: editor.editSteps.length > 0 && editor.repeatsBalanced

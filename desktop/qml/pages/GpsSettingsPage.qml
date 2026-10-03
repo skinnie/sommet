@@ -176,6 +176,28 @@ PageFlickable {
             }
         }
 
+        // ---- Wahoo only: routes on the device ----
+        Card {
+            width: parent.width
+            visible: root.isWahoo
+            Loader {
+                width: parent.width
+                active: root.isWahoo
+                sourceComponent: WahooRoutesPanel { width: parent.width }
+            }
+        }
+
+        // ---- Wahoo only: planned workouts on the device ----
+        Card {
+            width: parent.width
+            visible: root.isWahoo
+            Loader {
+                width: parent.width
+                active: root.isWahoo
+                sourceComponent: WahooWorkoutsPanel { width: parent.width }
+            }
+        }
+
         // ---- Magene only: device settings + altitude ----
         Card {
             width: parent.width
