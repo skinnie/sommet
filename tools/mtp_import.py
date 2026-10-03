@@ -203,9 +203,44 @@ def _adb_serials():
     return rows
 
 
+
+def wahoo_name(raw):
+    """"Wahoo <model>" from whatever the unit reports - the adb model ("ELEMNT", "ELEMNT BOLT")
+    or the MTP host ("WahooFitness_ELEMNT_XXXXXXXXXXXXXXXX"). No vendor string, no serial
+    (André, 2026-10-03: "Don't call Wahoo devices wahoo fitness nor put the serial number. only
+    Wahoo %Device ..like Wahoo Elemnt..Wahoo Bolt")."""
+    words = [w for w in re.split(r"[_\s]+", raw or "") if w]
+    words = [w for w in words if w.lower() not in ("wahoo", "wahoofitness", "fitness")]
+    # Drop a trailing serial: a long token mixing letters and digits.
+    if words and len(words[-1]) >= 8 and re.search(r"\d", words[-1]) and re.search(r"[A-Za-z]", words[-1]):
+        words = words[:-1]
+    model = [w.upper() for w in words] or ["ELEMNT"]
+    if len(model) > 1 and model[0] == "ELEMNT":
+        model = model[1:]                   # "ELEMNT BOLT" -> "BOLT", "ELEMNT ROAM" -> "ROAM"
+    return "Wahoo " + " ".join(model)
+
+def wahoo_on_usb_bus():
+    """True if a WahooFitness device is on the USB bus (Linux sysfs) - used to tell "not
+    plugged" from "plugged but the adb server never noticed it"."""
+    import glob
+    for m in glob.glob("/sys/bus/usb/devices/*/manufacturer"):
+        try:
+            if "wahoo" in open(m).read().lower():
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def _adb_devices():
     devices = []
-    for serial, state in _adb_serials():
+    serials = _adb_serials()
+    if not serials and wahoo_on_usb_bus():
+        # Plugged, but the running adb server never noticed it (seen 2026-10-02/03): restart it.
+        _adb("kill-server", timeout=15)
+        _adb("start-server", timeout=30)
+        serials = _adb_serials()
+    for serial, state in serials:
         if state != "device":
             # Not usable yet (RSA prompt not accepted, or still booting). Only report it when
             # we can't tell what it is - the UI can say "accept the prompt / re-plug".
@@ -230,7 +265,7 @@ def _adb_devices():
         devices.append({
             "kind": "wahoo",
             "host": serial,
-            "name": model if model.lower().startswith("wahoo") else "Wahoo " + model,
+            "name": wahoo_name(model),
             "mount": "",
             "activitiesDir": WAHOO_EXPORTS,
             "activityCount": len(fits),
@@ -254,7 +289,7 @@ def discover():
         devices.append({
             "kind": kind,
             "host": host,
-            "name": host.replace("_", " ").strip(),
+            "name": wahoo_name(host) if kind == "wahoo" else host.replace("_", " ").strip(),
             "mount": mount,
             "activitiesDir": adir or "",
             "activityCount": len(fits),

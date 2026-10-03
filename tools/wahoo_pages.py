@@ -193,7 +193,20 @@ def _adb(*args, serial=None, timeout=30, text=True):
     return out.returncode, (out.stdout.replace("\r", "") if text else out.stdout)
 
 
-def find_serial(serial=None):
+def wahoo_on_usb_bus():
+    """True if a WahooFitness device is on the USB bus (Linux sysfs) - used to tell "not
+    plugged" from "plugged but the adb server never noticed it"."""
+    import glob
+    for m in glob.glob("/sys/bus/usb/devices/*/manufacturer"):
+        try:
+            if "wahoo" in open(m).read().lower():
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def find_serial(serial=None, _retry=True):
     """The adb serial of a connected Wahoo (has the com.wahoofitness.bolt app), or None."""
     if not shutil.which("adb"):
         return None
@@ -205,6 +218,12 @@ def find_serial(serial=None):
         _c, pk = _adb("shell", "pm list packages " + WAHOO_PACKAGE, serial=parts[0])
         if "package:" + WAHOO_PACKAGE in pk:
             return parts[0]
+    # Seen on André's X230 (2026-10-02/03): the ELEMNT is on the USB bus with its adb interface
+    # up, but an adb server started earlier never picks it up. Restart the server once.
+    if _retry and wahoo_on_usb_bus():
+        _adb("kill-server", timeout=15)
+        _adb("start-server", timeout=30)
+        return find_serial(serial, _retry=False)
     return None
 
 

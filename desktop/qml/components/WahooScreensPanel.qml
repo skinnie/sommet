@@ -229,28 +229,49 @@ Column {
                         Flow {
                             width: parent.width
                             spacing: Theme.spacingSmall
+                            // One numbered row per field, in the ELEMNT's top-to-bottom order.
+                            // Buttons that don't apply are dimmed, not hidden, so rows stay aligned.
                             Repeater {
                                 model: card.modelData.fields
                                 delegate: Row {
                                     id: cell
                                     required property var modelData
                                     required property int index
-                                    spacing: 2
+                                    readonly property int count: card.modelData.fields.length
+                                    width: 380
+                                    spacing: 4
+                                    Text {
+                                        width: 22
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        horizontalAlignment: Text.AlignRight
+                                        text: (cell.index + 1) + "."
+                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                    }
                                     RoundedComboBox {
-                                        width: 200
+                                        width: 210
                                         model: root.fieldNames
                                         currentIndex: root.fieldIds.indexOf(cell.modelData)
+                                        displayText: root.nameById[cell.modelData] || String(cell.modelData)
                                         enabled: !root.saving
                                         onActivated: (i) => root.mutate(p => { p[card.index].fields[cell.index] = root.fieldIds[i] })
                                     }
                                     RoundedButton {
-                                        text: "‹"; visible: cell.index > 0; enabled: !root.saving
+                                        text: "↑"
+                                        enabled: !root.saving && cell.index > 0
+                                        opacity: cell.index > 0 ? 1 : 0.3
                                         onClicked: root.mutate(p => { const f = p[card.index].fields; const t = f[cell.index]; f[cell.index] = f[cell.index - 1]; f[cell.index - 1] = t })
                                     }
                                     RoundedButton {
+                                        text: "↓"
+                                        enabled: !root.saving && cell.index < cell.count - 1
+                                        opacity: cell.index < cell.count - 1 ? 1 : 0.3
+                                        onClicked: root.mutate(p => { const f = p[card.index].fields; const t = f[cell.index]; f[cell.index] = f[cell.index + 1]; f[cell.index + 1] = t })
+                                    }
+                                    RoundedButton {
                                         text: "✕"
-                                        visible: card.modelData.resizable && card.modelData.fields.length > 1
-                                        enabled: !root.saving
+                                        visible: card.modelData.resizable
+                                        enabled: !root.saving && cell.count > 1
+                                        opacity: cell.count > 1 ? 1 : 0.3
                                         onClicked: root.mutate(p => p[card.index].fields.splice(cell.index, 1))
                                     }
                                 }
