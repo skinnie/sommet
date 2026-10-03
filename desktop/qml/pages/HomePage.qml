@@ -229,7 +229,9 @@ PageFlickable {
                 return;
             }
             root.wahooBleOk = true;
-            root.bikeSyncMsg = "";
+            root.bikeSyncMsg = (r.tooBig || []).length > 0
+                ? qsTr("%n ride(s) too big for Bluetooth on this ELEMNT — plug the cable in for those.", "", r.tooBig.length)
+                : "";
             root.wahooBleFiles = r.files || [];
             ActivityService.importFromWahooBle(r.files || []);
         };

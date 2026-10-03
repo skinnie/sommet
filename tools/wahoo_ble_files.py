@@ -79,6 +79,7 @@ async def send(local, remote, msg_id=0x21):
     async with BleakClient(dev, timeout=20) as c:
         await c.start_notify(FILE_UUID, on_file)
         await c.write_gatt_char(KEEPALIVE, b"\x00", response=False)
+        ka = asyncio.ensure_future(_keepalive(c))
         await asyncio.sleep(0.3)
         name = b"\x00\x02" + remote.encode("utf-8") + b"\x00" * 5
         await write_all(c, _packets(0x06, 0x07, msg_id, name))
@@ -92,6 +93,7 @@ async def send(local, remote, msg_id=0x21):
             await wait(0x0c)
         await write_all(c, [bytes([0x09, 0, msg_id])])
         done = await wait(0x09)
+        ka.cancel()
     if len(done) < 4 or done[3] != 0:
         raise RuntimeError("the ELEMNT refused the file (%s)" % done.hex())
     return {"remote": remote, "bytes": len(data)}
@@ -126,6 +128,17 @@ async def list_dir(path, msg_id=0x22):
         await c.write_gatt_char(FILE_UUID, b"\x03\x00", response=False)
     msg = b"".join(parts[k] for k in sorted(parts))
     return _parse_listing(msg, path)
+
+
+async def _keepalive(c, every=5.0):
+    """Write the keep-alive byte every few seconds for as long as the transfer runs: without it
+    the ELEMNT drops the link after about 80 s (a 150 KB pull, 2026-10-03)."""
+    while True:
+        await asyncio.sleep(every)
+        try:
+            await c.write_gatt_char(KEEPALIVE, b"\x00", response=False)
+        except Exception:                      # noqa: BLE001 - the transfer itself reports errors
+            return
 
 
 async def _start(c, op, remote, msg_id):
@@ -167,6 +180,7 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
 
     async def run(c):
         await c.start_notify(FILE_UUID, on_file)
+        ka = asyncio.ensure_future(_keepalive(c))
         try:
             await c.write_gatt_char(KEEPALIVE, b"\x00", response=False)
             await asyncio.sleep(0.3)
@@ -175,9 +189,10 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
             if rsp["result"] != 0:
                 raise FileNotFoundError("the ELEMNT has no %s (result %d)" % (remote, rsp["result"]))
             if rsp["size"]:
-                # ~4 KB/s at worst over BLE; scale the wait with the size.
-                await asyncio.wait_for(done.wait(), 30 + rsp["size"] / 2000)
+                # ~2 KB/s over BLE; scale the wait with the size, generously.
+                await asyncio.wait_for(done.wait(), 30 + rsp["size"] / 1000)
         finally:
+            ka.cancel()
             await c.stop_notify(FILE_UUID)
 
     if client is not None:
@@ -195,6 +210,9 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
 
 
 RIDES = "/sdcard/exports"
+# André's ELEMNT switched itself OFF twice (2026-10-03 16:38 and 18:5x) while sending a 300 KB file
+# over Bluetooth; 150 KB came through fine. Until that's understood, bigger rides need the cable.
+BLE_MAX_BYTES = 150 * 1024
 
 
 async def fetch_rides(dest, names):
@@ -203,8 +221,17 @@ async def fetch_rides(dest, names):
     from bleak import BleakClient
     os.makedirs(dest, exist_ok=True)
     copied, errors = [], []
+    sizes = {f["name"]: f["size"] for f in await list_dir(RIDES)}
     async with BleakClient(await _find(), timeout=20) as c:
         for n, name in enumerate(names):
+            size = sizes.get(os.path.basename(name))
+            if size is None:
+                errors.append("%s: not on the ELEMNT" % name)
+                continue
+            if size > BLE_MAX_BYTES:
+                errors.append("%s: %d KB is too big for Bluetooth on this ELEMNT (it switches off) - "
+                              "plug the cable in to import it" % (name, size // 1024))
+                continue
             out = os.path.join(dest, "wahoo__" + os.path.basename(name))
             try:
                 await pull("%s/%s" % (RIDES, os.path.basename(name)), out, msg_id=0x30 + n % 0x40, client=c)
@@ -251,8 +278,9 @@ def main():
             out = {"ok": True, "files": asyncio.run(list_dir(args.args[0]))}
         elif args.command == "rides":
             files = asyncio.run(list_dir(RIDES))
-            rides = sorted(f["name"] for f in files if not f["dir"] and f["name"].lower().endswith(".fit"))
-            out = {"ok": True, "files": rides}
+            rides = [f for f in files if not f["dir"] and f["name"].lower().endswith(".fit")]
+            out = {"ok": True, "files": sorted(f["name"] for f in rides),
+                   "tooBig": sorted(f["name"] for f in rides if f["size"] > BLE_MAX_BYTES)}
         elif args.command == "fetch":
             names = list(args.args[1:])
             if args.only_stdin:

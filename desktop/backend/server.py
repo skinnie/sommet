@@ -2630,8 +2630,12 @@ class Handler(BaseHTTPRequestHandler):
         with self.WAHOO_PAGES_LOCK:
             _c, out, err = run_tool("wahoo_ble_files.py", ["rides"], timeout=120)
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "no answer"}
+        # Rides too big for Bluetooth (the ELEMNT switches off) are left OUT of `files`: the app
+        # marks every listed file as synced, and these must still come in over the cable later.
+        too_big = payload.get("tooBig", [])
+        files = [f for f in payload.get("files", []) if f not in too_big]
         self._send_json(200 if payload.get("ok") else 502,
-                        {"ok": payload.get("ok", False), "files": payload.get("files", []),
+                        {"ok": payload.get("ok", False), "files": files, "tooBig": too_big,
                          "error": payload.get("error")})
 
     def _handle_wahooble_import(self, body=None):
