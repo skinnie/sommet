@@ -141,6 +141,9 @@ public:
     // The Bryton Aero 60 over Bluetooth (2026-09-26): same flow as the Magene, rides tagged
     // "bryton" like a cable import, so a ride pulled either way is only ever imported once.
     Q_INVOKABLE void importFromBrytonBle(const QString &address, const QStringList &files);
+    // The Wahoo ELEMNT over Bluetooth (2026-10-03): tagged "wahoo" like the cable import, so a
+    // ride is only ever imported once whichever way it came. Found by name (its address rotates).
+    Q_INVOKABLE void importFromWahooBle(const QStringList &files);
     // How many of a bike computer's ride files a Sync would still pull (not yet in the bike_seen
     // history). Used only to decide whether "Sync rides" has anything to do - NOT a count of new
     // library entries (that needs decoding). 0 => everything's been checked, grey the button out.

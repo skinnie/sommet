@@ -267,6 +267,26 @@ Item {
                 statusMsg = res && res.error ? res.error : qsTr("Send to ELEMNT failed")
         })
     }
+    // Fresh OSM maps on the ELEMNT for the tiles this route crosses (tools/wahoo_maps.py): the
+    // build runs detached in the backend; progress and the tiles live in GPS settings → Maps.
+    function wahooMapsForRoute() {
+        busy = true
+        statusMsg = qsTr("Finding the map tiles for this route…")
+        api("POST", "/api/wahoo/maps/tiles", { gpx: plannedGpx }, function(status, res) {
+            if (!res || !res.ok || !res.tiles || res.tiles.length === 0) {
+                busy = false
+                statusMsg = res && res.error ? res.error : qsTr("Couldn't work out the map tiles")
+                return
+            }
+            const tiles = res.tiles
+            api("POST", "/api/wahoo/maps/update", { tiles: tiles }, function(status2, res2) {
+                busy = false
+                statusMsg = res2 && res2.ok
+                    ? qsTr("Building ELEMNT maps for %n tile(s) (%1) — this runs in the background; follow it in GPS settings → Maps.", "", tiles.length).arg(tiles.join(", "))
+                    : (res2 && res2.error ? res2.error : qsTr("Couldn't start the map build"))
+            })
+        })
+    }
     // Only a C406 that's actually on (BikeDevices' scan / last answer), not just remembered.
     readonly property bool mageneHere: BikeDevices.magene !== null && BikeDevices.mageneReachable
     readonly property bool watchCanTakeRoute: HomeViewModel.routeWatches.length > 0
@@ -670,6 +690,8 @@ Item {
         ThemedMenuItem { text: qsTr("Wahoo ELEMNT"); visible: root.wahooUsb; onTriggered: root.sendToWahoo("usb") }
         ThemedMenuItem { text: qsTr("Wahoo ELEMNT (Bluetooth)"); visible: !root.wahooUsb && wahooSeen.seen
                          onTriggered: root.sendToWahoo("ble") }
+        ThemedMenuItem { text: qsTr("Wahoo ELEMNT maps for this route"); visible: root.wahooUsb
+                         onTriggered: root.wahooMapsForRoute() }
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
         // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
         ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")

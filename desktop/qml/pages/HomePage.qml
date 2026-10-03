@@ -198,11 +198,50 @@ PageFlickable {
         xhr.open("GET", "http://127.0.0.1:8766/api/magene/rides?address=" + encodeURIComponent(bike.address));
         xhr.send();
     }
+    // --- Wahoo ELEMNT over Bluetooth (2026-10-03). Once Sommet has seen the ELEMNT on the cable
+    // (the "wahoo" seen flag the Routes and Training pages share), it stays on Home while
+    // unplugged and Sync reads its rides over Bluetooth (tools/wahoo_ble_files.py). Same kind
+    // "wahoo" as the cable entry, so GPS settings, the icon and the ride history are shared; the
+    // cable wins while it's plugged in.
+    Settings { id: wahooBleMemory; category: "wahoo"; property bool seen: false }
+    readonly property bool wahooOnUsb: mtpBikeComputers.some(b => b.kind === "wahoo")
+    onWahooOnUsbChanged: if (wahooOnUsb) wahooBleMemory.seen = true
+    property var wahooBleFiles: null           // its ride list, once read this session
+    property bool wahooBleOk: false            // the last Bluetooth read worked
+    property bool wahooBleTried: false         // ... and there was one this session
+    readonly property var wahooBleDevices: wahooBleMemory.seen && !wahooOnUsb
+        ? [{ "kind": "wahoo", "transport": "ble", "name": qsTr("Wahoo ELEMNT (Bluetooth)"), "address": "ELEMNT",
+             "activityCount": wahooBleFiles ? wahooBleFiles.length : -1, "files": wahooBleFiles }] : []
+    function syncWahooBle() {
+        root.bikeSyncMsg = qsTr("Reading rides from the ELEMNT over Bluetooth…");
+        root.bikeSyncOk = true;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            var r = {};
+            try { r = JSON.parse(xhr.responseText); } catch (e) {}
+            root.wahooBleTried = true;
+            if (!r.ok) {
+                root.wahooBleOk = false;
+                root.bikeSyncOk = false;
+                root.bikeSyncMsg = qsTr("ELEMNT not found — turn it on, and make sure no phone is connected to it.");
+                return;
+            }
+            root.wahooBleOk = true;
+            root.bikeSyncMsg = "";
+            root.wahooBleFiles = r.files || [];
+            ActivityService.importFromWahooBle(r.files || []);
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/wahooble/rides");
+        xhr.send();
+    }
     // Shared with the Training Program (its "Send to / Create for Magene" menu entries).
     onMageneDevicesChanged: BikeDevices.magene = mageneDevices.length > 0 ? mageneDevices[0] : null
     // The unified list the whole page reads: plugged (MTP) bike computers plus any Magene found
     // over Bluetooth. One "active device across watches and bike computers" (André, 2026-09-04).
     readonly property var bikeComputers: mtpBikeComputers.concat(mageneDevices).concat(brytonBleDevices)
+                                                         .concat(wahooBleDevices)
     // The remembered Magene only counts as connected while it actually answers (its last
     // connection worked). Asleep/off, it stays selectable but reads "asleep" and isn't counted
     // (André, 2026-09-26: "c406 shows connected and the device is off").
@@ -241,7 +280,10 @@ PageFlickable {
     }
     // Reachability lives in BikeDevices (shared with Routes/the planner, kept fresh by its scan).
     function mageneAnswered(ok) { BikeDevices.mageneAnswered(ok) }
-    function isReachable(bike) { return BikeDevices.isReachable(bike) }
+    function isReachable(bike) {
+        if (bike && bike.kind === "wahoo" && bike.transport === "ble") return root.wahooBleOk
+        return BikeDevices.isReachable(bike)
+    }
     // The C406 came into range while it's the active device and the card hasn't read it yet.
     Connections {
         target: BikeDevices
@@ -291,7 +333,7 @@ PageFlickable {
             DeviceService.selectBikeComputer("");
         else if (!DeviceService.bikeActive && !HomeViewModel.connected && !HomeViewModel.garminPicked) {
             // prefer a plugged one over a remembered Magene that may be asleep
-            const live = bikeComputers.filter(b => b.kind !== "c406" && b.kind !== "brytonble")
+            const live = bikeComputers.filter(b => b.kind !== "c406" && b.kind !== "brytonble" && b.transport !== "ble")
             if (live.length > 0) DeviceService.selectBikeComputer(live[0].kind)
             // The remembered Magene is known at once, before the USB list and the watch have
             // answered - picking it straight away beat every plugged device (André, 2026-09-26).
@@ -1004,7 +1046,8 @@ PageFlickable {
                             // A Magene whose ride list isn't known yet (asleep when selected) can still
                             // Sync: it reads the list first (syncMagene).
                             readonly property bool listUnknown: root.activeBike !== null
-                                && (root.activeBike.kind === "c406" || root.activeBike.kind === "brytonble")
+                                && (root.activeBike.kind === "c406" || root.activeBike.kind === "brytonble"
+                                    || root.activeBike.transport === "ble")
                                 && !root.activeBike.files
                             enabled: !ActivityService.loading && (root.activeBikeUnsynced > 0 || listUnknown)
                             text: ActivityService.loading
@@ -1020,6 +1063,9 @@ PageFlickable {
                                     root.syncMagene(root.activeBike);
                                 else if (root.activeBike && root.activeBike.kind === "brytonble")
                                     root.syncBrytonBle(root.activeBike);
+                                else if (root.activeBike && root.activeBike.kind === "wahoo"
+                                         && root.activeBike.transport === "ble")
+                                    root.syncWahooBle();
                                 else
                                     ActivityService.importFromBikeComputers();
                             }
@@ -1536,6 +1582,7 @@ PageFlickable {
                             required property var modelData
                             label: root.bikeDisplayName(modelData)
                                    + (root.isReachable(modelData) ? ""
+                                      : modelData.transport === "ble" ? (root.wahooBleTried ? qsTr(" (not found)") : "")
                                       : modelData.kind === "brytonble" ? qsTr(" (not found)") : qsTr(" (asleep)"))
                             active: DeviceService.activeBikeKind === modelData.kind
                             onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectBikeComputer(modelData.kind) }

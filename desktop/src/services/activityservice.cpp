@@ -1720,6 +1720,12 @@ void ActivityService::importFromBrytonBle(const QString &address, const QStringL
                       tr("Bryton"), address, files);
 }
 
+void ActivityService::importFromWahooBle(const QStringList &files)
+{
+    importFromBleBike(QStringLiteral("wahoo"), QStringLiteral("/api/wahooble/import"),
+                      tr("ELEMNT"), QStringLiteral("ELEMNT"), files);
+}
+
 // A Bluetooth bike computer: pull only the listed files not yet in the sync history (bike_seen,
 // keyed "<tag>|<file name>" - shared with the cable import), decode, insert with the library's
 // start-time dedup. tag = library source tag, endpoint = the backend's import route.

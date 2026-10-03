@@ -198,6 +198,17 @@ PageFlickable {
             }
         }
 
+        // ---- Wahoo only: OSM maps built here ----
+        Card {
+            width: parent.width
+            visible: root.isWahoo
+            Loader {
+                width: parent.width
+                active: root.isWahoo
+                sourceComponent: WahooMapsPanel { width: parent.width }
+            }
+        }
+
         // ---- Magene only: device settings + altitude ----
         Card {
             width: parent.width

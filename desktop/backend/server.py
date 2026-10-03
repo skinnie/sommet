@@ -149,6 +149,10 @@ ROUTE_CACHE_DIR = Path.home() / "AmbitAppBackups" / "routecache"
 # output file, so record/status and record/stop can find it. None = no recording in flight.
 _SLEEP_REC = None
 
+# Wahoo ELEMNT map job (tools/wahoo_maps.py setup / update, detached - a tile build can take an
+# hour): {"kind", "proc", "progress" (the tool's progress JSON), "log", "started"}. One at a time.
+_WAHOO_MAPS_JOB = None
+
 # Confirmed live and fully unauthenticated, 2026-08-05 (docs/sgee_andre.md) - no AppKey/account
 # needed, unlike the rest of that host's API surface.
 GPS_ORBIT_URL = "https://devices.suunto-operations.com/devices/gpsorbit/binary"
@@ -830,7 +834,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
                      "wahoo_settings.py", "wahoo_profile.py", "wahoo_routes.py",
-                     "wahoo_ble_files.py", "wahoo_workout.py"}
+                     "wahoo_ble_files.py", "wahoo_workout.py", "wahoo_maps.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1203,6 +1207,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_settings(None)
         elif self.path == "/api/wahoo/routes" or self.path.startswith("/api/wahoo/routes?"):
             self._handle_wahoo_routes("list", None)
+        elif self.path == "/api/wahooble/rides":
+            self._handle_wahooble_rides()
+        elif self.path == "/api/wahoo/maps":
+            self._handle_wahoo_maps()
+        elif self.path == "/api/wahoo/maps/job":
+            self._handle_wahoo_maps_job()
         elif self.path == "/api/wahoo/workouts" or self.path.startswith("/api/wahoo/workouts?"):
             self._handle_wahoo_workouts("list", None)
         elif self.path == "/api/library":
@@ -1457,6 +1467,16 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_routes("delete", body)
         elif self.path == "/api/wahoo/workout":
             self._handle_wahoo_workouts("send", body)
+        elif self.path == "/api/wahooble/import":
+            self._handle_wahooble_import(body)
+        elif self.path == "/api/wahoo/maps/tiles":
+            self._handle_wahoo_maps_tiles(body)
+        elif self.path == "/api/wahoo/maps/update":
+            self._handle_wahoo_maps_start("update", body)
+        elif self.path == "/api/wahoo/maps/setup":
+            self._handle_wahoo_maps_start("setup", body)
+        elif self.path == "/api/wahoo/maps/restore":
+            self._handle_wahoo_maps_restore(body)
         elif self.path == "/api/wahoo/workouts/delete":
             self._handle_wahoo_workouts("delete", body)
         elif self.path == "/api/bryton/profile/compare":
@@ -2100,6 +2120,132 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "wahoo_workout.py failed"}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
+    # ---- Wahoo ELEMNT maps (tools/wahoo_maps.py): OSM tiles built here with wahooMapsCreator and
+    # installed over the cable. Building is long (downloads + rendering), so setup / update run
+    # detached and the app polls /api/wahoo/maps/job. ----------------------------------------------
+
+    @staticmethod
+    def _wahoo_tiles(value):
+        tiles = [str(t) for t in (value or []) if re.fullmatch(r"\d{1,3}/\d{1,3}", str(t))]
+        return tiles[:40]
+
+    def _handle_wahoo_maps(self):
+        """GET /api/wahoo/maps - {ready (toolchain installed), missing, tiles (the ELEMNT's, when
+        it's on the cable; `sommet` = built by Sommet), usb}."""
+        _c, out, err = run_tool("wahoo_maps.py", ["check"], timeout=30)
+        check = self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
+        payload = {"ok": bool(check.get("ok")), "ready": check.get("ready", False),
+                   "missing": check.get("missing", []), "tiles": [], "usb": False}
+        with self.WAHOO_PAGES_LOCK:
+            _c, out, err = run_tool("wahoo_maps.py", ["status"], timeout=180)
+        st = self._parse_last_json_line(out) or {}
+        if st.get("ok"):
+            payload.update(tiles=st.get("tiles", []), usb=True)
+        else:
+            payload["deviceError"] = st.get("error") or err.strip()
+        self._send_json(200, payload)
+
+    def _handle_wahoo_maps_tiles(self, body):
+        """POST /api/wahoo/maps/tiles {gpx, marginKm?} - the zoom-8 tiles a route needs."""
+        body = body or {}
+        gpx = body.get("gpx") or ""
+        if "<gpx" not in gpx:
+            self._send_json(400, {"ok": False, "error": "no GPX"})
+            return
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "route.gpx")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(gpx)
+            _c, out, err = run_tool("wahoo_maps.py", ["tiles", path, "--margin-km",
+                                                       str(float(body.get("marginKm") or 10))], timeout=60)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_wahoo_maps_start(self, kind, body):
+        """POST /api/wahoo/maps/update {tiles: ["130/86", ...]} - build + install, detached.
+        POST /api/wahoo/maps/setup - install the map toolchain, detached."""
+        global _WAHOO_MAPS_JOB
+        job = _WAHOO_MAPS_JOB
+        if job and job["proc"].poll() is None:
+            self._send_json(409, {"ok": False, "error": "a map job is already running", "kind": job["kind"]})
+            return
+        args = [PYTHON, str(TOOLS_DIR / "wahoo_maps.py"), kind]
+        tiles = []
+        if kind == "update":
+            tiles = self._wahoo_tiles((body or {}).get("tiles"))
+            if not tiles:
+                self._send_json(400, {"ok": False, "error": "no tiles"})
+                return
+            args += tiles
+        out_dir = Path.home() / "AmbitAppBackups" / "wahoo"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        progress, log = out_dir / "maps-job.json", out_dir / "maps-job.log"
+        for f in (progress, log):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        args += ["--progress", str(progress)]
+        try:
+            with open(log, "w") as lf:
+                proc = subprocess.Popen(args, cwd=str(TOOLS_DIR), stdin=subprocess.DEVNULL, stdout=lf,
+                                        stderr=subprocess.STDOUT, start_new_session=True)
+        except Exception as e:  # noqa: BLE001
+            self._send_json(500, {"ok": False, "error": "could not start: %s" % e})
+            return
+        _WAHOO_MAPS_JOB = {"kind": kind, "proc": proc, "progress": str(progress), "log": str(log),
+                           "started": int(time.time()), "tiles": tiles}
+        self._send_json(200, {"ok": True, "kind": kind, "tiles": tiles})
+
+    def _handle_wahoo_maps_job(self):
+        """GET /api/wahoo/maps/job - {running, kind, stage, tiles, error, step (latest log line)}."""
+        job = _WAHOO_MAPS_JOB
+        if not job:
+            self._send_json(200, {"ok": True, "running": False})
+            return
+        running = job["proc"].poll() is None
+        out = {"ok": True, "running": running, "kind": job["kind"], "tiles": job["tiles"],
+               "started": job["started"]}
+        try:
+            with open(job["progress"]) as fh:
+                out.update(json.load(fh))
+        except (OSError, ValueError):
+            pass
+        step, result = "", None
+        try:
+            with open(job["log"], errors="replace") as fh:
+                lines = [ln.strip() for ln in fh.readlines()[-200:]]
+            for ln in lines:
+                if ln.startswith("{") and ln.endswith("}"):
+                    try:
+                        result = json.loads(ln)
+                    except ValueError:
+                        pass
+                elif ln.startswith(("INFO:# ", "INFO:+ ", "wahoo_maps:")):
+                    step = ln.split(":", 1)[1].lstrip("#+ ").strip()
+        except OSError:
+            pass
+        out["step"] = step
+        if not running and result is not None:
+            out["result"] = result
+            if not result.get("ok"):
+                out.setdefault("error", result.get("error"))
+                out["stage"] = "error"
+            elif job["kind"] == "setup":
+                out["stage"] = "done"
+        self._send_json(200, out)
+
+    def _handle_wahoo_maps_restore(self, body):
+        """POST /api/wahoo/maps/restore {tiles} - put Wahoo's original tiles back."""
+        tiles = self._wahoo_tiles((body or {}).get("tiles"))
+        if not tiles:
+            self._send_json(400, {"ok": False, "error": "no tiles"})
+            return
+        with self.WAHOO_PAGES_LOCK:
+            _c, out, err = run_tool("wahoo_maps.py", ["restore"] + tiles, timeout=120)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip()}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
     # The ELEMNT keeps FTP / max HR / weight / height (no LTHR, no MAP); gender and birthday
     # aren't wired yet (see tools/wahoo_profile.py).
     _WAHOO_COMPARE_FIELDS = ("ftp", "max_hr", "weight", "height")
@@ -2477,6 +2623,36 @@ class Handler(BaseHTTPRequestHandler):
         files = [r.get("name") for r in payload.get("rides", []) if r.get("name")]
         self._send_json(200 if payload.get("ok") else 502,
                         {"ok": payload.get("ok", False), "files": files, "error": payload.get("error")})
+
+    def _handle_wahooble_rides(self):
+        """GET /api/wahooble/rides - the ride files on the Wahoo ELEMNT, read over Bluetooth
+        ({ok, files}), the same names the cable import sees (/sdcard/exports)."""
+        with self.WAHOO_PAGES_LOCK:
+            _c, out, err = run_tool("wahoo_ble_files.py", ["rides"], timeout=120)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "no answer"}
+        self._send_json(200 if payload.get("ok") else 502,
+                        {"ok": payload.get("ok", False), "files": payload.get("files", []),
+                         "error": payload.get("error")})
+
+    def _handle_wahooble_import(self, body=None):
+        """POST /api/wahooble/import {files:[{name}]} - pull those rides off the ELEMNT over
+        Bluetooth and decode them, tagged "wahoo" like the cable import (one sync history)."""
+        body = body or {}
+        files = body.get("files")
+        if not isinstance(files, list) or not files:
+            self._send_json(400, {"ok": False, "error": "no files"})
+            return
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.WAHOO_PAGES_LOCK:
+                code, out, err = run_tool("wahoo_ble_files.py", ["fetch", tmpdir, "--only-stdin"],
+                                          timeout=1800, stdin=json.dumps({"files": files}))
+            res = self._parse_last_json_line(out) or {}
+            if not res.get("ok"):
+                self._send_json(502, {"ok": False, "error": res.get("error") or "ELEMNT pull failed",
+                                       "stderr": (err or "")[-400:]})
+                return
+            activities = self._bike_activities_from_fits(res.get("copied", []), "wahoo")
+            self._send_json(200, {"ok": True, "activities": activities, "count": len(activities)})
 
     def _handle_brytonble_import(self, body=None):
         """POST /api/brytonble/import {address, files:[{name}]} - pull those rides over Bluetooth

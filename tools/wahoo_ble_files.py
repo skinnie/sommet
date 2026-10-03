@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-"""Send / delete files on a Wahoo ELEMNT over Bluetooth - the file channel of its BLE service, as
+"""Send, list and fetch files on a Wahoo ELEMNT over Bluetooth - the file channel of its BLE service, as
 the open-source BoltOn app (gitlab.com/Hague/bolton, MIT) does it. Used by Sommet to put routes
 (and later plans) on the ELEMNT without a cable (André, 2026-10-03, "be sure to have them usb and
 bluetooth").
 
     ./tools/wahoo_ble_files.py send LOCAL /sdcard/routes/Name.gpx
     ./tools/wahoo_ble_files.py list /data/data/com.wahoofitness.bolt/files/routes/12/
+    ./tools/wahoo_ble_files.py pull "/sdcard/exports/<ride>.fit" ride.fit
+    ./tools/wahoo_ble_files.py rides                      # the ride files the ELEMNT keeps
+    ./tools/wahoo_ble_files.py fetch DEST NAME.fit ...    # those rides, over one connection
 
 Protocol (characteristic a026e036, all multi-packet messages framed "cmd id seq <=17 bytes"):
-  06/07  file name     = 00 02 <utf-8 path> 00 00 00 00 00
+  06/07  start transfer = 00 <op> <utf-8 path> 00 <offset u32> - 01 pull (the ELEMNT sends the
+         file, raw), 02 push (we send it, gzipped chunks). A pull answers "08 id <seq> 00 01 01
+         <result> <size u32>" (result 0 = OK, 1 = no such file), then streams the file in 4096-byte
+         chunks - "0a id seq <data>" packets, "0b" closing each chunk, seq restarting per chunk, no
+         acks - and ends "09 00 id 00" (2026-10-03: a 7900-byte ride came back byte-identical).
+         Not used: 03 also pulls, gzipped; some other values delete the file (a push from offset 0
+         deletes the old file first) - not pinned down, so there is no BLE delete here.
   08     "more than one chunk follows" = 08 id 00 01 02 00 00 00 00 00
   0a/0b  each 4096-byte chunk, gzipped, prefixed 00 01 00 00 (or, for the last chunk, the size
          of that chunk as u32 LE); the ELEMNT answers each chunk "0c id ..."
@@ -22,6 +31,7 @@ import argparse
 import asyncio
 import gzip
 import json
+import os
 import struct
 import sys
 
@@ -118,6 +128,92 @@ async def list_dir(path, msg_id=0x22):
     return _parse_listing(msg, path)
 
 
+async def _start(c, op, remote, msg_id):
+    req = b"\x00" + bytes([op]) + remote.encode("utf-8") + b"\x00" * 5
+    for pkt in _packets(0x06, 0x07, msg_id, req):
+        await c.write_gatt_char(FILE_UUID, pkt, response=False)
+        await asyncio.sleep(0.02)
+
+
+async def _find():
+    from bleak import BleakScanner
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, ad: bool(d.name) and d.name.upper().startswith("ELEMNT"), timeout=20)
+    if dev is None:
+        raise RuntimeError("no ELEMNT advertising over Bluetooth (on? not connected to a phone?)")
+    return dev
+
+
+async def pull(remote, local=None, msg_id=0x23, client=None):
+    """The ELEMNT's file `remote` -> bytes (also written to `local` when given)."""
+    from bleak import BleakClient
+    rsp, chunks, cur, done = {}, [], [], asyncio.Event()
+    got_rsp = asyncio.Event()
+
+    def on_file(_s, d):
+        b = bytes(d)
+        if len(b) < 3 or b[1] != msg_id and b[0] != 0x09:
+            return
+        if b[0] == 0x08 and len(b) >= 11:
+            rsp["result"], rsp["size"] = b[6], struct.unpack_from("<I", b, 7)[0]
+            got_rsp.set()
+        elif b[0] in (0x0a, 0x0b):
+            cur.append(b[3:])
+            if b[0] == 0x0b:
+                chunks.append(b"".join(cur))
+                cur.clear()
+        elif b[0] == 0x09 and len(b) >= 3 and b[2] == msg_id:
+            done.set()
+
+    async def run(c):
+        await c.start_notify(FILE_UUID, on_file)
+        try:
+            await c.write_gatt_char(KEEPALIVE, b"\x00", response=False)
+            await asyncio.sleep(0.3)
+            await _start(c, 1, remote, msg_id)
+            await asyncio.wait_for(got_rsp.wait(), 20)
+            if rsp["result"] != 0:
+                raise FileNotFoundError("the ELEMNT has no %s (result %d)" % (remote, rsp["result"]))
+            if rsp["size"]:
+                # ~4 KB/s at worst over BLE; scale the wait with the size.
+                await asyncio.wait_for(done.wait(), 30 + rsp["size"] / 2000)
+        finally:
+            await c.stop_notify(FILE_UUID)
+
+    if client is not None:
+        await run(client)
+    else:
+        async with BleakClient(await _find(), timeout=20) as c:
+            await run(c)
+    data = b"".join(chunks) + b"".join(cur)
+    if len(data) != rsp["size"]:
+        raise RuntimeError("got %d of %d bytes of %s" % (len(data), rsp["size"], remote))
+    if local:
+        with open(local, "wb") as fh:
+            fh.write(data)
+    return data
+
+
+RIDES = "/sdcard/exports"
+
+
+async def fetch_rides(dest, names):
+    """Pull ride files from /sdcard/exports over ONE connection, named like the cable import
+    (DEST/wahoo__<name>) - [{kind, name, path}] for the files that came through."""
+    from bleak import BleakClient
+    os.makedirs(dest, exist_ok=True)
+    copied, errors = [], []
+    async with BleakClient(await _find(), timeout=20) as c:
+        for n, name in enumerate(names):
+            out = os.path.join(dest, "wahoo__" + os.path.basename(name))
+            try:
+                await pull("%s/%s" % (RIDES, os.path.basename(name)), out, msg_id=0x30 + n % 0x40, client=c)
+                copied.append({"kind": "wahoo", "name": os.path.basename(name), "path": out})
+            except (RuntimeError, FileNotFoundError, asyncio.TimeoutError) as e:
+                errors.append("%s: %s" % (name, e))
+    return copied, errors
+
+
 def _parse_listing(msg, path):
     o = msg.find(b"\x00\x03\x00")
     if o < 0:
@@ -144,12 +240,31 @@ def _parse_listing(msg, path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["send", "list"])
-    ap.add_argument("args", nargs="+", help="send: LOCAL REMOTE; list: FOLDER")
+    ap.add_argument("command", choices=["send", "list", "pull", "rides", "fetch"])
+    ap.add_argument("args", nargs="*", help="send: LOCAL REMOTE; pull: REMOTE LOCAL; list: FOLDER; "
+                                            "fetch: DEST NAME... (or --only-stdin)")
+    ap.add_argument("--only-stdin", action="store_true",
+                    help="fetch: read {\"files\": [{\"name\"}]} from stdin")
     args = ap.parse_args()
     try:
         if args.command == "list":
             out = {"ok": True, "files": asyncio.run(list_dir(args.args[0]))}
+        elif args.command == "rides":
+            files = asyncio.run(list_dir(RIDES))
+            rides = sorted(f["name"] for f in files if not f["dir"] and f["name"].lower().endswith(".fit"))
+            out = {"ok": True, "files": rides}
+        elif args.command == "fetch":
+            names = list(args.args[1:])
+            if args.only_stdin:
+                spec = json.loads(sys.stdin.read() or "{}")
+                names += [f.get("name") for f in spec.get("files", []) if f.get("name")]
+            copied, errors = asyncio.run(fetch_rides(args.args[0], names))
+            out = {"ok": bool(copied) or not names, "copied": copied, "count": len(copied), "errors": errors}
+            if not out["ok"]:
+                out["error"] = "; ".join(errors)
+        elif args.command == "pull":
+            data = asyncio.run(pull(args.args[0], args.args[1]))
+            out = {"ok": True, "remote": args.args[0], "local": args.args[1], "bytes": len(data)}
         else:
             out = dict(asyncio.run(send(args.args[0], args.args[1])), ok=True)
     except Exception as e:                     # noqa: BLE001 - one JSON error line for callers

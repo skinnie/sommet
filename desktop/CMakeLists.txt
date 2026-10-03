@@ -268,6 +268,7 @@ qt_add_qml_module(ambitapp
         qml/components/WahooSettingsPanel.qml
         qml/components/WahooRoutesPanel.qml
         qml/components/WahooWorkoutsPanel.qml
+        qml/components/WahooMapsPanel.qml
         qml/components/IntervalsIcon.qml
         qml/MapService.qml
         qml/PlanStore.qml
