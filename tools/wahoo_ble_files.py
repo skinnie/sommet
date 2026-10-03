@@ -15,7 +15,8 @@ Protocol (characteristic a026e036, all multi-packet messages framed "cmd id seq 
          file, raw), 02 push (we send it, gzipped chunks). A pull answers "08 id <seq> 00 01 01
          <result> <size u32>" (result 0 = OK, 1 = no such file), then streams the file in 4096-byte
          chunks - "0a id seq <data>" packets, "0b" closing each chunk, seq restarting per chunk, no
-         acks - and ends "09 00 id 00" (2026-10-03: a 7900-byte ride came back byte-identical).
+         acks - and ends "09 00 id 00" (2026-10-03: a 7900-byte ride and a 300 KB file came back
+         byte-identical; ~2 KB/s). Keep-alive writes every 5 s or the link drops at ~80 s.
          Not used: 03 also pulls, gzipped; some other values delete the file (a push from offset 0
          deletes the old file first) - not pinned down, so there is no BLE delete here.
   08     "more than one chunk follows" = 08 id 00 01 02 00 00 00 00 00
@@ -210,9 +211,6 @@ async def pull(remote, local=None, msg_id=0x23, client=None):
 
 
 RIDES = "/sdcard/exports"
-# André's ELEMNT switched itself OFF twice (2026-10-03 16:38 and 18:5x) while sending a 300 KB file
-# over Bluetooth; 150 KB came through fine. Until that's understood, bigger rides need the cable.
-BLE_MAX_BYTES = 150 * 1024
 
 
 async def fetch_rides(dest, names):
@@ -221,17 +219,8 @@ async def fetch_rides(dest, names):
     from bleak import BleakClient
     os.makedirs(dest, exist_ok=True)
     copied, errors = [], []
-    sizes = {f["name"]: f["size"] for f in await list_dir(RIDES)}
     async with BleakClient(await _find(), timeout=20) as c:
         for n, name in enumerate(names):
-            size = sizes.get(os.path.basename(name))
-            if size is None:
-                errors.append("%s: not on the ELEMNT" % name)
-                continue
-            if size > BLE_MAX_BYTES:
-                errors.append("%s: %d KB is too big for Bluetooth on this ELEMNT (it switches off) - "
-                              "plug the cable in to import it" % (name, size // 1024))
-                continue
             out = os.path.join(dest, "wahoo__" + os.path.basename(name))
             try:
                 await pull("%s/%s" % (RIDES, os.path.basename(name)), out, msg_id=0x30 + n % 0x40, client=c)
@@ -278,9 +267,8 @@ def main():
             out = {"ok": True, "files": asyncio.run(list_dir(args.args[0]))}
         elif args.command == "rides":
             files = asyncio.run(list_dir(RIDES))
-            rides = [f for f in files if not f["dir"] and f["name"].lower().endswith(".fit")]
-            out = {"ok": True, "files": sorted(f["name"] for f in rides),
-                   "tooBig": sorted(f["name"] for f in rides if f["size"] > BLE_MAX_BYTES)}
+            rides = sorted(f["name"] for f in files if not f["dir"] and f["name"].lower().endswith(".fit"))
+            out = {"ok": True, "files": rides}
         elif args.command == "fetch":
             names = list(args.args[1:])
             if args.only_stdin:
