@@ -829,7 +829,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "magene_device.py", "magene_route.py", "magene_workout.py",
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
-                     "wahoo_settings.py"}
+                     "wahoo_settings.py", "wahoo_profile.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1474,6 +1474,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_brytonble_profile_compare(body)
         elif self.path == "/api/brytonble/profile/apply":
             self._handle_brytonble_profile_apply(body)
+        elif self.path == "/api/wahoo/profile/compare":
+            self._handle_wahoo_profile_compare(body)
+        elif self.path == "/api/wahoo/profile/apply":
+            self._handle_wahoo_profile_apply(body)
         elif self.path == "/api/magene/device":
             self._handle_magene_device(body)
         elif self.path == "/api/magene/profile/compare":
@@ -2018,6 +2022,77 @@ class Handler(BaseHTTPRequestHandler):
         payload["schema"] = schema.get("settings", {})
         payload["autoPauseOn"] = schema.get("autoPauseOn", 0.447)
         self._send_json(200 if payload.get("ok") else 502, payload)
+
+    # The ELEMNT keeps FTP / max HR / weight / height (no LTHR, no MAP); gender and birthday
+    # aren't wired yet (see tools/wahoo_profile.py).
+    _WAHOO_COMPARE_FIELDS = ("ftp", "max_hr", "weight", "height")
+
+    def _handle_wahoo_profile_compare(self, body):
+        """POST /api/wahoo/profile/compare {athlete_id?, api_key?} - {device, intervals, diff} like
+        the Bryton / Magene ones, the ELEMNT read over the cable or Bluetooth (wahoo_profile.py)."""
+        body = body or {}
+        with self.WAHOO_PAGES_LOCK:
+            code, out, err = run_tool("wahoo_profile.py", ["read"], timeout=120)
+        prof = self._parse_last_json_line(out) or {}
+        if not prof.get("ok"):
+            self._send_json(502, {"ok": False, "error": prof.get("error") or err.strip() or "could not read the ELEMNT"})
+            return
+        device = {f: prof.get(f) for f in self._WAHOO_COMPARE_FIELDS}
+        intervals = None
+        aid, akey = body.get("athlete_id"), body.get("api_key")
+        if aid and akey:
+            c2, o2, _e2 = run_tool("intervals_athlete.py", ["get", str(aid), str(akey)])
+            if c2 == 0:
+                intervals = json.loads(o2)
+        diff = []
+        if intervals:
+            for f in self._WAHOO_COMPARE_FIELDS:
+                dv, iv = device.get(f), intervals.get(f)
+                if dv is None or iv is None:
+                    continue
+                same = abs(dv - iv) < 0.5 if f in ("weight", "height") else dv == iv
+                if not same:
+                    diff.append({"field": f, "device": dv, "intervals": iv})
+        self._send_json(200, {"ok": True, "device": device, "intervals": intervals, "diff": diff,
+                              "via": prof.get("via")})
+
+    def _handle_wahoo_profile_apply(self, body):
+        """POST /api/wahoo/profile/apply {direction, fields, athlete_id?, api_key?} - 'to_device'
+        writes FTP / max HR / weight / height to the ELEMNT (zone ceilings scaled with FTP / max
+        HR); 'to_intervals' pushes FTP / max HR / weight back to intervals.icu."""
+        body = body or {}
+        direction = body.get("direction")
+        fields = {k: v for k, v in (body.get("fields") or {}).items()
+                  if k in self._WAHOO_COMPARE_FIELDS and v is not None}
+        if not fields:
+            self._send_json(400, {"ok": False, "error": "no fields to apply"})
+            return
+        if direction == "to_device":
+            with self.WAHOO_PAGES_LOCK:
+                code, out, err = run_tool("wahoo_profile.py", ["write"], timeout=180,
+                                          stdin=json.dumps(fields))
+            res = self._parse_last_json_line(out) or {}
+            if not res.get("ok"):
+                self._send_json(502, {"ok": False, "error": res.get("error") or err.strip() or "device write failed"})
+                return
+            self._send_json(200, {"ok": True, "written": fields, "via": res.get("via")})
+            return
+        if direction == "to_intervals":
+            aid, akey = body.get("athlete_id"), body.get("api_key")
+            if not aid or not akey:
+                self._send_json(400, {"ok": False, "error": "intervals.icu not connected"})
+                return
+            args = ["put", str(aid), str(akey)]
+            for name in ("ftp", "max_hr", "weight"):
+                if name in fields:
+                    args += ["--" + name.replace("_", "-"), str(fields[name])]
+            code, out, err = run_tool("intervals_athlete.py", args)
+            if code != 0:
+                self._send_json(502, {"ok": False, "error": err.strip() or "intervals write failed"})
+                return
+            self._send_json(200, {"ok": True, "sent": out.strip()})
+            return
+        self._send_json(400, {"ok": False, "error": f"unknown direction {direction!r}"})
 
     def _handle_bryton_info(self):
         """GET /api/bryton/info - the connected Bryton's identity, firmware versions and lifetime

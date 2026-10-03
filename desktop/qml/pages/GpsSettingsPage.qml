@@ -91,10 +91,9 @@ PageFlickable {
             }
         }
 
-        // ---- Profile (Bryton + Magene) ----
+        // ---- Profile (Bryton, Magene, Wahoo) ----
         Card {
             width: parent.width
-            visible: !root.isWahoo
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
@@ -106,6 +105,8 @@ PageFlickable {
                     width: parent.width; wrapMode: Text.WordWrap
                     text: profileSyncPrefs.value(root.kind + "_mode", "") === "auto"
                           ? qsTr("Kept in sync with intervals.icu automatically every time it's connected.")
+                          : root.isWahoo
+                            ? qsTr("FTP, max HR, weight and height — compare with intervals.icu and pick the right values. The ELEMNT's zones follow FTP and max HR.")
                           : root.isBrytonBle
                             ? qsTr("FTP, LTHR, max HR, MAP, weight and height — compare with intervals.icu and pick the right values.")
                             : qsTr("FTP, LTHR, max HR, weight, height, gender and age — compare with intervals.icu and pick the right values.")
@@ -114,8 +115,10 @@ PageFlickable {
                 RoundedButton {
                     text: qsTr("Sync profile")
                     onClicked: {
-                        profileDialog.apiBase = root.isMagene ? "magene" : root.isBrytonBle ? "brytonble" : "bryton"
-                        profileDialog.deviceName = root.isMagene ? qsTr("Magene") : qsTr("Bryton")
+                        profileDialog.apiBase = root.isMagene ? "magene" : root.isBrytonBle ? "brytonble"
+                                              : root.isWahoo ? "wahoo" : "bryton"
+                        profileDialog.deviceName = root.isMagene ? qsTr("Magene") : root.isWahoo ? qsTr("ELEMNT")
+                                                 : qsTr("Bryton")
                         profileDialog.address = root.isMagene ? root.mageneAddress
                                               : root.isBrytonBle ? root.brytonBleAddress : ""
                         profileDialog.open()
