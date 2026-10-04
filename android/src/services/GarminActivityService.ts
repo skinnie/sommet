@@ -21,15 +21,17 @@ export interface GarminActivitySyncState {
 
 /** eTrex tracks carry their own titles ("Morning walk", "Park loop") that match none of the
  * 84 Suunto activity types, so GpxParser -> activityForName() would land every one on the
- * generic "Unspecified sport" badge. Name every eTrex activity "Walking" - the exact Suunto
- * ActivityType (id 12) name - so it lands in the Walking bucket/colour and Totals groups it
- * (GpxParser reads gpx.trk.name for the type). */
+ * generic "Unspecified sport" badge. Name every eTrex activity "Hiking" - Suunto's own sport
+ * name (id 96), and what intervals.icu's "Hike" maps to - so it lands in the Hiking
+ * bucket/colour and Totals groups it (GpxParser reads gpx.trk.name for the type). It was
+ * "Walking" until 2026-10-04 (André: "etrex should be classified as hike/trekking whatever is
+ * the suunto equivalent"). */
 function forceWalkTrackName(gpx: string): string {
   if (/<trk\b[^>]*>\s*<name>/.test(gpx)) {
-    return gpx.replace(/(<trk\b[^>]*>\s*<name>)[\s\S]*?(<\/name>)/, '$1Walking$2');
+    return gpx.replace(/(<trk\b[^>]*>\s*<name>)[\s\S]*?(<\/name>)/, '$1Hiking$2');
   }
   // No track name to replace - inject one right after the opening <trk>.
-  return gpx.replace(/(<trk\b[^>]*>)/, '$1<name>Walking</name>');
+  return gpx.replace(/(<trk\b[^>]*>)/, '$1<name>Hiking</name>');
 }
 
 /** Non-cryptographic, just for de-duplicating imported activities that have

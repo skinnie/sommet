@@ -337,7 +337,11 @@ QVariantMap GarminService::parseActivityGpx(const QString &gpxText)
     // resolves both to id 12 "Walking"), which is what lets TotalsPage.qml group these
     // together across devices instead of splitting them into an unclassified pile per
     // device.
-    result[QStringLiteral("name")] = QStringLiteral("Walking");
+    // "Hiking" since 2026-10-04 (André: "etrex should be classified as hike/trekking whatever is
+    // the suunto equivalent") - Suunto's own sport name, and what intervals.icu's "Hike" maps to
+    // in shared/sport_names.json, so the move reads the same before and after it goes through
+    // intervals.icu. The reasoning above still holds, only the bucket changed from "Walking".
+    result[QStringLiteral("name")] = QStringLiteral("Hiking");
     return result;
 }
 

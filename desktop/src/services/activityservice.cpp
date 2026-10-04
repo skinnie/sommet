@@ -2334,8 +2334,11 @@ void ActivityService::exportActivitiesToIntervals(const QVariantList &activities
     m_exportPending = items.size();
     m_exportUploaded = 0;
     m_exportFailed = 0;
+    // These are handheld (eTrex) tracks: filed as hikes, not as the "Run" intervals.icu gives a
+    // sport-less GPX (André, 2026-10-04).
     for (const Item &it : items)
-        uploadFileToIntervals(-1, it.data, it.contentType, it.filename, athlete, key);
+        uploadFileToIntervals(-1, it.data, it.contentType, it.filename, athlete, key,
+                              QStringLiteral("Hike"));
 }
 
 void ActivityService::exportActivityToGarmin(const QString &name, const QString &fitBase64,
@@ -2466,7 +2469,8 @@ void ActivityService::exportActivitiesToGarmin(const QVariantList &activities)
 
 void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
                                             const QString &contentType, const QString &filename,
-                                            const QString &athlete, const QString &key)
+                                            const QString &athlete, const QString &key,
+                                            const QString &setType)
 {
     QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
     QHttpPart filePart;
@@ -2485,12 +2489,34 @@ void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
 
     QNetworkReply *reply = m_network.post(req, multiPart);
     multiPart->setParent(reply);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, idx]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, setType, basic]() {
         reply->deleteLater();
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const bool ok = reply->error() == QNetworkReply::NoError
                         && (status == 200 || status == 201);
+        if (ok && !setType.isEmpty()) {
+            // Give the new activity its sport. The reply names it either at the top level or in
+            // an "activities" list (one file can hold several); best effort - a failure here
+            // leaves the upload as intervals.icu typed it.
+            const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+            QStringList ids;
+            if (o.value(QStringLiteral("id")).isString())
+                ids << o.value(QStringLiteral("id")).toString();
+            for (const QJsonValue &v : o.value(QStringLiteral("activities")).toArray())
+                if (v.toObject().value(QStringLiteral("id")).isString())
+                    ids << v.toObject().value(QStringLiteral("id")).toString();
+            ids.removeDuplicates();
+            for (const QString &id : std::as_const(ids)) {
+                QNetworkRequest put(QUrl(QStringLiteral("https://intervals.icu/api/v1/activity/%1").arg(id)));
+                put.setRawHeader("Authorization", "Basic " + basic.toBase64());
+                put.setRawHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Sommet/1.0");
+                put.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+                QNetworkReply *r = m_network.put(
+                    put, QJsonDocument(QJsonObject{{QStringLiteral("type"), setType}}).toJson());
+                connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
+            }
+        }
         if (ok) {
             ++m_exportUploaded;
             if (idx >= 0 && m_db.isOpen()) {
