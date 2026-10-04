@@ -273,7 +273,7 @@ Item {
                 color: Theme.mutedText
                 text: HealthService.lastError.length > 0
                       ? HealthService.lastError
-                      : qsTr("No Garmin health data for the last 30 days.")
+                      : qsTr("No health data in the last year.")
             }
 
             Text {

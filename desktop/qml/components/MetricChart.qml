@@ -32,7 +32,9 @@ Item {
                    font.bold: true }
             Text {
                 visible: root.hasData
-                text: (Math.round(root.series[root.series.length - 1].value * 10) / 10) + root.unit
+                // guarded: the binding is evaluated even while hidden, and an empty series threw a
+                // TypeError on every Health open (seen 21x in one session, 2026-10-04)
+                text: root.hasData ? (Math.round(root.series[root.series.length - 1].value * 10) / 10) + root.unit : ""
                 color: root.lineColor; font.pixelSize: Theme.fontSizeLabel; font.bold: true
             }
         }

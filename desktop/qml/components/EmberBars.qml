@@ -39,7 +39,8 @@ Item {
                     var v = maxV * g / 3, y = padT + pH - (v / maxV) * pH
                     ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.14)
                     ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke()
-                    ctx.fillStyle = Theme.mutedText; ctx.fillText(Math.round(v).toString(), padL - 6, y)
+                    // small scales need a decimal, or an empty chart reads "1, 1, 0, 0" (2026-10-04)
+                    ctx.fillStyle = Theme.mutedText; ctx.fillText(maxV < 6 ? v.toFixed(1) : Math.round(v).toString(), padL - 6, y)
                 }
                 if (s.length) {
                     var bw = pW / s.length, bar = Math.min(24, bw * 0.6), rr = 4

@@ -111,8 +111,18 @@ Item {
                             maxV = Math.max(maxV, s[i].fitness, s[i].fatigue)
                         maxV *= 1.15
                         var w = width, h = height, pad = 4
-                        function x(i) { return pad + (w - 2 * pad) * i / (s.length - 1) }
+                        // Vertical scale (André, 2026-10-03: the Coach graph showed "a line with no
+                        // values on the vertical axis"): round load values in a left gutter.
+                        var step = maxV > 120 ? 50 : maxV > 60 ? 25 : maxV > 24 ? 10 : 5
+                        var padL = 26
+                        function x(i) { return padL + (w - padL - pad) * i / (s.length - 1) }
                         function y(v) { return h - pad - (h - 2 * pad) * v / maxV }
+                        ctx.font = "10px sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle"
+                        for (var tv = step; tv < maxV; tv += step) {
+                            ctx.strokeStyle = Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.18)
+                            ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(padL, y(tv)); ctx.lineTo(w - pad, y(tv)); ctx.stroke()
+                            ctx.fillStyle = Theme.mutedText; ctx.fillText(String(tv), padL - 5, y(tv))
+                        }
 
                         ctx.beginPath()
                         ctx.moveTo(x(0), y(s[0].fitness))

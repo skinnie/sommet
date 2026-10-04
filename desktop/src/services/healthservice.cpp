@@ -134,7 +134,12 @@ void HealthService::refresh(int days)
         return;
     }
     setLoading(true);
-    if (haveIntervals) fetchIntervals(days);
+    // intervals.icu's wellness feed is one request whatever the window, so it gets a year, like
+    // Android's Health screen. With 30 days the page was simply empty for someone who had not
+    // worn a tracker lately (André, 2026-10-03: last readings 27/08 - "Normal since I don't wear
+    // a wearable for sleeping for long time") while the tablet showed the same data fine. The
+    // Garmin calls loop per day, so they keep the short window.
+    if (haveIntervals) fetchIntervals(qMax(days, 365));
     if (haveGarmin) fetchGarmin(days);
     if (wantGarminSleep) fetchGarminSleep(days);
 }

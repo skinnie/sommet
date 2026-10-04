@@ -734,7 +734,7 @@ Item {
         Column {
             Layout.fillWidth: true
             spacing: 2
-            Text { text: qsTr("Race Planner"); color: Theme.text
+            Text { text: qsTr("Race Plan"); color: Theme.text
                    font.pixelSize: Theme.fontSizeTitle; font.weight: Font.Bold }
             Text { text: qsTr("Plan when you'll reach each checkpoint — and whether you'll beat the time limits."); color: Theme.mutedText
                    font.pixelSize: Theme.fontSizeCaption }

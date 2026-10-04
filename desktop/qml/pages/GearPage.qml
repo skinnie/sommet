@@ -357,6 +357,9 @@ Item {
                                         RoundedButton { text: modelData.retired ? qsTr("Un-retire") : qsTr("Retire"); onClicked: GearService.setRetired(modelData.id, !modelData.retired) }
                                         RoundedButton { text: qsTr("Add part"); onClicked: root.askName(qsTr("Add component"), "", function (n) { GearService.addComponent(modelData.id, n, "Other") }) }
                                         RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
+                                        // Delete stands apart at the far end, not next to "Add reminder"
+                                        // (André, 2026-10-03, Android Gear: "easy to hit by mistake").
+                                        Item { Layout.fillWidth: true }
                                         RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                     }
 
@@ -388,6 +391,7 @@ Item {
                                                 Layout.fillWidth: true
                                                 Text { Layout.fillWidth: true; text: "• " + modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeBody }
                                                 RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
+                                                Item { Layout.preferredWidth: Theme.spacingLarge }   // keep Delete clear of it
                                                 RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                             }
                                             Repeater {
