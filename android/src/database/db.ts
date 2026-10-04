@@ -351,6 +351,14 @@ export async function rejectJunkActivity(id: string, durationS: number, distance
   return true;
 }
 
+/** Removes an imported copy of a move this device already has from the watch, and blacklists
+ *  its id so the next import does not bring it back. Local only (no Sommet Sync tombstone). */
+export async function rejectDuplicateImport(id: string): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('INSERT OR IGNORE INTO deleted_activities (id, deleted_at) VALUES (?, ?)', [id, Date.now()]);
+  await db.executeSql('DELETE FROM activities WHERE id = ?', [id]);
+}
+
 /** What a later intervals.icu import may correct on a row it already has: sport name, calories. */
 export async function updateImportedActivity(id: string, fields: { activity_type?: string; energy_kcal?: number }): Promise<void> {
   const db = await getDb();

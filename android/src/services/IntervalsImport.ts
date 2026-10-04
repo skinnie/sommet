@@ -3,6 +3,7 @@ import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { backfillIntervalsTracks } from './IntervalsTracks';
 import {
   markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord, updateImportedActivity,
+  rejectDuplicateImport,
 } from '../database/db';
 import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from './SportNames';
 
@@ -68,7 +69,26 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     const rawType = String(a.type || '');
     const type = sportNameForIntervalsType(rawType);
     const energy_kcal = Math.round(Number(a.calories ?? 0)) || 0;
+    const date = String(a.start_date_local || a.start_date || '').slice(0, 19);
+    const distance_m = Math.round(Number(a.icu_distance ?? a.distance ?? 0)) || 0;
+    const duration_s = Math.round(Number(a.moving_time ?? a.elapsed_time ?? 0)) || 0;
+    // Is this really a watch move already synced locally? Either the same day, type and
+    // ~distance, or - whatever the type, since a move retyped on intervals.icu ("Walking" ->
+    // "Hiking") is still the same move - the same start within two minutes and a similar
+    // duration (seen on the tablet, 2026-10-04: four such pairs).
+    const day = date.slice(0, 10);
+    const startMs = Date.parse(date);
+    const dupOfWatch = watchActs.some(e => {
+      if (e.date.slice(0, 10) !== day) return false;
+      if (e.activity_type === type && Math.abs(e.distance_m - distance_m) <= Math.max(50, distance_m * 0.01)) return true;
+      const eMs = Date.parse(e.date.slice(0, 19));
+      return isFinite(startMs) && isFinite(eMs) && Math.abs(eMs - startMs) <= 120000
+        && Math.abs(e.duration_s - duration_s) <= Math.max(60, duration_s * 0.15);
+    });
     if (knownIds.has(icuId)) {
+      // An earlier import kept the intervals.icu copy of a move this device read off the watch
+      // itself (the type differed, so the old same-type test missed it): drop the copy.
+      if (dupOfWatch && icuById.has(icuId)) { await rejectDuplicateImport(icuId); skipped++; continue; }
       // Already here. Bring an earlier import up to date: calories (never stored before
       // 2026-10-03) and the shared sport name - the latter only where the row still holds what
       // the old import wrote, so a sport the user changed by hand stays.
@@ -85,17 +105,9 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       skipped++; continue;
     }
 
-    const date = String(a.start_date_local || a.start_date || '').slice(0, 19);
-    const distance_m = Math.round(Number(a.icu_distance ?? a.distance ?? 0)) || 0;
-    const duration_s = Math.round(Number(a.moving_time ?? a.elapsed_time ?? 0)) || 0;
     // Junk/test entries never come in (desktop rule since 2026-08-24).
     if (isJunkActivity(duration_s, distance_m)) { skipped++; continue; }
 
-    // Skip if this is really a watch move already synced locally (same day, type, ~distance).
-    const day = date.slice(0, 10);
-    const dupOfWatch = watchActs.some(e =>
-      e.date.slice(0, 10) === day && e.activity_type === type &&
-      Math.abs(e.distance_m - distance_m) <= Math.max(50, distance_m * 0.01));
     if (dupOfWatch) { skipped++; continue; }
 
     // Which device recorded it (2026-08-26, desktop parity). intervals.icu gives a real name
@@ -136,7 +148,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
 // One quiet re-import after the 2026-10-03 update, so activities imported earlier get their
 // calories and the shared sport names without the user finding the button in Settings. No-op
 // when intervals.icu is not connected (it then runs on the first launch after connecting).
-const BACKFILL_KEY = 'intervals.import.backfill.kcal1';
+const BACKFILL_KEY = 'intervals.import.backfill.kcal2';   // 2: also drops watch-move duplicates
 export async function backfillIntervalsImportOnce(): Promise<void> {
   if (await AsyncStorage.getItem(BACKFILL_KEY)) return;
   if (!(await getIntervalsIcuCredentials())) return;
