@@ -29,7 +29,9 @@ function yearOf(a: ActivityRecord): number {
 
 function formatKm(meters: number): string {
   const km = meters / 1000;
-  return `${km.toLocaleString('en-GB', { maximumFractionDigits: km >= 100 ? 0 : 1 })} km`;
+  // one decimal, no thousands separator - written exactly as the desktop writes it (André,
+  // 2026-10-04: "Put the same as desktop"): "3698.1 km", not "3,698 km"
+  return `${km.toFixed(1)} km`;
 }
 
 export default function TotalsScreen() {

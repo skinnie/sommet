@@ -9,6 +9,11 @@ Item {
     id: root
 
     Component.onCompleted: HealthService.refresh()
+    // The day of a series' newest reading, shown under each tile like Android does (André,
+    // 2026-10-04: "Put the same as android") - a value from weeks ago must not read as today's.
+    function lastDate(series) {
+        return series && series.length > 0 ? DateFormat.date(series[series.length - 1].date) : ""
+    }
     Connections {
         target: HealthService
         function onChanged() { /* charts repaint on their own series bindings */ }
@@ -68,6 +73,8 @@ Item {
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: Math.round(HealthService.latestRhr) + qsTr(" bpm")
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.rhr); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -82,6 +89,8 @@ Item {
                         Text { text: Math.round(HealthService.latestSteps)
                                      .toLocaleString(Qt.locale("en"), 'f', 0)
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.steps); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -90,6 +99,8 @@ Item {
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: Math.round(HealthService.latestHrv) + qsTr(" ms")
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.hrv); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -103,6 +114,8 @@ Item {
                         Text { text: Math.round(HealthService.latestHrvAmbit) + qsTr(" ms")
                                color: Theme.text
                                font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.hrvAmbit); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -111,6 +124,8 @@ Item {
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: Math.round(HealthService.latestBodyBattery)
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.bodyBattery); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -119,6 +134,8 @@ Item {
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: HealthService.latestSleep.toFixed(1) + qsTr(" h")
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.sleep); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                     Column {
                         spacing: 2
@@ -128,6 +145,8 @@ Item {
                                font.pixelSize: Theme.fontSizeLabel }
                         Text { text: Math.round(HealthService.latestSleepScore)
                                color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
+                        Text { text: root.lastDate(HealthService.sleepScore); color: Theme.mutedText
+                               font.pixelSize: Theme.fontSizeCaption }
                     }
                 }
             }

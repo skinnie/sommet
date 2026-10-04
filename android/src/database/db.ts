@@ -359,6 +359,13 @@ export async function rejectDuplicateImport(id: string): Promise<void> {
   await db.executeSql('DELETE FROM activities WHERE id = ?', [id]);
 }
 
+/** Removes an imported activity that no longer exists at its source. No blacklist entry: if it
+ *  ever exists there again, it may come back. */
+export async function removeImportedActivity(id: string): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('DELETE FROM activities WHERE id = ?', [id]);
+}
+
 /** What a later intervals.icu import may correct on a row it already has: sport name, calories. */
 export async function updateImportedActivity(id: string, fields: { activity_type?: string; energy_kcal?: number }): Promise<void> {
   const db = await getDb();

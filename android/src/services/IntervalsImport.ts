@@ -3,7 +3,7 @@ import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { backfillIntervalsTracks } from './IntervalsTracks';
 import {
   markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord, updateImportedActivity,
-  rejectDuplicateImport,
+  rejectDuplicateImport, removeImportedActivity,
 } from '../database/db';
 import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from './SportNames';
 
@@ -60,6 +60,17 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
   const all = await getAllActivities();
   const watchActs = all.filter(e => !e.id.startsWith('icu:'));
   const icuById = new Map(all.filter(e => e.id.startsWith('icu:')).map(e => [e.id, e] as [string, ActivityRecord]));
+
+  // An activity deleted on intervals.icu goes here too (André, 2026-10-04: 14 multi-day GPS track
+  // logs were deleted there - up to 39,310 h each - and would otherwise have stayed in this
+  // app's totals for good). Only on a full-history import, and only when the answer is clearly
+  // the whole list (at least half of what is stored), so a cut-short reply cannot empty the app.
+  if (!afterDate && acts.length > 0 && acts.length >= icuById.size / 2) {
+    const remote = new Set(acts.map((a: any) => `icu:${a?.id}`));
+    for (const id of icuById.keys()) {
+      if (!remote.has(id)) { await removeImportedActivity(id); icuById.delete(id); }
+    }
+  }
 
   let imported = 0;
   let skipped = 0;
@@ -148,7 +159,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
 // One quiet re-import after the 2026-10-03 update, so activities imported earlier get their
 // calories and the shared sport names without the user finding the button in Settings. No-op
 // when intervals.icu is not connected (it then runs on the first launch after connecting).
-const BACKFILL_KEY = 'intervals.import.backfill.kcal2';   // 2: also drops watch-move duplicates
+const BACKFILL_KEY = 'intervals.import.backfill.kcal3';   // 2: drops watch-move duplicates; 3: drops what was deleted on intervals.icu
 export async function backfillIntervalsImportOnce(): Promise<void> {
   if (await AsyncStorage.getItem(BACKFILL_KEY)) return;
   if (!(await getIntervalsIcuCredentials())) return;
