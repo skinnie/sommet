@@ -1225,7 +1225,7 @@ Item {
             const step = { type: { typeName: row.stepType } }
             const v = Number(row.durationValue)
             if (row.durationKind === "lap")
-                step.duration = { durationName: "lap" }
+                step.duration = { durationName: "lap", value: 1 }
             else if (row.durationKind === "time_min")
                 step.duration = { durationName: "time", value: Math.round(v * 60) }
             else if (row.durationKind === "time_s")

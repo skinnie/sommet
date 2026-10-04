@@ -10,9 +10,13 @@ var BT = { 0: ["u8", 1, 0xFF], 1: ["s8", 1, 0x7F], 2: ["u8", 1, 0xFF], 3: ["s16"
            4: ["u16", 2, 0xFFFF], 5: ["s32", 4, 0x7FFFFFFF], 6: ["u32", 4, 0xFFFFFFFF],
            8: ["f32", 4, null], 9: ["f64", 8, null], 10: ["u8", 1, 0x00], 11: ["u16", 2, 0x0000],
            12: ["u32", 4, 0x00000000] };
-var WANTED = { 0: 1, 18: 1, 19: 1, 20: 1, 101: 1 };
+var WANTED = { 0: 1, 18: 1, 19: 1, 20: 1, 21: 1, 27: 1, 101: 1 };
 var LAP_TRIGGERS = { 0: "manual", 1: "time", 2: "distance", 3: "position_start", 4: "position_lap",
                      5: "position_waypoint", 6: "position_marked", 7: "session_end", 8: "fitness_equipment" };
+// FIT workout_step: duration_type, intensity, and the scale of duration_value per kind.
+var STEP_ENDS = { 0: "time", 1: "distance", 5: "lap" };
+var STEP_INTENSITY = { 0: "active", 1: "rest", 2: "warmup", 3: "cooldown" };
+var STEP_VALUE_SCALE = { time: 1000, distance: 100 };
 var STROKES = { 0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill", 5: "mixed", 6: "im" };
 var FOOT_SPORTS = { 1: 1, 11: 1, 17: 1 };
 
@@ -143,7 +147,10 @@ function lapsKind(laps, hasLengths) {
 function streamsFromFit(bytes, points) {
     points = points || 2000;
     var fileId = null, session = null, lapsRaw = [], recs = [], lensRaw = [];
+    var stepDefs = {}, stepEvents = [];
     decodeFit(bytes, function (gn, v) {
+        if (gn === 27) stepDefs[v[254]] = v;
+        else if (gn === 21 && (v[0] === 3 || v[0] === 4)) stepEvents.push(v);
         if (gn === 0 && !fileId) fileId = v;
         else if (gn === 18 && !session) session = v;
         else if (gn === 19) lapsRaw.push(v);
@@ -276,8 +283,23 @@ function streamsFromFit(bytes, points) {
                  avg_hr: hrs.length ? Math.round(hrs.reduce(function (a, b) { return a + b; }, 0) / hrs.length) : null };
     });
 
+    // guided-workout steps: each workout_step start event, described by the step it names
+    var workoutSteps = [], workoutN = 1;
+    stepEvents.forEach(function (ev) {
+        if (ev[0] === 3) {                    // workout stopped: the next step opens a new one
+            if (ev[1] === 1 && workoutSteps.length) workoutN = workoutSteps[workoutSteps.length - 1].workout + 1;
+            return;
+        }
+        if (ev[1] !== 0 || !has(ev, 253)) return;
+        var d = stepDefs[ev[3]] || {};
+        var endsOn = has(d, 1) && STEP_ENDS[d[1]] ? STEP_ENDS[d[1]] : null;
+        var intensity = has(d, 7) && STEP_INTENSITY[d[7]] ? STEP_INTENSITY[d[7]] : null;
+        workoutSteps.push({ workout: workoutN, start_s: ev[253] - t0, intensity: intensity, ends_on: endsOn,
+                            value: has(d, 2) && endsOn && STEP_VALUE_SCALE[endsOn] ? d[2] / STEP_VALUE_SCALE[endsOn] : null });
+    });
+
     return {
-        ok: true, laps_kind: lapsKind(laps, lengths.length > 0),
+        ok: true, workout_steps: workoutSteps, laps_kind: lapsKind(laps, lengths.length > 0),
         sport: { sport: sport, sub_sport: has(session, 6) ? session[6] : null },
         start_utc: t0 ? t0 + FIT_EPOCH : null, manufacturer: has(fileId, 1) ? fileId[1] : null, product: has(fileId, 2) ? fileId[2] : null,
         records: n, channels: present, summary: summary, streams: streams, hist: histograms,

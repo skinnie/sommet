@@ -1,0 +1,97 @@
+{
+ "name": "Descansos auto",
+ "activityId": 6,
+ "steps": [
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Crawl 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 15
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso 15s"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Crawl 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 30
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso 30s"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Crawl 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 60
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso 60s"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Crawl 50m"
+  }
+ ]
+}

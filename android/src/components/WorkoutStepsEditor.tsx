@@ -81,7 +81,7 @@ export function toSchema(r: StepRow): WorkoutStep {
   if (r.stepType === 'repeatEnd') return { type: { typeName: 'repeatEnd' } };
   const v = Number(r.durationValue) || 0;
   const duration =
-    r.durationKind === 'lap' ? { durationName: 'lap', value: 0 }
+    r.durationKind === 'lap' ? { durationName: 'lap', value: 1 }
     : r.durationKind === 'time_min' ? { durationName: 'time', value: Math.round(v * 60) }
     : r.durationKind === 'time_s' ? { durationName: 'time', value: Math.round(v) }
     : r.durationKind === 'distance_km' ? { durationName: 'distance', value: Math.round(v * 1000) }

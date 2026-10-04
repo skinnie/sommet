@@ -6,6 +6,7 @@
 #include <cstring>
 #include <ctime>
 #include <vector>
+#include <algorithm>
 #include <set>
 #include <cmath>
 #include <climits>
@@ -390,6 +391,7 @@ static const long ABSENT = LONG_MIN;
 struct Rec {
     uint32_t t_g;   // timestamp, garmin seconds
     bool has_pos = false; double lat = 0, lon = 0, ele = 0;   // GPS position (outdoor only)
+    uint32_t ms = 0;   // the sample's own time into the move, ms
     long hr = ABSENT, cad = ABSENT, spd = ABSENT, pwr = ABSENT,
          dist = ABSENT, alt = ABSENT, temp = ABSENT;
 };
@@ -578,12 +580,47 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
             Rec r;
             r.t_g = (uint32_t)((long)start_epoch + (long)(s.time / 1000) - (long)GARMIN_EPOCH);
             if (has_gps) { r.has_pos = has_pos; r.lat = cur_lat; r.lon = cur_lon; r.ele = cur_ele; }
+            r.ms = s.time;
             r.hr = cur_hr; r.cad = cur_cad; r.spd = cur_spd; r.pwr = cur_pwr;
             r.dist = cur_dist; r.alt = cur_alt; r.temp = cur_temp;
             recs.push_back(r);
         }
     }
     if (recs.empty()) return {};
+
+    // No live heart rate at all on a move without GPS (a pool swim): take it from the belt's
+    // stored beats. In the water the belt's radio does not reach the watch, so a Smart Sensor
+    // keeps every beat and hands them over at the end as ibi samples; their running sum is the
+    // move's own clock, pauses included (the belt writes a pause as gap records). Twin of the
+    // desktop heart_rate_from_ibi (tools/exercise_log.py): beats of 300-2000 ms count, and the
+    // heart rate at a sample is that of the beats in the 5 s before it.
+    if (!has_gps) {
+        bool live_hr = false;
+        for (const Rec &r : recs) if (r.hr != ABSENT) { live_hr = true; break; }
+        std::vector<double> beat_t; std::vector<uint32_t> beat_v;
+        if (!live_hr) {
+            double t = 0;
+            for (uint32_t i = 0; i < entry->samples_count; i++) {
+                const ambit_log_sample_t &s = entry->samples[i];
+                if (s.type != ambit_log_sample_type_ibi) continue;
+                for (uint8_t k = 0; k < s.u.ibi.ibi_count; k++) {
+                    uint16_t v = s.u.ibi.ibi[k];
+                    t += v;
+                    if (v >= 300 && v <= 2000) { beat_t.push_back(t); beat_v.push_back(v); }
+                }
+            }
+        }
+        if (!beat_t.empty()) {
+            for (Rec &r : recs) {
+                size_t hi = std::upper_bound(beat_t.begin(), beat_t.end(), (double)r.ms) - beat_t.begin();
+                size_t lo = std::lower_bound(beat_t.begin(), beat_t.end(), (double)r.ms - 5000.0) - beat_t.begin();
+                if (hi < lo + 2) continue;
+                double sum = 0;
+                for (size_t k = lo; k < hi; k++) sum += beat_v[k];
+                r.hr = lround(60000.0 * (double)(hi - lo) / sum);
+            }
+        }
+    }
 
     // Which sensor channels this move actually carried (present in >=1 record). Field number,
     // byte size, base type per the standard FIT record profile. An outdoor move takes position/
@@ -630,9 +667,16 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     {
         uint16_t seen = 0; double prev_end = -1;
         bool sane = true;
-        for (uint32_t i = 0; i < entry->samples_count; i++) {
-            const ambit_log_sample_t &s = entry->samples[i];
-            if (s.type != ambit_log_sample_type_swimming_turn) continue;
+        // By length count, not by position in the log: the watch can write a length's record
+        // ahead of the one before it (26, 28, 27, 29 on a real swim, 2026-10-04), and walking
+        // them in log order dropped a length.
+        std::vector<const ambit_log_sample_t *> turns;
+        for (uint32_t i = 0; i < entry->samples_count; i++)
+            if (entry->samples[i].type == ambit_log_sample_type_swimming_turn) turns.push_back(&entry->samples[i]);
+        std::stable_sort(turns.begin(), turns.end(), [](const ambit_log_sample_t *a, const ambit_log_sample_t *b) {
+            return a->u.swimming_turn.lengths < b->u.swimming_turn.lengths; });
+        for (const ambit_log_sample_t *turn : turns) {
+            const ambit_log_sample_t &s = *turn;
             if (s.u.swimming_turn.lengths <= seen || s.u.swimming_turn.duration == 0) continue;
             seen = s.u.swimming_turn.lengths;
             double swim = s.u.swimming_turn.duration / 10.0;
@@ -650,10 +694,12 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
     // session (local 2, global 18)
     std::vector<Buf::F> sfields = {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
                   {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}};
+    sfields.push_back({16,1,FU8}); sfields.push_back({17,1,FU8});   // avg / max heart rate, the watch's own
     if (pool) { sfields.push_back({44,2,FU16}); sfields.push_back({46,1,FE}); sfields.push_back({33,2,FU16}); }
     b.def(2, 18, sfields);
     b.u8(2); b.u16(0); b.u32(end_g); b.u32(start_g); b.u32(dur_ms); b.u32(dur_ms);
     b.u32(dist_cm); b.u16(h.ascent); b.u16(h.descent); b.u8(sport); b.u8(sub_sport); b.u8(8); b.u8(1);
+    b.u8(h.heartrate_avg ? h.heartrate_avg : 0xFF); b.u8(h.heartrate_max ? h.heartrate_max : 0xFF);
     if (pool) { b.u16(h.swimming_pool_length * 100); b.u8(0); b.u16((uint32_t)lens.size()); }
     // lap (local 3, global 19)
     b.def(3, 19, {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{9,4,FU32},{0,1,FE},{1,1,FE}});
@@ -682,6 +728,38 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
             }
             const Len &l = lens[k];
             one(l.start, l.swim, l.strokes, l.style < 6 ? STROKE[l.style] : 0xFF, true);
+        }
+    }
+
+    // Guided-workout steps (twin of the desktop _write_workout_steps): the watch logs an episodic
+    // 0x1e record each time a native workout enters a step - libambit keeps it as an unknown
+    // sample: [type 3][u32 time][0x1e][f32 target min][f32 target max][f32 end value][u16]
+    // [u16 step: 1 interval, 3 rest, 7 workout finished][u16][u16 ends on: 0x0a distance,
+    // 0x0b time, 0x19 lap]. Written as a FIT workout_step (global 27) plus a workout_step start
+    // event (global 21) at the moment it was entered; "finished" becomes a workout stop event.
+    {
+        bool defs = false; uint16_t idx = 0;
+        for (uint32_t i = 0; i < entry->samples_count; i++) {
+            const ambit_log_sample_t &s = entry->samples[i];
+            if (s.type != ambit_log_sample_type_unknown || !s.u.unknown.data || s.u.unknown.datalen < 26) continue;
+            const uint8_t *d = s.u.unknown.data;
+            if (d[0] != 3 || d[5] != 0x1e) continue;
+            float end_value; memcpy(&end_value, d + 14, 4);
+            uint16_t step = (uint16_t)(d[20] | (d[21] << 8)), ends = (uint16_t)(d[24] | (d[25] << 8));
+            uint32_t t_g = (uint32_t)((long)start_epoch + (long)(s.time / 1000) - (long)GARMIN_EPOCH);
+            if (!defs) {
+                b.def(8, 27, {{254,2,FU16},{1,1,FE},{2,4,FU32},{7,1,FE}});
+                b.def(9, 21, {{253,4,FU32},{0,1,FE},{1,1,FE},{3,4,FU32}});
+                defs = true;
+            }
+            if (step == 7) { b.u8(9); b.u32(t_g); b.u8(3); b.u8(1); b.u32(0); continue; }
+            uint8_t dur_type = ends == 0x0a ? 1 : ends == 0x0b ? 0 : ends == 0x19 ? 5 : 0xFF;
+            double scale = ends == 0x0a ? 100.0 : ends == 0x0b ? 1000.0 : 0.0;
+            b.u8(8); b.u16(idx); b.u8(dur_type);
+            b.u32(scale > 0 ? (uint32_t)llround(end_value * scale) : 0xFFFFFFFFu);
+            b.u8(step == 1 ? 0 : step == 3 ? 1 : 0xFF);
+            b.u8(9); b.u32(t_g); b.u8(4); b.u8(0); b.u32(idx);
+            idx++;
         }
     }
 

@@ -190,6 +190,13 @@ def with_si_units(workout):
             rng["min"] = rng["min"] * factor
             rng["max"] = rng["max"] * factor
         duration = s.get("duration") or {}
+        # A lap step counts Lap presses: the program ends it once the lap count has risen by
+        # `value`. With no value (what the editors sent) that is 0 presses, so the step ended
+        # by itself - real, 2026-10-04 (André's pool swim): every "until Lap" step lasted about
+        # 1 s. One press is what "until Lap" means - hardware-confirmed the same day on his
+        # Ambit3 Sport ("crawl 50m appears, press lap, descanso 45 appears").
+        if duration.get("durationName") == "lap" and not duration.get("value"):
+            duration["value"] = 1
         dfactor = SI_DURATION_FACTOR.get(duration.get("durationName"))
         if dfactor and "value" in duration:
             duration["value"] = duration["value"] * dfactor

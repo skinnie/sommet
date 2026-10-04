@@ -342,13 +342,26 @@ class Link:
         if not head or head[0] != 0x3F:
             raise RuntimeError("no reply from the watch")
         total, = struct.unpack("<I", bytes(head[16:20]))
-        body = bytes(head[20:20 + min(42, total)])
-        while len(body) < total:
+        body = bytearray(total)
+        body[:min(42, total)] = head[20:20 + min(42, total)]
+        # Each continuation report says which part it is (u16 at +4) and is placed there, not
+        # appended in arrival order. Real, 2026-10-03 (Ambit3 Sport): a 1024 B CustomModes read
+        # came back with two of its reports swapped; a read-modify-write (guided_workout.py
+        # --append) trusted it and wrote the Transition mode back with 2 displays missing.
+        got, seen = min(42, total), set()
+        while got < total:
             more = self.device.read(64, 20000)
             if not more:
-                raise RuntimeError(f"truncated reply: {len(body)}/{total} bytes")
-            body += bytes(more[8:8 + min(54, total - len(body))])
-        return body
+                raise RuntimeError(f"truncated reply: {got}/{total} bytes")
+            part, = struct.unpack("<H", bytes(more[4:6]))
+            offset = 42 + (part - 1) * 54
+            if more[2] != 0x5E or part < 1 or offset >= total or part in seen:
+                raise RuntimeError(f"unexpected reply report (type 0x{more[2]:02x}, part {part})")
+            seen.add(part)
+            chunk = min(54, total - offset)
+            body[offset:offset + chunk] = more[8:8 + chunk]
+            got += chunk
+        return bytes(body)
 
 
 def read_flash(link, address, size, label=""):

@@ -1,0 +1,97 @@
+{
+ "name": "Estilos auto",
+ "activityId": 6,
+ "steps": [
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Crawl 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 45
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Brucos 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 45
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Costas 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 45
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "distance",
+    "value": 50
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Mariposa 50m"
+  }
+ ]
+}

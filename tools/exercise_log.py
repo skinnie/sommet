@@ -420,6 +420,19 @@ def parse_sample(data, offset, periodic_spec_ref, samples, time_compensators):
             s["version"] = c.bytes(4)
             s["build_year"] = c.u16(); s["build_month"] = c.u8(); s["build_day"] = c.u8()
             s["build_hour"] = c.u8(); s["build_minute"] = c.u8(); s["build_msec"] = c.u16()
+        elif episodic_type == 0x1e and sample_len >= 26:
+            # A native guided workout entering a step (not in openambit). Read off André's
+            # pool swim of 2026-10-04 (Ambit3 Sport, fw 2.4.17), which ran three workouts whose
+            # steps we had written ourselves: target band min/max (-1.0 = no target), then the
+            # step's end value in the workout's own units (50.0 m, 45.0 s; 0 for a lap step and
+            # for the record written when the workout finishes).
+            s["type"] = "workout_step"
+            s["target_min"], s["target_max"], s["end_value"] = struct.unpack_from("<fff", data, c.offset)
+            c.skip(12)
+            c.skip(2)                         # 1 in every record seen
+            s["step"] = c.u16()               # seen: 1 interval, 3 rest, 7 workout finished
+            c.skip(2)                         # 0x00ff in every record seen
+            s["ends_on"] = c.u16()            # seen: 0x0a distance, 0x0b time, 0x19 lap
         else:
             s["type"] = "unknown"
             s["episodic_type"] = episodic_type
@@ -1086,7 +1099,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
         (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
-    ])
+    ] + _SESSION_HR_FIELDS)
     _u8(data, 2)
     _u16(data, 0)                             # message_index
     _u32(data, end_g)                         # timestamp
@@ -1100,6 +1113,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
     _u8(data, 1)          # event_type = 1 (stop)
+    _write_session_hr(data, header)
 
     # lap (local 3, global 19)
     _write_def(data, 3, 19,
@@ -1113,6 +1127,8 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u32(data, round(dist_m * 100))
     _u8(data, 9)          # event = 9 (lap)
     _u8(data, 1)
+
+    _write_workout_steps(data, extract_workout_steps(header, samples))
 
     # Developer-data declarations for the logged Suunto App outputs (FIT dev fields). One
     # developer_data_id (our fixed app UUID) plus one field_description per present slot; the
@@ -1243,8 +1259,105 @@ def extract_indoor_records(header, samples):
                 cur_rules[v["name"]] = v["value"]
         _apply_periodic_channels(cur, state, s)
         time = s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))
-        records.append({"time": time, "rules": dict(cur_rules), **cur})
+        records.append({"time": time, "rules": dict(cur_rules), "_ms": s["time"], **cur})
+    # No live heart rate at all (a swim): take it from the belt's stored beats, if it sent any.
+    belt_hr = heart_rate_from_ibi(samples) if all(r["hr"] is None for r in records) else None
+    for r in records:
+        ms = r.pop("_ms")
+        if belt_hr:
+            r["hr"] = belt_hr(ms)
     return records
+
+
+def _write_session_hr(data, header):
+    """Session avg_heart_rate / max_heart_rate (fields 16, 17): the watch's own figures from the
+    log header, invalid when the move had no heart rate (0 there)."""
+    _u8(data, header.get("heartrate_avg") or 0xFF)
+    _u8(data, header.get("heartrate_max") or 0xFF)
+
+
+_SESSION_HR_FIELDS = [(16, 1, _U8), (17, 1, _U8)]
+
+# Guided-workout step records (see parse_sample, episodic 0x1e) -> FIT. Only the codes seen
+# on the watch are mapped; an unknown one is written invalid rather than guessed.
+_STEP_FINISHED = 7
+_STEP_TO_FIT_INTENSITY = {1: 0, 3: 1}                 # interval -> active, rest -> rest
+_STEP_END_TO_FIT = {0x0a: (1, 100), 0x0b: (0, 1000), 0x19: (5, 0)}   # distance cm, time ms, open
+
+
+def extract_workout_steps(header, samples):
+    """The guided-workout steps the watch entered during the move, in order:
+    [{time, step, ends_on, end_value}], time a UTC datetime."""
+    start = datetime.datetime(
+        header["year"], header["month"], header["day"],
+        header["hour"], header["minute"], header["msec"] // 1000,
+        tzinfo=datetime.timezone.utc)
+    return [{"time": s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"])),
+             "step": s["step"], "ends_on": s["ends_on"], "end_value": s["end_value"]}
+            for s in samples if s["type"] == "workout_step"]
+
+
+def _write_workout_steps(data, steps):
+    """The guided workout as FIT has it: a `workout_step` message (global 27) describing each
+    step the watch entered - how it ends, and whether it is work or rest - and an `event`
+    (global 21, workout_step start) at the moment it was entered, pointing at it. The record
+    the watch writes when a workout finishes becomes a `workout` stop event."""
+    if not steps:
+        return
+    _write_def(data, 8, 27, [(254, 2, _U16), (1, 1, _E), (2, 4, _U32), (7, 1, _E)])
+    _write_def(data, 9, 21, [(253, 4, _U32), (0, 1, _E), (1, 1, _E), (3, 4, _U32)])
+    index = 0
+    for st in steps:
+        t_g = int(st["time"].timestamp()) - GARMIN_EPOCH
+        if st["step"] == _STEP_FINISHED:
+            _u8(data, 9); _u32(data, t_g); _u8(data, 3); _u8(data, 1); _u32(data, 0)
+            continue
+        dur_type, scale = _STEP_END_TO_FIT.get(st["ends_on"], (0xFF, 0))
+        _u8(data, 8)
+        _u16(data, index)
+        _u8(data, dur_type)
+        _u32(data, round(st["end_value"] * scale) if scale else 0xFFFFFFFF)
+        _u8(data, _STEP_TO_FIT_INTENSITY.get(st["step"], 0xFF))
+        _u8(data, 9); _u32(data, t_g); _u8(data, 4); _u8(data, 0); _u32(data, index)
+        index += 1
+
+
+# One beat interval the belt can really have produced, ms (200 down to 30 bpm). Outside it the
+# value is a dropped/doubled beat or one of the belt's gap records (up to 60000 each).
+_IBI_MIN_MS, _IBI_MAX_MS = 300, 2000
+_IBI_WINDOW_MS = 5000             # heart rate = the beats of the last 5 s
+
+
+def heart_rate_from_ibi(samples):
+    """Heart rate over the move from the belt's stored beat intervals, for a move the watch
+    logged no live heart rate for: `at(ms)` -> bpm or None, ms being a sample's own `time`.
+
+    In the water the belt's radio does not reach the watch, so a Suunto Smart Sensor keeps every
+    beat and hands them over when the move is stopped: the log then has no "hr" in its periodic
+    samples and all the beat intervals in a block at the end. Read off André's pool swim of
+    2026-10-04 (Ambit3 Sport): 5583 intervals summing to 2700.4 s = the move's 2527.7 s plus
+    its 172.7 s pause, which the belt wrote as gap records (60000 + 60000 + 52657) - so the
+    running sum of the intervals is the move's own clock, pauses included. The beats' average
+    (132) and the header's (133) agree. Returns None when the move has no beat intervals."""
+    import bisect
+    ibis = [v for s in samples if s["type"] == "ibi" for v in s["ibi"]]
+    if not ibis:
+        return None
+    times, good = [], []          # when each real beat landed, and its interval
+    t = 0
+    for v in ibis:
+        t += v
+        if _IBI_MIN_MS <= v <= _IBI_MAX_MS:
+            times.append(t)
+            good.append(v)
+
+    def at(ms):
+        hi = bisect.bisect_right(times, ms)
+        lo = bisect.bisect_left(times, ms - _IBI_WINDOW_MS)
+        if hi - lo < 2:
+            return None
+        return round(60000 * (hi - lo) / sum(good[lo:hi]))
+    return at
 
 
 # Ambit swim style (the watch's own FT_SWIM_STYLE list, custom_modes.py; same as openambit's
@@ -1266,7 +1379,10 @@ def extract_pool_lengths(header, samples):
         header["year"], header["month"], header["day"],
         header["hour"], header["minute"], header["msec"] // 1000,
         tzinfo=datetime.timezone.utc)
-    turns = [s for s in samples if s["type"] == "swimming_turn"]
+    # By length count, not by position in the log: the watch can write a length's record ahead
+    # of the one before it. Real, 2026-10-04 (André's swim): 26, 28, 27, 29 - walking them in
+    # log order dropped length 27 (39 lengths against the header's 40).
+    turns = sorted((s for s in samples if s["type"] == "swimming_turn"), key=lambda s: s["lengths"])
     out = []
     seen = 0
     prev_end = None
@@ -1393,7 +1509,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
         (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
-    ] + swim_fields)
+    ] + _SESSION_HR_FIELDS + swim_fields)
     _u8(data, 2)
     _u16(data, 0)                             # message_index
     _u32(data, end_g)                         # timestamp
@@ -1407,6 +1523,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
     _u8(data, 1)          # event_type = 1 (stop)
+    _write_session_hr(data, header)
     if swim_fields:
         _u16(data, round(pool_m * 100))       # pool_length (scale 100, m)
         _u8(data, 0)                          # pool_length_unit = metric
@@ -1428,6 +1545,8 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     # Pool swims: one length message per length (see extract_pool_lengths).
     if lengths:
         _write_pool_lengths(data, lengths)
+
+    _write_workout_steps(data, extract_workout_steps(header, samples))
 
     # Developer-data declarations for logged Suunto App outputs - identical to the GPS path.
     if rule_slots:

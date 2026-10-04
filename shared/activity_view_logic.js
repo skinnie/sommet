@@ -538,6 +538,26 @@ function workoutBlocks(doc, ftp) {
     return out;
 }
 
+// ------------------------------------------------------------------ guided workouts run on the device
+// One line per workout the device was guiding during the activity, from the file's own step
+// records (st.workout_steps): when it started and its steps as they were entered, e.g.
+// "50 m, rest 45 s, 50 m". A step that ends on the Lap button reads "until Lap".
+function workoutLines(st) {
+    var steps = (st && st.workout_steps) || [], out = [], cur = null;
+    function stepText(w) {
+        var what = w.ends_on === "distance" && w.value ? fmtNum(w.value, 0) + " m"
+                 : w.ends_on === "time" && w.value ? (w.value < 60 ? fmtNum(w.value, 0) + " s" : fmtClock(w.value))
+                 : w.ends_on === "lap" ? "until Lap" : "step";
+        return w.intensity === "rest" ? "rest " + what : w.intensity === "warmup" ? "warm up " + what
+             : w.intensity === "cooldown" ? "cool down " + what : what;
+    }
+    steps.forEach(function (w) {
+        if (!cur || cur.workout !== w.workout) { cur = { workout: w.workout, start_s: w.start_s, parts: [] }; out.push(cur); }
+        cur.parts.push(stepText(w));
+    });
+    return out.map(function (g) { return { start_s: g.start_s, text: "Guided workout at " + fmtClock(g.start_s) + ": " + g.parts.join(", ") }; });
+}
+
 // Which chart lines start switched on: the sport's defaults that this file actually recorded;
 // when it has none of them (a ride with no power or heart rate), the first two it does have -
 // never an empty chart. Returns {channel id: bool} over the sport's channel list.
@@ -577,6 +597,6 @@ if (typeof module !== "undefined" && module.exports) {
         colourBands: colourBands, bandColour: bandColour, bandShares: bandShares, niceTicks: niceTicks,
         channelScale: channelScale, channelValueText: channelValueText, sectionSummary: sectionSummary,
         longestRun: longestRun, compareUsual: compareUsual, swimBenchmark: swimBenchmark, median: median,
-        paceText: paceText, ftpFrom: ftpFrom, workoutBlocks: workoutBlocks, defaultChannelsOn: defaultChannelsOn, refineSport: refineSport, channelUseful: channelUseful
+        paceText: paceText, ftpFrom: ftpFrom, workoutBlocks: workoutBlocks, defaultChannelsOn: defaultChannelsOn, refineSport: refineSport, channelUseful: channelUseful, workoutLines: workoutLines
     };
 }

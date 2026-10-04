@@ -599,6 +599,18 @@ Item {
                         zonePalette: root.zonePalette
                     }
 
+                    // Guided workouts the watch ran during this activity, one line each.
+                    Repeater {
+                        model: AVL.workoutLines(root._st)
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.text
+                            font.pixelSize: Theme.fontSizeLabel
+                            text: modelData.text
+                        }
+                    }
+
                     Column {
                         visible: root._hasPlot && !(root.sport === "pool_swim" && root._hasLengths)
                         width: parent.width

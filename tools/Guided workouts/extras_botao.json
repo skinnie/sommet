@@ -1,0 +1,68 @@
+{
+ "name": "Extras botao",
+ "activityId": 6,
+ "steps": [
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "lap"
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Pernas 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 30
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso 30s"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "lap"
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Metade/metade 50m"
+  },
+  {
+   "type": {
+    "typeName": "rest"
+   },
+   "duration": {
+    "durationName": "time",
+    "value": 30
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Descanso 30s"
+  },
+  {
+   "type": {
+    "typeName": "interval"
+   },
+   "duration": {
+    "durationName": "lap"
+   },
+   "target": {
+    "targetName": "none"
+   },
+   "text": "Parar a meio 50m"
+  }
+ ]
+}

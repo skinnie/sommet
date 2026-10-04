@@ -438,6 +438,8 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
             </View>)}
           {!!swimMode && st?.sets?.length > 0 && (
             <Text style={s.caption}>{st.sets.length} sets between rests at the wall. Longest non-stop: {st.longest_nonstop_m} m.</Text>)}
+          {AVL.workoutLines(st).map((w: { start_s: number; text: string }) => (
+            <Text key={w.start_s} style={[s.caption, { color: t.text }]}>{w.text}</Text>))}
         </View>)}
 
       {tab === 'laps' && st && (

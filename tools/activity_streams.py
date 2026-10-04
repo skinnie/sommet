@@ -21,6 +21,9 @@ Magene file. Output:
   sets         lengths grouped between rests at the wall (rest >= 10 s): [{n, lengths, dist_m,
                  swim_s, rest_after_s, stroke, strokes_per_length, avg_hr}]
   longest_nonstop_m   the longest set, in metres (pool swims)
+  workout_steps  the guided-workout steps the device entered: [{workout, start_s, intensity
+                 ("active"/"rest"/None), ends_on ("time"/"distance"/"lap"/None), value (seconds
+                 or metres)}]; `workout` counts the workouts run in the one activity, from 1
   hist         {"hr": [[bpm, seconds], ...], "pw": [[watts, seconds], ...]} at full resolution,
                so zone times are exact whatever the zone bounds (the streams are averaged)
 
@@ -30,7 +33,7 @@ stores per leg (strides/min + fractional_cadence/128), doubled to steps per minu
 
 The FIT layout is the public FIT SDK profile (Garmin, FIT Protocol + Profile.xlsx): 12/14-byte
 header, definition + data messages, compressed-timestamp headers. Messages read: file_id(0),
-session(18), lap(19), record(20), length(101).
+session(18), lap(19), record(20), event(21), workout_step(27), length(101).
 """
 
 import argparse
@@ -50,11 +53,15 @@ _BT = {0: ("B", 1, 0xFF), 1: ("b", 1, 0x7F), 2: ("B", 1, 0xFF), 3: ("h", 2, 0x7F
        8: ("f", 4, None), 9: ("d", 8, None), 10: ("B", 1, 0x00), 11: ("H", 2, 0x0000),
        12: ("I", 4, 0x00000000), 14: ("q", 8, 0x7FFFFFFFFFFFFFFF),
        15: ("Q", 8, 0xFFFFFFFFFFFFFFFF), 16: ("Q", 8, 0x0000000000000000)}
-WANTED = {0, 18, 19, 20, 101}
+WANTED = {0, 18, 19, 20, 21, 27, 101}
 
 LAP_TRIGGERS = {0: "manual", 1: "time", 2: "distance", 3: "position_start", 4: "position_lap",
                 5: "position_waypoint", 6: "position_marked", 7: "session_end",
                 8: "fitness_equipment"}
+# FIT workout_step: duration_type, intensity, and the scale of duration_value per kind.
+STEP_ENDS = {0: "time", 1: "distance", 5: "lap"}
+STEP_INTENSITY = {0: "active", 1: "rest", 2: "warmup", 3: "cooldown"}
+STEP_VALUE_SCALE = {"time": 1000.0, "distance": 100.0}
 STROKES = {0: "freestyle", 1: "backstroke", 2: "breaststroke", 3: "butterfly", 4: "drill",
            5: "mixed", 6: "im"}
 FOOT_SPORTS = {1, 11, 17}     # running, walking, hiking: cadence is per leg in FIT
@@ -211,7 +218,12 @@ def _fill_gaps(full):
 
 def streams_from_fit(data: bytes, points: int = 2000) -> dict:
     file_id, session, laps_raw, recs, lens_raw = {}, {}, [], [], []
+    step_defs, step_events = {}, []
     for gn, v in _decode(data):
+        if gn == 27:
+            step_defs[v.get(254)] = v
+        elif gn == 21 and v.get(0) in (3, 4):
+            step_events.append(v)
         if gn == 0 and not file_id:
             file_id = v
         elif gn == 18 and not session:
@@ -383,8 +395,27 @@ def streams_from_fit(data: bytes, points: int = 2000) -> dict:
             "avg_hr": _round(sum(hrs) / len(hrs)) if hrs else None,
         })
 
+    # --- guided-workout steps: each workout_step start event, described by the step it names --
+    workout_steps, workout_n = [], 1
+    for ev in step_events:
+        if ev.get(0) == 3:                    # workout stopped: the next step opens a new one
+            if ev.get(1) == 1 and workout_steps:
+                workout_n = workout_steps[-1]["workout"] + 1
+            continue
+        if ev.get(1) != 0 or 253 not in ev:
+            continue
+        d = step_defs.get(ev.get(3)) or {}
+        ends_on = STEP_ENDS.get(d.get(1))
+        value = d.get(2)
+        workout_steps.append({
+            "workout": workout_n, "start_s": ev[253] - t0,
+            "intensity": STEP_INTENSITY.get(d.get(7)), "ends_on": ends_on,
+            "value": value / STEP_VALUE_SCALE[ends_on] if value is not None and ends_on in STEP_VALUE_SCALE else None,
+        })
+
     return {
         "ok": True,
+        "workout_steps": workout_steps,
         "laps_kind": laps_kind(laps, bool(lengths)),
         "sport": {"sport": sport, "sub_sport": session.get(6)},
         "start_utc": (t0 + FIT_EPOCH) if t0 else None,
