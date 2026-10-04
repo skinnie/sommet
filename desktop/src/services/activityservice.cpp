@@ -3,6 +3,7 @@
 #include "apppaths.h"
 
 #include <QDebug>
+#include <QRegularExpression>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -2236,6 +2237,20 @@ void ActivityService::exportActivityToIntervals(const QString &name, const QStri
     }
 }
 
+// First and last <time> of a GPX, as UTC. A handheld's track log can span weeks in one file.
+static bool gpxTimeSpan(const QString &gpx, QDateTime *first, QDateTime *last)
+{
+    static const QRegularExpression re(QStringLiteral("<time>\\s*([^<]+?)\\s*</time>"));
+    const QRegularExpressionMatch a = re.match(gpx);
+    const int lastAt = gpx.lastIndexOf(QStringLiteral("<time>"));
+    if (!a.hasMatch() || lastAt < 0)
+        return false;
+    const QRegularExpressionMatch b = re.match(gpx, lastAt);
+    *first = QDateTime::fromString(a.captured(1), Qt::ISODate);
+    *last = b.hasMatch() ? QDateTime::fromString(b.captured(1), Qt::ISODate) : QDateTime();
+    return first->isValid() && last->isValid();
+}
+
 void ActivityService::exportActivitiesToIntervals(const QVariantList &activities)
 {
     QSettings settings;
@@ -2252,12 +2267,47 @@ void ActivityService::exportActivitiesToIntervals(const QVariantList &activities
     QStringList done = settings.value(QStringLiteral("intervals/exportedKeys")).toStringList();
     struct Item { QByteArray data; QString contentType, filename; };
     QList<Item> items;
+    bool skipped = false;
     for (const QVariant &v : activities) {
         const QVariantMap a = v.toMap();
         const QString akey = a.value(QStringLiteral("startTime")).toString()
                              + QLatin1Char('|') + a.value(QStringLiteral("name")).toString();
         if (done.contains(akey))
             continue;
+        // What must never be uploaded (André, 2026-10-04, after 14 "runs" of up to 39,310 h had
+        // to be deleted from intervals.icu - they were eTrex/Dakota/Colorado track logs sent by
+        // this export):
+        //   * a track log, not an outing: more than 24 h between its first and last point;
+        //   * a junk/test entry (the rule every import uses);
+        //   * something intervals.icu already has - an activity of ours from there that starts
+        //     within three minutes. The exportedKeys list alone was not enough: it lives in one
+        //     config file, so another install (or a copy of the config) sent the file again, and
+        //     25/09/2026 is on intervals.icu twice.
+        // All three are remembered in exportedKeys so they are not looked at again.
+        {
+            const QString gpxText = a.value(QStringLiteral("gpxText")).toString();
+            QDateTime first, last;
+            const bool haveSpan = gpxTimeSpan(gpxText, &first, &last);
+            bool skip = haveSpan && first.secsTo(last) > 24 * 3600;
+            if (!skip)
+                skip = isJunkActivity(a.value(QStringLiteral("durationSeconds")).toInt(),
+                                      a.value(QStringLiteral("distanceMeters")).toDouble());
+            if (!skip && haveSpan && m_db.isOpen()) {
+                // intervals.icu rows are stored in local time; the GPX is UTC.
+                const QDateTime local = first.toLocalTime();
+                QSqlQuery q(m_db);
+                q.prepare(QStringLiteral("SELECT 1 FROM activities WHERE source = 'intervals' "
+                                         "AND start_time BETWEEN ? AND ? LIMIT 1"));
+                q.addBindValue(local.addSecs(-180).toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss")));
+                q.addBindValue(local.addSecs(180).toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss")));
+                skip = q.exec() && q.next();
+            }
+            if (skip) {
+                done << akey;
+                skipped = true;
+                continue;
+            }
+        }
         const QByteArray fit =
             QByteArray::fromBase64(a.value(QStringLiteral("fitBase64")).toString().toLatin1());
         const QString gpx = a.value(QStringLiteral("gpxText")).toString();
@@ -2274,6 +2324,8 @@ void ActivityService::exportActivitiesToIntervals(const QVariantList &activities
         done << akey;
     }
     if (items.isEmpty()) {
+        if (skipped)
+            settings.setValue(QStringLiteral("intervals/exportedKeys"), done);
         emit exportFinished(0, 0);
         return;
     }

@@ -1,12 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { ActivityRecord, getAllActivities } from '../database/db';
 import { colorForName } from '../services/ActivityColors';
 import { Card } from '../components/ui/Card';
 import Icon from '../components/ui/Icon';
 import { useV3Theme } from '../theme/v3';
-import { t, dateLocale } from '../i18n';
+import { t, dateLocale, fmtDate } from '../i18n';
 
 // Calendar - port of desktop/qml/CalendarPage.qml (real request, 2026-08-11, with a reference
 // screenshot: a month grid where each day carries a coloured dot for the activity recorded
@@ -32,6 +32,10 @@ export default function CalendarScreen() {
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth()); // 0-11
+  // The month's activities are listed under the grid (André, 2026-10-04: the screen used the top
+  // of a tablet and left the rest blank). Tapping a day narrows the list to it; again clears.
+  const navigation = useNavigation<any>();
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
 
   useFocusEffect(useCallback(() => {
@@ -44,6 +48,7 @@ export default function CalendarScreen() {
   function goNextMonth() {
     if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1);
   }
+  React.useEffect(() => { setSelectedDay(null); }, [viewYear, viewMonth]);
   function goToday() { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); }
 
   const isCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
@@ -108,6 +113,11 @@ export default function CalendarScreen() {
     return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(2024, 0, 1 + i)));
   }, []);
 
+  const listed = useMemo(() => monthActivities
+    .filter(a => selectedDay === null || activityDate(a)!.getDate() === selectedDay)
+    .slice().sort((x, y) => (y.date || '').localeCompare(x.date || '')),
+  [monthActivities, selectedDay]);
+
   const monthTitle = new Date(viewYear, viewMonth, 1)
     .toLocaleDateString(dateLocale, { month: 'long', year: 'numeric' });
 
@@ -144,7 +154,9 @@ export default function CalendarScreen() {
         {weeks.map((week, wi) => (
           <View key={wi} style={styles.weekRow}>
             {week.map((cell, ci) => (
-              <DayCell key={ci} cell={cell} theme={theme} />
+              <DayCell key={ci} cell={cell} theme={theme} selected={!!cell && cell.day === selectedDay}
+                onPress={cell && cell.activities.length > 0
+                  ? () => setSelectedDay(d => (d === cell.day ? null : cell.day)) : undefined} />
             ))}
           </View>
         ))}
@@ -157,6 +169,25 @@ export default function CalendarScreen() {
         <View style={[styles.legendDot, { backgroundColor: colorForName('Running') }]} />
         <Text style={styles.legendText}>{t.calendarLegendActivity}</Text>
       </View>
+
+      {/* The month's activities, newest first (or just the tapped day's). */}
+      {listed.length > 0 && (
+        <Card>
+          <Text style={styles.listTitle}>
+            {selectedDay ? fmtDate(new Date(viewYear, viewMonth, selectedDay)) : monthTitle}
+          </Text>
+          {listed.map(a => (
+            <TouchableOpacity key={a.id} style={styles.listRow} activeOpacity={0.7}
+              onPress={() => navigation.navigate('Map', { activity: a })}>
+              <View style={[styles.legendDot, { backgroundColor: colorForName(a.activity_type) }]} />
+              <Text style={styles.listDate}>{fmtDate(a.date)}</Text>
+              <Text style={styles.listSport} numberOfLines={1}>{a.activity_type || t.unknownActivity}</Text>
+              <Text style={styles.listNum}>{a.distance_m > 0 ? `${(a.distance_m / 1000).toFixed(1)} km` : ''}</Text>
+              <Text style={styles.listNum}>{fmtDur(a.duration_s)}</Text>
+            </TouchableOpacity>
+          ))}
+        </Card>
+      )}
     </ScrollView>
   );
 }
@@ -167,7 +198,14 @@ export default function CalendarScreen() {
 // total duration relative to the month. Today with no activity yet keeps its own solid pill;
 // today with an activity gets a thin primary ring around the real circle so "today" and "what
 // you did" are both shown. A second sport that day adds one outer ring in its colour.
-function DayCell({ cell, theme }: { cell: any; theme: ReturnType<typeof useV3Theme> }) {
+function fmtDur(seconds: number): string {
+  const m = Math.round((seconds || 0) / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+
+function DayCell({ cell, theme, selected, onPress }: {
+  cell: any; theme: ReturnType<typeof useV3Theme>; selected?: boolean; onPress?: () => void;
+}) {
   const styles = createStyles(theme);
   if (!cell) return <View style={styles.dayCell} />;
 
@@ -181,7 +219,8 @@ function DayCell({ cell, theme }: { cell: any; theme: ReturnType<typeof useV3The
   const numberOnCircle = hasActivity || isToday;
 
   return (
-    <View style={styles.dayCell}>
+    <TouchableOpacity style={[styles.dayCell, selected && styles.daySelected]} activeOpacity={0.6}
+      disabled={!onPress} onPress={onPress}>
       <View style={styles.dayInner}>
         {/* second-sport outer ring */}
         {secondColor && (
@@ -217,7 +256,7 @@ function DayCell({ cell, theme }: { cell: any; theme: ReturnType<typeof useV3The
           {cell.day}
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -250,4 +289,11 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   legendDot: { width: 12, height: 12, borderRadius: 6 },
   legendText: { fontSize: 12, color: t.mutedText, marginRight: 8 },
+  daySelected: { backgroundColor: t.primary + '22', borderRadius: 10 },
+  listTitle: { fontSize: 14, fontWeight: '700', color: t.text, marginBottom: 6, textTransform: 'capitalize' },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9,
+             borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border },
+  listDate: { fontSize: 13, color: t.mutedText, width: 86 },
+  listSport: { flex: 1, fontSize: 14, color: t.text, fontWeight: '600' },
+  listNum: { fontSize: 13, color: t.text, width: 76, textAlign: 'right' },
 });

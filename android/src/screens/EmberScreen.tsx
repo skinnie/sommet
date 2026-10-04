@@ -175,16 +175,14 @@ export default function EmberScreen() {
         </View>
       </View>
 
-      {/* Bars for fasting + calories, line for water - matches desktop EmberPage.qml */}
-      {fastSeries.length > 1 &&
-        <EmberBars label="Fasting hours" unit="h" decimals={1} goal={today.fastGoalHours || 16}
-          barColor={t.warning} series={fastSeries} />}
-      {series(d => d.kcal).length > 1 &&
-        <EmberBars label="Calories in" unit=" kcal" barColor={t.success} series={series(d => d.kcal)} />}
-      {series(d => d.coffee).length > 1 &&
-        <EmberBars label="Coffee (cups/day)" barColor={t.hard} series={series(d => d.coffee)} />}
-      {series(d => d.waterL).length > 1 &&
-        <EmberBars label="Water (litres)" unit=" L" decimals={1} goal={2.5} barColor={t.accent} series={series(d => d.waterL)} />}
+      {/* Bars for fasting + calories, line for water - matches desktop EmberPage.qml. Always
+          shown, like the desktop (André, 2026-10-04: with nothing logged yet the screen was six
+          tiles and a blank tablet); a chart with under two days says so itself. */}
+      <EmberBars label="Fasting hours" unit="h" decimals={1} goal={today.fastGoalHours || 16}
+        barColor={t.warning} series={fastSeries} />
+      <EmberBars label="Calories in" unit=" kcal" barColor={t.success} series={series(d => d.kcal)} />
+      <EmberBars label="Coffee (cups/day)" barColor={t.hard} series={series(d => d.coffee)} />
+      <EmberBars label="Water (litres)" unit=" L" decimals={1} goal={2.5} barColor={t.accent} series={series(d => d.waterL)} />
 
       <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
         Logged here and synced with the Ember store on your other devices.
