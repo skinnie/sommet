@@ -494,10 +494,13 @@ PageFlickable {
     // ---- layout ----------------------------------------------------------------------------
     Column {
         id: column
-        anchors.horizontalCenter: parent.horizontalCenter
+        // Full width with the same side margin as Health, Gear and Totals (André, 2026-10-04:
+        // "match") - this page and Settings sat in a narrow centred strip.
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.spacingLarge
         anchors.top: parent.top
         anchors.topMargin: Theme.spacingLarge
-        width: 520
+        width: parent.width - Theme.spacingLarge * 2
         spacing: Theme.spacingMedium
 
         // --- Import a route (the old card): Upload GPX -> preview -> send to a device; or the planner

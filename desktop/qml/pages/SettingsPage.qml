@@ -141,10 +141,13 @@ PageFlickable {
 
     Column {
         id: column
-        anchors.horizontalCenter: parent.horizontalCenter
+        // Full width with the same side margin as the other pages (André, 2026-10-04: "match");
+        // it used to be a 480 px strip in the middle of the window.
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.spacingLarge
         anchors.top: parent.top
         anchors.topMargin: Theme.spacingLarge
-        width: 480
+        width: parent.width - Theme.spacingLarge * 2
         // Real, 2026-08-09 ("more coherence and simplicity") - was spacingMedium, the same
         // gap used *inside* every card between its own rows - so the whole page read as one
         // undifferentiated stack rather than distinct sections. Larger gap between cards

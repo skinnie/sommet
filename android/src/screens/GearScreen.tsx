@@ -1,3 +1,4 @@
+import { runIntervalsAutoSync } from '../services/IntervalsImport';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal,
@@ -57,6 +58,9 @@ export default function GearScreen() {
     (async () => {
       await reload();
       setLoading(false);
+      // Then the current totals from intervals.icu, like the desktop (2026-10-04: this screen
+      // showed mileage from the last time a button in Settings was pressed, weeks earlier).
+      if (await runIntervalsAutoSync().catch(() => false)) await reload();
     })();
   }, [reload]);
 

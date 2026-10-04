@@ -6,6 +6,7 @@ import {
   rejectDuplicateImport, removeImportedActivity,
 } from '../database/db';
 import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from './SportNames';
+import { importFromIntervals as importGearFromIntervals } from './GearMirrorService';
 
 // Import activities FROM intervals.icu INTO the app's local DB (André, 2026-08-18: "I would
 // prefer to have all activities living on my app"). Pull-only. Brings in EVERY activity as a
@@ -19,6 +20,7 @@ import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from '.
 // no-op, and an intervals activity that actually ORIGINATED from the watch (same day + type +
 // distance) is skipped so it never double-counts a move already synced off the watch.
 const API_BASE = 'https://intervals.icu/api/v1';
+const DUP_WINDOW_MS = 180000;   // desktop kWindowSecs
 
 // What this file's own table produced before 2026-10-03 (a short private copy that had drifted
 // from the desktop's). Kept only to recognise rows it wrote, so a re-import can give them the
@@ -72,6 +74,11 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     }
   }
 
+  // Oldest upload first, so of two copies of one ride the first uploaded is the one kept.
+  const idNum = (a: any) => Number(String(a?.id ?? '').replace(/\D/g, '')) || 0;
+  acts.sort((x: any, y: any) => idNum(x) - idNum(y));
+  const keptIcu: { ms: number; dur: number }[] = [];
+
   let imported = 0;
   let skipped = 0;
   for (const a of acts) {
@@ -83,19 +90,26 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     const date = String(a.start_date_local || a.start_date || '').slice(0, 19);
     const distance_m = Math.round(Number(a.icu_distance ?? a.distance ?? 0)) || 0;
     const duration_s = Math.round(Number(a.moving_time ?? a.elapsed_time ?? 0)) || 0;
-    // Is this really a watch move already synced locally? Either the same day, type and
-    // ~distance, or - whatever the type, since a move retyped on intervals.icu ("Walking" ->
-    // "Hiking") is still the same move - the same start within two minutes and a similar
-    // duration (seen on the tablet, 2026-10-04: four such pairs).
+    // Is this the same move as one already kept? The desktop's rule (dedupeActivities): starts
+    // within three minutes and durations within 0.66-1.5x of each other - whatever the sport,
+    // since a move retyped on intervals.icu ("Walking" -> "Hiking") is still the same move.
+    //   * against moves this device read off a watch (plus the older same day/type/distance test);
+    //   * against another intervals.icu copy already taken in this run - one ride uploaded twice
+    //     (André, 2026-10-04: the 300 km of 04/04/2026 was there from the Edge 1040 and again as
+    //     "Tacx Training", "likely an export from rungap ... maybe a duplicate"). The copy with the
+    //     lower intervals.icu id - the first one uploaded - is the one kept.
     const day = date.slice(0, 10);
     const startMs = Date.parse(date);
+    const sameMove = (otherMs: number, otherDur: number) => {
+      if (!isFinite(startMs) || !isFinite(otherMs) || Math.abs(otherMs - startMs) > DUP_WINDOW_MS) return false;
+      if (duration_s > 0 && otherDur > 0) { const r = duration_s / otherDur; if (r > 1.5 || r < 0.66) return false; }
+      return true;
+    };
     const dupOfWatch = watchActs.some(e => {
       if (e.date.slice(0, 10) !== day) return false;
       if (e.activity_type === type && Math.abs(e.distance_m - distance_m) <= Math.max(50, distance_m * 0.01)) return true;
-      const eMs = Date.parse(e.date.slice(0, 19));
-      return isFinite(startMs) && isFinite(eMs) && Math.abs(eMs - startMs) <= 120000
-        && Math.abs(e.duration_s - duration_s) <= Math.max(60, duration_s * 0.15);
-    });
+      return sameMove(Date.parse(e.date.slice(0, 19)), e.duration_s);
+    }) || keptIcu.some(k => sameMove(k.ms, k.dur));
     if (knownIds.has(icuId)) {
       // An earlier import kept the intervals.icu copy of a move this device read off the watch
       // itself (the type differed, so the old same-type test missed it): drop the copy.
@@ -113,6 +127,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
         if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
           await updateImportedActivity(icuId, fix);
       }
+      if (isFinite(startMs) && !isJunkActivity(duration_s, distance_m)) keptIcu.push({ ms: startMs, dur: duration_s });
       skipped++; continue;
     }
 
@@ -120,6 +135,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     if (isJunkActivity(duration_s, distance_m)) { skipped++; continue; }
 
     if (dupOfWatch) { skipped++; continue; }
+    if (isFinite(startMs)) keptIcu.push({ ms: startMs, dur: duration_s });
 
     // Which device recorded it (2026-08-26, desktop parity). intervals.icu gives a real name
     // for nearly every activity; fall back to a friendly form of the upload source when the
@@ -156,13 +172,38 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
   return { imported, skipped };
 }
 
-// One quiet re-import after the 2026-10-03 update, so activities imported earlier get their
-// calories and the shared sport names without the user finding the button in Settings. No-op
-// when intervals.icu is not connected (it then runs on the first launch after connecting).
-const BACKFILL_KEY = 'intervals.import.backfill.kcal3';   // 2: drops watch-move duplicates; 3: drops what was deleted on intervals.icu
-export async function backfillIntervalsImportOnce(): Promise<void> {
-  if (await AsyncStorage.getItem(BACKFILL_KEY)) return;
-  if (!(await getIntervalsIcuCredentials())) return;
-  await importActivitiesFromIntervals();
-  await AsyncStorage.setItem(BACKFILL_KEY, '1');
+// Automatic refresh from intervals.icu, like the desktop's autoIntervalsCloudSync (André,
+// 2026-10-04, on a bike showing 50,166 km here and 50,559 km on the desktop: "make it as the
+// desktop"). The desktop pulls gear and activities by itself; Android only did on a button in
+// Settings, so the tablet's gear was from 18/08. Called when the app opens and when Gear opens:
+//   * gear: pull-only import (GearMirrorService.importFromIntervals - no pushes, no deletes);
+//   * activities: the last 30 days each time, the whole history once a day (that is the run that
+//     also applies deletions and the one-time fixes of 2026-10-03/04).
+// At most once every 15 minutes - intervals.icu rate-limits (HTTP 429). No-op when not connected.
+const AUTO_LAST_KEY = 'intervals.autosync.last';
+const AUTO_FULL_KEY = 'intervals.autosync.fullImport.v3';
+const AUTO_MIN_GAP_MS = 15 * 60 * 1000;
+const AUTO_FULL_GAP_MS = 24 * 3600 * 1000;
+let autoSyncRunning = false;
+export async function runIntervalsAutoSync(): Promise<boolean> {
+  if (autoSyncRunning) return false;
+  if (!(await getIntervalsIcuCredentials())) return false;
+  const now = Date.now();
+  if (now - Number((await AsyncStorage.getItem(AUTO_LAST_KEY)) || 0) < AUTO_MIN_GAP_MS) return false;
+  autoSyncRunning = true;
+  try {
+    await AsyncStorage.setItem(AUTO_LAST_KEY, String(now));
+    await importGearFromIntervals({ keepLocalEdits: true }).catch(() => {});
+    const lastFull = Number((await AsyncStorage.getItem(AUTO_FULL_KEY)) || 0);
+    if (now - lastFull >= AUTO_FULL_GAP_MS) {
+      await importActivitiesFromIntervals();
+      await AsyncStorage.setItem(AUTO_FULL_KEY, String(now));
+    } else {
+      const since = new Date(now - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      await importActivitiesFromIntervals(since);
+    }
+    return true;
+  } finally {
+    autoSyncRunning = false;
+  }
 }

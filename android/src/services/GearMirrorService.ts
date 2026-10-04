@@ -84,7 +84,7 @@ function snapshotJson(l: LocalGear): string {
  * run while still evaluating, and the primitive for eventually OWNING this data independently of
  * intervals.icu (André 2026-08-18: "get the info from intervals.icu… the aim is to ditch
  * intervals in the future"). On overlap remote simply wins; local-only gear is left untouched. */
-export async function importFromIntervals(): Promise<number> {
+export async function importFromIntervals(opts: { keepLocalEdits?: boolean } = {}): Promise<number> {
   const remotes = await listGear();
   const parentMap = buildParentMap(remotes);
   const locals = await getAllGear(true);
@@ -96,6 +96,18 @@ export async function importFromIntervals(): Promise<number> {
   let imported = 0;
   for (const r of remotes) {
     const existing = byRemoteId.get(r.id);
+    // The automatic refresh (keepLocalEdits) must not undo something changed here and not yet
+    // sent - a rename, a retire (updatedAt later than lastSyncedAt). Such a row only takes the
+    // new mileage; its name/retired/snapshot stay, and it stays marked as changed (updatedAt one
+    // tick after lastSyncedAt) so a later Sync still pushes it. lastSyncedAt has to move: it is
+    // also the moment GearTotals counts local rides from.
+    if (opts.keepLocalEdits && existing && !existing.deleted && existing.updatedAt > existing.lastSyncedAt) {
+      const now = Date.now();
+      await upsertGear({ ...existing, distanceM: r.distanceM, timeS: r.timeS, lastSyncedAt: now, updatedAt: now + 1 });
+      imported++;
+      continue;
+    }
+    if (opts.keepLocalEdits && existing?.deleted) continue;   // deleted here, not yet sent: leave it
     await upsertGear(localFromRemote(r, parentMap.get(r.id) ?? null, existing));
     await syncRemindersFromRemote(existing?.id ?? r.id, r);
     imported++;
