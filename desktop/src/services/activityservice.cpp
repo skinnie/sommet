@@ -1437,6 +1437,12 @@ void ActivityService::importFromIntervals(int oldestDays)
     // (oldestDays<=0) uses a far-past oldest; otherwise the last N days. newest is today.
     QUrlQuery query;
     const QDate today = QDate::currentDate();
+    // Once after the 2026-10-04 update the whole history is asked for, whatever window the
+    // caller wanted: that is the pass that removes old activities deleted on intervals.icu and
+    // renames rows stored under a raw sport type. Marked done when the reply has been applied.
+    const bool fullPass = !settings.value(QStringLiteral("connections/intervals_icu/fullPass2")).toBool();
+    if (fullPass)
+        oldestDays = 0;
     const QDate oldest = oldestDays > 0 ? today.addDays(-oldestDays) : QDate(2005, 1, 1);
     query.addQueryItem(QStringLiteral("oldest"), oldest.toString(Qt::ISODate));
     query.addQueryItem(QStringLiteral("newest"), today.toString(Qt::ISODate));
@@ -1450,10 +1456,12 @@ void ActivityService::importFromIntervals(int oldestDays)
 
     setLoading(true);
     QNetworkReply *reply = m_network.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, fullPass]() {
         reply->deleteLater();
         setLoading(false);
         if (reply->error() != QNetworkReply::NoError) {
+            // importError has no listener on most pages, so a failed sync used to leave no trace.
+            qWarning().noquote() << "[intervals] activity import failed:" << reply->errorString();
             emit importError(reply->errorString());
             return;
         }
@@ -1463,6 +1471,8 @@ void ActivityService::importFromIntervals(int oldestDays)
             return;
         }
         importActivitiesInto(doc.array());
+        if (fullPass)
+            QSettings().setValue(QStringLiteral("connections/intervals_icu/fullPass2"), true);
     });
 }
 
@@ -1533,12 +1543,19 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     // imported 4722 activities... most were already here"). Now we only insert activities we don't
     // already have (keyed by the intervals id), so a routine sync with nothing new inserts 0 and
     // reports 0, and the periodic churn is gone.
-    QSet<QString> existing;
+    // id -> (row key, stored name). The name and key are kept so the two corrections below - a
+    // raw sport name, an activity deleted remotely - touch exactly the rows that need it, by
+    // primary key. (A first version ran one UPDATE per activity filtered on external_id: no
+    // index, 4,700 scans of a 240 MB table on the UI thread - the app froze for minutes.)
+    struct Held { int idx; QString device; QString name; QString start; };
+    QHash<QString, Held> existing;
     QSqlQuery ex(m_db);
-    if (ex.exec(QStringLiteral("SELECT external_id FROM activities WHERE source = 'intervals' "
-                               "AND COALESCE(external_id,'') <> ''")))
+    if (ex.exec(QStringLiteral("SELECT external_id, idx, device, name, start_time FROM activities "
+                               "WHERE source = 'intervals' AND COALESCE(external_id,'') <> ''")))
         while (ex.next())
-            existing.insert(ex.value(0).toString());
+            existing.insert(ex.value(0).toString(),
+                            {ex.value(1).toInt(), ex.value(2).toString(), ex.value(3).toString(),
+                             ex.value(4).toString()});
 
     // New rows use negative idx, below the lowest existing imported idx, so (idx, device) never
     // collides with an intervals row already stored.
@@ -1548,13 +1565,36 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
             && mn.next() && !mn.value(0).isNull())
         idx = mn.value(0).toInt() - 1;
 
+    // What this reply holds, and from when: an activity we have inside that window that the
+    // reply no longer lists was deleted on intervals.icu (see the removal after the loop).
+    QSet<QString> fetched;
+    QString windowStart;
+
     int count = 0;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const QString extId = o.value(QStringLiteral("id")).toVariant().toString();
+        if (!extId.isEmpty())
+            fetched.insert(extId);
+        const QString startLocal = o.value(QStringLiteral("start_date_local")).toString();
+        if (!startLocal.isEmpty() && (windowStart.isEmpty() || startLocal < windowStart))
+            windowStart = startLocal;
         // Already have this one (or saw it earlier in this same batch) - skip, don't re-insert.
-        if (!extId.isEmpty() && existing.contains(extId))
+        // One correction on the way: a row stored under the RAW type ("EMountainBikeRide",
+        // before the shared sport table of 2026-10-03) takes its proper name. Only that exact
+        // case, so nothing else about an existing row changes.
+        if (!extId.isEmpty() && existing.contains(extId)) {
+            const Held &h = existing[extId];
+            const QString rawType = o.value(QStringLiteral("type")).toString();
+            const QString proper = sportNameForIntervalsType(rawType);
+            if (h.idx != INT_MIN && !rawType.isEmpty() && proper != rawType && h.name == rawType) {
+                QSqlQuery fix(m_db);
+                fix.prepare(QStringLiteral("UPDATE activities SET name = ? WHERE idx = ? AND device = ?"));
+                fix.addBindValue(proper); fix.addBindValue(h.idx); fix.addBindValue(h.device);
+                fix.exec();
+            }
             continue;
+        }
         // Store the mapped SPORT as the name so the badge shows the right icon and it reads
         // like a watch move. (The intervals.icu free-text title isn't kept - the sport is what
         // every other activity in the app shows.)
@@ -1595,10 +1635,38 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(device);
         ins.exec();
         if (!extId.isEmpty())
-            existing.insert(extId);
+            existing.insert(extId, {INT_MIN, QString(), QString(), QString()});   // new this run
         ++count;
     }
-    m_db.commit();
+    // An activity deleted on intervals.icu goes here too. The import has only ADDED since
+    // 2026-09-20, so a deleted one stayed for good (André, 2026-10-04: 14 multi-day GPS track
+    // logs deleted there - up to 39,310 h each - were still in Home's "1,280 h this year"). The
+    // reply covers [windowStart, now] completely, so what we hold in that window and it does not
+    // list is gone there. Guard: never more than half of the window at once - a cut-short reply
+    // must not empty the list.
+    if (!windowStart.isEmpty() && !fetched.isEmpty()) {
+        QList<Held> gone;
+        int inWindow = 0;
+        for (auto it = existing.cbegin(); it != existing.cend(); ++it) {
+            if (it->idx == INT_MIN || it->start < windowStart)
+                continue;                       // added in this run, or older than the reply covers
+            ++inWindow;
+            if (!fetched.contains(it.key()))
+                gone.append(*it);
+        }
+        qInfo().noquote() << "[intervals] import:" << fetched.size() << "listed," << count << "new,"
+                          << gone.size() << "no longer there, of" << inWindow << "held";
+        if (!gone.isEmpty() && gone.size() * 2 <= inWindow) {
+            QSqlQuery del(m_db);
+            del.prepare(QStringLiteral("DELETE FROM activities WHERE idx = ? AND device = ? AND source = 'intervals'"));
+            for (const Held &h : std::as_const(gone)) {
+                del.bindValue(0, h.idx);
+                del.bindValue(1, h.device);
+                del.exec();
+            }
+        }
+    }
+        m_db.commit();
     dbLoadAll();
     emit activitiesChanged();
     emit importFinished(count);
