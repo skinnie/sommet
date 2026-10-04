@@ -48,9 +48,11 @@ describe('SportNames', () => {
     expect(isFootSport('Indoor cycling')).toBe(false);
   });
 
-  it('junk = under a minute AND under 100 m', () => {
+  it('junk = under two minutes AND under 100 m', () => {
     expect(isJunkActivity(21, 0)).toBe(true);
+    expect(isJunkActivity(90, 0)).toBe(true);
     expect(isJunkActivity(50, 300)).toBe(false);
+    expect(isJunkActivity(120, 0)).toBe(false);
     expect(isJunkActivity(600, 0)).toBe(false);
   });
 });

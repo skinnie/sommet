@@ -63,6 +63,20 @@ void HealthService::setSleepProvider(const QString &p)
     refresh();
 }
 
+QString HealthService::sleepScoreSource() const
+{
+    return QSettings().value(QStringLiteral("health/sleepScoreSource"),
+                             QStringLiteral("sommet")).toString();
+}
+
+void HealthService::setSleepScoreSource(const QString &p)
+{
+    if (p == sleepScoreSource())
+        return;
+    QSettings().setValue(QStringLiteral("health/sleepScoreSource"), p);
+    rebuild();   // both series are already in memory - no refetch needed
+}
+
 QString HealthService::hrvSource() const
 {
     // Which cloud source feeds the OVERNIGHT HRV line - one of "intervals" | "garmin" (never
@@ -118,7 +132,7 @@ void HealthService::setCoospoHrvEnabled(bool on)
 void HealthService::refresh(int days)
 {
     m_lastError.clear();
-    m_iRhr.clear(); m_iSteps.clear(); m_iHrv.clear(); m_iSleep.clear();
+    m_iRhr.clear(); m_iSteps.clear(); m_iHrv.clear(); m_iSleep.clear(); m_iSleepScore.clear();
     m_gRhr.clear(); m_gSteps.clear(); m_gHrv.clear(); m_gBattery.clear(); m_gSleep.clear();
 
     const QSettings s;
@@ -203,7 +217,11 @@ void HealthService::rebuild()
     m_sleep = (sp == QStringLiteral("intervals")) ? m_iSleep
             : (sp == QStringLiteral("garmin"))    ? m_gSleep
                                                   : QVariantList{};
-    m_sleepScore = buildSleepScores(m_sleep);
+    // The score: this app's own, or intervals.icu's when the user picked that and it has any
+    // (nothing shown is worse than the app's own, so an empty feed falls back).
+    m_sleepScore = (sleepScoreSource() == QStringLiteral("intervals") && !m_iSleepScore.isEmpty()
+                    && sp != QStringLiteral("off"))
+                 ? m_iSleepScore : buildSleepScores(m_sleep);
     emit changed();
 }
 
@@ -253,6 +271,11 @@ void HealthService::fetchIntervals(int days)
                     m_iSleep.append(QVariantMap{
                         {QStringLiteral("date"), o.value(QStringLiteral("id")).toString()},
                         {QStringLiteral("value"), secs.toDouble() / 3600.0}});
+                const auto score = o.value(QStringLiteral("sleepScore"));
+                if (score.isDouble() && score.toDouble() > 0)
+                    m_iSleepScore.append(QVariantMap{
+                        {QStringLiteral("date"), o.value(QStringLiteral("id")).toString()},
+                        {QStringLiteral("value"), score.toDouble()}});
             }
         } else if (m_lastError.isEmpty()) {
             m_lastError = reply->errorString();

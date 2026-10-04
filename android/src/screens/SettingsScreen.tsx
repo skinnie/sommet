@@ -41,6 +41,7 @@ import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } fro
 import { importFromIntervals, runGearMirror, resolveConflict } from '../services/GearMirrorService';
 import { GearConflict } from '../services/GearDiff';
 import { importActivitiesFromIntervals } from '../services/IntervalsImport';
+import { getSleepScoreSource, setSleepScoreSource } from '../services/WellnessService';
 import {
   isAuthenticated as stravaIsAuth, getAuthorizationUrl as stravaAuthUrl, logout as stravaLogout,
 } from '../services/ApiStrava';
@@ -143,6 +144,8 @@ export default function SettingsScreen() {
   // Morning HRV from a BLE heart-rate strap - own persisted flag (StrapHrvPref.ts), default OFF.
   // Mirrors the desktop health/coospoHrvEnabled toggle so both platforms gate the strap card.
   const [strapHrvEnabled, setStrapHrvEnabledState] = useState(false);
+  const [icuSleepScore, setIcuSleepScore] = useState(false);
+  useEffect(() => { getSleepScoreSource().then(v => setIcuSleepScore(v === 'intervals')).catch(() => {}); }, []);
   // Activity screen: normalized power, TSS, IF and work on rides (desktop parity: Settings ->
   // Activities -> Advanced power numbers). Off by default.
   const [advancedPower, setAdvancedPower] = useState(false);
@@ -567,6 +570,21 @@ export default function SettingsScreen() {
         <Text style={styles.sectionDesc}>
           Measure your morning HRV directly from a Bluetooth heart-rate strap (Polar Verity Sense,
           COOSPO, …) - no watch needed. When on, a Measure card appears on the Health screen.
+        </Text>
+        {/* Which sleep score Health shows (André, 2026-10-04: "can we make it selectable?"). */}
+        <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }]}>
+          <Text style={[styles.connRowText, { flex: 1, marginRight: 12 }]}>
+            Use intervals.icu's sleep score
+          </Text>
+          <Toggle
+            value={icuSleepScore}
+            onValueChange={v => { setIcuSleepScore(v); setSleepScoreSource(v ? 'intervals' : 'sommet').catch(() => {}); }}
+          />
+        </View>
+        <Text style={styles.sectionDesc}>
+          Off: Sommet scores each night itself, from how long you slept. On: the score that came
+          with the night on intervals.icu (from the watch or app that recorded it) is shown where
+          there is one.
         </Text>
       </View>
 

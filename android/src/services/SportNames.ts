@@ -53,10 +53,13 @@ export function canonicalSportName(name: string): string {
     || (/\s/.test(n) ? n : humanizeSportType(n));
 }
 
-/** Junk/test entry: under a minute AND under 100 m. Same rule as the desktop's import (André,
- *  2026-08-24: "it was tests for our app"; 2026-10-03: they still showed on Android). */
+/** Junk/test entry: under two minutes AND under 100 m. Same rule as the desktop
+ *  (activityservice.cpp isJunkActivity). André, 2026-08-24: "it was tests for our app";
+ *  2026-10-04: one-minute watch tests counted too, so the limit went from one minute to two. */
+export const JUNK_MAX_S = 120;
+export const JUNK_MAX_M = 100;
 export function isJunkActivity(durationS: number, distanceM: number): boolean {
-  return (Number(durationS) || 0) < 60 && (Number(distanceM) || 0) < 100;
+  return (Number(durationS) || 0) < JUNK_MAX_S && (Number(distanceM) || 0) < JUNK_MAX_M;
 }
 
 /** On foot, pace (min/km) means something; on a bike or in a boat it does not - speed does. */

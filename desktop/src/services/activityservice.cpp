@@ -25,6 +25,16 @@
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
+// Junk/test entry: under two minutes AND under 100 m. One rule for every source (André,
+// 2026-08-24: "it was tests for our app"; 2026-10-04: watch moves too - the list still showed
+// 0-1 minute runs with no distance, read off the watch while testing). Android's twin is
+// SportNames.isJunkActivity.
+static bool isJunkActivity(int durationS, double distanceM)
+{
+    return durationS < 120 && distanceM < 100.0;
+}
+
+
 static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 
 ActivityService::ActivityService(QObject *parent) : QObject(parent)
@@ -697,6 +707,12 @@ bool ActivityService::dbLoadAll()
             continue;
         // Testing mode's sample moves only show while Testing mode is on.
         if (!m_showDemo && q.value(13).toString() == QStringLiteral("demo"))
+            continue;
+        // Junk/test entries never show, whatever put the row there - a watch read re-inserts
+        // every move on the watch, so they are hidden here rather than deleted. Demo rows are
+        // exempt (Testing mode's samples are what they are).
+        if (q.value(13).toString() != QStringLiteral("demo")
+                && isJunkActivity(q.value(2).toInt(), q.value(3).toDouble()))
             continue;
         QVariantMap parsed;
         parsed[QStringLiteral("index")] = q.value(0).toInt();
@@ -1551,11 +1567,11 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         const double distance = o.value(QStringLiteral("distance")).toDouble();
         const double ascent = o.value(QStringLiteral("total_elevation_gain")).toDouble();
         const int calories = o.value(QStringLiteral("calories")).toInt();
-        // Skip junk/test entries - under a minute AND under 100 m (planned/manual/test uploads
+        // Skip junk/test entries - isJunkActivity() (planned/manual/test uploads
         // with no real recorded activity, André 2026-08-24: "it was tests for our app"). An
         // activity needs at least ~1 min OR ~100 m to count; these live on intervals.icu so the
         // filter has to run on every import, not just a one-off local delete.
-        if (duration < 60 && distance < 100.0)
+        if (isJunkActivity(duration, distance))
             continue;
         // Prefer the real device name; fall back to a friendly form of the source connector.
         QString device = o.value(QStringLiteral("device_name")).toString();
@@ -1640,7 +1656,7 @@ void ActivityService::importGarminActivitiesInto(const QJsonArray &arr)
         const QJsonObject o = v.toObject();
         const int duration = o.value(QStringLiteral("duration")).toInt();
         const double distance = o.value(QStringLiteral("distance")).toDouble();
-        if (duration < 60 && distance < 100.0)   // skip test/junk, same rule as intervals import
+        if (isJunkActivity(duration, distance))   // skip test/junk, same rule as intervals import
             continue;
         QSqlQuery ins(m_db);
         ins.prepare(QStringLiteral(
@@ -1959,7 +1975,7 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         const QJsonObject o = v.toObject();
         const int duration = o.value(QStringLiteral("durationSeconds")).toInt();
         const double distance = o.value(QStringLiteral("distanceMeters")).toDouble();
-        if (duration < 60 && distance < 100.0)   // skip junk/aborted, same rule as other imports
+        if (isJunkActivity(duration, distance))   // skip junk/aborted, same rule as other imports
             continue;
         const qint64 epoch = epochOf(o.value(QStringLiteral("startTime")).toString());
         if (alreadyHave(epoch, duration)) {      // already in the library from some source

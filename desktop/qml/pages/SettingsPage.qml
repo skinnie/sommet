@@ -756,6 +756,21 @@ PageFlickable {
                 }
                 Row {
                     width: parent.width; spacing: Theme.spacingSmall
+                    Text { text: qsTr("Sleep score"); color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                           anchors.verticalCenter: parent.verticalCenter
+                           width: parent.width - sleepScoreCombo.width - Theme.spacingSmall }
+                    RoundedComboBox {
+                        id: sleepScoreCombo
+                        width: 200
+                        anchors.verticalCenter: parent.verticalCenter
+                        readonly property var _keys: ["sommet", "intervals"]
+                        model: [qsTr("Sommet's own"), qsTr("From intervals.icu")]
+                        currentIndex: Math.max(0, _keys.indexOf(HealthService.sleepScoreSource))
+                        onActivated: (i) => HealthService.sleepScoreSource = _keys[i]
+                    }
+                }
+                Row {
+                    width: parent.width; spacing: Theme.spacingSmall
                     Text { text: qsTr("HRV (overnight)"); color: Theme.text
                            font.pixelSize: Theme.fontSizeBody
                            anchors.verticalCenter: parent.verticalCenter

@@ -45,6 +45,19 @@ function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Which sleep SCORE the Health screen shows (André, 2026-10-04: "can we make it selectable?" -
+// the app showed 18 for a night intervals.icu scored 49): 'sommet' = this app's own, computed
+// from the night's duration; 'intervals' = the one intervals.icu carries, where a night has one.
+// Same choice as the desktop's health/sleepScoreSource.
+export type SleepScoreSource = 'sommet' | 'intervals';
+const SLEEP_SCORE_KEY = 'health.sleepScoreSource';
+export async function getSleepScoreSource(): Promise<SleepScoreSource> {
+  return (await AsyncStorage.getItem(SLEEP_SCORE_KEY)) === 'intervals' ? 'intervals' : 'sommet';
+}
+export async function setSleepScoreSource(v: SleepScoreSource): Promise<void> {
+  await AsyncStorage.setItem(SLEEP_SCORE_KEY, v);
+}
+
 // Raw wellness rows for a window, newest last. Returns [] when intervals.icu isn't connected
 // rather than throwing, so a screen can render its "connect first" state instead of an error.
 export async function fetchWellness(days = 365): Promise<WellnessDay[]> {
@@ -64,6 +77,7 @@ export async function fetchWellness(days = 365): Promise<WellnessDay[]> {
   const rows = await resp.json();
   if (!Array.isArray(rows)) return [];
 
+  const scoreSource = await getSleepScoreSource();
   const out: WellnessDay[] = [];
   for (const r of rows) {
     const date = String(r?.id ?? '');          // wellness rows are keyed by date in `id`
@@ -81,6 +95,10 @@ export async function fetchWellness(days = 365): Promise<WellnessDay[]> {
       const sc = computeSleepScore({ durationMin: r.sleepSecs / 60 });
       if (sc) day.sleepScore = sc.score;
     }
+    // The user can prefer the score intervals.icu carries for the night (from the watch/app that
+    // recorded it) over this app's own - see getSleepScoreSource().
+    if (scoreSource === 'intervals' && typeof r.sleepScore === 'number' && r.sleepScore > 0)
+      day.sleepScore = r.sleepScore;
     out.push(day);
   }
   out.sort((a, b) => a.date.localeCompare(b.date));

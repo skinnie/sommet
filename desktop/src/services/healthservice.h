@@ -29,6 +29,11 @@ class HealthService : public QObject
     // Ambit-only user with no sleep data). Persisted in QSettings health/sleepProvider.
     Q_PROPERTY(QVariantList sleep READ sleep NOTIFY changed)
     Q_PROPERTY(QString sleepProvider READ sleepProvider WRITE setSleepProvider NOTIFY changed)
+    // Which sleep SCORE to show (André, 2026-10-04: "can we make it selectable?" - the app showed
+    // 18 for a night intervals.icu scored 49): "sommet" = this app's own (sleepscore.cpp, from the
+    // chosen sleep source), "intervals" = the score intervals.icu carries for the night (from the
+    // watch/app that recorded it). Persisted in QSettings health/sleepScoreSource.
+    Q_PROPERTY(QString sleepScoreSource READ sleepScoreSource WRITE setSleepScoreSource NOTIFY changed)
     // HRV is split into two DELIBERATELY SEPARATE tracks, because they are different
     // measurements that must never share a line (André, 2026-08-25): `hrv` is the OVERNIGHT
     // value from a single chosen cloud source (hrvSource = "intervals" | "garmin", like
@@ -79,6 +84,8 @@ public:
     QVariantList sleep() const { return m_sleep; }
     QString sleepProvider() const;
     void setSleepProvider(const QString &p);
+    QString sleepScoreSource() const;
+    void setSleepScoreSource(const QString &p);
     QVariantList hrvAmbit() const { return m_hrvAmbit; }
     double latestHrvAmbit() const { return lastValue(m_hrvAmbit); }
     QString hrvSource() const;
@@ -135,6 +142,7 @@ private:
     bool m_sleepRecording = false;
     QString m_sleepMessage;
     // Per-source buffers.
+    QVariantList m_iSleepScore;                               // intervals' own per-night score
     QVariantList m_iRhr, m_iSteps, m_iHrv, m_iSleep;         // intervals (sleep from sleepSecs)
     QVariantList m_gRhr, m_gSteps, m_gHrv, m_gBattery, m_gSleep;  // garmin
 

@@ -1,6 +1,6 @@
 import SQLite, { SQLiteDatabase } from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
-import { canonicalSportName, isJunkActivity } from '../services/SportNames';
+import { canonicalSportName, isJunkActivity, JUNK_MAX_S, JUNK_MAX_M } from '../services/SportNames';
 
 SQLite.enablePromise(true);
 
@@ -317,7 +317,7 @@ export async function isActivityDeleted(id: string): Promise<boolean> {
 
 // Tidy-up of what earlier builds stored (André, 2026-10-03). Runs at every open and is a no-op
 // once done:
-//   * junk/test entries - under a minute AND under 100 m - are removed; the desktop has skipped
+//   * junk/test entries (SportNames.isJunkActivity) are removed; the desktop has skipped
 //     them at import since 2026-08-24 ("it was tests for our app"), Android never did;
 //   * sport types stored raw ("EMountainBikeRide"), under an old spelling or with stray spaces
 //     get Suunto's name (SportNames.canonicalSportName).
@@ -328,8 +328,8 @@ async function tidyImportedActivities(db: SQLiteDatabase): Promise<void> {
   // Sommet Sync tombstone - this is a local view rule, not a delete to push to other devices.
   await db.executeSql(
     `INSERT OR IGNORE INTO deleted_activities (id, deleted_at)
-       SELECT id, ? FROM activities WHERE duration_s < 60 AND distance_m < 100`, [Date.now()]);
-  await db.executeSql('DELETE FROM activities WHERE duration_s < 60 AND distance_m < 100');
+       SELECT id, ? FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`, [Date.now()]);
+  await db.executeSql(`DELETE FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`);
   const [res] = await db.executeSql(`SELECT DISTINCT activity_type FROM activities WHERE activity_type != ''`);
   for (let i = 0; i < res.rows.length; i++) {
     const from: string = res.rows.item(i).activity_type;
