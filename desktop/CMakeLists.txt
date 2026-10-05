@@ -197,6 +197,7 @@ qt_add_qml_module(ambitapp
         qml/ActivityTypes.qml
         qml/ActivityViewLogic.js
         qml/ActivityChartDraw.js
+        qml/SwimWorkout.js
         qml/components/Card.qml
         qml/components/SommetMark.qml
         qml/components/PageFlickable.qml

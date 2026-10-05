@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TextInput, TouchableOpacity, Pressable, StyleSheet, ActivityIndicator, Alert, Linking,
 } from 'react-native';
 import { useRoute } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Card } from '../components/ui/Card';
 import { useV3Theme } from '../theme/v3';
 import { t, fmtDate } from '../i18n';
@@ -22,7 +23,7 @@ import { loadPlan, savePlan } from '../services/WorkoutPlanStore';
 import { pushEntry, deleteEvent, newUid } from '../services/IntervalsEvents';
 import {
   WorkoutStepsEditor, StepRow, PlanDevice, DEVICE_LABELS, defaultSteps, fromSchema, toWorkout,
-  repeatsBalanced, fitsDevice,
+  repeatsBalanced, fitsDevice, swimKind, fitRows,
 } from '../components/WorkoutStepsEditor';
 
 // One plan for every device (André, 2026-09-25 - desktop Training Program parity): an entry is
@@ -31,7 +32,10 @@ import {
 // passes which devices are around; opened without params it behaves as before (watch only).
 // uid = permanent identity; icuEventId = its intervals.icu event; icuOwned = made in Sommet (only
 // those are pushed / deleted on intervals.icu - imported ones are never deleted there).
-type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEventId?: number; icuOwned?: boolean; sport?: string };
+// modePicked = the sport mode was chosen in the editor (it then wins over the mode matching the
+// entry's intervals.icu sport); poolLength = the pool a swim workout's lengths were counted in.
+type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEventId?: number; icuOwned?: boolean; sport?: string;
+  modePicked?: boolean; poolLength?: number };
 // Workout Calendar - André's locked design (2026-08-21): dated native guided workouts named
 // "dd/mm_name" in the WORKOUT menu, sidestepping the unreachable native TrainingProgram flash
 // region entirely (assets/Firmware/re-out/training_program_CONCLUSION.md on desktop has the
@@ -43,6 +47,8 @@ type PlanEntry = CalendarPlanEntry & { device?: PlanDevice; uid?: string; icuEve
 // workout" -> pick a date + sport mode -> "Add to Calendar". The Plan below is this screen's
 // own state, saved on the phone (WorkoutPlanStore) so it survives restarts. "Sync to Watch" reads what's
 // actually on the watch, erases anything dated before today, and installs whatever's next.
+const SWIM_PREFS_KEY = 'workoutCalendar.swimPrefs';
+
 export default function WorkoutCalendarScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
@@ -65,6 +71,24 @@ export default function WorkoutCalendarScreen() {
   const [modes, setModes] = useState<ExerciseMode[] | null>(null);
   const [modesLoading, setModesLoading] = useState(false);
   const [mode, setMode] = useState<string | null>(null);
+  // Swimming (shared/swim_workout.js): "pool" / "open" when the chosen mode is a swim sport, the
+  // pool's length, and the language of the stroke words - the last two remembered on the phone.
+  const [poolLength, setPoolLength] = useState(25);
+  const [swimWords, setSwimWords] = useState('en');
+  useEffect(() => {
+    AsyncStorage.getItem(SWIM_PREFS_KEY).then(v => {
+      const p = v ? JSON.parse(v) : null;
+      if (p?.poolLength > 0) setPoolLength(p.poolLength);
+      if (p?.words) setSwimWords(p.words);
+    }).catch(() => undefined);
+  }, []);
+  const saveSwimPrefs = (pool: number, words: string) =>
+    AsyncStorage.setItem(SWIM_PREFS_KEY, JSON.stringify({ poolLength: pool, words })).catch(() => undefined);
+  const swimOf = (modeName: string | null) => (device === 'suunto' || device === '')
+    ? swimKind((modes ?? []).find(m => m.settings.name === modeName)?.settings.activityId) : '';
+  const swim = swimOf(mode);
+  // Picking a sport mode makes the steps fit it (a heart-rate target has no use in the pool).
+  const pickMode = (modeName: string) => { setMode(modeName); setRows(r => fitRows(r, device, swimOf(modeName), poolLength)); };
 
   const [name, setName] = useState('My workout');
 
@@ -163,7 +187,7 @@ export default function WorkoutCalendarScreen() {
   // The creator: a workout for `device` on `date`. Bike computers take it straight away (no
   // compile step); the watch still goes through the community compiler below.
   function addBikeEntry(sendNow: boolean) {
-    const workout = toWorkout(name, rows);
+    const workout = toWorkout(name, rows, poolLength);
     const prev = editIndex != null ? plan[editIndex] : undefined;
     const entry: PlanEntry = { date, mode: '', workoutName: workout.name!, workout, device, ...identityFor(prev) };
     setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
@@ -178,10 +202,15 @@ export default function WorkoutCalendarScreen() {
     setDate(e.date);
     setName(e.workoutName);
     setDevice(e.device ?? (available.includes('suunto') ? 'suunto' : available[0] ?? ''));
-    if (e.workout) setRows(e.workout.steps.map(fromSchema));
+    // The entry's own sport mode: the one picked for it, else the one matching its sport.
+    const entryMode = (e.modePicked && e.mode) || (e.sport && modeForSport(e.sport)) || e.mode || mode;
+    const pool = e.poolLength && e.poolLength > 0 ? e.poolLength : poolLength;
+    if (entryMode) setMode(entryMode);
+    setPoolLength(pool);
+    if (e.workout) setRows(e.workout.steps.map(st => fromSchema(st, e.device === 'bryton' || e.device === 'magene' ? '' : swimOf(entryMode || null), pool)));
   }
 
-  const editorOk = rows.length > 0 && repeatsBalanced(rows) && fitsDevice(rows, device);
+  const editorOk = rows.length > 0 && repeatsBalanced(rows) && fitsDevice(rows, device, swim);
 
   const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
@@ -196,7 +225,7 @@ export default function WorkoutCalendarScreen() {
   }, []);
 
   function buildWorkout(): Workout {
-    return toWorkout(name, rows);
+    return toWorkout(name, rows, poolLength);
   }
 
   // The compiler site's editor just POSTs whatever text is in it as-is (same request shape
@@ -291,7 +320,8 @@ export default function WorkoutCalendarScreen() {
     const workoutName = name.trim() || 'Workout';
     const workout = buildWorkout();
     const prev = editIndex != null ? plan[editIndex] : undefined;
-    const entry: PlanEntry = { date, mode, workoutName, compiled: compiledPending, workout, device: 'suunto', ...identityFor(prev) };
+    const entry: PlanEntry = { date, mode, modePicked: true, workoutName, compiled: compiledPending, workout, device: 'suunto',
+      ...(prev?.sport ? { sport: prev.sport } : {}), ...(swim === 'pool' ? { poolLength } : {}), ...identityFor(prev) };
     setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
     setEditIndex(null);
     mirror(entry);
@@ -313,7 +343,10 @@ export default function WorkoutCalendarScreen() {
       Ride: ['cycl', 'bike', 'ride', 'vélo', 'velo'], VirtualRide: ['indoor', 'cycl', 'bike'],
       GravelRide: ['gravel', 'cycl', 'bike'], MountainBikeRide: ['mountain', 'mtb', 'cycl', 'bike'],
       Run: ['run'], VirtualRun: ['treadmill', 'run'], TrailRun: ['trail', 'run'],
-      Walk: ['walk'], Hike: ['hik', 'trek', 'walk'], Swim: ['swim'], Rowing: ['row'], NordicSki: ['ski'],
+      Walk: ['walk'], Hike: ['hik', 'trek', 'walk'], Rowing: ['row'], NordicSki: ['ski'],
+      // A pool swim goes to the pool mode, an open-water one to the open-water mode - not to
+      // whichever mode with "swim" in its name the watch lists first.
+      Swim: ['pool', 'swim'], OpenWaterSwim: ['open', 'swim'],
     };
     const names = (modes ?? []).map(m => m.settings.name);
     for (const w of words[sport] ?? []) for (const n of names) if (n.toLowerCase().includes(w)) return n;
@@ -327,7 +360,7 @@ export default function WorkoutCalendarScreen() {
     // Only the watch's entries: bike-computer ones are sent from their own menu.
     // Each in the watch sport mode matching its sport (desktop modeForSport), else its own mode.
     const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene')
-      .map(e => ({ ...e, mode: (e.sport && modeForSport(e.sport)) || e.mode || mode || '' }));
+      .map(e => ({ ...e, mode: (e.modePicked && e.mode) || (e.sport && modeForSport(e.sport)) || e.mode || mode || '' }));
     const noMode = watchPlan.filter(e => !e.mode);
     if (noMode.length) {
       Alert.alert(t.error, `${t.workoutCalendarPickModeFirst} (${noMode.map(e => `${e.date} ${e.sport ?? ''}`.trim()).join(', ')})`);
@@ -392,7 +425,7 @@ export default function WorkoutCalendarScreen() {
                 {/* One per sport: the watch lists a workout under every mode of its sport (desktop
                     TrainingProgramPage workoutModes), so e.g. "Running Couch25k -W1" isn't a choice. */}
                 {(modes ?? []).filter((m, i, all) => all.findIndex(x => x.settings.activityId === m.settings.activityId) === i).map((m, i) => (
-                  <TouchableOpacity key={i} style={[s.chip, mode === m.settings.name && s.chipActive]} onPress={() => setMode(m.settings.name)}>
+                  <TouchableOpacity key={i} style={[s.chip, mode === m.settings.name && s.chipActive]} onPress={() => pickMode(m.settings.name)}>
                     <Text style={[s.chipText, mode === m.settings.name && s.chipTextActive]}>{m.settings.name}</Text>
                   </TouchableOpacity>
                 ))}
@@ -401,7 +434,9 @@ export default function WorkoutCalendarScreen() {
           </>
         )}
 
-        <WorkoutStepsEditor rows={rows} device={device} onChange={setRows} />
+        <WorkoutStepsEditor rows={rows} device={device} onChange={setRows} swim={swim} poolLength={poolLength}
+          onPoolLength={m => { setPoolLength(m); saveSwimPrefs(m, swimWords); }}
+          words={swimWords} onWords={w => { setSwimWords(w); saveSwimPrefs(poolLength, w); }} />
 
         {isBike && (
           <Row>

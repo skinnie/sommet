@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtCore
 import AmbitApp
+import "../SwimWorkout.js" as SW
 
 // Training Program - real request, 2026-08-12 (André: "how can we build from scratch a
 // workout planner that installs a scheduled (date) workout", then "movescount era called
@@ -128,7 +129,11 @@ Item {
     // C406 takes time steps with power/cadence targets (tools/magene_workout.py); the Bryton
     // Aero 60 time or distance with power/HR/speed/cadence (bryton_from_intervals.py); the
     // Suunto guided workout everything (workout.py).
-    function capsFor(device) {
+    function capsFor(device, swim) {
+        // In the water (a Suunto swim mode): no targets, and steps that end on a distance, a
+        // time, the Lap button or pool lengths (shared/swim_workout.js).
+        if ((device === "" || device === "suunto") && SW.swimCaps(swim))
+            return SW.swimCaps(swim)
         if (device === "magene")
             return { durations: ["time_min", "time_s"], targets: ["none", "power", "cadence"] }
         // ELEMNT .plan: time or distance steps, watts / bpm / rpm ranges (tools/wahoo_workout.py).
@@ -221,7 +226,10 @@ Item {
         "Ride": ["cycl", "bike", "ride", "vélo", "velo"], "VirtualRide": ["indoor", "cycl", "bike"],
         "GravelRide": ["gravel", "cycl", "bike"], "MountainBikeRide": ["mountain", "mtb", "cycl", "bike"],
         "Run": ["run"], "VirtualRun": ["treadmill", "run"], "TrailRun": ["trail", "run"],
-        "Walk": ["walk"], "Hike": ["hik", "trek", "walk"], "Swim": ["swim"], "Rowing": ["row"],
+        "Walk": ["walk"], "Hike": ["hik", "trek", "walk"], "Rowing": ["row"],
+        // A pool swim goes to the pool mode, an open-water one to the open-water mode - not to
+        // whichever mode with "swim" in its name the watch lists first.
+        "Swim": ["pool", "swim"], "OpenWaterSwim": ["open", "swim"],
         "NordicSki": ["ski"]
     })
     function modeForSport(sport) {
@@ -244,6 +252,11 @@ Item {
             out.push(m.name)
         }
         return out
+    }
+    // "pool" / "open" when a sport mode is one of the watch's swim sports, else "".
+    function swimKindOf(name) {
+        const m = CustomModesService.modes.find(x => x.name === name)
+        return m ? SW.swimKind(m.activityId) : ""
     }
     // The offered mode for any mode name: the first mode of the same sport.
     function canonicalMode(name) {
@@ -366,6 +379,13 @@ Item {
     // The plan being edited survives a restart or leaving the page (André's audit, 2026-09-27:
     // it came back empty, with nothing saying it had to be saved). Every change is kept as a
     // draft; "Save" still stores it as a named plan.
+    // Swim workouts: the pool length last used and the language of the stroke words.
+    Settings {
+        id: swimPrefs
+        category: "swimWorkout"
+        property real poolLength: 25
+        property string words: "en"
+    }
     Settings {
         id: draftStore
         category: "trainingProgram"
@@ -1114,7 +1134,23 @@ Item {
         // Which device this workout is made for ("suunto" | "bryton" | "magene" | "" = any):
         // restricts the duration/target pickers to what that device can take (root.capsFor).
         property string device: ""
-        readonly property var caps: root.capsFor(device)
+        readonly property var caps: root.capsFor(device, swim)
+        // Swimming: which swim sport the chosen mode is ("pool" / "open" / ""), the pool's length
+        // (pool lengths are a step ending; kept on the workout), and the language of the stroke
+        // words the Stroke picker writes into a step's text.
+        readonly property string swim: forSuunto ? root.swimKindOf(mode) : ""
+        property real poolLength: 25
+        // The steps made to fit the mode just picked (a heart-rate target has no use in the pool).
+        function fitToMode() {
+            editSteps = editSteps.map(row => SW.fitRow(row, editor.caps, editor.poolLength))
+        }
+        function setPoolLength(metres) {
+            if (!(metres > 0) || metres === poolLength) return
+            const old = poolLength
+            poolLength = metres
+            editSteps = editSteps.map(row => Object.assign({}, row,
+                { stepText: SW.retext(row, row, old, metres) }))
+        }
         // Backlight flashes only exist on the Suunto guided workout (guided_workout.py adds them
         // when compiling); the watch's own beeps aren't configurable, so they're only explained.
         readonly property bool forSuunto: device === "" || device === "suunto"
@@ -1148,12 +1184,12 @@ Item {
                                                qsTr("Repeat start"), qsTr("Repeat end")]
         readonly property var durationKinds: ["time_min", "time_s", "distance_km",
                                               "distance_m", "ascent_m", "lap",
-                                              "energy_kcal", "hr_above", "hr_below"]
+                                              "energy_kcal", "hr_above", "hr_below", "lengths"]
         readonly property var durationLabels: [qsTr("Time (min)"), qsTr("Time (s)"),
                                                qsTr("Distance (km)"), qsTr("Distance (m)"),
                                                qsTr("Ascent (m)"), qsTr("Lap press"),
                                                qsTr("Energy (kcal)"), qsTr("Until HR above (bpm)"),
-                                               qsTr("Until HR below (bpm)")]
+                                               qsTr("Until HR below (bpm)"), qsTr("Pool lengths")]
         readonly property var targetKinds: ["none", "hr", "pace", "speed",
                                             "vertical_speed", "power", "cadence"]
         readonly property var targetLabels: [qsTr("No target"), qsTr("Heart rate (bpm)"),
@@ -1168,6 +1204,7 @@ Item {
             workoutName = entry ? entry.workout.name : qsTr("Workout")
             mode = root.canonicalMode(entry ? root.modeOf(entry, modePicker.currentText)
                                             : modePicker.currentText)
+            poolLength = entry && entry.poolLength > 0 ? entry.poolLength : swimPrefs.poolLength
             editSteps = entry ? entry.workout.steps.map(editor.fromSchema)
                               : [editor.defaultStep("warmup"),
                                  editor.defaultStep("interval"),
@@ -1194,7 +1231,10 @@ Item {
             if (s.duration && s.duration.durationName === "time") {
                 if (value % 60 === 0) { kind = "time_min"; value = value / 60 }
             } else if (s.duration && s.duration.durationName === "distance") {
-                if (value % 1000 === 0) { kind = "distance_km"; value = value / 1000 }
+                const lengths = editor.swim === "pool" ? SW.lengthsFor(value, editor.poolLength) : null
+                if (lengths !== null) { kind = "lengths"; value = lengths }
+                else if (editor.swim === "pool") kind = "distance_m"
+                else if (value % 1000 === 0) { kind = "distance_km"; value = value / 1000 }
                 else kind = "distance_m"
             } else if (s.duration && s.duration.durationName === "ascent") {
                 kind = "ascent_m"
@@ -1234,6 +1274,8 @@ Item {
                 step.duration = { durationName: "distance", value: Math.round(v * 1000) }
             else if (row.durationKind === "distance_m")
                 step.duration = { durationName: "distance", value: Math.round(v) }
+            else if (row.durationKind === "lengths")
+                step.duration = { durationName: "distance", value: Math.round(v * editor.poolLength) }
             else if (row.durationKind === "energy_kcal")
                 step.duration = { durationName: "energy", value: Math.round(v) }
             else if (row.durationKind === "hr_above" || row.durationKind === "hr_below")
@@ -1275,6 +1317,7 @@ Item {
             if (prev && prev.mode) entry.mode = prev.mode
             if (prev && prev.sport) entry.sport = prev.sport
             if (editor.forSuunto && editor.mode) { entry.mode = editor.mode; entry.modePicked = true }
+            if (editor.swim === "pool") { entry.poolLength = editor.poolLength; swimPrefs.poolLength = editor.poolLength }
             if (editor.device) entry.device = editor.device
             const next = root.entries.filter(e => e.date !== editor.editDate)
             next.push(entry)
@@ -1288,6 +1331,10 @@ Item {
         function mutate(index, patch) {
             const next = editSteps.slice()
             next[index] = Object.assign({}, next[index], patch)
+            // A step text the Stroke picker wrote follows its step ("Crawl 50m" -> "Crawl 100m").
+            if (editor.swim && patch.stepText === undefined)
+                next[index].stepText = SW.retext(editSteps[index], next[index],
+                                                 editor.poolLength, editor.poolLength)
             editSteps = next
         }
 
@@ -1308,8 +1355,48 @@ Item {
                     width: parent.width * 0.38 - parent.spacing
                     model: root.workoutModes
                     currentIndex: Math.max(model.indexOf(editor.mode), 0)
-                    onActivated: editor.mode = currentText
+                    onActivated: { editor.mode = currentText; editor.fitToMode() }
                     Component.onCompleted: if (!editor.mode) editor.mode = currentText
+                }
+            }
+
+            // Swimming: the pool's length (steps can end on a number of lengths) and the language
+            // of the words the Stroke picker puts on the watch.
+            Row {
+                visible: editor.swim !== ""
+                spacing: Theme.spacingSmall
+                Text {
+                    visible: editor.swim === "pool"
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Pool length (m)")
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeLabel
+                }
+                RoundedTextField {
+                    visible: editor.swim === "pool"
+                    width: 70
+                    text: String(editor.poolLength)
+                    validator: DoubleValidator { bottom: 1 }
+                    onTextEdited: editor.setPoolLength(Number(text))
+                }
+                Item { visible: editor.swim === "pool"; width: Theme.spacingMedium; height: 1 }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("Stroke words on the watch")
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeLabel
+                }
+                RoundedComboBox {
+                    width: 150
+                    model: SW.LANGUAGES.map(l => l.label)
+                    currentIndex: Math.max(0, SW.LANGUAGES.findIndex(l => l.id === swimPrefs.words))
+                    onActivated: (i) => swimPrefs.words = SW.LANGUAGES[i].id
+                }
+                InfoDot {
+                    text: qsTr("In the water a step can end on a distance, a time, the Lap button or "
+                               + "pool lengths, and has no target: the heart-rate belt cannot reach "
+                               + "the watch under water. Pick a stroke on a step to write its text "
+                               + "for the watch, e.g. \"Crawl 50m\" - you can still type your own.")
                 }
             }
 
@@ -1446,6 +1533,19 @@ Item {
                     Row {
                         visible: !stepRow.isRepeat
                         spacing: Theme.spacingSmall
+                        RoundedComboBox {
+                            visible: editor.swim !== ""
+                            width: stepRow.width * 0.19
+                            readonly property var word: SW.wordOf(stepRow.modelData.stepText, swimPrefs.words)
+                            model: [qsTr("Stroke…")].concat(SW.WORDS.map(w => w.label))
+                            currentIndex: word ? 1 + SW.WORDS.findIndex(w => w.id === word.id) : 0
+                            onActivated: (i) => {
+                                if (i > 0)
+                                    editor.mutate(stepRow.index, { stepText: SW.stepText(
+                                        SW.WORDS[i - 1].id, swimPrefs.words, stepRow.modelData,
+                                        editor.poolLength) })
+                            }
+                        }
                         RoundedTextField {
                             width: stepRow.width * 0.3
                             text: stepRow.modelData.stepText || ""

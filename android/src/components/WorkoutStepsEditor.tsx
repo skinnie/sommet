@@ -10,6 +10,12 @@ import type { Workout, WorkoutStep } from '../services/WorkoutSource';
 import Icon from './ui/Icon';
 import { PHASE_WORD } from '../services/GuidedWorkoutCore';
 
+// Swimming in the builders - shared with the desktop (shared/swim_workout.js).
+const SW = require('../config/swimWorkout');
+export const swimKind = (activityId?: number): string => SW.swimKind(activityId);
+export const fitRows = (rows: StepRow[], device: PlanDevice, swim: string, pool: number): StepRow[] =>
+  rows.map(r => SW.fitRow(r, capsFor(device, swim), pool));
+
 export type PlanDevice = 'suunto' | 'bryton' | 'magene' | '';
 export const DEVICE_LABELS: Record<Exclude<PlanDevice, ''>, string> = {
   suunto: 'Suunto watch', bryton: 'Bryton', magene: 'Magene C406',
@@ -17,7 +23,10 @@ export const DEVICE_LABELS: Record<Exclude<PlanDevice, ''>, string> = {
 
 // Same table as the desktop: Magene = time + power/cadence (magene_workout.py); Bryton =
 // time/distance + power/HR/speed/cadence (bryton_from_intervals.py); Suunto = everything.
-export function capsFor(device: PlanDevice) {
+export function capsFor(device: PlanDevice, swim = ''): { durations: string[]; targets: string[] } {
+  // In the water (a Suunto swim mode): no targets; steps end on a distance, a time, the Lap
+  // button or pool lengths (shared/swim_workout.js).
+  if ((device === '' || device === 'suunto') && SW.swimCaps(swim)) return SW.swimCaps(swim);
   if (device === 'magene') return { durations: ['time_min', 'time_s'], targets: ['none', 'power', 'cadence'] };
   if (device === 'bryton') return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m'], targets: ['none', 'power', 'hr', 'speed', 'cadence'] };
   // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed targets
@@ -32,7 +41,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 const DUR_LABEL: Record<string, string> = {
   time_min: 'min', time_s: 's', distance_km: 'km', distance_m: 'm', ascent_m: 'm+', lap: 'lap',
-  energy_kcal: 'kcal', hr_above: 'until HR above (bpm)', hr_below: 'until HR below (bpm)',
+  lengths: 'lengths', energy_kcal: 'kcal', hr_above: 'until HR above (bpm)', hr_below: 'until HR below (bpm)',
 };
 const TGT_LABEL: Record<string, string> = {
   none: 'No target', hr: 'HR', pace: 'Pace min/km', speed: 'Speed km/h', vertical_speed: 'V-speed', power: 'Power W', cadence: 'Cadence',
@@ -56,14 +65,20 @@ export const defaultSteps = (): StepRow[] => [
   defaultStep('repeatEnd'), defaultStep('cooldown', 5),
 ];
 
-export function fromSchema(s: WorkoutStep): StepRow {
+export function fromSchema(s: WorkoutStep, swim = '', pool = 25): StepRow {
   const type = s.type.typeName;
   if (type === 'repeatStart') return { ...defaultStep(type), repeatCount: s.type.value || 2 };
   if (type === 'repeatEnd') return defaultStep(type);
   let kind = 'time_s', value = s.duration?.value ?? 0;
   const dn = s.duration?.durationName;
   if (dn === 'time' && value % 60 === 0) { kind = 'time_min'; value = value / 60; }
-  else if (dn === 'distance') { if (value % 1000 === 0) { kind = 'distance_km'; value = value / 1000; } else kind = 'distance_m'; }
+  else if (dn === 'distance') {
+    const lengths = swim === 'pool' ? SW.lengthsFor(value, pool) : null;
+    if (lengths !== null) { kind = 'lengths'; value = lengths; }
+    else if (swim === 'pool') kind = 'distance_m';
+    else if (value % 1000 === 0) { kind = 'distance_km'; value = value / 1000; }
+    else kind = 'distance_m';
+  }
   else if (dn === 'ascent') kind = 'ascent_m';
   else if (dn === 'lap') kind = 'lap';
   else if (dn === 'energy') kind = 'energy_kcal';
@@ -76,7 +91,7 @@ export function fromSchema(s: WorkoutStep): StepRow {
   };
 }
 
-export function toSchema(r: StepRow): WorkoutStep {
+export function toSchema(r: StepRow, pool = 25): WorkoutStep {
   if (r.stepType === 'repeatStart') return { type: { typeName: 'repeatStart', value: Math.max(1, Math.round(r.repeatCount)) } };
   if (r.stepType === 'repeatEnd') return { type: { typeName: 'repeatEnd' } };
   const v = Number(r.durationValue) || 0;
@@ -86,6 +101,7 @@ export function toSchema(r: StepRow): WorkoutStep {
     : r.durationKind === 'time_s' ? { durationName: 'time', value: Math.round(v) }
     : r.durationKind === 'distance_km' ? { durationName: 'distance', value: Math.round(v * 1000) }
     : r.durationKind === 'distance_m' ? { durationName: 'distance', value: Math.round(v) }
+    : r.durationKind === 'lengths' ? { durationName: 'distance', value: Math.round(v * pool) }
     : r.durationKind === 'energy_kcal' ? { durationName: 'energy', value: Math.round(v) }
     : r.durationKind === 'hr_above' || r.durationKind === 'hr_below' ? { durationName: r.durationKind, value: Math.round(v) }
     : { durationName: 'ascent', value: Math.round(v) };
@@ -98,7 +114,8 @@ export function toSchema(r: StepRow): WorkoutStep {
   return step;
 }
 
-export const toWorkout = (name: string, rows: StepRow[]): Workout => ({ name: name.trim() || 'Workout', steps: rows.map(toSchema) });
+export const toWorkout = (name: string, rows: StepRow[], pool = 25): Workout =>
+  ({ name: name.trim() || 'Workout', steps: rows.map(r => toSchema(r, pool)) });
 
 /** Repeat markers pair up, no nesting (the generator's own expand_steps rule). */
 export function repeatsBalanced(rows: StepRow[]): boolean {
@@ -111,8 +128,8 @@ export function repeatsBalanced(rows: StepRow[]): boolean {
 }
 
 /** Steps the device can't take (e.g. an HR step created for the Magene). */
-export function fitsDevice(rows: StepRow[], device: PlanDevice): boolean {
-  const c = capsFor(device);
+export function fitsDevice(rows: StepRow[], device: PlanDevice, swim = ''): boolean {
+  const c = capsFor(device, swim);
   return rows.every(r => r.stepType === 'repeatStart' || r.stepType === 'repeatEnd'
     || (c.durations.includes(r.durationKind) && c.targets.includes(r.targetKind)));
 }
@@ -175,12 +192,27 @@ function Tick({ label, value, onChange }: { label: string; value: boolean; onCha
 const cycle = (list: string[], cur: string) => list[(Math.max(0, list.indexOf(cur)) + 1) % list.length];
 
 /** Tap a pill to cycle its value (type / duration unit / target) - compact on a phone. */
-export function WorkoutStepsEditor({ rows, device, onChange }: {
+export function WorkoutStepsEditor({ rows, device, onChange, swim = '', poolLength = 25, onPoolLength, words = 'en', onWords }: {
   rows: StepRow[]; device: PlanDevice; onChange: (rows: StepRow[]) => void;
+  // Swimming ("pool" / "open" when the chosen sport mode is a swim sport): the pool's length and
+  // the language of the stroke words the Stroke pill writes into a step's text.
+  swim?: string; poolLength?: number; onPoolLength?: (m: number) => void; words?: string; onWords?: (lang: string) => void;
 }) {
   const t = useV3Theme();
-  const caps = capsFor(device);
-  const set = (i: number, patch: Partial<StepRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const caps = capsFor(device, swim);
+  // A step text the Stroke pill wrote follows its step ("Crawl 50m" -> "Crawl 100m").
+  const set = (i: number, patch: Partial<StepRow>) => onChange(rows.map((r, j) => {
+    if (j !== i) return r;
+    const next = { ...r, ...patch };
+    if (swim && patch.stepText === undefined) next.stepText = SW.retext(r, next, poolLength, poolLength);
+    return next;
+  }));
+  const setPool = (m: number) => {
+    if (!(m > 0) || m === poolLength) return;
+    onChange(rows.map(r => ({ ...r, stepText: SW.retext(r, r, poolLength, m) })));
+    onPoolLength?.(m);
+  };
+  const strokeIds: string[] = SW.WORDS.map((w: { id: string }) => w.id);
   const suunto = device === 'suunto' || device === '';
   const [infoRow, setInfoRow] = React.useState<string | null>(null);  // "<row>:step" | "<row>:limit"
   const bold = { fontWeight: '700' as const, fontSize: v3Type.caption };
@@ -193,6 +225,26 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
             a step starts and when the workout ends; <Text style={bold}>two quick beeps</Text> once you&apos;ve been outside
             a step&apos;s target limits for 5 s, then every 15 s while you stay outside. The <Text style={bold}>Light On</Text> ticks
             add a backlight flash to those moments.
+          </Text>
+        </View>
+      )}
+      {!!swim && (
+        <View style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+            {swim === 'pool' && (
+              <>
+                <Text style={{ color: t.text, fontSize: v3Type.caption }}>Pool length (m)</Text>
+                <Num value={poolLength} onChange={setPool} />
+              </>
+            )}
+            <Text style={{ color: t.text, fontSize: v3Type.caption }}>Stroke words on the watch</Text>
+            <Pill label={(SW.LANGUAGES.find((l: { id: string }) => l.id === words) ?? SW.LANGUAGES[0]).label}
+              onPress={() => onWords?.(cycle(SW.LANGUAGES.map((l: { id: string }) => l.id), words))} />
+          </View>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>
+            In the water a step can end on a distance, a time, the Lap button or pool lengths, and has no target: the
+            heart-rate belt cannot reach the watch under water. Tap Stroke on a step to write its text for the watch,
+            e.g. &quot;Crawl 50m&quot; - you can still type your own.
           </Text>
         </View>
       )}
@@ -230,6 +282,13 @@ export function WorkoutStepsEditor({ rows, device, onChange }: {
           </View>
           {!repeat && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+              {!!swim && (() => {
+                const word = SW.wordOf(r.stepText, words);
+                return (
+                  <Pill label={word ? SW.WORDS.find((w: { id: string }) => w.id === word.id).label : 'Stroke'} active={!!word}
+                    onPress={() => set(i, { stepText: SW.stepText(cycle(strokeIds, word ? word.id : strokeIds[strokeIds.length - 1]), words, r, poolLength) })} />
+                );
+              })()}
               <TextInput value={r.stepText ?? ''} maxLength={29} placeholder={`On watch: ${PHASE_WORD[r.stepType] ?? 'Step'}`}
                 placeholderTextColor={t.mutedText} onChangeText={v => set(i, { stepText: v })}
                 style={{

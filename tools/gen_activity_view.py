@@ -12,6 +12,8 @@ Two sources, one place to edit:
                                  checked by tools/test_activity_streams_parity.js)
   shared/activity_chart_draw.js  how the charts are DRAWN (canvas calls), used by the desktop's QML
                                  Canvas and by the Android WebView chart page alike
+  shared/swim_workout.js         swimming in the workout builders: what a step can ask for in the
+                                 water, the stroke words for the watch, pool lengths
   shared/sport_names.json        every source's sport type -> Suunto's sport name (intervals.icu,
                                  Garmin, ...), so one activity reads the same in both apps
 Copies: the desktop embeds desktop/assets/activity_view.json (Qt resource) and imports
@@ -29,6 +31,7 @@ LOGIC_SRC = ROOT / "shared" / "activity_view_logic.js"
 STREAMS_SRC = ROOT / "shared" / "activity_streams.js"
 DRAW_SRC = ROOT / "shared" / "activity_chart_draw.js"
 SPORTS_SRC = ROOT / "shared" / "sport_names.json"
+SWIM_SRC = ROOT / "shared" / "swim_workout.js"
 PRAGMA = b".pragma library\n// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 HEADER = b"// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 
@@ -67,6 +70,10 @@ def targets():
              HEADER.replace(b"activity_view_logic.js", b"activity_streams.js") + STREAMS_SRC.read_bytes()),
             (ROOT / "desktop" / "qml" / "ActivityChartDraw.js",
              PRAGMA.replace(b"activity_view_logic.js", b"activity_chart_draw.js") + DRAW_SRC.read_bytes()),
+            (ROOT / "desktop" / "qml" / "SwimWorkout.js",
+             PRAGMA.replace(b"activity_view_logic.js", b"swim_workout.js") + SWIM_SRC.read_bytes()),
+            (ROOT / "android" / "src" / "config" / "swimWorkout.js",
+             HEADER.replace(b"activity_view_logic.js", b"swim_workout.js") + SWIM_SRC.read_bytes()),
             # also as a module, for the few helpers the app itself uses (the swim legend)
             (ROOT / "android" / "src" / "config" / "activityChartDraw.js",
              HEADER.replace(b"activity_view_logic.js", b"activity_chart_draw.js") + DRAW_SRC.read_bytes()),

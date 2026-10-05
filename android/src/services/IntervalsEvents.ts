@@ -59,7 +59,7 @@ export function workoutDoc(w: Workout): { steps: any[] } {
 export function sportType(e: MirrorEntry): string {
   if (e.device === 'bryton' || e.device === 'magene') return 'Ride';
   const mode = (e.mode ?? '').toLowerCase();
-  for (const [word, t] of [['run', 'Run'], ['trail', 'Run'], ['walk', 'Walk'], ['hik', 'Walk'], ['swim', 'Swim'], ['row', 'Rowing'], ['ski', 'NordicSki']]) {
+  for (const [word, t] of [['run', 'Run'], ['trail', 'Run'], ['walk', 'Walk'], ['hik', 'Walk'], ['openwater', 'OpenWaterSwim'], ['open water', 'OpenWaterSwim'], ['swim', 'Swim'], ['row', 'Rowing'], ['ski', 'NordicSki']]) {
     if (mode.includes(word)) return t;
   }
   return 'Ride';

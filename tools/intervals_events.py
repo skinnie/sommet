@@ -85,6 +85,7 @@ def sport_type(entry):
         return "Ride"
     mode = (entry.get("mode") or "").lower()
     for word, t in (("run", "Run"), ("trail", "Run"), ("walk", "Walk"), ("hik", "Walk"),
+                    ("openwater", "OpenWaterSwim"), ("open water", "OpenWaterSwim"),
                     ("swim", "Swim"), ("row", "Rowing"), ("ski", "NordicSki")):
         if word in mode:
             return t
