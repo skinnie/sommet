@@ -390,6 +390,11 @@ Item {
         id: draftStore
         category: "trainingProgram"
         property string draft: ""
+        // Sport mode that runs the next upcoming workout by itself ("" = off). With it set, the
+        // watch-face "Today" card's Start -> that mode -> the steps run, no WORKOUT menu
+        // (hardware, André's Peak, 2026-10-05). Best a mode kept for the program, since every
+        // recording in it runs the workout.
+        property string autoStartMode: ""
     }
     property bool _draftRestored: false
     function saveDraft() {
@@ -878,11 +883,54 @@ Item {
                         wrapMode: Text.WordWrap
                         text: qsTr("Sync to watch puts your next workouts (5 at a time) in the "
                                    + "watch's WORKOUT menu: start the sport, hold [Next], pick "
-                                   + "WORKOUT. It also shows a “Today” card on the time "
-                                   + "screen on each workout's day. Sync again after training to "
-                                   + "bring the next ones in.")
+                                   + "WORKOUT. Sync again after training to bring the next ones in.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
+                    }
+
+                    // The watch-face "Today" card + auto-start. The card's Start only opens the
+                    // sport list; the firmware has no link from a card to a workout. What it has
+                    // is active rules: a workout set as a mode's rule runs on every recording in
+                    // that mode. So: card -> Start -> this mode -> the steps run by themselves.
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingMedium
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("“Today” card starts")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        RoundedComboBox {
+                            id: autoStartPicker
+                            width: parent.width * 0.3
+                            model: [qsTr("Off")].concat(CustomModesService.modes.map(m => m.name))
+                            currentIndex: {
+                                const i = CustomModesService.modes.findIndex(
+                                    m => m.name === draftStore.autoStartMode)
+                                return i < 0 ? 0 : i + 1
+                            }
+                            onActivated: draftStore.autoStartMode =
+                                currentIndex === 0 ? "" : CustomModesService.modes[currentIndex - 1].name
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width * 0.5
+                            wrapMode: Text.WordWrap
+                            text: draftStore.autoStartMode.length > 0
+                                  ? qsTr("Each workout's day shows a card on the time screen. "
+                                         + "Start it, pick %1, start recording: the steps run by "
+                                         + "themselves. Every recording in %1 runs the next "
+                                         + "workout, so keep that mode for the program. The watch "
+                                         + "shows “Easy” and turns its HR limits on (rest to 97% "
+                                         + "of max, out of the way of the steps).")
+                                        .arg(draftStore.autoStartMode)
+                                  : qsTr("Off: only workouts without steps get a card; stepped "
+                                         + "workouts are picked from the WORKOUT menu.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
                     }
 
                     Row {
@@ -928,7 +976,8 @@ Item {
                                      && !TrainingProgramService.installing
                                      && HomeViewModel.anyDevice
                             onClicked: TrainingProgramService.syncCalendar(
-                                root.entriesWithMode(modePicker.currentText), true)
+                                root.entriesWithMode(modePicker.currentText), true,
+                                draftStore.autoStartMode)
                         }
                         RoundedButton {
                             // Same planned workouts, sent to a mounted Bryton Aero 60 as its own
@@ -1036,12 +1085,15 @@ Item {
                                 const n = r.nativeCards || 0
                                 if (n === 0)
                                     return qsTr("No cards on the watch face: workouts with steps start from the sport mode's WORKOUT menu.")
+                                const a = r.autoStart
+                                const auto = a && a.mode
+                                    ? qsTr(" %1 starts %2 by itself.").arg(a.mode).arg(a.workout) : ""
                                 const range = (r.nativeCardFirst && r.nativeCardLast
                                                && r.nativeCardFirst !== r.nativeCardLast)
                                     ? qsTr(" (%1 → %2)").arg(r.nativeCardFirst).arg(r.nativeCardLast)
                                     : ""
                                 return qsTr("Planned moves on the watch face: %1 dated card%2")
-                                    .arg(n).arg(n === 1 ? "" : "s") + range
+                                    .arg(n).arg(n === 1 ? "" : "s") + range + auto
                             }
                             color: Theme.primary
                             font.pixelSize: Theme.fontSizeCaption

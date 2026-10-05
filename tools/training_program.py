@@ -296,7 +296,9 @@ def main():
                           " \"distance\": 0, \"moveId\": 0}, ...]}. The header base date is the"
                           " EARLIEST item's date; each item's dayOffset is derived from it (must"
                           " fit in 0..255 days); at most 60 items (the firmware's cap). Items"
-                          " are sorted by date. This is what the desktop backend calls.")
+                          " are sorted by date. Optional \"hrZones\": [a,b,c,d] sets the"
+                          " header's zone percentages (default 60/70/80/90). This is what the"
+                          " desktop backend calls.")
     ap.add_argument("--json", action="store_true",
                      help="print one final JSON line {ok, written, count, baseDate, dates,"
                           " bytes} - for desktop/backend/server.py (its usual last-JSON-line"
@@ -331,6 +333,13 @@ def main():
             if (parsed[-1][0] - base).days > 255:
                 raise ValueError("plan spans more than 255 days (dayOffset is one byte)")
             plan_items = [(d, it) for d, it in parsed]
+            # Optional header zone percentages. The card's HR band is zone%[i]..zone%[i+1] of
+            # max HR for intensity i (firmware FUN_0003ed3e); 97/98/99/100 with intensity 0
+            # makes it rest HR .. 97 % - the widest the watch allows, used when the card only
+            # points at a guided workout (desktop backend, auto-start mode).
+            plan_zones = tuple(int(z) for z in plan["hrZones"]) \
+                if isinstance(plan, dict) and plan.get("hrZones") else DEFAULT_HR_ZONES
+            pack_hr_zones(plan_zones)  # validate now, with the plan error path
         except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
             print(f"bad --plan: {e}")
             emit_json(False, error=str(e))
@@ -358,7 +367,7 @@ def main():
                 day_offset=(d - args.date).days, completed=bool(it.get("completed", False)),
                 move_id=int(it.get("moveId", 0)), distance=int(it.get("distance", 0))))
             dates.append(d.isoformat())
-        flash, layout = build_training_program(items, base_date=args.date)
+        flash, layout = build_training_program(items, base_date=args.date, hr_zones=plan_zones)
         blob = layout[0][2]
         print(f"  plan: {len(items)} planned move(s), base date {args.date.isoformat()}, "
               f"{len(blob)} bytes")

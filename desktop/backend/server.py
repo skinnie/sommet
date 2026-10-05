@@ -7576,6 +7576,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "error": f"entries {missing} are missing date/mode/workout"})
             return
         plan = {"name": body.get("name", "Calendar"), "entries": entries}
+        auto_start = str(body.get("autoStartMode") or "").strip()
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(plan, f)
             plan_path = f.name
@@ -7583,6 +7584,11 @@ class Handler(BaseHTTPRequestHandler):
             args = [plan_path, "--sync", "--json"]
             if body.get("write"):
                 args.append("--write")
+            if auto_start:
+                # The named mode runs the next upcoming workout on every recording, so the
+                # Today card's Start -> that mode -> the steps run by themselves (see
+                # training_calendar.auto_start_rules). Omitted = any such rule is removed.
+                args += ["--auto-start", auto_start]
             code, out, err = run_tool("training_calendar.py", args, timeout=300)
         finally:
             try:
@@ -7607,9 +7613,10 @@ class Handler(BaseHTTPRequestHandler):
         3C 46 50 5A was written; the reader and display gate are decompiled from the watch's
         MSP430X firmware (assets/Firmware/re-out, git-ignored).
 
-        Only PLAIN sessions get a card - "run 30 min", one step with no target, or no steps at
-        all. A workout with steps is a guided workout and lives in its mode's WORKOUT menu only
-        (the sync-calendar endpoint): on Movescount these were two separate things made in two
+        Without an "autoStartMode" only PLAIN sessions get a card - "run 30 min", one step with
+        no target, or no steps at all. A workout with steps is a guided workout and lives in
+        its mode's WORKOUT menu only (the sync-calendar endpoint): on Movescount these were two
+        separate things made in two
         separate places - a Planned move was "a training session with a set date, activity type,
         duration, and intensity" (Suunto's Training programs tutorial, 2015-02-24), a workout
         was built in the app's Workout planner, and the tutorials note there was no link
@@ -7619,6 +7626,16 @@ class Handler(BaseHTTPRequestHandler):
         50 % / 100 % marks, none of his steps. With no plain session left in the plan the
         region is cleared, so cards from an earlier sync go too. write:false is a real dry-run
         (the tool builds and logs the exact bytes, opens no device).
+
+        WITH "autoStartMode" (the same name the sync-calendar call got) every entry gets a
+        card, because the card's Start now leads somewhere: that mode runs the next upcoming
+        workout by itself (training_calendar.auto_start_rules). The card then only points at
+        the workout, so its own HR target must stay out of the way - the firmware always turns
+        the mode's HR limits on for a planned move (FUN_00026a36), the band being
+        zone%[i]..zone%[i+1] of max HR (FUN_0003ed3e); intensity 0 with header zones
+        97/98/99/100 gives rest HR .. 97 % of max, the widest the watch allows. Hardware,
+        André's Peak, 2026-10-05: card -> Start -> Running -> "Brisk Walk 5' 1/6" with the
+        step's own band; the only trace of the card is the HR-limits indicator.
 
         Per entry: name = the workout's name (the card shows it; 23 bytes), duration = the sum
         of its time steps (repeat blocks expanded; rounded up to whole minutes), distance = the
@@ -7659,6 +7676,7 @@ class Handler(BaseHTTPRequestHandler):
         sys.path.insert(0, str(TOOLS_DIR))
         import workout as W  # noqa: E402  (tools/workout.py: expand_steps)
 
+        auto_start = str(body.get("autoStartMode") or "").strip()
         items, resolution, guided = [], [], []
         for e in entries:
             wk = e["workout"]
@@ -7668,9 +7686,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False,
                                        "error": f"entry {e.get('date')}: bad workout steps ({exc})"})
                 return
-            if len(steps) > 1 or any(
+            if not auto_start and (len(steps) > 1 or any(
                     str((s.get("target") or {}).get("targetName") or "none") not in ("none", "")
-                    for s in steps):
+                    for s in steps)):
                 guided.append(e["date"])   # has steps: WORKOUT menu only, no card
                 continue
             seconds = sum(int(s["duration"]["value"]) for s in steps
@@ -7694,7 +7712,9 @@ class Handler(BaseHTTPRequestHandler):
             # 0 Easy .. 4 Maximal). This used to send 2/3/4 for easy/moderate/hard, one scale
             # too high twice over - real, 2026-10-05 (André: "now my watch has all workouts on
             # 'maximal'"): every HR-targeted run went out as 4.
-            if e.get("intensity") is not None:
+            if auto_start:
+                intensity = 0   # Easy: with zones 97/98/99/100 the widest band (see above)
+            elif e.get("intensity") is not None:
                 intensity = max(0, min(4, int(e["intensity"])))
             else:
                 easy_types = {"warmup", "cooldown", "recovery", "rest"}
@@ -7719,8 +7739,11 @@ class Handler(BaseHTTPRequestHandler):
                                "activityIdFrom": how})
 
         if items:
+            plan = {"items": items}
+            if auto_start:
+                plan["hrZones"] = [97, 98, 99, 100]
             with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-                json.dump({"items": items}, f)
+                json.dump(plan, f)
                 plan_path = f.name
             try:
                 args = ["--plan", plan_path, "--json"]
@@ -7744,6 +7767,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         result["items"] = items
         result["guided"] = guided
+        result["autoStartMode"] = auto_start or None
         result["activityIdSource"] = activity_source
         result["resolution"] = resolution
         self._send_json(200 if result.get("ok") else 502, result)

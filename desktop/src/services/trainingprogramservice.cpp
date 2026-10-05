@@ -198,7 +198,8 @@ void TrainingProgramService::importFromIntervals(const QString &start, const QSt
     });
 }
 
-void TrainingProgramService::syncCalendar(const QVariantList &entries, bool write)
+void TrainingProgramService::syncCalendar(const QVariantList &entries, bool write,
+                                          const QString &autoStartMode)
 {
     setInstalling(true);
 
@@ -207,10 +208,12 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
     QJsonObject body;
     body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
     body[QStringLiteral("write")] = write;
+    if (!autoStartMode.isEmpty())
+        body[QStringLiteral("autoStartMode")] = autoStartMode;
 
     QNetworkReply *reply = m_network.post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, write, entries] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, write, entries, autoStartMode] {
         reply->deleteLater();
         // installing stays true until the native-card write (below) also finishes.
 
@@ -223,11 +226,13 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
         result[QStringLiteral("dryRun")] = !write;
         result[QStringLiteral("rotation")] = true;
         for (const auto key : {"today", "removed", "added", "displaysAdded", "failed", "waiting",
-                                 "menuMax"}) {
+                                 "menuMax", "autoStart", "repaired"}) {
             const QString k = QString::fromLatin1(key);
             if (obj.contains(k)) {
                 if (obj.value(k).isArray())
                     result[k] = obj.value(k).toArray().toVariantList();
+                else if (obj.value(k).isObject())
+                    result[k] = obj.value(k).toObject().toVariantMap();
                 else
                     result[k] = obj.value(k).toVariant();
             }
@@ -245,17 +250,20 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
         // Second half: the native "Today 1/2" planned-move cards. Fire it regardless of the
         // rotation result - the two are independent watch writes (WORKOUT-menu guidance vs the
         // TIME-mode card), and a user whose guided-workout compile failed still wants the cards.
-        writePlannedMoves(entries, write);
+        writePlannedMoves(entries, write, autoStartMode);
     });
 }
 
-void TrainingProgramService::writePlannedMoves(const QVariantList &entries, bool write)
+void TrainingProgramService::writePlannedMoves(const QVariantList &entries, bool write,
+                                               const QString &autoStartMode)
 {
     QNetworkRequest request(backendUrl(QStringLiteral("/api/trainingprogram/planned-moves")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QJsonObject body;
     body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
     body[QStringLiteral("write")] = write;
+    if (!autoStartMode.isEmpty())
+        body[QStringLiteral("autoStartMode")] = autoStartMode;
 
     QNetworkReply *reply = m_network.post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));

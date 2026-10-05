@@ -77,7 +77,11 @@ public:
     // (hardware-confirmed 2026-09-03, tools/training_program.py). A workout with steps gets no
     // card: the backend leaves it out, and clears the cards when none is left. write:false is a real dry-run for both. Both results merge
     // into lastInstallResult (the rotation fields plus nativeCards/nativeCardError).
-    Q_INVOKABLE void syncCalendar(const QVariantList &entries, bool write);
+    // autoStartMode: "" = cards only for plain sessions, no auto-start; a sport-mode name =
+    // that mode runs the next upcoming workout on every recording and every entry gets a card
+    // (the card's Start -> that mode -> the steps run by themselves; hardware 2026-10-05).
+    Q_INVOKABLE void syncCalendar(const QVariantList &entries, bool write,
+                                  const QString &autoStartMode = QString());
 
 signals:
     void loadingChanged();
@@ -103,7 +107,7 @@ private:
 
     // Second half of syncCalendar(): POST /api/trainingprogram/planned-moves and merge the
     // native-card result (count / error) into the rotation result already in m_lastInstallResult.
-    void writePlannedMoves(const QVariantList &entries, bool write);
+    void writePlannedMoves(const QVariantList &entries, bool write, const QString &autoStartMode);
 
     static QUrl backendUrl(const QString &path);
 };

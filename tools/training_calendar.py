@@ -129,7 +129,45 @@ def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_
     return kept, to_add, waiting
 
 
-def sync(link, plan, today, write, json_out):
+def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, auto_start):
+    """Edit `decoded` (custom_modes.decode output) in place so that the sport mode named
+    `auto_start` runs the plan's next upcoming workout on every recording - the one lever the
+    firmware has for "Start on the Today card -> pick the mode -> the steps run by themselves":
+    a RULE in a mode's RULES list is an ACTIVE engine slot (hardware 2026-08-19, then seen as a
+    nuisance; hardware 2026-10-05 on André's Peak: card -> Start -> Running -> "Brisk Walk 5'
+    1/6" with the step's own HR band, no WORKOUT menu). Only ONE such rule exists at a time -
+    two would run at once - and it is always re-pointed here, because a managed entry's index
+    in the Apps region moves at every sync.
+
+    First every rule in ANY mode that points at a managed ("dd/mm_") entry is dropped (that is
+    how the feature is switched off, auto_start=None); then, if `auto_start` names a mode and
+    the plan has an upcoming installed workout, that mode gets one rule at the workout's index
+    in `new_apps_bytes`. Returns (touched_mode_names, {"mode", "workout"} or None)."""
+    old_names = {i: e["name"] for i, e in enumerate(existing)}
+    touched = []
+    for mode in decoded["exercise_modes"]:
+        before = mode.get("Rules") or []
+        after = [r for r in before if not is_managed(old_names.get(r["RuleIdx"], ""))]
+        if len(after) != len(before):
+            mode["Rules"] = after
+            touched.append(mode["Settings"]["Name"])
+    if not auto_start:
+        return touched, None
+    idx_mode = GW.find_mode_index(decoded, auto_start)
+    installed = {e["name"]: i for i, e in enumerate(apps.decode(new_apps_bytes))}
+    for e in sorted((e for e in plan_entries if e["date"] >= str(today)), key=lambda e: e["date"]):
+        label = entry_label(e["date"], e["workout"]["name"])
+        if label in installed:
+            mode = decoded["exercise_modes"][idx_mode]
+            mode.setdefault("Rules", []).append(
+                {"RuleIdx": installed[label], "UseRule": True, "LogRule": False})
+            if mode["Settings"]["Name"] not in touched:
+                touched.append(mode["Settings"]["Name"])
+            return touched, {"mode": mode["Settings"]["Name"], "workout": label}
+    return touched, None
+
+
+def sync(link, plan, today, write, json_out, auto_start=None):
     mm = read_memory_map(link)
     cm_base, cm_size = mm["CustomModes"]
     apps_base, apps_size = mm["Apps"]
@@ -189,8 +227,11 @@ def sync(link, plan, today, write, json_out):
         if not any(d.get("Template") == GW.GUIDANCE_TEMPLATE for d in mode.get("Displays", [])):
             mode.setdefault("Displays", []).append(GW.guidance_display())
             modes_touched.append(mode_name)
-    # Sport modes are written only when a display was actually added, and then only as the used
-    # extent. Writing back the raw 12 KB region read above (the old "unchanged" path) leaves a
+    rules_touched, auto = auto_start_rules(decoded, existing, new_apps_bytes, plan["entries"],
+                                           today, auto_start)
+    modes_touched = sorted(set(modes_touched) | set(rules_touched))
+    # Sport modes are written only when a display or rule actually changed, and then only as the
+    # used extent. Writing back the raw 12 KB region read above (the old "unchanged" path) leaves a
     # closing hash the firmware rejects on the next restart - "Connect to Moveslink" and
     # factory-default sport modes (André's Peak, 2026-09-26). write_nav.send_plan now refuses it.
     new_cm_bytes = cmw.build_custom_modes_body(decoded, decoded.get("format_type", 2)) \
@@ -200,7 +241,7 @@ def sync(link, plan, today, write, json_out):
               "failed": [{"name": n, "error": err} for n, err in failed],
               "waiting": waiting, "menuMax": GW.WORKOUT_MENU_MAX,
               "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes),
-              "repaired": [n for n, _ in restamped]}
+              "repaired": [n for n, _ in restamped], "autoStart": auto}
 
     if not json_out:
         print(f"sync as of {today}:")
@@ -213,7 +254,9 @@ def sync(link, plan, today, write, json_out):
             for n, err in failed:
                 print(f"    {n}: {err}")
         if modes_touched:
-            print(f"  guidance display added to: {modes_touched}")
+            print(f"  sport modes rewritten (guidance display / auto-start rule): {modes_touched}")
+        if auto:
+            print(f"  auto-start: {auto['mode']!r} runs {auto['workout']!r} on every recording")
         if restamped:
             print(f"  repaired (any-mode sport byte / rule id): {[n for n, _ in restamped]}")
         if not removed and not added_names and not modes_touched and not failed and not restamped:
@@ -237,6 +280,20 @@ def sync(link, plan, today, write, json_out):
     for name, base, blob in writes:
         fi = FlashImage(); fi.write(base, blob)
         send_plan(link, fi, [(name, base, blob), ("t", base, None)], commit=False)
+    if new_cm_bytes is not None:
+        # Read back and roll back on a mismatch - a CustomModes write once landed 54 bytes
+        # shifted (2026-08-25, workout_install.py) and scrambled every mode after the target.
+        back = bytes(read_flash(link, cm_base, len(new_cm_bytes), label="CustomModes (verify)"))
+        if back != bytes(new_cm_bytes):
+            old = bytes(current_cm[:cm.used_extent(current_cm)])
+            fi = FlashImage(); fi.write(cm_base, old)
+            send_plan(link, fi, [("CustomModes (rollback)", cm_base, old), ("t", cm_base, None)],
+                      commit=False)
+            result.update(ok=False, written=True, autoStart=None,
+                          error="sport modes read back wrong after the write; restored the "
+                                "previous sport modes (workouts were installed, auto-start was not)")
+            print(json.dumps(result) if json_out else f"  !! {result['error']}")
+            return result
     result["written"] = True
     result["customModesWritten"] = new_cm_bytes is not None
     result["backup"] = backup
@@ -307,6 +364,11 @@ def main():
     ap.add_argument("--remove", metavar="NAME",
                     help="remove one native workout by its on-watch name (e.g. 'Light workout')")
     ap.add_argument("--today", metavar="YYYY-MM-DD", help="override today's date (testing)")
+    ap.add_argument("--auto-start", metavar="MODE",
+                    help="sport mode (by name) that runs the plan's next upcoming workout on"
+                         " every recording - the Today card's Start -> this mode -> the steps"
+                         " run by themselves (see auto_start_rules). Without it any such rule"
+                         " from an earlier sync is removed.")
     ap.add_argument("--write", action="store_true", help="actually write (else dry-run)")
     ap.add_argument("--json", action="store_true", help="print one-line JSON (for a GUI)")
     args = ap.parse_args()
@@ -326,7 +388,7 @@ def main():
 
     plan = json.load(open(args.plan))
     today = datetime.date.fromisoformat(args.today) if args.today else datetime.date.today()
-    result = sync(link, plan, today, args.write, args.json)
+    result = sync(link, plan, today, args.write, args.json, auto_start=args.auto_start)
     return 0 if result.get("ok") else 1
 
 
