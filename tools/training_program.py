@@ -295,7 +295,7 @@ def main():
                           " \"durationMinutes\": 45, \"intensity\": 1, \"name\": \"Long run\","
                           " \"distance\": 0, \"moveId\": 0}, ...]}. The header base date is the"
                           " EARLIEST item's date; each item's dayOffset is derived from it (must"
-                          " fit in 0..255 days); at most 60 items (the firmware's cap). Items"
+                          " fit in 0..127 days); at most 60 items (the firmware's cap). Items"
                           " are sorted by date. Optional \"hrZones\": [a,b,c,d] sets the"
                           " header's zone percentages (default 60/70/80/90). This is what the"
                           " desktop backend calls.")
@@ -330,8 +330,10 @@ def main():
                 parsed.append((d, it))
             parsed.sort(key=lambda t: t[0])
             base = parsed[0][0]
-            if (parsed[-1][0] - base).days > 255:
-                raise ValueError("plan spans more than 255 days (dayOffset is one byte)")
+            if (parsed[-1][0] - base).days > 127:
+                # The firmware masks the item's day offset with 0x7F (sfi2 notes, item +0).
+                raise ValueError("plan spans more than 127 days from its first workout - the "
+                                 "watch's day offset wraps past that")
             plan_items = [(d, it) for d, it in parsed]
             # Optional header zone percentages. The card's HR band is zone%[i]..zone%[i+1] of
             # max HR for intensity i (firmware FUN_0003ed3e); 97/98/99/100 with intensity 0

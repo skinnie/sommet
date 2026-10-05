@@ -154,8 +154,15 @@ def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, aut
     if not auto_start:
         return touched, None
     idx_mode = GW.find_mode_index(decoded, auto_start)
+    sport = GW.mode_activity_id(decoded, auto_start)
     installed = {e["name"]: i for i, e in enumerate(apps.decode(new_apps_bytes))}
     for e in sorted((e for e in plan_entries if e["date"] >= str(today)), key=lambda e: e["date"]):
+        # Only this mode's sport: a mixed plan must not make the running mode run a swim.
+        try:
+            if GW.mode_activity_id(decoded, e["mode"]) != sport:
+                continue
+        except SystemExit:
+            continue
         label = entry_label(e["date"], e["workout"]["name"])
         if label in installed:
             mode = decoded["exercise_modes"][idx_mode]
@@ -236,6 +243,13 @@ def sync(link, plan, today, write, json_out, auto_start=None):
     # factory-default sport modes (André's Peak, 2026-09-26). write_nav.send_plan now refuses it.
     new_cm_bytes = cmw.build_custom_modes_body(decoded, decoded.get("format_type", 2)) \
         if modes_touched else None
+    if new_cm_bytes is not None and cm.check_field_type_shortcut_invariant(new_cm_bytes):
+        # Finding 53's "connect to Moveslink" root cause - refuse rather than write it.
+        result = {"ok": False, "written": False,
+                  "error": "the rebuilt sport modes break the field Type/Shortcut invariant - "
+                           "nothing written"}
+        print(json.dumps(result) if json_out else f"  !! {result['error']}")
+        return result
 
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],

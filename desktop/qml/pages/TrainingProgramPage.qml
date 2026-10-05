@@ -881,9 +881,8 @@ Item {
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("Sync to watch puts your next workouts (5 at a time) in the "
-                                   + "watch's WORKOUT menu: start the sport, hold [Next], pick "
-                                   + "WORKOUT. Sync again after training to bring the next ones in.")
+                        text: qsTr("Sync to watch puts your next workouts on the watch (5 at a "
+                                   + "time). Sync again after each workout to bring the next one in.")
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
                     }
@@ -898,7 +897,7 @@ Item {
 
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: qsTr("“Today” card starts")
+                            text: qsTr("Training day on the watch")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
@@ -919,15 +918,15 @@ Item {
                             width: parent.width * 0.5
                             wrapMode: Text.WordWrap
                             text: draftStore.autoStartMode.length > 0
-                                  ? qsTr("Each workout's day shows a card on the time screen. "
-                                         + "Start it, pick %1, start recording: the steps run by "
-                                         + "themselves. Every recording in %1 runs the next "
-                                         + "workout, so keep that mode for the program. The watch "
-                                         + "shows “Easy” and turns its HR limits on (rest to 97% "
-                                         + "of max, out of the way of the steps).")
+                                  ? qsTr("On a training day the watch says so on its time screen. "
+                                         + "Press Start, pick %1, start recording: the workout runs "
+                                         + "step by step. Every recording in %1 runs the planned "
+                                         + "workout, so keep that mode for your training plan. The "
+                                         + "watch also turns its HR limits on (wide, out of the way); "
+                                         + "you can switch them off on the watch.")
                                         .arg(draftStore.autoStartMode)
-                                  : qsTr("Off: only workouts without steps get a card; stepped "
-                                         + "workouts are picked from the WORKOUT menu.")
+                                  : qsTr("Off: the watch shows nothing on training days; pick the "
+                                         + "workout from the sport's WORKOUT menu (hold [Next]).")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
@@ -1084,16 +1083,15 @@ Item {
                                 const r = TrainingProgramService.lastInstallResult
                                 const n = r.nativeCards || 0
                                 if (n === 0)
-                                    return qsTr("No cards on the watch face: workouts with steps start from the sport mode's WORKOUT menu.")
+                                    return qsTr("Nothing on the watch's time screen; workouts are picked from the WORKOUT menu.")
                                 const a = r.autoStart
                                 const auto = a && a.mode
-                                    ? qsTr(" %1 starts %2 by itself.").arg(a.mode).arg(a.workout) : ""
+                                    ? qsTr(" %1 starts %2.").arg(a.mode).arg(a.workout) : ""
                                 const range = (r.nativeCardFirst && r.nativeCardLast
                                                && r.nativeCardFirst !== r.nativeCardLast)
                                     ? qsTr(" (%1 → %2)").arg(r.nativeCardFirst).arg(r.nativeCardLast)
                                     : ""
-                                return qsTr("Planned moves on the watch face: %1 dated card%2")
-                                    .arg(n).arg(n === 1 ? "" : "s") + range + auto
+                                return qsTr("Training days on the watch: %1").arg(n) + range + auto
                             }
                             color: Theme.primary
                             font.pixelSize: Theme.fontSizeCaption
@@ -1107,7 +1105,7 @@ Item {
                                 return r.nativeCardError !== undefined
                                     && String(r.nativeCardError).length > 0
                             }
-                            text: qsTr("Couldn't write the planned-move cards. ")
+                            text: qsTr("Couldn't set up the training days on the watch. ")
                                 + TrainingProgramService.lastInstallResult.nativeCardError
                             color: Theme.warning
                             font.pixelSize: Theme.fontSizeCaption
