@@ -198,8 +198,7 @@ void TrainingProgramService::importFromIntervals(const QString &start, const QSt
     });
 }
 
-void TrainingProgramService::syncCalendar(const QVariantList &entries, bool write,
-                                          const QString &autoStartMode)
+void TrainingProgramService::syncCalendar(const QVariantList &entries, bool write, bool autoStart)
 {
     setInstalling(true);
 
@@ -208,12 +207,11 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
     QJsonObject body;
     body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
     body[QStringLiteral("write")] = write;
-    if (!autoStartMode.isEmpty())
-        body[QStringLiteral("autoStartMode")] = autoStartMode;
+    body[QStringLiteral("autoStart")] = autoStart;
 
     QNetworkReply *reply = m_network.post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, write, entries, autoStartMode] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, write, entries, autoStart] {
         reply->deleteLater();
         // installing stays true until the native-card write (below) also finishes.
 
@@ -250,20 +248,19 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
         // Second half: the native "Today 1/2" planned-move cards. Fire it regardless of the
         // rotation result - the two are independent watch writes (WORKOUT-menu guidance vs the
         // TIME-mode card), and a user whose guided-workout compile failed still wants the cards.
-        writePlannedMoves(entries, write, autoStartMode);
+        writePlannedMoves(entries, write, autoStart);
     });
 }
 
 void TrainingProgramService::writePlannedMoves(const QVariantList &entries, bool write,
-                                               const QString &autoStartMode)
+                                               bool autoStart)
 {
     QNetworkRequest request(backendUrl(QStringLiteral("/api/trainingprogram/planned-moves")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QJsonObject body;
     body[QStringLiteral("entries")] = QJsonArray::fromVariantList(entries);
     body[QStringLiteral("write")] = write;
-    if (!autoStartMode.isEmpty())
-        body[QStringLiteral("autoStartMode")] = autoStartMode;
+    body[QStringLiteral("autoStart")] = autoStart;
 
     QNetworkReply *reply = m_network.post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));

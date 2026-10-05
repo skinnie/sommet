@@ -264,6 +264,14 @@ Item {
         if (!m) return name
         return CustomModesService.modes.find(x => x.activityId === m.activityId).name
     }
+    // Where a workout with no sport of its own goes: the watch's running mode (Suunto ActivityID
+    // 3), else its first mode. Imported workouts carry their sport; hand-made ones pick it in the
+    // editor - there is no page-level sport picker any more (André, 2026-10-05: "do we need that
+    // picker? ... when we select the workout then we will select the sport on the watch").
+    readonly property string defaultMode: {
+        const run = CustomModesService.modes.find(m => m.activityId === 3)
+        return run ? run.name : (root.workoutModes[0] || "")
+    }
     // Sport mode of a planned workout: the one picked in the editor, else the mode matching its
     // intervals.icu sport, else its own mode, else `fallbackMode`.
     function modeOf(e, fallbackMode) {
@@ -390,11 +398,10 @@ Item {
         id: draftStore
         category: "trainingProgram"
         property string draft: ""
-        // Sport mode that runs the next upcoming workout by itself ("" = off). With it set, the
-        // watch-face "Today" card's Start -> that mode -> the steps run, no WORKOUT menu
-        // (hardware, André's Peak, 2026-10-05). Best a mode kept for the program, since every
-        // recording in it runs the workout.
-        property string autoStartMode: ""
+        // Every mode of a plan sport runs the next upcoming workout by itself. With it on, the
+        // watch-face "Today" card's Start -> pick the sport -> the steps run, no WORKOUT menu
+        // (hardware, André's Peak, 2026-10-05).
+        property bool autoStart: false
     }
     property bool _draftRestored: false
     function saveDraft() {
@@ -617,13 +624,13 @@ Item {
                                   ? qsTr("Fetching…") : qsTr("Fetch")
                             enabled: ConnectionsService.intervalsIcuConnected
                                      && !TrainingProgramService.loading
-                                     && modePicker.currentText.length > 0
+                                     && root.defaultMode.length > 0
                             onClicked: {
                                 root.importStatus = ""
                                 TrainingProgramService.importFromIntervals(
                                     // Each workout keeps its own intervals.icu sport (modeOf);
-                                    // "Install into" only covers a sport with no watch mode.
-                                    importFrom.text, importTo.text, modePicker.currentText,
+                                    // the default only covers a sport with no watch mode.
+                                    importFrom.text, importTo.text, root.defaultMode,
                                     ConnectionsService.intervalsIcuAthleteId,
                                     ConnectionsService.intervalsIcuApiKey())
                             }
@@ -895,36 +902,24 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingMedium
 
-                        Text {
+                        CheckBox {
+                            id: autoStartToggle
                             anchors.verticalCenter: parent.verticalCenter
                             text: qsTr("Training day on the watch")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
-                        }
-                        RoundedComboBox {
-                            id: autoStartPicker
-                            width: parent.width * 0.3
-                            model: [qsTr("Off")].concat(CustomModesService.modes.map(m => m.name))
-                            currentIndex: {
-                                const i = CustomModesService.modes.findIndex(
-                                    m => m.name === draftStore.autoStartMode)
-                                return i < 0 ? 0 : i + 1
-                            }
-                            onActivated: draftStore.autoStartMode =
-                                currentIndex === 0 ? "" : CustomModesService.modes[currentIndex - 1].name
+                            checked: draftStore.autoStart
+                            onToggled: draftStore.autoStart = checked
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width * 0.5
+                            width: parent.width * 0.6
                             wrapMode: Text.WordWrap
-                            text: draftStore.autoStartMode.length > 0
+                            text: draftStore.autoStart
                                   ? qsTr("On a training day the watch says so on its time screen. "
-                                         + "Press Start, pick %1, start recording: the workout runs "
-                                         + "step by step. Every recording in %1 runs the planned "
-                                         + "workout, so keep that mode for your training plan. The "
-                                         + "watch also turns its HR limits on (wide, out of the way); "
-                                         + "you can switch them off on the watch.")
-                                        .arg(draftStore.autoStartMode)
+                                         + "Press Start, pick the sport, start recording: the workout "
+                                         + "runs step by step. Until the next sync every recording in "
+                                         + "that sport runs the planned workout - end it from the "
+                                         + "watch's options menu (END WORKOUT) if you just want to run. "
+                                         + "The watch also turns its HR limits on, wide and out of the way.")
                                   : qsTr("Off: the watch shows nothing on training days; pick the "
                                          + "workout from the sport's WORKOUT menu (hold [Next]).")
                             color: Theme.mutedText
@@ -932,38 +927,6 @@ Item {
                         }
                     }
 
-                    Row {
-                        width: parent.width
-                        spacing: Theme.spacingMedium
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: qsTr("Install into")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
-                        }
-                        RoundedComboBox {
-                            id: modePicker
-                            width: parent.width * 0.3
-                            model: root.workoutModes
-                            // Running by default (Suunto ActivityID 3), not whichever mode happens
-                            // to be first on the watch (Cycling on André's).
-                            currentIndex: {
-                                const run = CustomModesService.modes.find(m => m.activityId === 3)
-                                return run ? Math.max(0, root.workoutModes.indexOf(run.name)) : 0
-                            }
-                            Component.onCompleted: CustomModesService.refresh()
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width * 0.5
-                            wrapMode: Text.WordWrap
-                            text: qsTr("Workouts imported from intervals.icu keep their own "
-                                       + "sport mode; this is the mode for any you add by hand.")
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
-                        }
-                    }
 
                     Row {
                         spacing: Theme.spacingMedium
@@ -975,8 +938,8 @@ Item {
                                      && !TrainingProgramService.installing
                                      && HomeViewModel.anyDevice
                             onClicked: TrainingProgramService.syncCalendar(
-                                root.entriesWithMode(modePicker.currentText), true,
-                                draftStore.autoStartMode)
+                                root.entriesWithMode(root.defaultMode), true,
+                                draftStore.autoStart)
                         }
                         RoundedButton {
                             // Same planned workouts, sent to a mounted Bryton Aero 60 as its own
@@ -1084,9 +1047,8 @@ Item {
                                 const n = r.nativeCards || 0
                                 if (n === 0)
                                     return qsTr("Nothing on the watch's time screen; workouts are picked from the WORKOUT menu.")
-                                const a = r.autoStart
-                                const auto = a && a.mode
-                                    ? qsTr(" %1 starts %2.").arg(a.mode).arg(a.workout) : ""
+                                const auto = (r.autoStart || []).map(
+                                    x => qsTr(" %1 starts %2.").arg(x.modes.join(", ")).arg(x.workout)).join("")
                                 const range = (r.nativeCardFirst && r.nativeCardLast
                                                && r.nativeCardFirst !== r.nativeCardLast)
                                     ? qsTr(" (%1 → %2)").arg(r.nativeCardFirst).arg(r.nativeCardLast)
@@ -1252,8 +1214,8 @@ Item {
             const entry = root.entryForDate(iso)
             device = forDevice !== undefined ? forDevice : (entry && entry.device ? entry.device : "")
             workoutName = entry ? entry.workout.name : qsTr("Workout")
-            mode = root.canonicalMode(entry ? root.modeOf(entry, modePicker.currentText)
-                                            : modePicker.currentText)
+            mode = root.canonicalMode(entry ? root.modeOf(entry, root.defaultMode)
+                                            : root.defaultMode)
             poolLength = entry && entry.poolLength > 0 ? entry.poolLength : swimPrefs.poolLength
             editSteps = entry ? entry.workout.steps.map(editor.fromSchema)
                               : [editor.defaultStep("warmup"),

@@ -130,19 +130,21 @@ def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_
 
 
 def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, auto_start):
-    """Edit `decoded` (custom_modes.decode output) in place so that the sport mode named
-    `auto_start` runs the plan's next upcoming workout on every recording - the one lever the
-    firmware has for "Start on the Today card -> pick the mode -> the steps run by themselves":
-    a RULE in a mode's RULES list is an ACTIVE engine slot (hardware 2026-08-19, then seen as a
-    nuisance; hardware 2026-10-05 on André's Peak: card -> Start -> Running -> "Brisk Walk 5'
-    1/6" with the step's own HR band, no WORKOUT menu). Only ONE such rule exists at a time -
-    two would run at once - and it is always re-pointed here, because a managed entry's index
-    in the Apps region moves at every sync.
+    """Edit `decoded` (custom_modes.decode output) in place so that EVERY sport mode of a
+    sport in the plan runs that sport's next upcoming workout on every recording - the one
+    lever the firmware has for "Start on the Today card -> pick the mode -> the steps run by
+    themselves": a RULE in a mode's RULES list is an ACTIVE engine slot (hardware 2026-08-19,
+    then seen as a nuisance; hardware 2026-10-05 on André's Peak: card -> Start -> Running ->
+    "Brisk Walk 5' 1/6" with the step's own HR band, no WORKOUT menu). By sport, not one
+    chosen mode (André, 2026-10-05: "you can do by sport... and then the user choose, at least
+    metrics will be ok"): whichever running mode he picks on the watch, his own screens apply
+    and the workout runs; a casual run ends it with the watch's END WORKOUT. The rules are
+    re-pointed at every sync (a managed entry's index in the Apps region moves).
 
     First every rule in ANY mode that points at a managed ("dd/mm_") entry is dropped (that is
-    how the feature is switched off, auto_start=None); then, if `auto_start` names a mode and
-    the plan has an upcoming installed workout, that mode gets one rule at the workout's index
-    in `new_apps_bytes`. Returns (touched_mode_names, {"mode", "workout"} or None)."""
+    how the feature is switched off, auto_start=False); then, per sport (ActivityID) with an
+    upcoming installed workout, each mode of that sport with a free rule slot gets one rule.
+    Returns (touched_mode_names, [{"sport", "workout", "modes"}])."""
     old_names = {i: e["name"] for i, e in enumerate(existing)}
     touched = []
     for mode in decoded["exercise_modes"]:
@@ -152,26 +154,32 @@ def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, aut
             mode["Rules"] = after
             touched.append(mode["Settings"]["Name"])
     if not auto_start:
-        return touched, None
-    idx_mode = GW.find_mode_index(decoded, auto_start)
-    sport = GW.mode_activity_id(decoded, auto_start)
+        return touched, []
     installed = {e["name"]: i for i, e in enumerate(apps.decode(new_apps_bytes))}
+    next_by_sport = {}   # ActivityID -> label of the next upcoming installed workout
     for e in sorted((e for e in plan_entries if e["date"] >= str(today)), key=lambda e: e["date"]):
-        # Only this mode's sport: a mixed plan must not make the running mode run a swim.
         try:
-            if GW.mode_activity_id(decoded, e["mode"]) != sport:
-                continue
+            sport = GW.mode_activity_id(decoded, e["mode"])
         except SystemExit:
             continue
         label = entry_label(e["date"], e["workout"]["name"])
-        if label in installed:
-            mode = decoded["exercise_modes"][idx_mode]
+        if sport not in next_by_sport and label in installed:
+            next_by_sport[sport] = label
+    out = []
+    for sport, label in next_by_sport.items():
+        modes = []
+        for mode in decoded["exercise_modes"]:
+            if mode["Settings"].get("ActivityID") != sport:
+                continue
+            if len(mode.get("Rules") or []) >= WI.SPORT_MODE_APP_LIMIT:
+                continue   # five apps already assigned - leave that mode alone
             mode.setdefault("Rules", []).append(
                 {"RuleIdx": installed[label], "UseRule": True, "LogRule": False})
+            modes.append(mode["Settings"]["Name"])
             if mode["Settings"]["Name"] not in touched:
                 touched.append(mode["Settings"]["Name"])
-            return touched, {"mode": mode["Settings"]["Name"], "workout": label}
-    return touched, None
+        out.append({"sport": sport, "workout": label, "modes": modes})
+    return touched, out
 
 
 def sync(link, plan, today, write, json_out, auto_start=None):
@@ -234,6 +242,21 @@ def sync(link, plan, today, write, json_out, auto_start=None):
         if not any(d.get("Template") == GW.GUIDANCE_TEMPLATE for d in mode.get("Displays", [])):
             mode.setdefault("Displays", []).append(GW.guidance_display())
             modes_touched.append(mode_name)
+    # With auto-start, every mode of a plan sport needs the guidance display too - the user
+    # picks any of them on the watch.
+    if auto_start:
+        sports = set()
+        for e in plan["entries"]:
+            if e["date"] >= str(today):
+                try:
+                    sports.add(GW.mode_activity_id(decoded, e["mode"]))
+                except SystemExit:
+                    pass
+        for mode in decoded["exercise_modes"]:
+            if mode["Settings"].get("ActivityID") in sports and not any(
+                    d.get("Template") == GW.GUIDANCE_TEMPLATE for d in mode.get("Displays", [])):
+                mode.setdefault("Displays", []).append(GW.guidance_display())
+                modes_touched.append(mode["Settings"]["Name"])
     rules_touched, auto = auto_start_rules(decoded, existing, new_apps_bytes, plan["entries"],
                                            today, auto_start)
     modes_touched = sorted(set(modes_touched) | set(rules_touched))
@@ -269,8 +292,8 @@ def sync(link, plan, today, write, json_out, auto_start=None):
                 print(f"    {n}: {err}")
         if modes_touched:
             print(f"  sport modes rewritten (guidance display / auto-start rule): {modes_touched}")
-        if auto:
-            print(f"  auto-start: {auto['mode']!r} runs {auto['workout']!r} on every recording")
+        for x in auto:
+            print(f"  auto-start: {x['modes']} run {x['workout']!r} on every recording")
         if restamped:
             print(f"  repaired (any-mode sport byte / rule id): {[n for n, _ in restamped]}")
         if not removed and not added_names and not modes_touched and not failed and not restamped:
@@ -303,7 +326,7 @@ def sync(link, plan, today, write, json_out, auto_start=None):
             fi = FlashImage(); fi.write(cm_base, old)
             send_plan(link, fi, [("CustomModes (rollback)", cm_base, old), ("t", cm_base, None)],
                       commit=False)
-            result.update(ok=False, written=True, autoStart=None,
+            result.update(ok=False, written=True, autoStart=[],
                           error="sport modes read back wrong after the write; restored the "
                                 "previous sport modes (workouts were installed, auto-start was not)")
             print(json.dumps(result) if json_out else f"  !! {result['error']}")
@@ -378,11 +401,11 @@ def main():
     ap.add_argument("--remove", metavar="NAME",
                     help="remove one native workout by its on-watch name (e.g. 'Light workout')")
     ap.add_argument("--today", metavar="YYYY-MM-DD", help="override today's date (testing)")
-    ap.add_argument("--auto-start", metavar="MODE",
-                    help="sport mode (by name) that runs the plan's next upcoming workout on"
-                         " every recording - the Today card's Start -> this mode -> the steps"
-                         " run by themselves (see auto_start_rules). Without it any such rule"
-                         " from an earlier sync is removed.")
+    ap.add_argument("--auto-start", action="store_true",
+                    help="every mode of a plan sport runs that sport's next upcoming workout on"
+                         " every recording - the Today card's Start -> any mode of the sport ->"
+                         " the steps run by themselves (see auto_start_rules). Without it any"
+                         " such rule from an earlier sync is removed.")
     ap.add_argument("--write", action="store_true", help="actually write (else dry-run)")
     ap.add_argument("--json", action="store_true", help="print one-line JSON (for a GUI)")
     args = ap.parse_args()

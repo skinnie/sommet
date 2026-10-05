@@ -7576,7 +7576,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "error": f"entries {missing} are missing date/mode/workout"})
             return
         plan = {"name": body.get("name", "Calendar"), "entries": entries}
-        auto_start = str(body.get("autoStartMode") or "").strip()
+        auto_start = bool(body.get("autoStart"))
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(plan, f)
             plan_path = f.name
@@ -7585,10 +7585,10 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("write"):
                 args.append("--write")
             if auto_start:
-                # The named mode runs the next upcoming workout on every recording, so the
-                # Today card's Start -> that mode -> the steps run by themselves (see
-                # training_calendar.auto_start_rules). Omitted = any such rule is removed.
-                args += ["--auto-start", auto_start]
+                # Every mode of a plan sport runs that sport's next upcoming workout on every
+                # recording, so the Today card's Start -> any mode of the sport -> the steps run
+                # by themselves (training_calendar.auto_start_rules). Off = such rules removed.
+                args.append("--auto-start")
             code, out, err = run_tool("training_calendar.py", args, timeout=300)
         finally:
             try:
@@ -7613,7 +7613,7 @@ class Handler(BaseHTTPRequestHandler):
         3C 46 50 5A was written; the reader and display gate are decompiled from the watch's
         MSP430X firmware (assets/Firmware/re-out, git-ignored).
 
-        Without an "autoStartMode" only PLAIN sessions get a card - "run 30 min", one step with
+        Without "autoStart" only PLAIN sessions get a card - "run 30 min", one step with
         no target, or no steps at all. A workout with steps is a guided workout and lives in
         its mode's WORKOUT menu only (the sync-calendar endpoint): on Movescount these were two
         separate things made in two
@@ -7627,9 +7627,9 @@ class Handler(BaseHTTPRequestHandler):
         region is cleared, so cards from an earlier sync go too. write:false is a real dry-run
         (the tool builds and logs the exact bytes, opens no device).
 
-        WITH "autoStartMode" (the same name the sync-calendar call got) every entry gets a
-        card, because the card's Start now leads somewhere: that mode runs the next upcoming
-        workout by itself (training_calendar.auto_start_rules). The card then only points at
+        WITH "autoStart" (the same flag the sync-calendar call got) every entry gets a card,
+        because the card's Start now leads somewhere: every mode of the sport runs the next
+        upcoming workout by itself (training_calendar.auto_start_rules). The card then only points at
         the workout, so its own HR target must stay out of the way - the firmware always turns
         the mode's HR limits on for a planned move (FUN_00026a36), the band being
         zone%[i]..zone%[i+1] of max HR (FUN_0003ed3e); intensity 0 with header zones
@@ -7676,7 +7676,7 @@ class Handler(BaseHTTPRequestHandler):
         sys.path.insert(0, str(TOOLS_DIR))
         import workout as W  # noqa: E402  (tools/workout.py: expand_steps)
 
-        auto_start = str(body.get("autoStartMode") or "").strip()
+        auto_start = bool(body.get("autoStart"))
         items, resolution, guided = [], [], []
         for e in entries:
             wk = e["workout"]
@@ -7767,7 +7767,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         result["items"] = items
         result["guided"] = guided
-        result["autoStartMode"] = auto_start or None
+        result["autoStart"] = auto_start
         result["activityIdSource"] = activity_source
         result["resolution"] = resolution
         self._send_json(200 if result.get("ok") else 502, result)
