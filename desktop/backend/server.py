@@ -7607,10 +7607,18 @@ class Handler(BaseHTTPRequestHandler):
         3C 46 50 5A was written; the reader and display gate are decompiled from the watch's
         MSP430X firmware (assets/Firmware/re-out, git-ignored).
 
-        This is the SAME plan the sync-calendar endpoint installs as guided workouts: that one
-        puts the guidance into each mode's WORKOUT menu; this one puts the dated card on the
-        watch face. Movescount did both in a single sync. write:false is a real dry-run (the
-        tool builds and logs the exact bytes, opens no device).
+        Only PLAIN sessions get a card - "run 30 min", one step with no target, or no steps at
+        all. A workout with steps is a guided workout and lives in its mode's WORKOUT menu only
+        (the sync-calendar endpoint): on Movescount these were two separate things made in two
+        separate places - a Planned move was "a training session with a set date, activity type,
+        duration, and intensity" (Suunto's Training programs tutorial, 2015-02-24), a workout
+        was built in the app's Workout planner, and the tutorials note there was no link
+        between the two. Writing both for the same session was ours alone, and a trap - real,
+        2026-10-05 (André, Couch to 5k W6.1): the watch said "today you have a workout", he
+        pressed Start on the card and got the card's own mode - one HR-zone target and the
+        50 % / 100 % marks, none of his steps. With no plain session left in the plan the
+        region is cleared, so cards from an earlier sync go too. write:false is a real dry-run
+        (the tool builds and logs the exact bytes, opens no device).
 
         Per entry: name = the workout's name (the card shows it; 23 bytes), duration = the sum
         of its time steps (repeat blocks expanded; rounded up to whole minutes), distance = the
@@ -7651,7 +7659,7 @@ class Handler(BaseHTTPRequestHandler):
         sys.path.insert(0, str(TOOLS_DIR))
         import workout as W  # noqa: E402  (tools/workout.py: expand_steps)
 
-        items, resolution = [], []
+        items, resolution, guided = [], [], []
         for e in entries:
             wk = e["workout"]
             try:
@@ -7660,6 +7668,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False,
                                        "error": f"entry {e.get('date')}: bad workout steps ({exc})"})
                 return
+            if len(steps) > 1 or any(
+                    str((s.get("target") or {}).get("targetName") or "none") not in ("none", "")
+                    for s in steps):
+                guided.append(e["date"])   # has steps: WORKOUT menu only, no card
+                continue
             seconds = sum(int(s["duration"]["value"]) for s in steps
                           if s.get("duration", {}).get("durationName") == "time")
             metres = sum(int(s["duration"]["value"]) for s in steps
@@ -7705,19 +7718,23 @@ class Handler(BaseHTTPRequestHandler):
             resolution.append({"date": e["date"], "mode": e["mode"], "activityId": activity_id,
                                "activityIdFrom": how})
 
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"items": items}, f)
-            plan_path = f.name
-        try:
-            args = ["--plan", plan_path, "--json"]
-            if body.get("write"):
-                args.append("--write")
-            code, out, err = run_tool("training_program.py", args, timeout=180)
-        finally:
+        if items:
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump({"items": items}, f)
+                plan_path = f.name
             try:
-                os.unlink(plan_path)
-            except OSError:
-                pass
+                args = ["--plan", plan_path, "--json"]
+                if body.get("write"):
+                    args.append("--write")
+                code, out, err = run_tool("training_program.py", args, timeout=180)
+            finally:
+                try:
+                    os.unlink(plan_path)
+                except OSError:
+                    pass
+        else:
+            args = ["--clear", "--json"] + (["--write"] if body.get("write") else [])
+            code, out, err = run_tool("training_program.py", args, timeout=180)
         result = self._parse_last_json_line(out)
         if result is None:
             self._send_json(502, {"ok": False,
@@ -7726,6 +7743,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "raw_output": out, "stderr": err})
             return
         result["items"] = items
+        result["guided"] = guided
         result["activityIdSource"] = activity_source
         result["resolution"] = resolution
         self._send_json(200 if result.get("ok") else 502, result)

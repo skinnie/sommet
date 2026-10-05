@@ -408,6 +408,8 @@ def main():
     print(f"\n{len(link.sent)} messages, {total} payload bytes, "
           f"{reports} reports of 64 bytes"
           + ("" if args.write else " — nothing was emitted"))
+    if args.clear:
+        emit_json(True, count=0, dates=[], cleared=True)
     return 0
 
 

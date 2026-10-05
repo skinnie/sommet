@@ -1022,8 +1022,8 @@ Item {
                             font.pixelSize: Theme.fontSizeCaption
                             font.bold: true
                         }
-                        // The native "Today 1/2" planned-move cards (TIME mode -> [Next]),
-                        // written alongside the WORKOUT-menu guidance by the same Sync action.
+                        // The native "Today 1/2" planned-move cards (TIME mode -> [Next]) - only
+                        // for plain sessions; a workout with steps is in the WORKOUT menu alone.
                         Text {
                             width: parent.width
                             wrapMode: Text.WordWrap
@@ -1035,7 +1035,7 @@ Item {
                                 const r = TrainingProgramService.lastInstallResult
                                 const n = r.nativeCards || 0
                                 if (n === 0)
-                                    return qsTr("No dated planned moves to show on the watch face.")
+                                    return qsTr("No cards on the watch face: workouts with steps start from the sport mode's WORKOUT menu.")
                                 const range = (r.nativeCardFirst && r.nativeCardLast
                                                && r.nativeCardFirst !== r.nativeCardLast)
                                     ? qsTr(" (%1 → %2)").arg(r.nativeCardFirst).arg(r.nativeCardLast)

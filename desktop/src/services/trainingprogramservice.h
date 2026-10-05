@@ -72,9 +72,10 @@ public:
     // POST /api/trainingprogram/sync-calendar THEN /api/trainingprogram/planned-moves - one
     // "Sync to watch" action does both halves of what a Movescount sync did: (1) install the
     // plan as native guided workouts in each sport mode's WORKOUT menu, rotating by date
-    // (tools/training_calendar.py), and (2) write the plan as NATIVE dated planned moves - the
-    // "Today 1/2" card the watch shows in TIME mode -> [Next] (hardware-confirmed 2026-09-03,
-    // tools/training_program.py). write:false is a real dry-run for both. Both results merge
+    // (tools/training_calendar.py), and (2) write the plan's PLAIN sessions (no steps) as NATIVE
+    // dated planned moves - the "Today 1/2" card the watch shows in TIME mode -> [Next]
+    // (hardware-confirmed 2026-09-03, tools/training_program.py). A workout with steps gets no
+    // card: the backend leaves it out, and clears the cards when none is left. write:false is a real dry-run for both. Both results merge
     // into lastInstallResult (the rotation fields plus nativeCards/nativeCardError).
     Q_INVOKABLE void syncCalendar(const QVariantList &entries, bool write);
 
