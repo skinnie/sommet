@@ -7,6 +7,35 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-10-05: Planned moves and guided workouts on the Ambit3 - four fixes and an auto-start (desktop, unreleased)
+
+André ran his Couch to 5k W6.1 from the watch's "Today" card and got "something completely different
+from any workout I've done in the past": "Maximal", no steps, "50% % km" at 2 km. Then the WORKOUT
+menu ran the swim test under the name of the run. Then: "I challenge you to find a solution,
+applicable via sommet to the watch to have the card load the workout with its steps and without the
+hr limits." All settled on his Ambit3 Peak the same evening; the firmware facts come from Ghidra on
+the MSP430X image in `assets/Firmware/re-out`.
+
+- **Card intensity**: the item byte is 0-based (0 Easy .. 4 Maximal); we sent 4 for "hard", so every
+  HR-targeted run read "Maximal". Fixed (`25acb59`).
+- **Card and guided workout are two features**: on Movescount a Planned move was "a training session
+  with a set date, activity type, duration, and intensity" (Suunto's Training programs tutorial,
+  2015) and an interval workout came from the app's Workout planner; the card's Start never opens a
+  workout. Without an auto-start mode, workouts with steps get no card any more (`9decace`).
+- **WORKOUT menu ran the wrong workout**: the watch lists rows per sport but runs the picked row's
+  position in its unfiltered 5-slot table; with a swim test first in storage, Running's first row ran
+  the swim. Every native workout now carries the any-mode sport byte, so each mode lists all five in
+  storage order and a pick runs what it names; the sync repairs older installs (`a57b5e3`).
+- **"Today card starts: <mode>"** (Training program page, off by default): that mode runs the plan's
+  next upcoming workout on every recording (a RULE in its RULES list), re-pointed at each sync, so
+  card -> Start -> that mode -> recording = "Brisk Walk 5' 1/6" with the step's own band, no menu.
+  The card's own HR target can't be switched off, only widened: intensity Easy with header zones
+  97/98/99/100 = rest HR .. 97% of max (`b99a59a`). Keep a mode for the program (every recording in
+  it runs the workout) and sync after each workout (the rule is set at sync time).
+- Known, unexplained: the 50%/100% pop-up prints "% km" on a duration-only card (firmware text).
+
+---
+
 ## 2026-09-29: Roadbook PDF on Android; roadbook + timeline fixes on both (Android 0.2.42, desktop 0.2.45)
 
 Merged into main 2026-09-30 as desktop 0.2.45: main had used 0.2.43 and 0.2.44 for other work (Coach,
