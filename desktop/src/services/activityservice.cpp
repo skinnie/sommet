@@ -1581,14 +1581,17 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         if (!startLocal.isEmpty() && (windowStart.isEmpty() || startLocal < windowStart))
             windowStart = startLocal;
         // Already have this one (or saw it earlier in this same batch) - skip, don't re-insert.
-        // One correction on the way: a row stored under the RAW type ("EMountainBikeRide",
-        // before the shared sport table of 2026-10-03) takes its proper name. Only that exact
-        // case, so nothing else about an existing row changes.
+        // One thing does follow intervals.icu on a row we already hold: its sport. A sport
+        // changed there (André, 2026-10-05: 23 handheld tracks retyped from Run to Hike still
+        // read "Running" here and counted under Running in Totals) or a name stored raw before
+        // the shared sport table ("EMountainBikeRide") is brought in line. Neither app lets the
+        // sport of an imported activity be edited locally, so there is nothing of the user's to
+        // overwrite. By primary key, and only for rows that actually differ.
         if (!extId.isEmpty() && existing.contains(extId)) {
             const Held &h = existing[extId];
             const QString rawType = o.value(QStringLiteral("type")).toString();
             const QString proper = sportNameForIntervalsType(rawType);
-            if (h.idx != INT_MIN && !rawType.isEmpty() && proper != rawType && h.name == rawType) {
+            if (h.idx != INT_MIN && !rawType.isEmpty() && h.name != proper) {
                 QSqlQuery fix(m_db);
                 fix.prepare(QStringLiteral("UPDATE activities SET name = ? WHERE idx = ? AND device = ?"));
                 fix.addBindValue(proper); fix.addBindValue(h.idx); fix.addBindValue(h.device);

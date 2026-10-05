@@ -5,7 +5,7 @@ import {
   markActivitySynced, getAllSyncedIds, getAllActivities, ActivityRecord, updateImportedActivity,
   rejectDuplicateImport, removeImportedActivity,
 } from '../database/db';
-import { sportNameForIntervalsType, canonicalSportName, isJunkActivity } from './SportNames';
+import { sportNameForIntervalsType, isJunkActivity } from './SportNames';
 import { importFromIntervals as importGearFromIntervals } from './GearMirrorService';
 
 // Import activities FROM intervals.icu INTO the app's local DB (André, 2026-08-18: "I would
@@ -21,17 +21,6 @@ import { importFromIntervals as importGearFromIntervals } from './GearMirrorServ
 // distance) is skipped so it never double-counts a move already synced off the watch.
 const API_BASE = 'https://intervals.icu/api/v1';
 const DUP_WINDOW_MS = 180000;   // desktop kWindowSecs
-
-// What this file's own table produced before 2026-10-03 (a short private copy that had drifted
-// from the desktop's). Kept only to recognise rows it wrote, so a re-import can give them the
-// shared name without touching a sport the user changed by hand.
-const OLD_TYPE_MAP: Record<string, string> = {
-  Ride: 'Cycling', VirtualRide: 'Cycling', MountainBikeRide: 'Mountain biking',
-  GravelRide: 'Cycling', CyclocrossRide: 'Cycling', TrackRide: 'Cycling',
-  Run: 'Running', VirtualRun: 'Running', TrailRun: 'Trail running',
-  Walk: 'Walking', Hike: 'Hiking', Swim: 'Swimming', OpenWaterSwim: 'Swimming',
-};
-const oldMapType = (t: string) => OLD_TYPE_MAP[t] || t || 'Other';
 
 export interface ImportResult {
   imported: number;
@@ -114,16 +103,17 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       // An earlier import kept the intervals.icu copy of a move this device read off the watch
       // itself (the type differed, so the old same-type test missed it): drop the copy.
       if (dupOfWatch && icuById.has(icuId)) { await rejectDuplicateImport(icuId); skipped++; continue; }
-      // Already here. Bring an earlier import up to date: calories (never stored before
-      // 2026-10-03) and the shared sport name - the latter only where the row still holds what
-      // the old import wrote, so a sport the user changed by hand stays.
+      // Already here. Bring it up to date: calories (never stored before 2026-10-03) and the
+      // sport.
       const have = icuById.get(icuId);
       if (have) {
         const fix: { activity_type?: string; energy_kcal?: number } = {};
         if (energy_kcal > 0 && !have.energy_kcal) fix.energy_kcal = energy_kcal;
-        if (have.activity_type !== type
-            && (have.activity_type === oldMapType(rawType) || have.activity_type === canonicalSportName(oldMapType(rawType))))
-          fix.activity_type = type;
+        // The sport follows intervals.icu: one changed there (2026-10-05: 23 handheld tracks
+        // retyped from Run to Hike still read "Running" here), or a name from the old private
+        // table. Nothing in the app edits the sport of an imported activity, so there is no
+        // local choice to overwrite.
+        if (rawType && have.activity_type !== type) fix.activity_type = type;
         if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
           await updateImportedActivity(icuId, fix);
       }
@@ -181,7 +171,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
 //     also applies deletions and the one-time fixes of 2026-10-03/04).
 // At most once every 15 minutes - intervals.icu rate-limits (HTTP 429). No-op when not connected.
 const AUTO_LAST_KEY = 'intervals.autosync.last';
-const AUTO_FULL_KEY = 'intervals.autosync.fullImport.v3';
+const AUTO_FULL_KEY = 'intervals.autosync.fullImport.v4';   // bump = one full pass after an update
 const AUTO_MIN_GAP_MS = 15 * 60 * 1000;
 const AUTO_FULL_GAP_MS = 24 * 3600 * 1000;
 let autoSyncRunning = false;
