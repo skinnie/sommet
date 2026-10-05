@@ -147,27 +147,36 @@ def sync(link, plan, today, write, json_out):
 
     decoded = cm.decode(current_cm)
     lang = GW.read_watch_language(link)
-    current_list = [{"_raw_block": b} for b in kept_blocks]
+    # Kept workouts from before 2026-10-05 carry a per-sport byte (a pick could run another
+    # sport's workout) and rule id 0. Repair them while we are rewriting the region anyway.
+    current_list, restamped = GW.restamp_rule_ids(
+        [e for e in existing if e["_raw_block"] in kept_block_set])
+    kept_blocks = [e["_raw_block"] for e in current_list]
     added_names = []
     failed = []  # [(label, error)] — one bad workout in the plan must not sink the whole sync
     new_apps_bytes = None
     for e in to_add:
         label = entry_label(e["date"], e["workout"]["name"])
         try:
-            # Each sport's WORKOUT menu lists only workouts with its ActivityID - a ride from
-            # intervals.icu must carry Cycling's, not the converter's default Running (3).
-            activity_id = GW.mode_activity_id(decoded, e["mode"])
+            GW.mode_activity_id(decoded, e["mode"])  # fail fast on an unknown mode name
             compiled = GW.compile_workout(e["workout"], lang)
         except SystemExit as err:
             failed.append((label, str(err)))
             continue
         compiled["name"] = label
-        compiled["activityId"] = activity_id
+        compiled["activityId"] = GW.ANY_MODE_ACTIVITY  # row == slot in every mode, see guided_workout
+        # A unique rule id per installed workout, or the watch runs the first one with the same
+        # id whatever was picked (GW.with_rule_id; André's swim-instead-of-run, 2026-10-05).
+        rule_id = GW.free_rule_id(current_list)
+        if rule_id is None:
+            failed.append((label, "no free rule id (1..9) left among the installed workouts"))
+            continue
+        compiled["binary"] = GW.with_rule_id(compiled["binary"], rule_id)
         new_apps_bytes = WI.build_apps_region(current_list, compiled, entry_type=GW.GUIDANCE_ENTRY_TYPE)
         current_list = WI.apps_entries_with_raw_blocks(new_apps_bytes)
         added_names.append(compiled["name"])
     if new_apps_bytes is None:
-        new_apps_bytes = rebuild_apps_region(kept_blocks)
+        new_apps_bytes = rebuild_apps_region(kept_blocks)  # also carries any re-stamped ids
 
     # Ensure every mode named by a kept-or-added entry has the guidance display so its
     # WORKOUT menu is surfaced at all (harmless no-op if it's already there).
@@ -190,7 +199,8 @@ def sync(link, plan, today, write, json_out):
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],
               "waiting": waiting, "menuMax": GW.WORKOUT_MENU_MAX,
-              "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes)}
+              "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes),
+              "repaired": [n for n, _ in restamped]}
 
     if not json_out:
         print(f"sync as of {today}:")
@@ -204,7 +214,9 @@ def sync(link, plan, today, write, json_out):
                 print(f"    {n}: {err}")
         if modes_touched:
             print(f"  guidance display added to: {modes_touched}")
-        if not removed and not added_names and not modes_touched and not failed:
+        if restamped:
+            print(f"  repaired (any-mode sport byte / rule id): {[n for n, _ in restamped]}")
+        if not removed and not added_names and not modes_touched and not failed and not restamped:
             print("  nothing to do — watch already matches the plan")
 
     if not write:

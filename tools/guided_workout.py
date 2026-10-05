@@ -287,6 +287,88 @@ def compile_workout(workout, lang=None):
             "binary": binary, "ruleId": j.get("ruleId"), "lightSites": light_sites}
 
 
+# The WORKOUT menu runs the picked ROW's position in the firmware's 5-slot table, but it LISTS
+# only the rows of the current sport (FUN_000581da filters on the entry's sport byte; the
+# executor does not). With two sports installed the two orders differ and a pick runs another
+# workout - André, 2026-10-05 (Ambit3 Peak): "05/10_W6.1 Workout", first Running row, ran the
+# swim test that sat first in storage ("1/3 1' easy swim"). It had worked until then only
+# because every running workout happened to precede the swim. The filter treats a sport byte
+# < 2 as "every mode" (FUN_000581da and FUN_000597a6 both test `< 2 || == mode`), so this is
+# what every native workout gets: each mode lists all five in storage order, row == slot, and
+# the user picks by name. Hardware-confirmed the same evening: W6.1 -> "Brisk Walk 1/6".
+ANY_MODE_ACTIVITY = 1
+
+# Every binary the community compiler returns carries ruleId 0 and the symbol "rule0" (a real
+# Movescount compile carried a unique id, e.g. rule10058938). The watch resolves the workout picked
+# Movescount compile carried a unique id, e.g. rule10058938). Stamping a unique id per installed
+# workout was tried first for the swim-instead-of-run mix-up above and did NOT fix it (the watch
+# picks by slot position, see ANY_MODE_ACTIVITY) - kept because a real install never shared an
+# id and the exercise log records it (FUN_0003bba6 writes it to the log header). The symbol is
+# rewritten in place, so the id must keep "rule<id>" the same length as "rule0": one digit,
+# 1..9 - plenty for a WORKOUT menu of 5.
+RULE_ID_OFFSET = 12   # u32 in the magic-less binary: ver(4) outFmtDiv(4) one(4) ruleId(4)
+
+
+def with_rule_id(binary, rule_id):
+    """The compiled binary (no IAMRULE magic) with its ruleId u32 and "rule0" symbol set to
+    `rule_id` (1..9). Raises if the binary isn't the compiler's rule0 shape."""
+    import struct
+    if not 1 <= int(rule_id) <= 9:
+        raise ValueError(f"rule id {rule_id} must be 1..9 (the symbol is patched in place)")
+    b = bytearray(binary)
+    if b[:len(b"IAMRULE\0")] == b"IAMRULE\0":
+        raise ValueError("with_rule_id wants the magic-less binary")
+    if struct.unpack_from("<I", b, RULE_ID_OFFSET)[0] != 0 or b.count(b"rule0\0") != 1:
+        raise ValueError("binary is not the compiler's rule0 shape - not patched")
+    struct.pack_into("<I", b, RULE_ID_OFFSET, int(rule_id))
+    return bytes(b).replace(b"rule0\0", b"rule%d\0" % int(rule_id))
+
+
+def free_rule_id(entries):
+    """The lowest id in 1..9 no entry on the watch uses (apps.decode's ruleId field). None if
+    all nine are taken, which a 5-workout menu never reaches."""
+    used = {e.get("ruleId") for e in entries}
+    return next((i for i in range(1, 10) if i not in used), None)
+
+
+def restamp_rule_ids(entries):
+    """(entries, repaired): the same decoded entries (with _raw_block) where every native
+    workout gets the any-mode sport byte (ANY_MODE_ACTIVITY) and, if its rule id is 0 or shared
+    with an earlier entry, a free one - its block rebuilt with a fresh marker. Repairs watches
+    synced before 2026-10-05 (per-sport bytes, rule0 everywhere); a generic Suunto App is never
+    touched. `repaired` lists (name, rule id)."""
+    import apps
+    import struct
+    import workout_install as WI
+    out, seen, renamed = [], set(), []
+    for e in entries:
+        e = dict(e)
+        rid = e.get("ruleId")
+        if e.get("reserved") == GUIDANCE_ENTRY_TYPE and e.get("activityId") != ANY_MODE_ACTIVITY:
+            blk = e["_raw_block"]
+            e["_raw_block"] = bytes([GUIDANCE_ENTRY_TYPE, ANY_MODE_ACTIVITY, blk[2]]) + blk[3:]
+            e["activityId"] = ANY_MODE_ACTIVITY
+            renamed.append((e.get("name"), rid))
+        if e.get("reserved") == GUIDANCE_ENTRY_TYPE and (not rid or rid in seen):
+            new = free_rule_id(out + entries[len(out):])
+            if new is not None:
+                try:
+                    binary = with_rule_id(e["binary"], new)
+                except ValueError:
+                    binary = None
+                if binary is not None:
+                    blk = e["_raw_block"]
+                    e["_raw_block"] = (bytes([GUIDANCE_ENTRY_TYPE, ANY_MODE_ACTIVITY,
+                                              apps.entry_checksum(binary)])
+                                       + blk[3:3 + apps.NAME_LEN] + apps.MAGIC + binary)
+                    e["binary"], e["ruleId"], rid = binary, new, new
+                    renamed.append((e.get("name"), new))
+        if rid:
+            seen.add(rid)
+        out.append(e)
+    return out, renamed
+
+
 def apps_name_len():
     import apps
     return apps.NAME_LEN - 1
@@ -300,10 +382,10 @@ def guidance_display():
 
 
 def mode_activity_id(decoded, mode_name):
-    """The sport mode's ActivityID. Each sport's WORKOUT menu lists only the native workouts
-    whose Apps-entry activityId matches it (of the first WORKOUT_MENU_MAX on the watch) -
-    HW-confirmed 2026-09-26: Bike (4) and Swim (6) tests showed up only under Cycling / Pool
-    swimming. The compiled binary doesn't depend on it; only the entry header does."""
+    """The sport mode's ActivityID. Still read to fail fast on an unknown mode name; the entry
+    header no longer carries it (ANY_MODE_ACTIVITY) - per-sport listing (HW 2026-09-26: Bike
+    and Swim tests only under Cycling / Pool swimming) ran the wrong workout once two sports
+    were installed, see the ANY_MODE_ACTIVITY note."""
     return decoded["exercise_modes"][find_mode_index(decoded, mode_name)]["Settings"]["ActivityID"]
 
 
@@ -338,7 +420,11 @@ def build_regions(current_custom_modes, current_apps, workout, mode_name, append
     decoded = cm.decode(current_custom_modes)
     activity_id = mode_activity_id(decoded, mode_name)  # before the compile: fail fast on a bad mode
     compiled = compile_workout(workout, lang)
-    compiled["activityId"] = activity_id  # listed under THIS sport's WORKOUT menu
+    compiled["activityId"] = ANY_MODE_ACTIVITY  # listed in every mode: row == slot (see above)
+    rule_id = free_rule_id(existing)
+    if rule_id is None:
+        raise ValueError("no free rule id (1..9) left among the installed workouts")
+    compiled["binary"] = with_rule_id(compiled["binary"], rule_id)
     new_apps = WI.build_apps_region(existing, compiled, entry_type=GUIDANCE_ENTRY_TYPE)
 
     mode_index = find_mode_index(decoded, mode_name)
