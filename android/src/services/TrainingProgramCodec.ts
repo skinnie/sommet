@@ -27,7 +27,7 @@ const pushU32 = (a: number[], v: number) => a.push(v & 0xff, (v >> 8) & 0xff, (v
 export interface TrainingItem {
   activityId: number;
   durationMinutes: number;
-  intensity: number;   // 1-5
+  intensity: number;   // 0-based: 0 Easy, 1 Moderate, 2 Hard, 3 Very hard, 4 Maximal
   name: string;
   dayOffset?: number;  // days from the header base date; 0 = the base/earliest move itself
   completed?: boolean;

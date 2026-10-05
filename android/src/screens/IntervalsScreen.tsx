@@ -114,9 +114,10 @@ export default function IntervalsScreen() {
   async function writePlanned() {
     // Base date = the move's own date (dayOffset 0 => today). The watch validates it as a real
     // calendar date (year 2013-2099); the old literal 0 made the firmware reject the header.
+    // The field asks for 1-5; the watch's byte is 0-based (0 Easy .. 4 Maximal).
     const today = new Date();
     const ok = await writePlannedMoves(
-      [{ activityId: pmActivity, durationMinutes: num(pmDuration), intensity: num(pmIntensity), name: pmName.trim() || 'Move', dayOffset: 0 }],
+      [{ activityId: pmActivity, durationMinutes: num(pmDuration), intensity: Math.max(0, Math.min(4, num(pmIntensity) - 1)), name: pmName.trim() || 'Move', dayOffset: 0 }],
       { year: today.getFullYear(), month: today.getMonth() + 1, day: today.getDate() }, setPmState,
     );
     if (ok) Alert.alert(t.experimentalIntervals, t.intervalsWritten);

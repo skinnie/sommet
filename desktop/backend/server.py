@@ -7614,8 +7614,8 @@ class Handler(BaseHTTPRequestHandler):
 
         Per entry: name = the workout's name (the card shows it; 23 bytes), duration = the sum
         of its time steps (repeat blocks expanded; rounded up to whole minutes), distance = the
-        sum of its distance steps (metres), intensity = entry.intensity or 3 (Movescount's 1-5
-        scale, moderate by default), activityId = the watch's own ActivityID for the entry's
+        sum of its distance steps (metres), intensity = entry.intensity or derived from the
+        workout's targets (the watch's 0-based level, 0 Easy .. 4 Maximal), activityId = the watch's own ActivityID for the entry's
         sport-mode NAME (one custom_modes.py --json read, so user-named modes like "Running
         Couch25k -W1" resolve correctly), falling back to workout.activityId, then 3 (Running).
         The response says which activityIds were resolved from the watch and which fell back."""
@@ -7673,26 +7673,27 @@ class Handler(BaseHTTPRequestHandler):
                 activity_id, how = PLANNED_MOVE_ACTIVITY_BY_MODE_NAME[mode_name], "table"
             else:
                 activity_id, how = 3, "default"
-            # Intensity (Movescount's 1-5 scale), André's rule 2026-09-04: derived from the
-            # workout's targets unless the entry sets it. Work steps (interval/active/work)
-            # with an HR or power target -> 4 (hard); any other target (pace/speed/cadence)
-            # on a work step -> 3; no targets at all -> 2 (easy) if the workout is only
-            # warmup/recovery/cooldown-type steps, else 3 (moderate).
+            # Intensity, André's rule 2026-09-04: derived from the workout's targets unless the
+            # entry sets it. Work steps (interval/active/work) with an HR or power target ->
+            # hard; any other target (pace/speed/cadence) on a work step -> moderate; no targets
+            # at all -> easy if the workout is only warmup/recovery/cooldown-type steps, else
+            # moderate. The byte is the watch's 0-based level (training_program.INTENSITY_LEVELS:
+            # 0 Easy .. 4 Maximal). This used to send 2/3/4 for easy/moderate/hard, one scale
+            # too high twice over - real, 2026-10-05 (André: "now my watch has all workouts on
+            # 'maximal'"): every HR-targeted run went out as 4.
             if e.get("intensity") is not None:
-                intensity = int(e["intensity"])
+                intensity = max(0, min(4, int(e["intensity"])))
             else:
                 easy_types = {"warmup", "cooldown", "recovery", "rest"}
                 work_targets = [str((s.get("target") or {}).get("targetName") or "none")
                                 for s in steps
                                 if str((s.get("type") or {}).get("typeName")) not in easy_types]
                 if any(t in ("hr", "power") for t in work_targets):
-                    intensity = 4
-                elif any(t not in ("none", "") for t in work_targets):
-                    intensity = 3
+                    intensity = 2   # Hard
                 elif work_targets:
-                    intensity = 3
+                    intensity = 1   # Moderate
                 else:
-                    intensity = 2
+                    intensity = 0   # Easy
             items.append({
                 "date": e["date"],
                 "activityId": activity_id,

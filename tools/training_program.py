@@ -17,7 +17,7 @@ region write (post-write hook) - no restart. Up to 60 items; base-date year 2013
 
     # Path (1) re-test: one planned move dated TODAY, then check the watch's reminder/day
     # screen (NOT the WORKOUT menu - that's the separate Workout-Planner/guidance path).
-    ./tools/training_program.py --name "Long run" --duration 60 --intensity 3   # dry-run
+    ./tools/training_program.py --name "Long run" --duration 60 --intensity 1   # dry-run
     ./tools/training_program.py --name "Long run" --duration 60 --write         # real write
     ./tools/training_program.py --name "Long run" --date 2026-08-20 --write     # dated tomorrow
 
@@ -86,6 +86,11 @@ def pack_hr_zones(zones=DEFAULT_HR_ZONES):
 HEADER_SIGNATURE = pack_hr_zones()
 
 
+# The item's intensity byte is the 0-based index into these (libkomposti's packer; the watch
+# prints the word on the planned-move card).
+INTENSITY_LEVELS = ("Easy", "Moderate", "Hard", "Very hard", "Maximal")
+
+
 def build_training_item(activity_id, duration_minutes, intensity, name,
                          day_offset=0, completed=False, move_id=0, distance=0):
     """One 40-byte TrainingProgram item. Layout REFINED 2026-08-09 (training_program_andre.md
@@ -104,7 +109,11 @@ def build_training_item(activity_id, duration_minutes, intensity, name,
         off 4  u32  moveId
         off 8  u32  distance (metres)
         off 12 u16  duration (MINUTES - createBinary divides JSON seconds by 60)
-        off 14 u8   intensity (1-5)
+        off 14 u8   intensity, 0-BASED: 0 Easy, 1 Moderate, 2 Hard, 3 Very hard, 4 Maximal
+                    (INTENSITY_LEVELS). Not 1-5 as this said until 2026-10-05: libkomposti packs
+                    the index into {Easy..Maximal}, and André's watch showed "Maximal" for every
+                    planned move written as 4. The firmware wants it < 5 (an HR-zone target from
+                    the header's zone bytes); 5+ leaves its target band uninitialised.
         off 15 u8   padding (0)
         off 16 23B  activityName (UTF-8, null-padded/truncated - strncpy 0x17). NOTE: starts
                     at offset 16, not 15 as the earlier version had it.
@@ -119,6 +128,8 @@ def build_training_item(activity_id, duration_minutes, intensity, name,
     by real mojibake on André's French Ambit3 Sport - same firmware, almost certainly the
     same string convention throughout, but flagging this one specifically as still unverified.
     """
+    if not 0 <= intensity < len(INTENSITY_LEVELS):
+        raise ValueError(f"intensity {intensity} is not 0..4 ({', '.join(INTENSITY_LEVELS)})")
     name_field = name.encode("utf-8", "replace")[:23]
     name_field = name_field.decode("utf-8", "ignore").encode("utf-8")
     name_field += b"\0" * (23 - len(name_field))
@@ -239,7 +250,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--name", default="Test", help="the workout's name (up to 23 characters)")
     ap.add_argument("--duration", type=int, default=30, help="planned duration in minutes")
-    ap.add_argument("--intensity", type=int, default=3, help="planned intensity, 0-255")
+    ap.add_argument("--intensity", type=int, default=1,
+                     help="planned intensity, 0-4: " + ", ".join(
+                         f"{i} {n}" for i, n in enumerate(INTENSITY_LEVELS)))
     ap.add_argument("--activity-id", type=int, default=3,
                      help="ActivityID (default 3 = Running)")
     ap.add_argument("--move-id", type=lambda x: int(x, 0), default=0,
@@ -279,7 +292,7 @@ def main():
     ap.add_argument("--plan", metavar="FILE",
                      help="write a WHOLE program from a JSON file instead of the single-item"
                           " flags: {\"items\": [{\"date\": \"YYYY-MM-DD\", \"activityId\": 3,"
-                          " \"durationMinutes\": 45, \"intensity\": 3, \"name\": \"Long run\","
+                          " \"durationMinutes\": 45, \"intensity\": 1, \"name\": \"Long run\","
                           " \"distance\": 0, \"moveId\": 0}, ...]}. The header base date is the"
                           " EARLIEST item's date; each item's dayOffset is derived from it (must"
                           " fit in 0..255 days); at most 60 items (the firmware's cap). Items"
@@ -341,7 +354,7 @@ def main():
         for d, it in plan_items:
             items.append(build_training_item(
                 int(it.get("activityId", 3)), int(it.get("durationMinutes", 0)),
-                int(it.get("intensity", 3)), str(it.get("name", "Move")),
+                int(it.get("intensity", 1)), str(it.get("name", "Move")),
                 day_offset=(d - args.date).days, completed=bool(it.get("completed", False)),
                 move_id=int(it.get("moveId", 0)), distance=int(it.get("distance", 0))))
             dates.append(d.isoformat())
@@ -351,7 +364,7 @@ def main():
               f"{len(blob)} bytes")
         for (d, it), item in zip(plan_items, items):
             print(f"    {d.isoformat()}  act={it.get('activityId', 3):<3} "
-                  f"{int(it.get('durationMinutes', 0)):>4} min  int={it.get('intensity', 3)}  "
+                  f"{int(it.get('durationMinutes', 0)):>4} min  int={it.get('intensity', 1)}  "
                   f"{str(it.get('name', 'Move'))[:23]!r}")
         send_plan(link, flash, layout, commit=False)
         total = sum(len(payload) for _, payload, _ in link.sent)
