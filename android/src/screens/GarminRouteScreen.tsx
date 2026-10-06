@@ -113,7 +113,7 @@ export default function GarminRouteScreen() {
       const { gpx, stats } = buildEtrexGpx(content, { mode });
       const fileName = `${base}_etrex_${mode}.gpx`;
       await Garmin.writeGpxToSdCard(sdCardVolume.volumeIndex, fileName, gpx);
-      setEtrexDone(t.garminEtrexDone(fileName, stats.turns, stats.crossings));
+      setEtrexDone(t.garminEtrexDone(fileName, stats.pins, stats.junctions));
       setSendState('idle');
     } catch (e: any) {
       if (e?.code === 'GPX_PICK_CANCELLED') { setSendState('idle'); return; }

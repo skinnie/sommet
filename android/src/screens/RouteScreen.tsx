@@ -12,7 +12,8 @@ import { WatchRoute } from '../services/RouteReader';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Button, StatusLine, Dropdown } from '../components/ui/primitives';
+import { Button, StatusLine, Dropdown, Toggle } from '../components/ui/primitives';
+import { buildRoutePins } from '../services/RoutePins';
 import { TrackPreview } from '../components/TrackPreview';
 import { SortBar } from '../components/ui/SortBar';
 import { getViewMode, setViewMode as persistViewMode, sortItems, sortKeysFor, SortKey, ViewMode } from '../services/ListViewPrefs';
@@ -60,6 +61,23 @@ export default function RouteScreen() {
   const params = useRoute<any>().params || {};
   const watchHere: boolean = params.watch ?? true;
   const [pending, setPending] = useState<PendingRoute | null>(null);
+  // Direction pins (services/RoutePins.ts): waypoints like "Left 1.2" where the route meets
+  // itself. The watch announces them in route order, so the route is followed from its start.
+  const [pinsOn, setPinsOn] = useState(false);
+  const [pinsNote, setPinsNote] = useState('');
+  function withPins(route: PendingRoute): PendingRoute {
+    const built = buildRoutePins(pendingToGpx(route), { target: 'ambit', name: route.name });
+    const pinned = routeFromGpx(built.gpx, route.name);
+    return { ...pinned, distanceM: route.distanceM, ascentM: route.ascentM, descentM: route.descentM };
+  }
+  function togglePins(on: boolean) {
+    setPinsOn(on);
+    setPinsNote('');
+    if (!on || !pending) return;
+    try { setPinsNote(t.routePinsCount(withPins(pending).waypoints.length)); }
+    catch (e: any) { setPinsOn(false); Alert.alert(t.error, e?.message ?? t.unknownError); }
+  }
+  useEffect(() => { setPinsOn(false); setPinsNote(''); }, [pending]);
   const scrollRef = useRef<ScrollView>(null);
 
   // ---- Library + planner (desktop parity) ----------------------------------------------------
@@ -216,7 +234,7 @@ export default function RouteScreen() {
   async function runUpload() {
     if (!pending) return;
     try {
-      await uploadRoute(pending, setSendState);
+      await uploadRoute(pinsOn ? withPins(pending) : pending, setSendState);
       setSendState(s => {
         if (s.phase === 'done') {
           setPending(null);
@@ -301,6 +319,12 @@ export default function RouteScreen() {
             <Text style={styles.itemStats}>
               {t.routeStats(formatDist(pending.distanceM), pending.points.length, pending.ascentM, pending.descentM)}
             </Text>
+            {watchHere && (
+              <View style={[styles.row, { alignItems: 'center' }]}>
+                <Toggle value={pinsOn} onValueChange={togglePins} disabled={sendBusy} />
+                <Text style={[styles.itemStats, { flex: 1 }]}>{pinsOn && pinsNote ? pinsNote : t.routePinsToggle}</Text>
+              </View>
+            )}
             <View style={styles.row}>
               {watchHere && <Button label={t.routeUploadBtn} variant="filled" loading={sendBusy} disabled={sendBusy} onPress={handleUpload} />}
               <Button label="Open in planner" variant="text" grow={false} disabled={sendBusy}

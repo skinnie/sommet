@@ -41,6 +41,7 @@ Kailash — plus Garmin eTrex 10/20/30 handheld GPS units.
 
 ### 🗺️ Routes
 - **Send a route to your watch** from a GPX file so you can follow it on your wrist.
+- **Direction pins on the watch** — optionally add waypoints ("Left 1.2") where the route meets itself; the watch announces them in order as you approach.
 - **Read routes back** off the watch and save them as GPX files.
 - A **preview map** shows you exactly what the route will look like before you send it.
 
@@ -128,7 +129,7 @@ Kailash — plus Garmin eTrex 10/20/30 handheld GPS units.
 - **Download activities** from the device.
 - **Import and export POIs.**
 - **Import and export routes.**
-- **Turn guidance for tracks** — the eTrex 30 shows no directions on a track and caps routes at 50 points, so Sommet can convert a GPX into a full track plus named turn/crossing waypoints ("R 12.4", "X STR 3.2"), or a route of ≤50 via points placed at the turns. Available from the Garmin route screen (Android) and the Route page's "Export for Garmin eTrex…" (desktop).
+- **Direction pins** — the eTrex draws a track as a bare line, so Sommet adds a waypoint ("Left 1.2", "Turn back 1.6") only where the route meets itself: a crossing, an out-and-back, a loop. Everywhere else the line is enough. Also available as a route of ≤50 via points. Garmin route screen (Android) and the Route page's "Send to…" (desktop).
 
 ### Bike computers (import your rides)
 - **Garmin Edge** and **Hammerhead Karoo** — plug in over USB and Sommet pulls the recorded rides straight off the device into your library.
