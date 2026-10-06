@@ -475,11 +475,37 @@ def route_to_gpx(flash, index):
         f'  <metadata><name>{xml_escape(d.name)}</name></metadata>',
         f'  <rte><name>{xml_escape(d.name)}</name>',
     ]
+    coords = []
     for p in points:
         lat, lon = F.inverse_xy(d.mid_lat, d.mid_lon, p.x, p.y)
+        coords.append((f"{lat:.7f}", f"{lon:.7f}"))
         ele = f'<ele>{p.altitude:.1f}</ele>' if p.altitude != F.ALTITUDE_NONE else ''
         lines.append(f'    <rtept lat="{lat:.7f}" lon="{lon:.7f}">{ele}</rtept>')
     lines.append('  </rte>')
+    # The route's own waypoints travel with it (2026-10-06). Without them a re-send of this
+    # export - which is how every "add a route" keeps the routes already on the watch - came
+    # back with only a synthesized Start/End, silently dropping named waypoints such as the
+    # direction pins of route_pins.py. Each is written at the exact coordinates of the route
+    # point nearest to it, searching forward from the previous one (rank order), so
+    # build_route's point match holds even on a loop whose start and end coincide.
+    own = []
+    route_key = F.decode_name(F.encode_name(d.name, "utf-8"))
+    wh = F.WaypointHeader.parse(flash.read(F.WAYPOINT_BASE, 6))
+    for i in range(wh.count):
+        w = F.WaypointDescriptor.parse(flash.read(F.WAYPOINT_DESC + 52 * i, 52))
+        if w.route_name == route_key:
+            own.append((F.WaypointTail.parse(w.tail).rank, w))
+    cursor, wpt_lines = 0, []
+    for _, w in sorted(own, key=lambda t: t[0]):
+        if not coords:
+            break
+        lat, lon = w.lat / 1e7, w.lon / 1e7
+        best = min(range(cursor, len(coords)),
+                   key=lambda k: (float(coords[k][0]) - lat) ** 2 + (float(coords[k][1]) - lon) ** 2)
+        cursor = best
+        wpt_lines.append(f'  <wpt lat="{coords[best][0]}" lon="{coords[best][1]}">'
+                         f'<name>{xml_escape(w.name)}</name><type>Waypoint</type></wpt>')
+    lines[3:3] = wpt_lines
     lines.append('</gpx>')
     return "\n".join(lines)
 

@@ -3547,8 +3547,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_route_etrex(self, body):
         """Body: {"gpx": str, "mode"?: "track"|"route", "name"?, "max_via"?: int, "reverse"?}. Returns {ok, gpx,
-        stats} - the GPX rebuilt for a Garmin eTrex 30/30x/32x: full track + named turn / crossing
-        waypoints ("track"), or a <=50-point route with the via points placed at turns ("route")."""
+        stats} - the GPX rebuilt for a Garmin eTrex 30/30x/32x: the untouched track + direction pins
+        where the route meets itself ("track", rules in tools/route_pins.py), or a <=50-point route
+        with the via points placed at those spots ("route")."""
         gpx = body.get("gpx")
         if not gpx:
             self._send_json(400, {"error": '"gpx" is required'})
@@ -3934,6 +3935,31 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"gpx\" (GPX file text)"})
             return
         confirm = bool(body.get("confirm", False))
+        # "pins": true (2026-10-06) - add direction pins as route waypoints where the route meets
+        # itself (tools/route_pins.py, Ambit rules: names <= 15 bytes, pins < 30 m apart merged).
+        # The watch announces waypoints strictly in route order ("Approaching <name>").
+        if body.get("pins"):
+            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+                f.write(gpx_text)
+                src_path = f.name
+            try:
+                pin_args = [src_path, "--target", "ambit", "--json"]
+                if body.get("name"):
+                    pin_args += ["--name", str(body["name"])]
+                if body.get("reverse"):
+                    pin_args += ["--reverse"]
+                _c, pin_out, pin_err = run_tool("route_pins.py", pin_args)
+            finally:
+                Path(src_path).unlink(missing_ok=True)
+            pinned = self._parse_last_json_line(pin_out)
+            if not pinned or not pinned.get("ok"):
+                msg = (pinned or {}).get("error") or pin_err.strip() or "could not work out the pins"
+                self._send_json(400, {"ok": False, "error": msg, "stderr": msg})
+                return
+            gpx_text = pinned["gpx"]
+            self._route_pin_count = pinned["stats"]["pins"]
+        else:
+            self._route_pin_count = None
         # Optional target (2026-09-26, "imagine I have 3 suunto watches plugged"): one specific
         # USB watch, for this write only - product id + serial, so two Ambit3 Peaks are told
         # apart. The read-back of its existing routes uses the SAME pin, so they're that watch's.
@@ -3967,7 +3993,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send_json(200 if code == 0 else 502, {
             "ok": code == 0, "wrote": confirm and code == 0,
-            "routes_kept": len(existing_paths),
+            "routes_kept": len(existing_paths), "pins": self._route_pin_count,
             "raw_output": out, "stderr": err})
 
     def _existing_route_gpx_paths(self, product_id=None, serial=None):

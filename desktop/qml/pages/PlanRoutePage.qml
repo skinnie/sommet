@@ -24,6 +24,7 @@ Item {
 
     // --- loaded route + climb colouring -----------------------------------------------
     property string plannedGpx: ""      // the uploaded GPX text; "" = nothing loaded
+    property bool sendPins: false       // "Add direction pins" in the send-to-watch dialog
     property string routeName: ""       // the file's name, for the header + send dialog
     property var coloredSegments: []    // [{color, coords:[[lat,lon],...]}] climb-coloured
     property var legendRows: []         // [{key,label,color,distance_m,ascent_m}]
@@ -505,12 +506,15 @@ Item {
         const label = w ? w.label : qsTr("watch")
         statusMsg = qsTr("Sending to %1…").arg(label)
         const body = { name: (routeName || "Sommet plan").replace(/\.gpx$/i, ""), gpx: plannedGpx, confirm: true }
+        if (sendPins) { body.pins = true; body.reverse = reversed }
         if (w && w.productId >= 0) { body.productId = w.productId; if (w.serial) body.serial = w.serial }
         api("POST", "/api/routes", body,
             function(status, res) {
                 busy = false
                 statusMsg = (res && res.ok)
-                    ? qsTr("Sent to %1 — %2 existing route(s) kept").arg(label).arg(res.routes_kept || 0)
+                    ? (res.pins !== undefined && res.pins !== null
+                       ? qsTr("Sent to %1 with %2 direction pins — %3 existing route(s) kept").arg(label).arg(res.pins).arg(res.routes_kept || 0)
+                       : qsTr("Sent to %1 — %2 existing route(s) kept").arg(label).arg(res.routes_kept || 0))
                     : (res && res.stderr ? res.stderr.trim()
                                          : (res && res.error ? res.error : qsTr("Send failed")))
             })
@@ -644,8 +648,9 @@ Item {
     }
 
     // Garmin eTrex 30/30x/32x: a track has no turn guidance and a route holds only ~50 points, so
-    // build either the full track + named turn/crossing waypoints, or a <=50-point route whose via
-    // points sit at the turns (tools/etrex_export.py). Saved through the same dialog as a day export.
+    // build either the untouched track + direction pins where the route meets itself, or a
+    // <=50-point route whose via points sit at those spots (tools/etrex_export.py, rules in
+    // tools/route_pins.py). Saved through the same dialog as a day export.
     // toDevice: write straight onto the plugged eTrex (Send to…) instead of the save dialog.
     function exportForEtrex(mode, toDevice) {
         if (!plannedGpx) return
@@ -656,7 +661,7 @@ Item {
                 if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("eTrex export failed"); return }
                 var st = res.stats || {}
                 statusMsg = mode === "track"
-                    ? qsTr("eTrex track: %1 turns, %2 crossings marked").arg(st.turns).arg(st.crossings)
+                    ? qsTr("eTrex track: %1 direction pins at %2 junctions").arg(st.pins).arg(st.junctions)
                     : qsTr("eTrex route: %1 via points").arg(st.points_out)
                 if (toDevice) {
                     GarminService.writeGpxToDevice((name + (mode === "track" ? " - track" : " - route"))
@@ -694,7 +699,7 @@ Item {
                          onTriggered: root.wahooMapsForRoute() }
         // eTrex only when one is plugged: a track has no turn guidance and a route holds ~50
         // points, so it gets one of the two eTrex-shaped versions (tools/etrex_export.py).
-        ThemedMenuItem { text: qsTr("eTrex — track + turn & crossing waypoints")
+        ThemedMenuItem { text: qsTr("eTrex — track + direction pins")
                          visible: GarminService.connected && GarminService.hasSdCard
                          onTriggered: root.exportForEtrex("track", true) }
         ThemedMenuItem { text: qsTr("eTrex — route (max 50 via points)")
@@ -1768,6 +1773,22 @@ Item {
                 font.pixelSize: Theme.fontSizeCaption
                 text: (root.routeName || qsTr("route")) + " · " + root.fmtKm(root.summary.distance_m)
                       + " · ↑ " + root.fmtM(root.summary.ascent_m)
+            }
+            // Direction pins (tools/route_pins.py): waypoints like "Left 1.2" where the route
+            // crosses itself, goes out and back, or closes a loop. The watch announces them in
+            // order, so the route has to be followed from its start.
+            RoundedCheckBox {
+                text: qsTr("Add direction pins where the route meets itself")
+                checked: root.sendPins
+                onToggled: root.sendPins = checked
+            }
+            Text {
+                width: parent.width
+                visible: root.sendPins
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeCaption
+                text: qsTr("The watch says “Approaching Left 1.2” before each one, in route order. A SuuntoLink sync removes routes it does not know.")
             }
         }
     }

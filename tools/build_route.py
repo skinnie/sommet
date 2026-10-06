@@ -43,11 +43,19 @@ def route_from_gpx(path, distance, ascent, descent, stamp, max_points=None):
     # The waypoints are the ones of type "Waypoint"; each matches a point of the
     # track, which must survive the simplification.
     forced, tagged = [], []
+    cursor = 0
     for lat, lon, wname, wtype in gpx_waypoints:
         if wtype != "Waypoint":
             continue
-        match = next((i for i, g in enumerate(gpx)
-                      if abs(g[0] - lat) < 1e-7 and abs(g[1] - lon) < 1e-7), None)
+        # Waypoints come in route order, so look forward from the previous match first: on a
+        # loop the last waypoint shares its coordinates with the first point, and a search from
+        # the top would pin it to the start. Falls back to the whole line for an unordered file.
+        hit = lambda i: abs(gpx[i][0] - lat) < 1e-7 and abs(gpx[i][1] - lon) < 1e-7
+        match = next((i for i in range(cursor, len(gpx)) if hit(i)), None)
+        if match is None:
+            match = next((i for i in range(len(gpx)) if hit(i)), None)
+        if match is not None:
+            cursor = match
         if match is None:
             raise ValueError(f"waypoint {wname!r} missing from the track")
         forced.append(match)
