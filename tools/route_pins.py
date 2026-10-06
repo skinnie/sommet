@@ -377,7 +377,7 @@ def ambit_gpx(an: dict, pins: Sequence[dict], name: str) -> str:
 
 
 def build(gpx_text: str, target: str = "etrex", name: Optional[str] = None, reverse: bool = False,
-          ok_pins: bool = True) -> dict:
+          ok_pins: bool = True, plain: bool = False) -> dict:
     """{ok, gpx, stats, pins, events, spikes} or {ok: False, error}."""
     if target not in ("etrex", "ambit"):
         return {"ok": False, "error": "target must be 'etrex' or 'ambit'"}
@@ -390,6 +390,8 @@ def build(gpx_text: str, target: str = "etrex", name: Optional[str] = None, reve
     if reverse:
         pts = list(reversed(pts))
     an = analyze(pts)
+    if plain:  # no pins at all: just the line (and, for the Ambit, its Start/End)
+        an = dict(an, events=[])
     pins = make_pins(an, target, ok_pins)
     if target == "ambit" and len(pins) > AMBIT_MAX_PINS:
         pins = make_pins(an, target, False)  # the OK backups go first
@@ -464,6 +466,8 @@ def _selftest() -> int:
     wn = _NAME.findall(r["gpx"].split("<rte>")[0])[1:]
     assert wn[0].startswith("Start, ") and "End" not in wn, wn
     assert build("<gpx></gpx>")["ok"] is False
+    r = build(_synthetic(TEST_WALK), "ambit", plain=True)
+    assert r["ok"] and [p["name"] for p in r["pins"]] == ["Start", "End"], r["pins"]
     print("route_pins selftest OK")
     return 0
 
@@ -475,6 +479,7 @@ def main(argv=None) -> int:
     ap.add_argument("--name")
     ap.add_argument("--reverse", action="store_true", help="walk the route the other way")
     ap.add_argument("--no-ok", action="store_true", help="leave out the OK backup pins")
+    ap.add_argument("--plain", action="store_true", help="no pins: only the line (Ambit: + Start/End)")
     ap.add_argument("--json", action="store_true", help="print {ok,gpx,stats,pins,events} instead of bare GPX")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
@@ -483,7 +488,7 @@ def main(argv=None) -> int:
     if not args.track:
         ap.error("a GPX file is required")
     raw = open(args.track, "r", encoding="utf-8", errors="replace").read()
-    res = build(raw, args.target, args.name, args.reverse, not args.no_ok)
+    res = build(raw, args.target, args.name, args.reverse, not args.no_ok, args.plain)
     if args.json:
         print(json.dumps(res))
         return 0 if res["ok"] else 2

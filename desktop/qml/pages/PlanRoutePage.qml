@@ -24,7 +24,6 @@ Item {
 
     // --- loaded route + climb colouring -----------------------------------------------
     property string plannedGpx: ""      // the uploaded GPX text; "" = nothing loaded
-    property bool sendPins: false       // "Add direction pins" in the send-to-watch dialog
     property string routeName: ""       // the file's name, for the header + send dialog
     property var coloredSegments: []    // [{color, coords:[[lat,lon],...]}] climb-coloured
     property var legendRows: []         // [{key,label,color,distance_m,ascent_m}]
@@ -506,15 +505,16 @@ Item {
         const label = w ? w.label : qsTr("watch")
         statusMsg = qsTr("Sending to %1…").arg(label)
         const body = { name: (routeName || "Sommet plan").replace(/\.gpx$/i, ""), gpx: plannedGpx, confirm: true }
-        if (sendPins) { body.pins = true; body.reverse = reversed }
         if (w && w.productId >= 0) { body.productId = w.productId; if (w.serial) body.serial = w.serial }
         api("POST", "/api/routes", body,
             function(status, res) {
                 busy = false
                 statusMsg = (res && res.ok)
-                    ? (res.pins !== undefined && res.pins !== null
+                    ? (res.pins > 0
                        ? qsTr("Sent to %1 with %2 direction pins — %3 existing route(s) kept").arg(label).arg(res.pins).arg(res.routes_kept || 0)
-                       : qsTr("Sent to %1 — %2 existing route(s) kept").arg(label).arg(res.routes_kept || 0))
+                       : res.pins_note
+                         ? qsTr("Sent to %1 without direction pins (%2) — %3 existing route(s) kept").arg(label).arg(res.pins_note).arg(res.routes_kept || 0)
+                         : qsTr("Sent to %1 — %2 existing route(s) kept").arg(label).arg(res.routes_kept || 0))
                     : (res && res.stderr ? res.stderr.trim()
                                          : (res && res.error ? res.error : qsTr("Send failed")))
             })
@@ -1774,21 +1774,15 @@ Item {
                 text: (root.routeName || qsTr("route")) + " · " + root.fmtKm(root.summary.distance_m)
                       + " · ↑ " + root.fmtM(root.summary.ascent_m)
             }
-            // Direction pins (tools/route_pins.py): waypoints like "Left 1.2" where the route
-            // crosses itself, goes out and back, or closes a loop. The watch announces them in
-            // order, so the route has to be followed from its start.
-            RoundedCheckBox {
-                text: qsTr("Add direction pins where the route meets itself")
-                checked: root.sendPins
-                onToggled: root.sendPins = checked
-            }
+            // Direction pins are added automatically by the backend (tools/route_pins.py):
+            // waypoints like "Left 1.2" where the route crosses itself, goes out and back, or
+            // closes a loop. The watch announces them in order, from the route's start.
             Text {
                 width: parent.width
-                visible: root.sendPins
                 wrapMode: Text.WordWrap
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeCaption
-                text: qsTr("The watch says “Approaching Left 1.2” before each one, in route order. A SuuntoLink sync removes routes it does not know.")
+                text: qsTr("Direction pins (“Left 1.2”) are added where the route meets itself. The watch announces them in order, so follow the route from its start. A SuuntoLink sync removes routes it does not know.")
             }
         }
     }
