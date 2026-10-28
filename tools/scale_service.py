@@ -112,7 +112,17 @@ def series(height_cm=None, sex=None, offset_pct=0.0, data_dir=None):
 
 
 class ScaleListener:
-    """Runs the passive scanner in its own thread. start()/stop() are safe to call repeatedly."""
+    """Listens for the scale in its own thread. start()/stop() are safe to call repeatedly.
+
+    It scans in short bursts (SCAN_ON_S on, SCAN_OFF_S off) and stays on while the scale is
+    talking. A nonstop scan stopped a Bluetooth mouse from reconnecting on a ThinkPad X230
+    (Broadcom 4.0 chip, BlueZ 5.72), 2026-10-28. Passive scanning would be nicer but needs
+    BlueZ's experimental advertisement monitor. A weigh-in broadcasts for well over SCAN_OFF_S
+    (live weight, impedance, then ~50 final packets over 5 s), so a burst catches its start."""
+
+    SCAN_ON_S = 3.0
+    SCAN_OFF_S = 7.0
+    HOLD_S = 20.0        # keep scanning this long after the last packet from the scale
 
     def __init__(self, data_dir=None):
         self.data_dir = data_dir
@@ -197,8 +207,28 @@ class ScaleListener:
             if res:
                 self.record(res, self.last_seen)
 
-        async with BleakScanner(on_adv):
-            await self._stop.wait()
+        scanner = BleakScanner(on_adv)
+        while not self._stop.is_set():
+            await scanner.start()
+            try:
+                began = time.time()
+                while not self._stop.is_set() and self.keep_scanning(began, time.time()):
+                    await self._wait_stop(0.5)
+            finally:
+                await scanner.stop()
+            await self._wait_stop(self.SCAN_OFF_S)
+
+    def keep_scanning(self, began, now):
+        """Inside a burst: stay on for SCAN_ON_S, and for HOLD_S after the scale's last packet."""
+        if now - began < self.SCAN_ON_S:
+            return True
+        return self.last_seen is not None and now - self.last_seen < self.HOLD_S
+
+    async def _wait_stop(self, seconds):
+        try:
+            await asyncio.wait_for(self._stop.wait(), seconds)
+        except asyncio.TimeoutError:
+            pass
 
     def record(self, res, now=None):
         reading = {"t": int(now or time.time()), "weightKg": res["weight_kg"],
@@ -228,6 +258,11 @@ def find_scales(seconds=15):
 
 
 def selftest():
+    L0 = ScaleListener()
+    assert L0.keep_scanning(100.0, 102.0) and not L0.keep_scanning(100.0, 103.5)   # a burst ends
+    L0.last_seen = 110.0
+    assert L0.keep_scanning(100.0, 125.0)                  # the scale is talking: stay on
+    assert not L0.keep_scanning(100.0, 131.0)              # 20 s quiet: back to bursts
     with tempfile.TemporaryDirectory() as tmp:
         assert load_weighins(tmp) == [] and series(data_dir=tmp) == []
         day = time.mktime((2026, 10, 16, 8, 0, 0, 0, 0, -1))

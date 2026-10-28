@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-10-28: Bluetooth mouse and keyboard keep working next to the scale (desktop 0.2.54)
+
+- **The scale listener scans in bursts** (about 3 s in every 10, nonstop only while the scale is
+  talking). 0.2.53 scanned without a break once a scale was set up, which stopped a Bluetooth
+  mouse from reconnecting on a ThinkPad X230 (Broadcom Bluetooth 4.0, BlueZ 5.72). With the
+  scale and the watch link both on, the mouse now works. README: "Linux: a Bluetooth mouse or
+  keyboard stops working while Sommet runs".
+
+---
+
 ## 2026-10-27: Bluetooth scale, weigh-ins to intervals.icu, sport modes and apps over Bluetooth (desktop 0.2.53)
 
 Checked on André's Ambit3 Peak (fw 2.4.17) over Bluetooth and an Etekcity FIT 8S scale, 2026-10-27.

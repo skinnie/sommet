@@ -263,6 +263,35 @@ pairing. Pair it once more: on the watch **Bluetooth → Unpair → Forget**, in
 Android phones and iPhones send their identity when pairing (seen in Bluetooth captures of the
 Suunto app), so they aren't affected. macOS and Windows haven't been tested with this yet.
 
+### Linux: a Bluetooth mouse or keyboard stops working while Sommet runs
+
+**What you'll see.** With Sommet open and a Bluetooth scale set up (or a watch connected over
+Bluetooth), a Bluetooth mouse or keyboard stops responding or won't reconnect. It comes back
+when Sommet is closed.
+
+**Why.** To hear the scale and to find the watch, Sommet scans for Bluetooth devices. On older
+Bluetooth chips (seen on a ThinkPad X230 with a Broadcom Bluetooth 4.0 chip, BlueZ 5.72), a
+scan that never stops leaves no room for the mouse to reconnect. Sommet 0.2.53 listened for
+the scale without a break.
+
+**Fixed in 0.2.54.** Sommet now scans in short bursts: about 3 seconds in every 10 for the
+scale, and the same for the watch while it isn't connected (none at all once it is). When the
+scale starts talking, Sommet keeps listening until the weigh-in is stored. With both running,
+Bluetooth scans about a third of the time, and the same X230 mouse kept working.
+
+**If it still happens:**
+
+1. Turn the scale off while you don't need it: **Settings → Connections → Bluetooth scale →
+   Manage → Stop listening** (Start listening turns it back on; your weigh-ins are kept).
+2. Turn Bluetooth off in Sommet: **Settings → Experimental features → Bluetooth**. The cable
+   still works for the watch.
+3. If the mouse stays dead after closing Sommet, check nothing is still scanning:
+   `bluetoothctl show | grep Discovering` should say `no`. If it says `yes` with Sommet closed,
+   a Sommet backend may still be running: `pkill -x Sommet` and stop `python3 server.py`, or
+   restart Bluetooth (`sudo systemctl restart bluetooth`).
+4. A newer USB Bluetooth adapter (Bluetooth 5) handles scanning and connections side by side
+   far better than a 4.0 chip.
+
 ### macOS: the "Input Monitoring" permission
 
 On recent macOS, the first time you sync a watch the system may ask you to **allow the app to
