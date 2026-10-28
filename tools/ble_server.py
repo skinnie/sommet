@@ -1168,15 +1168,24 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         glib.timeout_add_seconds(SCAN_ON_S, scan_stop)
 
     def scan_stop():
+        """Stop our scan. `scanning` stays True until BlueZ confirms, so scan_tick retries:
+        a StopDiscovery refused mid-connect used to be taken as done, and the scan then ran
+        for as long as the watch stayed linked (2026-10-28, 19:32 on; a Bluetooth mouse
+        couldn't reconnect meanwhile)."""
         if scanning[0]:
-            scanning[0] = False
             try:
                 adapter_obj.StopDiscovery()
-            except Exception:
-                pass                   # already stopped is fine
+                scanning[0] = False
+            except Exception as exc:
+                if "No discovery started" in str(exc) or "NotReady" in str(exc):
+                    scanning[0] = False    # nothing of ours to stop
+                else:
+                    print(f"  could not stop the scan yet ({exc}) - retrying")
         return False                   # one-shot
 
     def scan_tick():
+        if scanning[0] and (state.path is not None or dialing):
+            scan_stop()                # a stop that failed earlier: try again
         scan_start()
         return True                    # every SCAN_PERIOD_S
 

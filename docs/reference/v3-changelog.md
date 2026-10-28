@@ -11,9 +11,13 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 - **The scale listener scans in bursts** (about 3 s in every 10, nonstop only while the scale is
   talking). 0.2.53 scanned without a break once a scale was set up, which stopped a Bluetooth
-  mouse from reconnecting on a ThinkPad X230 (Broadcom Bluetooth 4.0, BlueZ 5.72). With the
-  scale and the watch link both on, the mouse now works. README: "Linux: a Bluetooth mouse or
-  keyboard stops working while Sommet runs".
+  mouse from reconnecting on a ThinkPad X230 (Broadcom Bluetooth 4.0, BlueZ 5.72).
+- **A scan can't get stuck on any more.** While the watch was connecting, BlueZ sometimes left
+  a scale burst's stop unanswered, or refused the watch link's stop, and the scan then ran for
+  an hour or more. A scale burst now waits at most 5 s and closes its own BlueZ connection
+  (which ends the scan); the watch link retries a refused stop every 10 s, also while linked.
+  Hardware: scale listener and watch link on for 30 min, no stuck scan, mouse working. README:
+  "Linux: a Bluetooth mouse or keyboard stops working while Sommet runs".
 
 ---
 

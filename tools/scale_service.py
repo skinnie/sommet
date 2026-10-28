@@ -123,12 +123,12 @@ class ScaleListener:
     SCAN_ON_S = 3.0
     SCAN_OFF_S = 7.0
     HOLD_S = 20.0        # keep scanning this long after the last packet from the scale
+    BLUEZ_REPLY_S = 5.0  # longest wait for BlueZ to answer a scan start or stop
 
     def __init__(self, data_dir=None):
         self.data_dir = data_dir
         self._thread = None
-        self._loop = None
-        self._stop = None
+        self._stop = threading.Event()
         self._lock = threading.Lock()
         self.error = None
         self.last_seen = None        # time of the last packet from our scale
@@ -168,55 +168,64 @@ class ScaleListener:
                 self.error = "bleak is not installed (pip install bleak)"
                 return
             self.error = None
+            self._stop.clear()
             self._thread = threading.Thread(target=self._run, name="scale-listener", daemon=True)
             self._thread.start()
 
     def stop(self):
         with self._lock:
-            if self._loop and self._stop:
-                self._loop.call_soon_threadsafe(self._stop.set)
+            self._stop.set()
             t = self._thread
         if t:
-            t.join(timeout=5)
+            t.join(timeout=8)
         self._thread = None
 
     def _run(self):
-        try:
-            asyncio.run(self._listen())
-        except Exception as e:           # noqa: BLE001 - surface any Bluetooth failure to the UI
-            self.error = str(e) or e.__class__.__name__
-
-    async def _listen(self):
-        from bleak import BleakScanner
-        self._loop = asyncio.get_running_loop()
-        self._stop = asyncio.Event()
+        """Bursts, each in its own event loop with its own connection to BlueZ, closed after the
+        burst. BlueZ ties a scan to the connection that asked for it: a scan stopped while the
+        watch link was connecting stayed on (17:24 and 17:30, 2026-10-28) until the backend
+        quit and its connection closed. Closing it after every burst ends such a scan at once."""
         settle = etekcity_scale.Settle()
-
-        def on_adv(device, adv):
-            raw = (adv.manufacturer_data or {}).get(etekcity_scale.COMPANY_ID)
-            d = etekcity_scale.decode(raw) if raw is not None else None
-            if d is None:
-                return
-            want = (load_config(self.data_dir).get("address") or "").upper()
-            if want and d["address"] != want:
-                return
-            if not want:                                   # first scale heard becomes THE scale
-                save_config({"address": d["address"]}, self.data_dir)
-            self.last_seen = time.time()
-            res = settle.feed(d, self.last_seen)
-            if res:
-                self.record(res, self.last_seen)
-
-        scanner = BleakScanner(on_adv)
         while not self._stop.is_set():
-            await scanner.start()
             try:
-                began = time.time()
-                while not self._stop.is_set() and self.keep_scanning(began, time.time()):
-                    await self._wait_stop(0.5)
-            finally:
-                await scanner.stop()
-            await self._wait_stop(self.SCAN_OFF_S)
+                asyncio.run(self._burst(settle))
+                self.error = None
+            except Exception as e:       # noqa: BLE001 - shown in the UI; the next burst retries
+                self.error = str(e) or e.__class__.__name__
+            self._stop.wait(self.SCAN_OFF_S)
+
+    def _on_adv(self, settle, adv):
+        raw = (adv.manufacturer_data or {}).get(etekcity_scale.COMPANY_ID)
+        d = etekcity_scale.decode(raw) if raw is not None else None
+        if d is None:
+            return
+        want = (load_config(self.data_dir).get("address") or "").upper()
+        if want and d["address"] != want:
+            return
+        if not want:                                       # first scale heard becomes THE scale
+            save_config({"address": d["address"]}, self.data_dir)
+        self.last_seen = time.time()
+        res = settle.feed(d, self.last_seen)
+        if res:
+            self.record(res, self.last_seen)
+
+    async def _burst(self, settle):
+        from bleak import BleakScanner
+        scanner = BleakScanner(lambda device, adv: self._on_adv(settle, adv))
+        try:
+            # BlueZ can leave a start or stop unanswered while the watch link is connecting
+            # (2026-10-28: a burst hung for over an hour, its scan on all along). Never wait
+            # long, and close the connection anyway: that ends the scan.
+            await asyncio.wait_for(scanner.start(), self.BLUEZ_REPLY_S)
+            began = time.time()
+            while not self._stop.is_set() and self.keep_scanning(began, time.time()):
+                await asyncio.sleep(0.25)
+        finally:
+            try:
+                await asyncio.wait_for(scanner.stop(), self.BLUEZ_REPLY_S)
+            except Exception:            # noqa: BLE001 - not started, or no reply: close anyway
+                pass
+            await close_bluez_connection()
 
     def keep_scanning(self, began, now):
         """Inside a burst: stay on for SCAN_ON_S, and for HOLD_S after the scale's last packet."""
@@ -224,18 +233,28 @@ class ScaleListener:
             return True
         return self.last_seen is not None and now - self.last_seen < self.HOLD_S
 
-    async def _wait_stop(self, seconds):
-        try:
-            await asyncio.wait_for(self._stop.wait(), seconds)
-        except asyncio.TimeoutError:
-            pass
-
     def record(self, res, now=None):
         reading = {"t": int(now or time.time()), "weightKg": res["weight_kg"],
                    "impedanceOhm": res.get("impedance_ohm"), "address": res["address"]}
         append_weighin(reading, self.data_dir)
         self.last_weighin = reading
         return reading
+
+
+async def close_bluez_connection():
+    """Linux: close bleak's D-Bus connection for this event loop, so BlueZ drops any scan it
+    still holds for it. Other systems: nothing to do."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        from bleak.backends.bluezdbus import manager as bluez_manager
+        mgr = bluez_manager._global_instances.pop(asyncio.get_running_loop(), None)
+        bus = getattr(mgr, "_bus", None)
+        if bus is not None:
+            bus.disconnect()
+            await asyncio.wait_for(bus.wait_for_disconnect(), 2)
+    except Exception:                    # noqa: BLE001 - a newer bleak may differ; bursts still end
+        pass
 
 
 def find_scales(seconds=15):
