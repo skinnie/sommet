@@ -7,7 +7,7 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
-## 2026-10-29: Sport-mode edits keep the POIs and survive a restart (desktop, next release)
+## 2026-10-29: Sport-mode edits keep the POIs and survive a restart (desktop 0.2.55)
 
 Found in a desktop audit on 2026-10-29.
 
@@ -33,7 +33,7 @@ Found in a desktop audit on 2026-10-29.
 
 ---
 
-## 2026-10-29: Restore, backups and the rest of the desktop audit (desktop + Android, next release)
+## 2026-10-29: Restore, backups and the rest of the desktop audit (desktop 0.2.55 + Android)
 
 **Backup & Restore**
 - **Restore puts back exactly what the backup holds.** It rebuilt the routes from whatever was
