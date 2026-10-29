@@ -279,9 +279,10 @@ scale, and the same for the watch while it isn't connected (none at all once it 
 scale starts talking, Sommet keeps listening until the weigh-in is stored. Two ways a scan
 could get stuck on are fixed too: while the watch was connecting, Linux's Bluetooth service
 sometimes didn't answer, or refused, Sommet's request to stop scanning, and the scan then ran
-until Sommet quit. Sommet now retries the stop, and drops its connection to the Bluetooth
-service after every scale burst, which ends any scan left behind. With both running, the same
-X230 mouse kept working.
+until Sommet quit. Sommet now drops its connection to the Bluetooth service after every scale
+burst, and the watch scan has a connection of its own that Sommet closes and opens again when
+the service stops answering it. Closing the connection is what ends a stuck scan. With both
+running, the same X230 mouse kept working.
 
 **If it still happens:**
 

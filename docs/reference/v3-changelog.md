@@ -18,6 +18,14 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   (which ends the scan); the watch link retries a refused stop every 10 s, also while linked.
   Hardware: scale listener and watch link on for 30 min, no stuck scan, mouse working. README:
   "Linux: a Bluetooth mouse or keyboard stops working while Sommet runs".
+- **The watch link's scan runs on its own BlueZ connection and is reset when BlueZ stops
+  answering.** Overnight on 2026-10-28 (20:34, no watch linked) a scan start was never
+  answered, BlueZ then refused every stop from the watch link for ten hours, and the mouse
+  stayed dead until Sommet quit. Retrying can't clear that, because BlueZ only lets go when the
+  client leaves the bus. The scan now waits at most 5 s for BlueZ, and after an unanswered start
+  or two refused stops in a row it closes its own connection (the scan ends within a second,
+  checked on the X230) and opens a new one. The watch service stays registered on the main
+  connection.
 
 ---
 

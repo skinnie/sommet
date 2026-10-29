@@ -240,6 +240,81 @@ def test_a_link_bluez_will_not_let_go():
     assert state.stuck is None
 
 
+class FakeAdapter:
+    """BlueZ's adapter as one client sees it: `answers` is what each call does in turn
+    (None = ok, a string = that error)."""
+
+    def __init__(self, log, answers):
+        self.log, self.answers = log, answers
+
+    def _call(self, name):
+        self.log.append(name)
+        answer = self.answers.pop(0) if self.answers else None
+        if answer is not None:
+            raise RuntimeError(answer)
+
+    def SetDiscoveryFilter(self, _filter, timeout=None):  # noqa: N802 - BlueZ's name
+        self.log.append("filter")
+
+    def StartDiscovery(self, timeout=None):  # noqa: N802
+        self._call("start")
+
+    def StopDiscovery(self, timeout=None):  # noqa: N802
+        self._call("stop")
+
+
+def scan_session(*answer_lists):
+    log, lists = [], list(answer_lists)
+
+    def connect():
+        log.append("open")
+        return FakeAdapter(log, lists.pop(0) if lists else []), lambda: log.append("close")
+    return S.ScanSession(connect, {"Transport": "le"}), log
+
+
+def test_a_scan_burst_starts_and_stops():
+    scan, log = scan_session([])
+    scan.start()
+    scan.stop()
+    assert log == ["open", "filter", "start", "stop"] and not scan.scanning and scan.resets == 0
+
+
+def test_one_refused_stop_is_retried():
+    busy = "org.bluez.Error.InProgress: Operation already in progress"
+    scan, log = scan_session([None, busy, None])
+    scan.start()
+    scan.stop()
+    assert scan.scanning and scan.resets == 0
+    scan.stop()
+    assert not scan.scanning and scan.refused == 0 and scan.resets == 0
+
+
+def test_a_scan_bluez_keeps_refusing_to_stop_is_reset():
+    busy = "org.bluez.Error.InProgress: Operation already in progress"
+    scan, log = scan_session([None, busy, busy, busy], [])
+    scan.start()
+    scan.stop()
+    scan.stop()                               # 2026-10-28: refused all night
+    assert scan.resets == 1 and not scan.scanning
+    assert log[-3:] == ["close", "open", "filter"]
+    scan.start()
+    scan.stop()
+    assert log[-2:] == ["start", "stop"] and not scan.scanning
+
+
+def test_an_unanswered_start_resets_at_once():
+    scan, log = scan_session(["org.freedesktop.DBus.Error.NoReply: Did not receive a reply"], [])
+    scan.start()
+    assert scan.resets == 1 and not scan.scanning and log[-3:] == ["close", "open", "filter"]
+
+
+def test_nothing_to_stop_is_stopped():
+    scan, _log = scan_session(["org.bluez.Error.Failed: No discovery started"])
+    scan.scanning = True
+    scan.stop()
+    assert not scan.scanning and scan.resets == 0
+
+
 def test_sync_lock():
     class Fake:
         def __init__(self, held):

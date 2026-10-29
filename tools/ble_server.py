@@ -949,6 +949,92 @@ EMPTY_LINK_CHECK_MS = 1000
 # "Pair with app".
 SCAN_ON_S = 3
 SCAN_PERIOD_S = 10
+BLUEZ_REPLY_S = 5      # a scan call BlueZ has not answered by then is not coming back
+STUCK_STOPS = 2        # refused stops in a row before the scan's connection is reset
+
+
+def _no_reply(exc):
+    name = getattr(exc, "get_dbus_name", lambda: None)() or ""
+    return "NoReply" in name or "NoReply" in str(exc)
+
+
+class ScanSession:
+    """The scan on its own D-Bus connection to BlueZ, so it can be reset alone.
+
+    BlueZ ties a scan to the client that started it, and while one of that client's start or
+    stop requests is unanswered it refuses every later one ("InProgress"). Seen live
+    2026-10-28 20:34: a StartDiscovery never got its answer, every stop after it was refused
+    for ten hours, the scan ran all night and a Bluetooth mouse could not reconnect. Only
+    that client leaving the bus clears it, so the scan runs on a private connection that is
+    closed and opened again when it happens. The watch service on the main connection is
+    left alone. `connect()` returns (adapter interface, close function)."""
+
+    def __init__(self, connect, scan_filter=None):
+        self._connect = connect
+        self._filter = scan_filter
+        self._adapter = None
+        self._close = None
+        self.scanning = False
+        self.refused = 0
+        self.resets = 0
+        self._open()
+
+    def _open(self):
+        try:
+            self._adapter, self._close = self._connect()
+            if self._filter is not None:
+                self._adapter.SetDiscoveryFilter(self._filter, timeout=BLUEZ_REPLY_S)
+        except Exception as exc:
+            print(f"  could not open the scan connection yet: {exc}")
+            self._adapter = None
+
+    def reset(self, why):
+        print(f"  BlueZ stopped answering our scan ({why}) - reconnecting to clear it")
+        try:
+            if self._close is not None:
+                self._close()
+        except Exception:
+            pass
+        self._adapter = self._close = None
+        self.scanning = False
+        self.refused = 0
+        self.resets += 1
+        self._open()
+
+    def start(self):
+        if self._adapter is None:
+            self._open()
+            if self._adapter is None:
+                return
+        try:
+            self._adapter.StartDiscovery(timeout=BLUEZ_REPLY_S)
+        except Exception as exc:
+            if _no_reply(exc):
+                self.reset("no answer to a scan start")
+                return
+            # already running is fine; a refused start is caught by the stop after it
+        self.scanning = True
+
+    def stop(self):
+        if not self.scanning:
+            return
+        if self._adapter is None:
+            self.scanning = False
+            return
+        try:
+            self._adapter.StopDiscovery(timeout=BLUEZ_REPLY_S)
+        except Exception as exc:
+            if "No discovery started" in str(exc) or "NotReady" in str(exc):
+                pass                   # nothing of ours to stop
+            elif _no_reply(exc) or self.refused + 1 >= STUCK_STOPS:
+                self.reset(f"stop refused: {exc}")
+                return
+            else:
+                self.refused += 1
+                print(f"  could not stop the scan yet ({exc}) - retrying")
+                return
+        self.scanning = False
+        self.refused = 0
 
 # A paired watch that drops this soon after connecting, before subscribing, refused this
 # computer's key: BlueZ disconnects ~86 ms in when the watch answers its encryption with "PIN
@@ -1088,7 +1174,6 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
     watch's handshake has completed on this link (a paired watch never subscribes again on a
     reconnect, so subscribing is not the sign).
     """
-    adapter_obj = dbus.Interface(bus.get_object(BLUEZ, adapter), ADAPTER_IFACE)
     seen = set()
     logged_others = set()   # foreign devices already logged once (they advertise many times a second)
     last_attempt_at = {}
@@ -1154,37 +1239,47 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         glib.timeout_add(EMPTY_LINK_CHECK_MS, watch_empty_link, path)
 
     dialing = set()                    # Connect() calls still in flight
-    scanning = [False]
+
+    def connect_scan():
+        conn = dbus.SystemBus(private=True)
+        return dbus.Interface(conn.get_object(BLUEZ, adapter), ADAPTER_IFACE), conn.close
+
+    # The filter is NOT optional, and its absence is the likeliest reason a scan sees
+    # everything except the device you want. With no filter BlueZ applies its own
+    # defaults - which can exclude LE-only advertisers and de-duplicate repeats - so a
+    # watch that btmon shows advertising never reaches a D-Bus client at all. Real miss,
+    # 2026-08-11: btmon captured the Ambit3 advertising the NSP UUID (AD type 0x07) from
+    # 0C:8C:DC:XX:XX:XX while this scan, running at the same time, reported nothing.
+    #
+    # Transport "le" asks for LE advertisements explicitly; DuplicateData keeps repeat
+    # adverts coming (a watch advertises the same payload over and over, and without this
+    # only the first is delivered); the RSSI floor is deliberately at the limit so nothing
+    # is dropped for being faint. BlueZ keeps a filter per client, so it is set on the
+    # scan's own connection (ScanSession).
+    scan = ScanSession(connect_scan, {
+        "Transport": "le",
+        "DuplicateData": dbus.Boolean(True),
+        "RSSI": dbus.Int16(-127),
+    })
 
     def scan_start():
         """One burst (SCAN_ON_S), skipped while a watch is linked or being dialed."""
         if state.path is not None or dialing:
             return
-        try:
-            adapter_obj.StartDiscovery()
-        except Exception:
-            pass                       # already running is fine
-        scanning[0] = True
+        scan.start()
         glib.timeout_add_seconds(SCAN_ON_S, scan_stop)
 
     def scan_stop():
         """Stop our scan. `scanning` stays True until BlueZ confirms, so scan_tick retries:
         a StopDiscovery refused mid-connect used to be taken as done, and the scan then ran
         for as long as the watch stayed linked (2026-10-28, 19:32 on; a Bluetooth mouse
-        couldn't reconnect meanwhile)."""
-        if scanning[0]:
-            try:
-                adapter_obj.StopDiscovery()
-                scanning[0] = False
-            except Exception as exc:
-                if "No discovery started" in str(exc) or "NotReady" in str(exc):
-                    scanning[0] = False    # nothing of ours to stop
-                else:
-                    print(f"  could not stop the scan yet ({exc}) - retrying")
+        couldn't reconnect meanwhile). Refused twice in a row, the scan's connection is reset
+        (ScanSession)."""
+        scan.stop()
         return False                   # one-shot
 
     def scan_tick():
-        if scanning[0] and (state.path is not None or dialing):
+        if scan.scanning and (state.path is not None or dialing):
             scan_stop()                # a stop that failed earlier: try again
         scan_start()
         return True                    # every SCAN_PERIOD_S
@@ -1299,7 +1394,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         # fight for the same radio, and BlueZ resolves it by aborting the connection -
         # "le-connection-abort-by-local", which reads like a refusal by the watch and is
         # really our own scan getting in the way.
-        scanning[0] = True             # stop it even mid-burst, or if another path started it
+        scan.scanning = True           # stop it even mid-burst, or if another path started it
         scan_stop()
         # If the watch already has a link to us there is nothing to initiate - it connects in
         # on its own, and our outbound attempt is at best redundant ("Operation already in
@@ -1406,27 +1501,8 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
             continue                   # remembered, not paired, not advertising
         consider(path, ifaces)
 
-    try:
-        # The filter is NOT optional, and its absence is the likeliest reason a scan sees
-        # everything except the device you want. With no filter BlueZ applies its own
-        # defaults - which can exclude LE-only advertisers and de-duplicate repeats - so a
-        # watch that btmon shows advertising never reaches a D-Bus client at all. Real miss,
-        # 2026-08-11: btmon captured the Ambit3 advertising the NSP UUID (AD type 0x07) from
-        # 0C:8C:DC:XX:XX:XX while this scan, running at the same time, reported nothing.
-        #
-        # Transport "le" asks for LE advertisements explicitly; DuplicateData keeps repeat
-        # adverts coming (a watch advertises the same payload over and over, and without this
-        # only the first is delivered); the RSSI floor is deliberately at the limit so nothing
-        # is dropped for being faint.
-        adapter_obj.SetDiscoveryFilter({
-            "Transport": "le",
-            "DuplicateData": dbus.Boolean(True),
-            "RSSI": dbus.Int16(-127),
-        })
-        print(f"  scanning for the watch in bursts ({SCAN_ON_S} s every {SCAN_PERIOD_S} s, "
-              "LE transport, duplicates on), none while a watch is linked")
-    except Exception as exc:
-        print(f"  could not set the discovery filter: {exc}")
+    print(f"  scanning for the watch in bursts ({SCAN_ON_S} s every {SCAN_PERIOD_S} s, "
+          "LE transport, duplicates on), none while a watch is linked")
     scan_start()
     glib.timeout_add_seconds(SCAN_PERIOD_S, scan_tick)
 
