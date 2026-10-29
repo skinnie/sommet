@@ -13,8 +13,11 @@ Item {
 
     readonly property var readiness: CoachService.readiness
     readonly property string light: readiness.light || "green"
+    // "none" = no activities stored yet, so no verdict (desktop audit 2026-10-29: an empty
+    // history read as "Fresh, go hard").
     readonly property color lightColor:
-        light === "green" ? Theme.success
+        light === "none" ? Theme.mutedText
+        : light === "green" ? Theme.success
         : light === "tempered" ? "#8FA33B"
         : light === "yellow" ? Theme.warning
         : Theme.error
@@ -61,7 +64,8 @@ Item {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: root.light === "green" ? qsTr("Fresh")
+                        text: root.light === "none" ? qsTr("No data yet")
+                            : root.light === "green" ? qsTr("Fresh")
                             : root.light === "tempered" ? qsTr("Fresh, ease in")
                             : root.light === "yellow" ? qsTr("Some fatigue")
                             : qsTr("Deep fatigue")

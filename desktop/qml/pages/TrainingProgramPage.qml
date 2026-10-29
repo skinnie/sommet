@@ -1394,8 +1394,12 @@ Item {
                     visible: editor.swim === "pool"
                     width: 70
                     text: String(editor.poolLength)
-                    validator: DoubleValidator { bottom: 1 }
-                    onTextEdited: editor.setPoolLength(Number(text))
+                    // "," or "." as the decimal separator (a French/Portuguese system types "33,3").
+                    validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
+                    onTextEdited: {
+                        const v = WatchUnits.parseDecimal(text)
+                        if (v >= 1) editor.setPoolLength(v)
+                    }
                 }
                 Item { visible: editor.swim === "pool"; width: Theme.spacingMedium; height: 1 }
                 Text {
@@ -1481,9 +1485,10 @@ Item {
                                      && stepRow.modelData.durationKind !== "lap"
                             width: parent.width * 0.1
                             text: String(stepRow.modelData.durationValue)
-                            validator: DoubleValidator { bottom: 0 }
+                            // Up to 3 decimals: a distance in km to the metre.
+                            validator: RegularExpressionValidator { regularExpression: /^\d{0,6}([.,]\d{0,3})?$/ }
                             onTextEdited: editor.mutate(stepRow.index,
-                                                        { durationValue: Number(text) })
+                                                        { durationValue: WatchUnits.parseDecimal(text) || 0 })
                         }
                         RoundedTextField {
                             visible: stepRow.modelData.stepType === "repeatStart"
@@ -1509,9 +1514,9 @@ Item {
                             // Empty (not "0") until set, so the "min"/"max" hints show.
                             text: stepRow.modelData.targetMin ? String(stepRow.modelData.targetMin) : ""
                             placeholderText: qsTr("min")
-                            validator: DoubleValidator { bottom: 0 }
+                            validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
                             onTextEdited: editor.mutate(stepRow.index,
-                                                        { targetMin: Number(text) })
+                                                        { targetMin: WatchUnits.parseDecimal(text) || 0 })
                         }
                         Text {
                             visible: !stepRow.isRepeat
@@ -1526,9 +1531,9 @@ Item {
                             width: parent.width * 0.08
                             text: stepRow.modelData.targetMax ? String(stepRow.modelData.targetMax) : ""
                             placeholderText: qsTr("max")
-                            validator: DoubleValidator { bottom: 0 }
+                            validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
                             onTextEdited: editor.mutate(stepRow.index,
-                                                        { targetMax: Number(text) })
+                                                        { targetMax: WatchUnits.parseDecimal(text) || 0 })
                         }
                         Icon {
                             anchors.verticalCenter: parent.verticalCenter

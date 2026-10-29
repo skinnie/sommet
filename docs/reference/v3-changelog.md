@@ -7,6 +7,92 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-10-29: Sport-mode edits keep the POIs and survive a restart (desktop, next release)
+
+Found in a desktop audit on 2026-10-29.
+
+- **Editing a sport mode no longer erases the watch's POIs.** Rename, Autolap, HR limits,
+  interval timer, display edits and creating or deleting a mode all sent 0x0b04 after writing
+  the sport modes. SuuntoLink never sends it there, and on its own 0x0b04 empties both POI
+  lists (Autolap Set erased 9 POIs in the audit). `send_plan` now refuses 0x0b04 after an Apps
+  or CustomModes write.
+- **Rename, Autolap, HR limits, display field and interval timer write only the used part of
+  the sport modes.** They wrote the whole 12 KB region, so the closing hash covered the padding:
+  the hash the watch rejects after a restart (err:62, then factory sport modes - Finding 28 and
+  the 2026-09-26 reset). The last-gate check missed them because they label the region
+  "CustomModes (...)"; it now matches the label by prefix.
+- **Set and Rename use what you typed.** Clicking the button took focus from the box, the box
+  went back to the watch's value first, so Rename did nothing and Set wrote the old value. A
+  box now keeps a typed value until the app re-reads the watch or another mode is picked. The
+  interval timer no longer loses High when you move on to Low.
+- Tests: `tools/test_sport_mode_writes.py` runs all six editors against a fake watch (used
+  extent only, its hash, no 0x0b04). Android was not affected: its writer already sends the used
+  extent and no 0x0b04.
+- Hardware, Ambit3 Peak (USB): Autolap on two modes and a rename, each changed and put back.
+  The 8 POIs stayed and the watch reported the used-extent hash after every write.
+
+---
+
+## 2026-10-29: Restore, backups and the rest of the desktop audit (desktop + Android, next release)
+
+**Backup & Restore**
+- **Restore puts back exactly what the backup holds.** It rebuilt the routes from whatever was
+  left in the saved region, so a route removed before the backup came back, and it kept the
+  POIs the watch held at restore time. It now sends the routes the backup's own header lists
+  (through the proven route writer) and the backup's POIs. A backup now saves the POI list as
+  read (`-pois.bin`); older backups use the list in their `-sync.json`, and a backup with
+  neither leaves the watch's POIs alone and says so. A cut-short or corrupt backup is refused
+  before anything is sent (file sizes and the route CRC). The old leftover recovery stays as
+  `write_nav.py restore PREFIX --from-leftovers`. Tests: `tools/test_backup_restore.py`.
+- **Restore asks first** ("The watch's routes and POIs are replaced by this backup's: 1 route
+  (…) and 8 POIs"), shows "Working…", and reports one plain line under the backup instead of
+  the tool's log. If the watch part fails, Ember data is not restored either.
+- **Backup page:** each card has its own "Create backup now" and "Save … to a folder"; the
+  separate "Backup database to folder" card (which saved the watch, not the database) is gone,
+  its button and cloud hint now sit in the Backup & Restore, Ambit1/2 and Kailash cards (🟣87).
+  "Open backup folder" is no longer cut off. The description says what a backup really holds
+  (no more "Profiles are future").
+- **The app-data backup includes weigh-ins**, typed-in and from a Bluetooth scale.
+- **Pre-write backups go to `~/AmbitAppBackups`, named per watch.** The workout installer,
+  intervals workouts, plan sync, Apps/CustomModes recovery and the Ambit1/2 route sender saved
+  them next to the program (temporary or read-only in the packaged app), in a relative folder,
+  or in a path hard-coded to one computer.
+
+**Watch writes**
+- **Plugging in no longer rewrites the workouts and Today cards when the plan hasn't
+  changed.** Apps and TrainingProgram are skipped when the watch reports the hash of exactly
+  what would be written and holds the same bytes; any doubt still writes (USB and Bluetooth).
+
+**Activities, routes, Coach**
+- **An exported FIT carries the move's climb.** Ascent and descent went into session fields
+  25/26 (first lap index, number of laps) instead of 22/23, so other apps read 0 m. Fixed in the
+  desktop, Android native and iOS writers. Tests: `tools/test_fit_ascent.py`.
+- **A route shows one climb and one name everywhere.** The planner, the route library and the
+  watch use the same rule (`route_elevation_m`, SuuntoLink's); days of a split route add up to
+  the total; the GPX's own name is used, not the file name. Android counts the same way now
+  (`RouteClimb.ts`): it rounded to nearest and lost the rise across a point without altitude, and
+  that number is what it writes to the watch. Tests: `tools/test_route_climb_agree.py`,
+  `RouteClimb.test.ts`.
+- **With no watch, Activities shows what's saved right away** instead of "reading off the watch"
+  for seconds and ending on an error.
+- **"Recorded on" shows the watch's name**, not its serial.
+- **Coach says there isn't enough data yet** instead of "fully rested, go hard" when nothing is
+  stored (Android already did).
+- **Numbers take a comma or a dot.** On a French or Portuguese system (LC_NUMERIC) a typed "."
+  was dropped, so Autolap "2.50" was sent as 250 km and nothing was written, and "72,5" read as
+  72. Every typed decimal (Autolap, interval distances, weight, POI and home coordinates, watch
+  settings, plans, gear, race plan, Magene autolap) now takes either (`WatchUnits.parseDecimal`).
+  Found in the post-build check on André's own locale.
+- **A failed sport-mode change says so.** The re-read after every write hid the write's error;
+  Autolap beyond what the watch holds (65.53 km) is refused on the page, and the field writer
+  refuses a value it can't store before opening the watch instead of crashing after the read.
+- **Small UI fixes:** the route weather chart writes 12°/11° (it read like a date); the HR limits
+  switch says "Use HR limits" (a fixed "enabled" showed while it was off); activity maps no
+  longer fetch open-ocean tiles at 0,0 before the track loads; dialogs no longer log binding
+  loops.
+
+---
+
 ## 2026-10-28: Bluetooth mouse and keyboard keep working next to the scale (desktop 0.2.54)
 
 - **The scale listener scans in bursts** (about 3 s in every 10, nonstop only while the scale is

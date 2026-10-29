@@ -55,6 +55,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import re
 import struct
@@ -68,6 +69,7 @@ import guided_workout as GW
 import iamrule_code as IC
 import training_plan as TP
 import workout_install as WI
+from training_program import watch_holds
 from ambit_pcap import FlashImage
 from write_nav import CMD_DEVICE_INFO, Link, read_flash, read_memory_map, send_plan
 
@@ -200,6 +202,18 @@ def rebuild_apps_region(raw_blocks):
 # at sync, so there is nothing on the watch to compare with; the sync remembers a fingerprint of
 # what it installed and reinstalls a kept label whose plan workout no longer matches it.
 INSTALLED_DIR = pathlib.Path.home() / "AmbitAppBackups" / "calendar"
+# Pre-write copies of the regions a sync or remove rewrites: the folder the sport-mode editors
+# use. Never next to this file: in the packaged app that is a temporary or read-only folder.
+BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "custom_modes"
+
+
+def backup_path(kind, serial=None):
+    """BACKUP_DIR/<kind>_<serial>_<time>.bin, the serial telling two watches' copies apart
+    (AMBIT_SERIAL, which the backend sets, when the watch's own answer is missing)."""
+    serial = serial or os.environ.get("AMBIT_SERIAL") or ""
+    tag = "_" + re.sub(r"[^A-Za-z0-9]", "_", serial) if serial else ""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    return BACKUP_DIR / f"{kind}{tag}_{time.strftime('%Y%m%d-%H%M%S')}.bin"
 
 
 def workout_fingerprint(workout, lang):
@@ -480,12 +494,16 @@ def sync(link, plan, today, write, json_out, auto_start=None):
         print(json.dumps(result) if json_out else f"  !! {result['error']}")
         return result
 
+    # The plug-in sync runs on every connection: an Apps region the watch already holds (same
+    # bytes, and the hash it reports is theirs) is not written again (desktop audit 2026-10-29).
+    apps_unchanged = watch_holds(link, "Apps", apps_base, new_apps_bytes, current=current_apps)
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],
               "waiting": waiting, "menuMax": GW.WORKOUT_MENU_MAX,
               "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes),
               "repaired": [n for n, _ in restamped], "autoStart": auto,
-              "dateGated": gated, "edited": [n for n in edited if n in added_names]}
+              "dateGated": gated, "edited": [n for n in edited if n in added_names],
+              "unchanged": apps_unchanged and new_cm_bytes is None}
 
     if not json_out:
         print(f"sync as of {today}:")
@@ -509,6 +527,8 @@ def sync(link, plan, today, write, json_out, auto_start=None):
             print(f"  reinstalled after an edit: {result['edited']}")
         if not removed and not added_names and not modes_touched and not failed and not restamped:
             print("  nothing to do — watch already matches the plan")
+        if result["unchanged"]:
+            print("  already up to date: nothing will be written")
 
     if not write:
         result["written"] = False
@@ -518,16 +538,16 @@ def sync(link, plan, today, write, json_out, auto_start=None):
             print("dry-run: pass --write to apply")
         return result
 
-    import pathlib
-    # Next to this file, not the working directory: the desktop backend also runs sync()
-    # in its own process for Bluetooth (training-calendar/04), where the cwd is not tools/.
-    backup = str(pathlib.Path(__file__).resolve().parent / "backups"
-                 / f"CustomModes_pre_calendar_{int(time.time())}.bin")
-    pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
-    pathlib.Path(backup).write_bytes(current_cm)
-    writes = [("Apps", apps_base, new_apps_bytes)]
+    writes = [] if apps_unchanged else [("Apps", apps_base, new_apps_bytes)]
     if new_cm_bytes is not None:
         writes.append(("CustomModes", cm_base, new_cm_bytes))
+    backup = None
+    if writes:
+        # A restore point for the sport modes, in ~/AmbitAppBackups (not next to this file:
+        # the backend also runs sync() in its own process for Bluetooth, and a packaged app's
+        # program folder is temporary or read-only).
+        backup = str(backup_path("CustomModes_pre_calendar", serial))
+        pathlib.Path(backup).write_bytes(current_cm)
     for name, base, blob in writes:
         fi = FlashImage(); fi.write(base, blob)
         send_plan(link, fi, [(name, base, blob), ("t", base, None)], commit=False)
@@ -545,7 +565,7 @@ def sync(link, plan, today, write, json_out, auto_start=None):
                                 "previous sport modes (workouts were installed, auto-start was not)")
             print(json.dumps(result) if json_out else f"  !! {result['error']}")
             return result
-    result["written"] = True
+    result["written"] = bool(writes)
     # Remember what is on the watch now: new installs get their workout's fingerprint, the
     # rest keep theirs (one never recorded gets the plan's - see edited_labels).
     on_watch = {e["name"] for e in apps.decode(new_apps_bytes) if is_managed(e["name"])}
@@ -560,8 +580,10 @@ def sync(link, plan, today, write, json_out, auto_start=None):
     result["backup"] = backup
     if json_out:
         print(json.dumps(result))
-    else:
+    elif writes:
         print(f"  written. CustomModes backed up -> {backup}")
+    else:
+        print("  already up to date: nothing written")
     return result
 
 
@@ -586,10 +608,8 @@ def remove(link, name, write, json_out):
     result = {"ok": True, "removed": [name], "appsBytes": len(new_apps_bytes), "written": False}
     result["remaining"] = [e["name"] for e in apps.decode(new_apps_bytes)]
     if write:
-        import pathlib
-        backup = f"backups/Apps_pre_remove_{int(time.time())}.bin"
-        pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
-        open(backup, "wb").write(current_apps)
+        backup = str(backup_path("Apps_pre_remove", watch_serial(link)))
+        pathlib.Path(backup).write_bytes(bytes(current_apps))
         result["backup"] = backup
         fi = FlashImage(); fi.write(apps_base, new_apps_bytes)
         send_plan(link, fi, [("Apps", apps_base, new_apps_bytes), ("t", apps_base, None)],

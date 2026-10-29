@@ -119,18 +119,33 @@ Item {
         persist()
     }
 
+    // Climbed since the start at distance d: the profile's asc_m (the full track, the same rule
+    // as the route total), so the days add up to the Ascent shown above. Null for a profile
+    // computed before asc_m existed.
+    function ascentAt(d) {
+        if (profileRows.length === 0 || profileRows[0].asc_m === undefined) return null
+        if (d >= routeLenM) return summary.ascent_m || 0
+        var a = 0
+        for (var j = 0; j < profileRows.length && profileRows[j].dist_m <= d; j++) a = profileRows[j].asc_m
+        return a
+    }
     readonly property var stages: {
         if (numDays < 2 || routeLenM <= 0 || profileRows.length < 2 || dayBounds.length !== numDays - 1) return []
         var edges = [0].concat(dayBounds).concat([routeLenM])
-        var out = [], pace = parseFloat(paceText) || 20
+        var out = [], pace = WatchUnits.parseDecimal(paceText) || 20
         for (var i = 0; i < numDays; i++) {
             var sm = edges[i], em = edges[i + 1]
             var asc = 0, prev = null
-            for (var j = 0; j < profileRows.length; j++) {
-                var r = profileRows[j]
-                if (r.ele_m === null || r.dist_m < sm || r.dist_m > em) continue
-                if (prev !== null && r.ele_m > prev) asc += r.ele_m - prev
-                prev = r.ele_m
+            var a0 = ascentAt(sm), a1 = ascentAt(em)
+            if (a0 !== null && a1 !== null) {
+                asc = a1 - a0
+            } else {
+                for (var j = 0; j < profileRows.length; j++) {
+                    var r = profileRows[j]
+                    if (r.ele_m === null || r.dist_m < sm || r.dist_m > em) continue
+                    if (prev !== null && r.ele_m > prev) asc += r.ele_m - prev
+                    prev = r.ele_m
+                }
             }
             out.push({ index: i, startFrac: sm / routeLenM, endFrac: em / routeLenM,
                        startKm: sm / 1000, endKm: em / 1000, distKm: (em - sm) / 1000,
@@ -222,8 +237,7 @@ Item {
             statusMsg = qsTr("Couldn't read that file")
             return
         }
-        var s = fileUrl.toString()
-        openRoute(decodeURIComponent(s.substring(s.lastIndexOf("/") + 1)), gpx)
+        openRoute(PlanStore.routeNameOf(gpx, fileUrl), gpx)
         api("POST", "/api/library/save", { name: routeName.replace(/\.gpx$/i, ""), gpx: gpx },
             function(status, res) { if (res && res.ok) root.libraryId = res.id })
     }
@@ -415,7 +429,7 @@ Item {
         PlanStore.poiCarryL = carryL.text
         var p = PlanStore.pois
         if (!p || !p.categories || !p.categories.water) return
-        var rate = parseFloat(waterRate.text) || 2.0, carry = parseFloat(carryL.text) || 1.5
+        var rate = WatchUnits.parseDecimal(waterRate.text) || 2.0, carry = WatchUnits.parseDecimal(carryL.text) || 1.5
         var np = JSON.parse(JSON.stringify(p))
         var w = np.categories.water
         w.longest_gap_litres = Math.round(rate * w.longest_gap_km / 10) / 10
@@ -447,7 +461,7 @@ Item {
 
     function forecastWeather() {
         if (!plannedGpx) { statusMsg = qsTr("Upload a GPX first"); return }
-        var pace = parseFloat(paceText)
+        var pace = WatchUnits.parseDecimal(paceText)
         if (!(pace > 0)) { statusMsg = qsTr("Enter a pace in km/h"); return }
         var body = { gpx: plannedGpx, reverse: reversed, start: startTime, pace: pace,
                      tz: -(new Date().getTimezoneOffset()) / 60 }
@@ -1040,9 +1054,9 @@ Item {
                             width: parent.width; wrapMode: Text.WordWrap
                             readonly property var w: (PlanStore.pois && PlanStore.pois.categories)
                                                      ? PlanStore.pois.categories.water : null
-                            readonly property real need: w ? Math.round((parseFloat(waterRate.text) || 2.0)
+                            readonly property real need: w ? Math.round((WatchUnits.parseDecimal(waterRate.text) || 2.0)
                                                                         * w.longest_gap_km / 10) / 10 : 0
-                            readonly property real carry: parseFloat(carryL.text) || 1.5
+                            readonly property real carry: WatchUnits.parseDecimal(carryL.text) || 1.5
                             visible: w !== null
                             text: !w ? "" : (need > carry
                                 ? qsTr("⚠ Your longest stretch with no refill (%1 km, after km %2) needs about %3 L — more than the %4 L you carry. Top up before it.")
@@ -1489,14 +1503,18 @@ Item {
                                 ctx.stroke()
 
                                 // temp/feels numbers at several evenly-spaced points, in a compact
-                                // "temp/feels" form (e.g. 21/22) - the legend explains the format
-                                // (André, 2026-09-02: "put like 21/22 and put it in a legend").
+                                // "temp/feels" form (e.g. 21°/22°) - the legend explains the format
+                                // (André, 2026-09-02: "put like 21/22 and put it in a legend"). The °
+                                // signs, as on the map and the stop list: a bare "12/11" read as a
+                                // date (audit 2026-10-29).
                                 ctx.font = "bold 10px sans-serif"; ctx.fillStyle = Theme.text; ctx.textAlign = "center"
                                 var nLab = Math.min(6, vis.length)
                                 for (s = 0; s < nLab; s++) {
                                     var rr = vis[Math.round(s * (vis.length - 1) / Math.max(1, nLab - 1))]
-                                    var lx = Math.max(mL + 14, Math.min(mL + pW - 14, X(rr.dist_m)))
-                                    ctx.fillText(Math.round(rr.temp_c) + "/" + Math.round(rr.feels_c), lx, Yt(rr.temp_c) - 6)
+                                    var tLab = Math.round(rr.temp_c) + "°/" + Math.round(rr.feels_c) + "°"
+                                    var labHalf = Math.max(14, ctx.measureText(tLab).width / 2 + 1)
+                                    var lx = Math.max(mL + labHalf, Math.min(mL + pW - labHalf, X(rr.dist_m)))
+                                    ctx.fillText(tLab, lx, Yt(rr.temp_c) - 6)
                                 }
 
                                 // wind strip (sampled across the window)

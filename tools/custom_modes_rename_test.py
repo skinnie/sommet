@@ -2,8 +2,8 @@
 """Real-hardware test: the first actual CONTENT edit written into CustomModes, not just the
 identical-content no-op custom_modes_writeback_test.py already confirmed working
 (2026-08-07 - see that file's own docstring and V3_CHANGELOG.md). Everything about the
-transport here is unchanged from that confirmed-working test (write_nav.py's own send_plan:
-CMD_DATA_WRITE chunks + CMD_DATA_TAIL padded-region SHA256 + CMD_NAV_COMMIT) - the only new
+transport here is write_nav.py's own send_plan: CMD_DATA_WRITE chunks of the used extent +
+CMD_DATA_TAIL with its SHA256, no CMD_NAV_COMMIT (fixed 2026-10-29) - the only new
 thing is that the bytes being written differ from what was just read, by exactly one
 field's worth.
 
@@ -194,26 +194,29 @@ def main():
     backup_path.write_bytes(fresh)
     out(f"Backup written to {backup_path}")
 
+    # Only the used extent, hashed as written, and no 0x0b04: a padded region gets a hash the
+    # watch rejects after a restart (err:62), and 0x0b04 empties its POI lists.
+    payload = bytes(modified[:CM.used_extent(modified)])
     flash = FlashImage()
-    flash.write(F.CUSTOM_MODES_BASE, bytes(modified))
+    flash.write(F.CUSTOM_MODES_BASE, payload)
     layout = [(f"CustomModes (rename {args.from_name!r} -> {args.to_name!r})",
-               F.CUSTOM_MODES_BASE, bytes(modified)),
+               F.CUSTOM_MODES_BASE, payload),
               ("tail", F.CUSTOM_MODES_BASE, None)]
 
-    out("Writing modified content + CMD_DATA_TAIL (padded-region SHA256) + CMD_NAV_COMMIT...")
-    send_plan(link, flash, layout, commit=True)
+    out(f"Writing the used extent ({len(payload)} bytes) + CMD_DATA_TAIL (its SHA256)...")
+    send_plan(link, flash, layout, commit=False)
     out("  send_plan returned without raising - no protocol-level rejection seen")
 
     out("Reading CustomModes back to verify...")
-    after = read_flash(link, F.CUSTOM_MODES_BASE, F.CUSTOM_MODES_REGION_SIZE, label="CustomModes")
+    after = read_flash(link, F.CUSTOM_MODES_BASE, len(payload), label="CustomModes")
 
-    if bytes(after) == bytes(modified):
+    if bytes(after) == payload:
         out(f"\nSUCCESS: region read back byte-for-byte matching the intended edit.")
         out(f"PLEASE CHECK THE WATCH NOW: {args.from_name!r} should now show as {args.to_name!r}")
         return finish({"ok": True, "dryRun": False, "from": args.from_name, "to": args.to_name,
                         "offsets": offsets, "bytesChanged": changed}, 0)
     else:
-        diffs = sum(1 for a, b in zip(after, modified) if a != b)
+        diffs = sum(1 for a, b in zip(after, payload) if a != b)
         out(f"\nMISMATCH: {diffs} bytes differ from what was intended.")
         mismatch_path = BACKUP_DIR / f"after_rename_{stamp}.bin"
         mismatch_path.write_bytes(after)

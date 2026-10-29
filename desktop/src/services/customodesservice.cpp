@@ -29,6 +29,7 @@ void CustomModesService::setLoading(bool value)
 void CustomModesService::setLastError(const QString &message)
 {
     m_lastError = message;
+    m_lastErrorFromRead = false;
     emit lastErrorChanged();
 }
 
@@ -58,9 +59,12 @@ void CustomModesService::refresh()
                 : QStringLiteral("%1")
                     .arg(obj.value(QStringLiteral("error")).toString(
                         obj.value(QStringLiteral("stderr")).toString())));
+            m_lastErrorFromRead = true;
             emit modesChanged();
             return;
         }
+        if (m_lastErrorFromRead)
+            setLastError(QString());
 
         QVariantList modes;
         for (const auto &m : obj.value(QStringLiteral("exerciseModes")).toArray()) {

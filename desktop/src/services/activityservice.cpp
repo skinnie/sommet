@@ -259,6 +259,20 @@ void ActivityService::refreshAllWatches()
         const auto root = netOk ? QJsonDocument::fromJson(reply->readAll()).object()
                                 : QJsonObject{};
         const auto watches = root.value(QStringLiteral("watches")).toArray();
+        // No watch at all - nothing on the cable, no Bluetooth link, not Testing mode: there is
+        // nothing to read, so show what's saved straight away. Asking the backend anyway took
+        // seconds and ended in an error a new user without a watch could do nothing about
+        // (desktop audit 2026-10-29).
+        if (netOk && root.value(QStringLiteral("ok")).toBool() && watches.isEmpty()
+            && root.contains(QStringLiteral("readsWithoutUsb"))
+            && !root.value(QStringLiteral("readsWithoutUsb")).toBool()) {
+            if (m_activities.isEmpty())
+                dbLoadAll();
+            m_ok = true;                     // no watch is not a failure to load
+            setLoading(false);
+            emit activitiesChanged();
+            return;
+        }
         if (!netOk || !root.value(QStringLiteral("ok")).toBool() || watches.isEmpty()) {
             // No enumerable USB watches (BLE handshake, no watch, or backend error): keep the
             // original single-read behaviour, which also covers the BLE path server-side.

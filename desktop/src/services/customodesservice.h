@@ -166,6 +166,9 @@ private:
     bool m_loading = false;
     bool m_ok = false;
     QString m_lastError;
+    // The error came from a read: the next good read clears it. A write's error stays until
+    // the next write, so the re-read every write ends with can't hide it.
+    bool m_lastErrorFromRead = false;
     QVariantList m_modes;
     QVariantList m_multisportModes;
     QVariantList m_fieldTypes;

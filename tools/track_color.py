@@ -27,9 +27,11 @@ hill with no data downloaded.
 """
 
 import argparse
+import bisect
 import json
 import sys
 
+import ambit_format
 import geo_util
 
 # Ordered low->high by upper bound. `upper` is the exclusive top of the band in percent;
@@ -112,6 +114,19 @@ def _windowed_gradient(eles, ds, window_m):
     return grads
 
 
+def _cumulative_ascent(pts):
+    """Ascent climbed up to each original point, by the same rule as the route total
+    (ambit_format.route_elevation_m: every rise between points that have an altitude)."""
+    out, up, prev = [], 0.0, None
+    for p in pts:
+        if p["ele"] is not None:
+            if prev is not None and p["ele"] > prev:
+                up += p["ele"] - prev
+            prev = p["ele"]
+        out.append(up)
+    return out
+
+
 def colorize(points, step_m=30.0, window_m=100.0, buckets=None, hgt_dir=None):
     """Track points [{'lat','lon','ele'?}] -> a dict of coloured segments, legend, elevation
     profile and summary. `step_m` is the resample spacing, `window_m` the gradient smoothing
@@ -135,15 +150,20 @@ def colorize(points, step_m=30.0, window_m=100.0, buckets=None, hgt_dir=None):
 
     lats, lons, eles, ds = _resample(pts, dists, step_m)
     grads = _windowed_gradient(eles, ds, window_m)
+    cum_up = _cumulative_ascent(pts)
 
     # elevation profile series (one entry per resampled sample), coloured the same way
     profile = []
     for i in range(len(ds)):
         g = grads[i]
         color = UNKNOWN_COLOR if g is None else classify(g, buckets)["color"]
+        # asc_m: climbed since the start, on the full track (so a day's climb, end minus
+        # start, adds up to the route total)
+        j = max(0, bisect.bisect_right(dists, ds[i] + 1e-6) - 1)
         profile.append({"dist_m": round(ds[i], 1),
                         "ele_m": None if eles[i] is None else round(eles[i], 1),
                         "grad_pct": None if g is None else round(g, 1),
+                        "asc_m": round(cum_up[j], 1),
                         "color": color})
 
     # merge consecutive same-bucket samples into drawable polyline segments
@@ -174,14 +194,12 @@ def colorize(points, step_m=30.0, window_m=100.0, buckets=None, hgt_dir=None):
     if cur is not None:
         segments.append(_finish_segment(cur))
 
-    # totals
-    asc = desc = 0.0
+    # Totals: the figure the watch shows for this route once sent (SuuntoLink's
+    # calculateElevation, ambit_format.route_elevation_m) over the full track, so the planner,
+    # the route library and the watch give one number. Summing the 30 m resample instead
+    # flattened small rises (Boucle 5km: 40/40 m here, 46/47 m in the library and on the watch).
     clean = [e for e in eles if e is not None]
-    for a, b in zip(clean, clean[1:]):
-        if b > a:
-            asc += b - a
-        else:
-            desc += a - b
+    asc, desc = ambit_format.route_elevation_m([(p["lat"], p["lon"], p["ele"]) for p in pts])
     real_grads = [g for g in grads if g is not None]
     summary = {
         "distance_m": round(dists[-1], 1),

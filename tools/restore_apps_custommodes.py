@@ -23,8 +23,8 @@ import apps
 import ambit_format as F
 import custom_modes as cm
 from ambit_pcap import FlashImage
-from write_nav import (CMD_DEVICE_INFO, Link, check_memory_map, read_flash,
-                        read_memory_map, send_plan)
+from write_nav import (CMD_DEVICE_INFO, Link, check_memory_map, pre_write_backup_path,
+                        read_flash, read_memory_map, send_plan)
 
 
 def apps_used_extent(data):
@@ -88,12 +88,11 @@ def main():
         cur_a = read_flash(link, F.APPS_BASE, F.APPS_REGION_SIZE, label="Apps(backup)")
         cur_c = read_flash(link, F.CUSTOM_MODES_BASE, F.CUSTOM_MODES_REGION_SIZE,
                             label="CM(backup)")
-        import time
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        open(f"/home/skinnie/ambit-app/backups/Apps_prerestore_{stamp}.bin", "wb").write(cur_a)
-        open(f"/home/skinnie/ambit-app/backups/CustomModes_prerestore_{stamp}.bin",
-             "wb").write(cur_c)
-        print(f"  backed up current state (stamp {stamp})")
+        apps_path = pre_write_backup_path("Apps_prerestore", link)
+        cm_path = pre_write_backup_path("CustomModes_prerestore", link)
+        apps_path.write_bytes(cur_a)
+        cm_path.write_bytes(cur_c)
+        print(f"  backed up current state to {apps_path.parent}")
 
     # Apps first, then CustomModes - so a mid-way failure never points a rule at a missing app.
     apps_payload = apps_bytes[:apps_extent]

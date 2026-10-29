@@ -735,6 +735,16 @@ def run_nav(args):
             path = pathlib.Path(f"{args.save}-{name.lower()}.bin")
             path.write_bytes(blob)
             print(f"  saved {len(blob)} B to {path}")
+        # The POI list too, as read (0x0b24), so Restore puts back exactly these POIs, not
+        # whatever the watch holds by then. Best-effort: a backup never fails over it.
+        try:
+            pois = read_pois(link)
+            if pois and F.SBEM_MAGIC in pois:
+                path = pathlib.Path(f"{args.save}-pois.bin")
+                path.write_bytes(pois)
+                print(f"  saved {len(poi_records_of(pois))} POI(s) to {path}")
+        except (RuntimeError, TimeoutError, OSError) as exc:
+            print(f"  skipped POIs: {exc}")
 
     if args.route_gpx is not None:
         gpx = route_to_gpx(flash, args.route_gpx)
@@ -1224,6 +1234,22 @@ def set_poi_records(link, records):
 DEFAULT_BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups"   # server.py's BACKUP_DIR
 
 
+def pre_write_backup_path(prefix, link=None, kind="custom_modes", ext="bin"):
+    """Where a tool saves what it is about to overwrite on the watch:
+    ~/AmbitAppBackups/<kind>/<prefix>_<serial>_<time>.<ext>, the folder is created. Never next
+    to the code: in the packaged app that folder is temporary or read-only, and a relative path
+    lands wherever the app was started from (desktop audit 2026-10-29). The serial is the
+    watch that opened, else AMBIT_SERIAL (the backend pins every call to one watch)."""
+    import os
+    import time
+    serial = str(getattr(link, "opened_serial", None) or os.environ.get("AMBIT_SERIAL") or "")
+    serial = "".join(c for c in serial if c.isalnum())
+    folder = DEFAULT_BACKUP_DIR / kind
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return folder / (f"{prefix}_{serial}_{stamp}.{ext}" if serial else f"{prefix}_{stamp}.{ext}")
+
+
 def poi_records_of(reply):
     """The non-empty POI records of a read_pois() reply, in the order read."""
     if not reply or F.SBEM_MAGIC not in reply:
@@ -1462,9 +1488,19 @@ def refuse_bad_custom_modes(blob):
 def send_plan(link, flash, layout, commit=True):
     """commit=False for GpsSGEE: confirmed against assets/ambit3 pcap/orbitsync, 2026-08-05
     - its data_write/data_tail_len pair is followed directly by unrelated queries, no
-    CMD_NAV_COMMIT, unlike Routes/Waypoints which always need one."""
+    CMD_NAV_COMMIT, unlike Routes/Waypoints which always need one.
+
+    Apps/CustomModes never get the commit either: SuuntoLink never sends it for them, and on
+    its own 0x0b04 empties both POI lists (CMD_POI_CLEAR). A sport-mode edit sent with it
+    erased every POI on the watch (desktop audit 2026-10-29), so it is refused here.
+    Regions are matched by label prefix, so "CustomModes (rename ...)" is checked too."""
     for name, _address, blob in layout:
-        if name == "CustomModes" and blob:
+        if not blob:
+            continue
+        if commit and name.startswith(("CustomModes", "Apps")):
+            raise ValueError(f"refusing to write {name} with the 0x0b04 nav commit: it empties "
+                             "the watch's POI lists - pass commit=False for Apps/CustomModes")
+        if name.startswith("CustomModes"):
             refuse_bad_custom_modes(blob)
     for command, address, body in emit_packs(flash, layout):
         if command == CMD_DATA_WRITE:
@@ -1491,9 +1527,96 @@ def build_reset(wpt_size=F.WAYPOINT_SIZE):
     return flash, layout
 
 
+def load_backup_nav(prefix):
+    """(flash, header) from a `nav --save` backup's -routes.bin and -waypoints.bin, checked the
+    way a read off the watch is: both files whole, and the route CRC over descriptors + points
+    matching the header. header is None for a backup of a watch that never held routes. Raises
+    ValueError for a backup that is cut short or does not check out, before anything is sent."""
+    routes = pathlib.Path(f"{prefix}-routes.bin").read_bytes()
+    waypoints = pathlib.Path(f"{prefix}-waypoints.bin").read_bytes()
+    if len(routes) != F.ROUTE_REGION_SIZE or len(waypoints) != F.WAYPOINT_REGION_SIZE:
+        raise ValueError(f"this backup's route files are incomplete ({len(routes)} and "
+                         f"{len(waypoints)} bytes, expected {F.ROUTE_REGION_SIZE} and "
+                         f"{F.WAYPOINT_REGION_SIZE})")
+    flash = FlashImage()
+    flash.write(F.WAYPOINT_BASE, waypoints)
+    flash.write(F.ROUTE_BASE, routes)
+    header = F.RouteHeader.parse(flash.read(F.ROUTE_BASE, 32))
+    if header.magic != F.ROUTE_HEADER_MAGIC:
+        return flash, None
+    if header.route_count:
+        crc = F.crc16_ccitt_false(flash.read(F.ROUTE_DESC, 52 * header.route_count)
+                                  + flash.read(F.ROUTE_POINTS, 12 * header.point_count))
+        if crc != header.checksum:
+            raise ValueError(f"this backup's routes do not check out (CRC 0x{crc:04x}, "
+                             f"header 0x{header.checksum:04x})")
+    return flash, header
+
+
+def backup_route_names(prefix):
+    """The route names a `nav --save` backup lists in its route header (what Restore puts
+    back), without decoding the points."""
+    flash, header = load_backup_nav(prefix)
+    if header is None:
+        return []
+    return [F.RouteDescriptor.parse(flash.read(F.ROUTE_DESC + 52 * i, 52)).name
+            for i in range(header.route_count)]
+
+
+def backup_routes_as_gpx(prefix):
+    """[{name, gpx}] for every route a `nav --save` backup lists in its own route header, and
+    only those. A removed route's bytes stay in flash behind the header (a route write rewrites
+    the headers, not the area behind them); counting what is there, as build_restore() does,
+    brought a deleted route back on Restore (desktop audit 2026-10-29)."""
+    flash, header = load_backup_nav(prefix)
+    if header is None:
+        return []
+    return [{"name": F.RouteDescriptor.parse(flash.read(F.ROUTE_DESC + 52 * i, 52)).name,
+             "gpx": route_to_gpx(flash, i)} for i in range(header.route_count)]
+
+
+def build_routes_from_gpx_texts(texts, wsize=F.WAYPOINT_SIZE):
+    """build_routes() for GPX held in memory, build_reset() when there is none."""
+    import tempfile
+    paths = []
+    try:
+        for text in texts:
+            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False,
+                                             encoding="utf-8") as f:
+                f.write(text)
+                paths.append(f.name)
+        if not paths:
+            return build_reset(wsize)
+        return build_routes([pathlib.Path(p) for p in paths], None, wsize)
+    finally:
+        for path in paths:
+            pathlib.Path(path).unlink(missing_ok=True)
+
+
+def backup_poi_list(prefix):
+    """The POIs a backup holds, for Restore: ("reply", bytes) from -pois.bin, the list as read
+    off the watch; else ("list", [{name, lat, lon, type}]) from the -sync.json snapshot that
+    backups from 2026-09-12 on carry; else (None, None), a backup that kept no POIs."""
+    raw = pathlib.Path(f"{prefix}-pois.bin")
+    if raw.exists():
+        data = raw.read_bytes()
+        if F.SBEM_MAGIC in data:
+            return "reply", data
+    snap = pathlib.Path(f"{prefix}-sync.json")
+    if snap.exists():
+        try:
+            cat = (json.loads(snap.read_text()).get("categories") or {}).get("pois") or {}
+        except (OSError, ValueError):
+            cat = {}
+        if cat.get("supported") and isinstance(cat.get("items"), list):
+            return "list", cat["items"]
+    return None, None
+
+
 def build_restore(prefix):
-    """Rebuilds the two headers from regions saved by `nav --save`, without touching the
-    data behind them.
+    """Undoes a reset (`restore --from-leftovers`): rebuilds the two headers from regions saved
+    by `nav --save`, without touching the data behind them. Not what the Backup page's Restore
+    uses: this also brings back routes removed before the save (see backup_routes_as_gpx).
 
     A reset rewrites only the two headers: 6 bytes and 32 bytes. Everything else -
     descriptors, points, index tables - stays in flash untouched, which a region read off
@@ -1799,6 +1922,11 @@ def main():
                              "([{name,lat,lon,type?}, ...]). The nav write + 0x0b04 commit above "
                              "clears the POI region, so this 0x0b25 sets rather than appends - "
                              "the SuuntoLink poiimport sequence. An empty list clears all POIs.")
+    parser.add_argument("--from-leftovers", action="store_true",
+                        help="restore: undo a reset by rebuilding the headers from whatever "
+                             "routes are still in the saved regions, removed ones included. "
+                             "Without it, restore writes back exactly the routes and POIs the "
+                             "backup lists.")
     parser.add_argument("--verbose", action="store_true",
                         help="logs every 64-byte report")
     parser.add_argument("--device", metavar="NAME",
@@ -1846,10 +1974,19 @@ def main():
     wsize = waypoint_size(link)
     if wsize != F.WAYPOINT_SIZE:
         print(f"  waypoint records of {wsize} bytes (Traverse layout)")
+    restore_names, restore_pois_kind, restore_pois = None, None, None
     if args.action == "reset":
         flash, layout = build_reset(wsize)
-    elif args.action == "restore":
+    elif args.action == "restore" and args.from_leftovers:
         flash, layout = build_restore(args.gpx[0])
+    elif args.action == "restore":
+        # The backup's own routes and POIs, so the watch ends up matching it.
+        routes = backup_routes_as_gpx(args.gpx[0])
+        restore_names = [r["name"] for r in routes]
+        flash, layout = build_routes_from_gpx_texts([r["gpx"] for r in routes], wsize)
+        if args.set_pois_json is None:
+            restore_pois_kind, restore_pois = backup_poi_list(args.gpx[0])
+        print(f"  restoring {len(routes)} route(s) from the backup")
     else:
         flash, layout = build_routes([pathlib.Path(p) for p in args.gpx], args.meta, wsize)
     backup = None
@@ -1869,7 +2006,27 @@ def main():
     # The 0x0b04 commit in send_plan() just cleared the POI SBEM region, so the 0x0b25 below
     # SETS the whole list (the SuuntoLink poiimport sequence) rather than appending. With
     # --set-pois-json we set a caller-supplied list instead of restoring what was read.
-    if args.set_pois_json is not None:
+    pois_from, pois_total = "watch", poi_restore_count(pois)
+    if restore_pois_kind == "reply":
+        # Restore: the backup's POIs as they were read off the watch, byte for byte.
+        pois_from, pois_total = "backup", poi_restore_count(restore_pois)
+        if pois_total:
+            _back, err = put_pois_back_safely(link, restore_pois, backup)
+            if err:
+                raise RuntimeError(err)
+        print(f"  POIs: {pois_total} from the backup")
+    elif restore_pois_kind == "list":
+        # Older backups: the POI list from their -sync.json snapshot.
+        pois_from, pois_total = "backup", len(restore_pois)
+        payloads = build_set_pois_payloads(restore_pois)
+        for payload in payloads:
+            link.command(CMD_POI_WRITE, payload)
+        if payloads and not check_poi_count(link, len(restore_pois)):
+            raise RuntimeError(f"the watch did not keep the {len(restore_pois)} POIs from the "
+                               f"backup" + (f"; its POIs before the restore are in {backup}"
+                                            if backup else ""))
+        print(f"  POIs: {pois_total} from the backup")
+    elif args.set_pois_json is not None:
         set_list = json.loads(pathlib.Path(args.set_pois_json).read_text())
         payloads = build_set_pois_payloads(set_list)   # [] for an empty list -> POIs cleared
         for payload in payloads:
@@ -1903,6 +2060,9 @@ def main():
           + ("" if args.write else " — nothing was emitted"))
     if args.compare:
         return 0 if compare_with_capture(link, args.compare) else 1
+    if args.json and restore_names is not None:
+        print(json.dumps({"ok": True, "wrote": bool(args.write), "routes": restore_names,
+                          "pois": pois_total, "poisFrom": pois_from}))
     return 0
 
 

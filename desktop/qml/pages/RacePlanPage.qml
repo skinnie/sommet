@@ -92,7 +92,7 @@ Item {
     // True when the plan is running on the fallback generic pace (no calibration, no typed speed).
     readonly property bool usingGenericPace: {
         if (calibratedProfile) return false
-        var b = parseFloat(baseSpeed.text)
+        var b = WatchUnits.parseDecimal(baseSpeed.text)
         return isNaN(b) || b <= 0
     }
     // Hours the rider never rides (a personal rule, or a curfew): riding stops, the rest is sleep.
@@ -161,8 +161,7 @@ Item {
     function loadGpx(fileUrl) {
         var gpx = LocalFileService.readText(fileUrl)
         if (!gpx || gpx.length === 0) { statusMsg = qsTr("Couldn't read that file"); return }
-        var s = fileUrl.toString()
-        gpxName = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
+        gpxName = PlanStore.routeNameOf(gpx, fileUrl)
         gpxText = gpx
         // Shared sticky route: a GPX loaded here also becomes the Plan (Route) page's route, and
         // survives navigation. PlanStore is a singleton that outlives this page's Loader.
@@ -282,7 +281,7 @@ Item {
         var prevOpenMs = startMs
         for (var i = 0; i < controlsModel.count; i++) {
             var c = controlsModel.get(i)
-            var km = parseFloat(c.km)
+            var km = WatchUnits.parseDecimal(c.km)
             if (isNaN(km)) continue
             var co = { label: c.label || ("Control " + (i + 1)), distance_km: km }
             var dt = clockToDt(prevMs, (c.hours || "").trim())
@@ -298,7 +297,7 @@ Item {
         // placeholder. Calibrated-from-a-ride = personal; a typed number = a generic guess (not a
         // "personal calibrated" prediction); nothing typed = a plausible generic default.
         var athlete = { weight_kg: 75.0 }
-        var base = parseFloat(baseSpeed.text)
+        var base = WatchUnits.parseDecimal(baseSpeed.text)
         if (calibratedProfile && !isNaN(base) && base > 0) {
             athlete.speed_profile = calibratedProfile
         } else if (!isNaN(base) && base > 0) {
@@ -323,14 +322,14 @@ Item {
         var events = []
         var namedSecs = 0
         for (var si = 0; si < plannedStops.length; si++) {
-            var km = parseFloat(plannedStops[si].km)
-            var mins = parseFloat(plannedStops[si].min)
+            var km = WatchUnits.parseDecimal(plannedStops[si].km)
+            var mins = WatchUnits.parseDecimal(plannedStops[si].min)
             if (!isNaN(km) && !isNaN(mins) && mins > 0) {
                 events.push({ km: km, duration_s: mins * 60 }); namedSecs += mins * 60
             }
         }
         if (events.length > 0) payload.stop_events = events
-        var T = parseFloat(stopTotalH.text)
+        var T = WatchUnits.parseDecimal(stopTotalH.text)
         if (!isNaN(T) && T >= 0 && stopTotalH.text.length > 0) {
             payload.stop_total_s = Math.max(0, T * 3600 - namedSecs)   // leftover after named stops
         } else {
@@ -375,7 +374,7 @@ Item {
                 // Learn from the rider only when THEY set the estimate (not the auto-prefill).
                 if (stopUserSet && stopTotalH.text.length) {
                     api("POST", "/api/race/stop-record",
-                        { distance_km: timeline.distance_km, hours: parseFloat(stopTotalH.text) },
+                        { distance_km: timeline.distance_km, hours: WatchUnits.parseDecimal(stopTotalH.text) },
                         function() {})
                 }
                 if (showResults)
@@ -431,7 +430,7 @@ Item {
         // cutoff-safe). Place the rider's hours at the planner's night control(s), scaled to total
         // sleepH so checkpoints before the block are unaffected and later ones shift by the sleep
         // (André, 2026-09-21: "sleep should appear between the cps, not spread across all").
-        var sleepSecs = (parseFloat(sleepH.text) > 0 && !noRideOn) ? parseFloat(sleepH.text) * 3600 : 0
+        var sleepSecs = (WatchUnits.parseDecimal(sleepH.text) > 0 && !noRideOn) ? WatchUnits.parseDecimal(sleepH.text) * 3600 : 0
         p.sleep_windows = []
         if (sleepSecs > 0) {
             var ws = (sleepPlan && sleepPlan.windows) ? sleepPlan.windows : []
@@ -494,9 +493,9 @@ Item {
     }
     // Minutes left for short stops = your food/rest budget minus the named ones (sleep is separate).
     function shortStopsLeftMin() {
-        var T = parseFloat(stopTotalH.text); if (isNaN(T)) return -1
+        var T = WatchUnits.parseDecimal(stopTotalH.text); if (isNaN(T)) return -1
         var named = 0
-        for (var i = 0; i < plannedStops.length; i++) { var m = parseFloat(plannedStops[i].min); if (!isNaN(m)) named += m }
+        for (var i = 0; i < plannedStops.length; i++) { var m = WatchUnits.parseDecimal(plannedStops[i].min); if (!isNaN(m)) named += m }
         // whole minutes, cut like fmtDur (so 1.03 h reads 1h01 here and in STOPS)
         return Math.max(0, Math.floor(T * 60 - named + 1e-6))
     }
@@ -1236,7 +1235,7 @@ Item {
                                     horizontalAlignment: Text.AlignRight
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                     onEditingFinished: {
-                                        var v = parseFloat(text)
+                                        var v = WatchUnits.parseDecimal(text)
                                         if (!isNaN(v) && v >= 0) {
                                             var o = root.controlOverrides; o[index] = v * 60
                                             root.controlOverrides = o; computeTimeline()

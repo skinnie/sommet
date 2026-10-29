@@ -5,6 +5,7 @@ import { ROUTE_REGION_ADDR, POINTS_OFFSET, parseHead, parseRoutes } from './Lega
 import { isAmbit12 } from './AmbitSettingsService';
 import { parseRouteGpx, nearestPointIndex, RoutePoint } from './RouteGpxParser';
 import { simplifyRoute } from './RouteSimplify';
+import { routeElevationM } from './RouteClimb';
 import {
   decodeNavigation, navigationToGpx, navHeaderReadLen, navUsedSizes,
   WatchNavigation, WatchRoute, WatchWaypoint,
@@ -55,18 +56,12 @@ function haversineM(a: { latitude: number; longitude: number }, b: { latitude: n
 // preview, rather than a second copy of the same math.
 export function computeDistanceAscentDescent(points: RoutePoint[]): { distanceM: number; ascentM: number; descentM: number } {
   let distanceM = 0;
-  let ascentM = 0;
-  let descentM = 0;
   for (let i = 1; i < points.length; i++) {
     distanceM += haversineM(points[i - 1], points[i]);
-    const a = points[i - 1].elevation;
-    const b = points[i].elevation;
-    if (a !== null && b !== null) {
-      const d = b - a;
-      if (d > 0) ascentM += d; else descentM += -d;
-    }
   }
-  return { distanceM: Math.round(distanceM), ascentM: Math.round(ascentM), descentM: Math.round(descentM) };
+  // The watch's own climb rule, shared with the desktop (RouteClimb.ts).
+  const { ascentM, descentM } = routeElevationM(points.map((p) => p.elevation));
+  return { distanceM: Math.round(distanceM), ascentM, descentM };
 }
 
 /**

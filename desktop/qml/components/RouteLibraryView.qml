@@ -197,8 +197,8 @@ PageFlickable {
             root.brytonMsg = ""; root.mageneMsg = ""; root.pendingLibraryId = ""
             const gpx = LocalFileService.readText(selectedFile)
             if (!gpx || gpx.length === 0) return
-            const s = selectedFile.toString()
-            const name = decodeURIComponent(s.substring(s.lastIndexOf("/") + 1)).replace(/\.gpx$/i, "")
+            // The name the import card shows (the GPX's own, else the file's), not the file name.
+            const name = PlanStore.routeNameOf(gpx, selectedFile).replace(/\.gpx$/i, "")
             root.api("POST", "/api/library/save", { name: name, gpx: gpx }, r => {
                 if (r.ok) root.pendingLibraryId = r.id
                 root.api("GET", "/api/library", null, l => root.saved = l.ok ? l.routes : root.saved)

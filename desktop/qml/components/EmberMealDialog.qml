@@ -16,7 +16,11 @@ ThemedDialog {
     property bool scanning: false
     signal logMeal(var meal)   // {name, kcal, protein, carbs, fat}
 
-    readonly property real grams: Number(gramsField.text.replace(",", "."))
+    // "," or "." as the decimal separator; 0 (nothing to log) outside 0-5000 g.
+    readonly property real grams: {
+        const g = WatchUnits.parseDecimal(gramsField.text)
+        return g > 0 && g <= 5000 ? g : 0
+    }
     readonly property var portionNow: picked && grams > 0 ? EmberFoodService.portion(picked, grams) : null
     readonly property bool _searchingText: searchField.text.trim().length >= 2
 
@@ -173,7 +177,7 @@ ThemedDialog {
                 RoundedTextField {
                     id: gramsField
                     width: 100
-                    validator: DoubleValidator { bottom: 0; top: 5000 }
+                    validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
                     onAccepted: logBtn.clicked()
                 }
                 Text { text: qsTr("g"); color: Theme.text; font.pixelSize: Theme.fontSizeBody

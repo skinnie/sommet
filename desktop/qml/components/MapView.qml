@@ -434,7 +434,10 @@ Item {
 
     Repeater {
         model: {
-            if (root.width <= 0 || root.height <= 0) return []
+            // Nothing is fetched while the map is hidden. Activity maps stay hidden until their
+            // track has loaded, and before that sit at 0,0 - every card and the detail view
+            // first downloaded open-ocean tiles at 0,0 (desktop audit 2026-10-29).
+            if (!root.visible || root.width <= 0 || root.height <= 0) return []
             const minTx = Math.floor(root.originX / root.tileSize)
             const maxTx = Math.floor((root.originX + root.width) / root.tileSize)
             const minTy = Math.floor(root.originY / root.tileSize)

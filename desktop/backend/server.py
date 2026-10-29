@@ -610,6 +610,39 @@ def _sync_display_name(model):
         return model
 
 
+def _backup_restore_contents(prefix):
+    """(route names, POI count) an Ambit3-family backup's Restore puts back, read from the
+    backup files the same way write_nav.py's restore reads them. POI count is None when the
+    backup kept no POI list (Restore then keeps the watch's own); (None, None) if unreadable."""
+    sys.path.insert(0, str(TOOLS_DIR))
+    try:
+        import write_nav                                     # noqa: PLC0415
+        names = write_nav.backup_route_names(prefix)
+        kind, pois = write_nav.backup_poi_list(prefix)
+    except Exception:                                        # noqa: BLE001 - only a label
+        return None, None
+    count = (write_nav.poi_restore_count(pois) if kind == "reply"
+             else len(pois) if kind == "list" else None)
+    return names, count
+
+
+def _restore_summary(info, ember):
+    """The one line Restore shows: what went back on the watch (write_nav.py restore --json)."""
+    parts = []
+    if info:
+        n = len(info.get("routes") or [])
+        parts.append("no routes" if n == 0 else "1 route" if n == 1 else f"{n} routes")
+        if info.get("poisFrom") == "backup":
+            p = int(info.get("pois") or 0)
+            parts.append("1 POI" if p == 1 else f"{p} POIs")
+    text = ("Restored " + " and ".join(parts) + " from the backup.") if parts else ""
+    if info and info.get("poisFrom") != "backup":
+        text += " This backup has no POI list, so the watch kept its own POIs."
+    if ember and not ember.get("error"):
+        text += " Ember data restored too."
+    return text.strip() or "Restored."
+
+
 def _sync_summary(snap):
     """A slot summary without the heavy per-item dicts - identity plus per-category counts,
     for /api/sync/state and a plan's source/target headers."""
@@ -4786,6 +4819,11 @@ class Handler(BaseHTTPRequestHandler):
                     b["sync"] = _sync_summary(json.loads(snap_file.read_text()))
                 except Exception:  # noqa: BLE001 - a bad snapshot just isn't offered as a source
                     b["hasSettings"] = False
+            # What Restore puts back, for its confirmation: the routes the backup lists and
+            # how many POIs (None: the backup kept no POI list, the watch keeps its own).
+            b["restoreRoutes"], b["restorePois"] = None, None
+            if b.get("hasRoutes") and b.get("deviceHint") not in ("kailash", "legacy"):
+                b["restoreRoutes"], b["restorePois"] = _backup_restore_contents(b["prefix"])
         backups.sort(key=lambda b: b["createdAt"], reverse=True)
         self._send_json(200, {"ok": True, "backups": backups})
 
@@ -4998,6 +5036,10 @@ class Handler(BaseHTTPRequestHandler):
         self._heal_stale_pin(info.get("watches", []))
         info["selected"] = SELECTED_PRODUCT_ID
         info["selectedSerial"] = SELECTED_SERIAL
+        # A watch linked over Bluetooth, or Testing mode's sample watch, is not on this USB list
+        # but still answers /api/activities. Saying so lets the app tell "no watch at all" (show
+        # what's saved, skip the read - audit 2026-10-29) from "read it another way".
+        info["readsWithoutUsb"] = bool(use_ble() or demo_ambit())
         self._send_json(200, info)
 
     @staticmethod
@@ -8255,6 +8297,12 @@ class Handler(BaseHTTPRequestHandler):
                 flash, layout, info = training_program.build_plan(
                     *training_program.parse_plan(plan))
             ble_bridge.bridge.set_dry_run(False)
+            # Same as the cable tool: cards the watch already holds are not written again on
+            # every connection (training_program.watch_holds, desktop audit 2026-10-29).
+            if training_program.watch_holds(ble_bridge.bridge, "TrainingProgram",
+                                            layout[0][1], layout[0][2]):
+                return {"ok": True, "written": False, "unchanged": True, "transport": "ble",
+                        **info}
             error = training_program.write_and_verify(ble_bridge.bridge, flash, layout)
         except (ble_bridge.BleBridgeError, RuntimeError, TimeoutError, ValueError,
                 KeyError, SystemExit) as exc:
@@ -9298,14 +9346,19 @@ class Handler(BaseHTTPRequestHandler):
         # An Ember-only backup (no watch data alongside it) has nothing for write_nav.py to
         # restore - skip that call entirely rather than have it fail on files that were never
         # written in the first place.
+        info = None
         if has_legacy_backup:
             code, out, err, ok = self._restore_legacy(prefix, confirm)
         elif has_routes_backup:
-            args = ["restore", prefix]
+            # The backup's own routes and POIs (write_nav.py restore, 2026-10-29): before, it
+            # rebuilt the routes from whatever was left in the saved region, deleted ones too,
+            # and kept the POIs the watch held at restore time.
+            args = ["restore", prefix, "--json"]
             if confirm:
                 args.append("--write")
             code, out, err = run_tool("write_nav.py", args)
-            ok = code == 0
+            info = self._parse_last_json_line(out)
+            ok = code == 0 and bool(info and info.get("ok"))
         else:
             code, out, err, ok = 0, "", "", True
 
@@ -9320,14 +9373,27 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 data = json.loads(ember_backup.read_text())
                 ember_result = {"entries": len(data.get("entries", [])), "fasts": len(data.get("fasts", []))}
-                if confirm:
+                if confirm and ok:      # never half a restore: the watch part failed
                     self._ember_save(data)
             except Exception as ex:
                 ember_result = {"error": str(ex)}
 
+        # One readable line for the page; the tool's full output stays in "log".
+        text, error = out, err
+        if has_routes_backup and not has_legacy_backup:
+            if ok:
+                text = _restore_summary(info, ember_result)
+                if not confirm:
+                    text = text.replace("Restored", "Would restore", 1)
+            else:
+                last = next((ln.strip() for ln in reversed((err or out or "").splitlines())
+                             if ln.strip()), "")
+                m = re.match(r"^[A-Za-z_.]*(?:Error|Exception): (.+)$", last)
+                error = ("Restore failed: " + (m.group(1) if m else last)) if last \
+                    else "Restore failed."
         self._send_json(200 if ok else 502, {
-            "ok": ok, "wrote": confirm and ok, "raw_output": out, "stderr": err,
-            "ember": ember_result})
+            "ok": ok, "wrote": confirm and ok, "raw_output": text, "stderr": error,
+            "log": (out or "") + (err or ""), "ember": ember_result})
 
     def _restore_legacy(self, prefix, confirm):
         """Restore an Ambit1/2 nav backup: waypoints (POIs) then the route region. Returns

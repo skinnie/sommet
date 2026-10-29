@@ -478,7 +478,7 @@ PageFlickable {
                                         settingRow.commit(valueField.text);
                                         return;
                                     }
-                                    const parsed = parseFloat(valueField.text);
+                                    const parsed = WatchUnits.parseDecimal(valueField.text);
                                     if (isNaN(parsed)) return;
                                     settingRow.commit(parsed);
                                 }
@@ -500,7 +500,7 @@ PageFlickable {
                             property bool west: settingRow.item.value < 0
                             function send() {
                                 if (!useDecl) { settingRow.commit(0); return; }
-                                const mag = Math.abs(parseFloat(declField.text));
+                                const mag = Math.abs(WatchUnits.parseDecimal(declField.text));
                                 if (isNaN(mag)) return;
                                 settingRow.commit(west ? -mag : mag);
                             }

@@ -60,6 +60,66 @@ PageFlickable {
     // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
     readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
 
+    // Restore asks first, says "Working…" until the watch answers and shows the result under
+    // the backup it came from (desktop audit 2026-10-29: it ran on the first click, with no
+    // sign of progress, and the result was the tool's raw log).
+    property string restoringPrefix: ""
+    property string restoredPrefix: ""
+    Connections {
+        target: BackupService
+        function onLastActionChanged() {
+            if (root.restoringPrefix.length > 0) {
+                root.restoredPrefix = root.restoringPrefix
+                root.restoringPrefix = ""
+            }
+        }
+    }
+
+    function restoreQuestion(b) {
+        const parts = []
+        if (b.hasRoutes && b.restoreRoutes) {
+            const n = b.restoreRoutes.length
+            const routes = n === 0 ? qsTr("no routes")
+                       : n === 1 ? qsTr("1 route (%1)").arg(b.restoreRoutes[0])
+                       : qsTr("%1 routes (%2)").arg(n).arg(b.restoreRoutes.join(", "))
+            if (b.restorePois === null || b.restorePois === undefined)
+                parts.push(qsTr("The watch's routes are replaced by this backup's: %1. " +
+                                "This backup has no POI list, so the watch keeps its own POIs.")
+                           .arg(routes))
+            else
+                parts.push(qsTr("The watch's routes and POIs are replaced by this backup's: " +
+                                "%1 and %2.").arg(routes)
+                           .arg(b.restorePois === 1 ? qsTr("1 POI") : qsTr("%1 POIs").arg(b.restorePois)))
+        } else if (b.hasRoutes || b.hasLegacy) {
+            parts.push(qsTr("The watch's routes and POIs are replaced by this backup's."))
+        }
+        if (b.hasEmber)
+            parts.push(qsTr("Your Ember data is replaced by this backup's."))
+        return parts.join("\n\n")
+    }
+
+    ThemedDialog {
+        id: restoreDialog
+        property var backup: null
+        title: qsTr("Restore this backup?")
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(440, (parent ? parent.width : 440) - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Text {
+            text: restoreDialog.backup ? root.restoreQuestion(restoreDialog.backup) : ""
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontSizeBody
+        }
+        onAccepted: {
+            root.restoredPrefix = ""
+            root.restoringPrefix = backup.prefix
+            BackupService.restoreBackup(backup.prefix, true)
+        }
+    }
+
     Column {
         id: column
         anchors.horizontalCenter: parent.horizontalCenter
@@ -114,8 +174,8 @@ PageFlickable {
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
                     text: qsTr("Saves this app's own database - every activity you've imported " +
-                                "(their GPX and FIT included) and your gear. This is separate " +
-                                "from the watch backups below.")
+                                "(their GPX and FIT included), your gear and your weigh-ins. " +
+                                "This is separate from the watch backups below.")
                 }
                 Text {
                     id: dbInfo
@@ -131,7 +191,10 @@ PageFlickable {
                                 "cloud too, no sign-in needed.")
                 }
 
-                Row {
+                // A Flow, not a Row: three buttons don't fit the 480 px card, and the last
+                // one was cut off at its edge (desktop audit 2026-10-29).
+                Flow {
+                    width: parent.width
                     spacing: Theme.spacingSmall
                     RoundedButton {
                         text: qsTr("Create backup now")
@@ -205,10 +268,20 @@ PageFlickable {
                                 "taken from this same watch.")
                 }
 
-                RoundedButton {
-                    text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
-                    enabled: !BackupService.loading
-                    onClicked: BackupService.createBackup()
+                Flow {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        enabled: !BackupService.loading
+                        onClicked: BackupService.createBackup()
+                    }
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…")
+                                                    : qsTr("Save a backup to a folder…")
+                        enabled: !BackupService.loading
+                        onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
+                    }
                 }
 
                 Text {
@@ -250,10 +323,20 @@ PageFlickable {
                                 "write either back to the watch.")
                 }
 
-                RoundedButton {
-                    text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
-                    enabled: !BackupService.loading
-                    onClicked: BackupService.createBackup()
+                Flow {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                        enabled: !BackupService.loading
+                        onClicked: BackupService.createBackup()
+                    }
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…")
+                                                    : qsTr("Save a backup to a folder…")
+                        enabled: !BackupService.loading
+                        onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
+                    }
                 }
 
                 Text {
@@ -274,25 +357,79 @@ PageFlickable {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                Text { text: qsTr("Backup & Restore"); font.bold: true; color: Theme.text }
+                // Title + the "little i" for the cloud-folder hint, moved here with the folder
+                // button from the separate "Backup database to folder" card (🟣87, 2026-10-29:
+                // that card saved the watch, not the database, and doubled the buttons).
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Backup & Restore")
+                        font.bold: true
+                        color: Theme.text
+                    }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 15; height: 15; radius: 7.5
+                        color: "transparent"
+                        border.width: 1
+                        border.color: folderInfo.open ? Theme.primary : Theme.mutedText
+                        Text {
+                            anchors.centerIn: parent
+                            text: "i"
+                            font.pixelSize: Theme.fontSizeLabel
+                            font.bold: true
+                            color: folderInfo.open ? Theme.primary : Theme.mutedText
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: folderInfo.open = !folderInfo.open
+                        }
+                    }
+                }
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeLabel
-                    text: qsTr("Covers Routes and POIs together (the watch's whole " +
-                                "navigation database) - Sport Modes, Settings, and Profiles " +
-                                "are future, not part of this mechanism.")
+                    text: qsTr("Saves this watch's routes, POIs, settings and sport modes. " +
+                                "Restore puts its routes and POIs back; settings and sport " +
+                                "modes go back through Copy to watch.")
                 }
 
-                RoundedButton {
-                    text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
-                    enabled: !BackupService.loading
-                    onClicked: BackupService.createBackup()
+                Text {
+                    id: folderInfo
+                    property bool open: false
+                    visible: open
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("You can save it to your favourite cloud folder, so it can be " +
+                                "synced if you wish.")
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        enabled: !BackupService.loading
+                        onClicked: { root.restoredPrefix = ""; BackupService.createBackup() }
+                    }
+                    RoundedButton {
+                        text: BackupService.loading ? qsTr("Working…")
+                                                    : qsTr("Save a backup to a folder…")
+                        enabled: !BackupService.loading
+                        onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
+                    }
                 }
 
                 Text {
                     visible: BackupService.lastActionText.length > 0
+                             && root.restoredPrefix.length === 0 && root.restoringPrefix.length === 0
                     width: parent.width
                     wrapMode: Text.WordWrap
                     font.pixelSize: Theme.fontSizeCaption
@@ -400,76 +537,25 @@ PageFlickable {
                                          && DeviceService.model === modelData.deviceModel
                                          && !(modelData.deviceSerial && DeviceService.serial
                                               && modelData.deviceSerial !== DeviceService.serial)
-                                text: qsTr("Restore")
-                                onClicked: BackupService.restoreBackup(modelData.prefix, true)
+                                text: root.restoringPrefix === modelData.prefix
+                                      ? qsTr("Working…") : qsTr("Restore")
+                                enabled: root.restoringPrefix.length === 0
+                                onClicked: {
+                                    restoreDialog.backup = modelData
+                                    restoreDialog.open()
+                                }
                             }
                         }
-                    }
-                }
-            }
-        }
-
-        // --- Save a copy to a folder (André, 2026-08-16): replaces the cloud-OAuth
-        // destinations (no keys, no sign-in). Point it at a Dropbox/OneDrive/Drive sync folder
-        // and the backup lands there; the desktop sync client carries it to the cloud. ---
-        Card {
-            width: parent.width
-            visible: !HomeViewModel.isGarmin && (DeviceCapabilities.supportsWatchBackup
-                                                 || DeviceCapabilities.supportsTravelArchive
-                                                 || DeviceCapabilities.supportsLegacyArchive)
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-
-                // Title + a "little i" that expands the cloud-folder hint (same affordance as
-                // Settings' orbital info).
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Backup database to folder")
-                        font.bold: true
-                        color: Theme.text
-                    }
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 15; height: 15; radius: 7.5
-                        color: "transparent"
-                        border.width: 1
-                        border.color: folderInfo.open ? Theme.primary : Theme.mutedText
                         Text {
-                            anchors.centerIn: parent
-                            text: "i"
-                            font.pixelSize: Theme.fontSizeLabel
-                            font.bold: true
-                            color: folderInfo.open ? Theme.primary : Theme.mutedText
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: folderInfo.open = !folderInfo.open
+                            visible: root.restoredPrefix === modelData.prefix
+                                     && BackupService.lastActionText.length > 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: Theme.fontSizeCaption
+                            color: BackupService.lastActionOk ? Theme.success : Theme.error
+                            text: BackupService.lastActionText
                         }
                     }
-                }
-
-                Text {
-                    id: folderInfo
-                    property bool open: false
-                    visible: open
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("You can save it to your favourite cloud folder, so it can be " +
-                                "synced if you wish.")
-                }
-
-                RoundedButton {
-                    text: BackupService.loading ? qsTr("Working…")
-                                                : qsTr("Save a backup to a folder…")
-                    enabled: !BackupService.loading
-                    onClicked: backupFolderDialog.open()
                 }
             }
         }
@@ -552,8 +638,13 @@ PageFlickable {
                                 onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
                             }
                             RoundedButton {
-                                text: qsTr("Restore")
-                                onClicked: BackupService.restoreBackup(modelData.prefix, true)
+                                text: root.restoringPrefix === modelData.prefix
+                                      ? qsTr("Working…") : qsTr("Restore")
+                                enabled: root.restoringPrefix.length === 0
+                                onClicked: {
+                                    restoreDialog.backup = modelData
+                                    restoreDialog.open()
+                                }
                             }
                         }
                     }

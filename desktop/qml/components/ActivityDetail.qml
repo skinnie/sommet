@@ -559,12 +559,21 @@ Item {
                         zonePalette: root.zonePalette
                         usual: root.usual
                     }
-                    // Which device recorded this (intervals.icu imports; watch moves leave it empty).
+                    // Which device recorded this. An import names it (Garmin, Zwift, a phone app...);
+                    // a watch move is tagged with its watch's serial, shown as the watch's name
+                    // (desktop audit 2026-10-29: it showed the bare serial).
                     Text {
                         visible: activity && (activity.device || "") !== ""
-                        // intervals.icu repeats the brand ("SUUNTO Suunto Ambit3 Peak"): drop a doubled first word.
-                        text: activity ? qsTr("Recorded on %1").arg(
-                            String(activity.device).replace(/^(\S+)\s+(?=\1\b)/i, "")) : ""
+                        text: {
+                            if (!activity) return ""
+                            const tag = String(activity.device)
+                            const watchName = activity.source === "watch"
+                                ? HomeViewModel.watchNameForTag(tag) : ""
+                            // intervals.icu repeats the brand ("SUUNTO Suunto Ambit3 Peak"): drop a
+                            // doubled first word.
+                            return qsTr("Recorded on %1").arg(
+                                watchName || tag.replace(/^(\S+)\s+(?=\1\b)/i, ""))
+                        }
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeLabel
                     }

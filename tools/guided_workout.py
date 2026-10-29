@@ -54,7 +54,7 @@ import custom_modes_write as cmw
 import workout_install as WI
 from ambit_pcap import FlashImage
 from write_nav import (CMD_DEVICE_INFO, Link, is_ambit12, read_flash, read_memory_map,
-                       send_plan)
+                       send_plan, pre_write_backup_path)
 
 GUIDANCE_TEMPLATE = 295   # 0x127, PID_RUNNER_GPS_TEMPLATE_GUIDANCE
 GUIDANCE_DISP_TYPE = 15   # 0x0f
@@ -585,7 +585,7 @@ def main():
         return emit(False, written=False, dryRun=True)
 
     import pathlib
-    backup = args.backup_to or f"backups/CustomModes_pre_workout_{int(time.time())}.bin"
+    backup = str(args.backup_to or pre_write_backup_path("CustomModes_pre_workout", link))
     pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
     open(backup, "wb").write(current_cm)
     if not args.json:

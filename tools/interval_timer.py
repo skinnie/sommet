@@ -270,22 +270,25 @@ def main():
     backup_path.write_bytes(fresh)
     out(f"Backup written to {backup_path}")
 
+    # Only the used extent, hashed as written, and no 0x0b04: a padded region gets a hash the
+    # watch rejects after a restart (err:62), and 0x0b04 empties its POI lists.
+    payload = bytes(modified[:CM.used_extent(modified)])
     flash = FlashImage()
-    flash.write(F.CUSTOM_MODES_BASE, bytes(modified))
-    layout = [(f"CustomModes ({args.mode} interval timer)", F.CUSTOM_MODES_BASE, bytes(modified)),
+    flash.write(F.CUSTOM_MODES_BASE, payload)
+    layout = [(f"CustomModes ({args.mode} interval timer)", F.CUSTOM_MODES_BASE, payload),
               ("tail", F.CUSTOM_MODES_BASE, None)]
 
-    out("Writing modified content + CMD_DATA_TAIL (SHA256 of the used extent)...")
+    out(f"Writing the used extent ({len(payload)} bytes) + CMD_DATA_TAIL (its SHA256)...")
     send_plan(link, flash, layout, commit=False)
     out("  send_plan returned without raising - no protocol-level rejection seen")
 
     out("Reading CustomModes back to verify...")
-    after = read_flash(link, F.CUSTOM_MODES_BASE, F.CUSTOM_MODES_REGION_SIZE, label="CustomModes")
-    if bytes(after) == bytes(modified):
+    after = read_flash(link, F.CUSTOM_MODES_BASE, len(payload), label="CustomModes")
+    if bytes(after) == payload:
         out("\nSUCCESS: region read back byte-for-byte matching the intended edit.")
         return finish({"ok": True, "dryRun": False, "mode": args.mode,
                        "intervalTimer": summary, "bytesChanged": changed}, 0)
-    diffs = sum(1 for a, b in zip(after, modified) if a != b)
+    diffs = sum(1 for a, b in zip(after, payload) if a != b)
     mismatch_path = BACKUP_DIR / f"after_intervaltimer_{stamp}.bin"
     mismatch_path.write_bytes(after)
     out(f"\nMISMATCH: {diffs} bytes differ from what was intended. Saved to {mismatch_path}.")

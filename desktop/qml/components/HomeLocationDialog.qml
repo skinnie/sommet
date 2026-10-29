@@ -64,7 +64,7 @@ ThemedDialog {
                 placeholderText: qsTr("Latitude")
                 text: root.latitude.toFixed(6)
                 onEditingFinished: {
-                    const v = parseFloat(text)
+                    const v = WatchUnits.parseDecimal(text)
                     if (!isNaN(v) && v >= -90 && v <= 90) {
                         root.latitude = v
                         map.resetView()
@@ -79,7 +79,7 @@ ThemedDialog {
                 placeholderText: qsTr("Longitude")
                 text: root.longitude.toFixed(6)
                 onEditingFinished: {
-                    const v = parseFloat(text)
+                    const v = WatchUnits.parseDecimal(text)
                     if (!isNaN(v) && v >= -180 && v <= 180) {
                         root.longitude = v
                         map.resetView()

@@ -23,7 +23,12 @@ import sys
 import tempfile
 import time
 
+import ambit_format
+
 INDEX = "index.json"
+# How ascentMeters/descentMeters were worked out. Entries saved with an older rule are
+# recomputed on the next list (only those numbers change; names and files stay as they are).
+CLIMB_RULE = "route_elevation_m"
 
 
 def _index(d):
@@ -56,27 +61,26 @@ def _points(gpx):
 
 def _stats(gpx):
     """(distance m, ascent m, descent m, point count, preview track) from the GPX's points
-    (haversine; no smoothing). The preview is <= 200 points, for the Library's map cards."""
+    (haversine; no smoothing). Ascent/descent are the figures the watch shows for the route once
+    sent (ambit_format.route_elevation_m, SuuntoLink's rule), the same the planner shows. The
+    preview is <= 200 points, for the Library's map cards."""
     pts = _points(gpx)
-    dist = asc = desc = 0.0
+    dist = 0.0
     for a, b in zip(pts, pts[1:]):
         p1, p2 = math.radians(a[0]), math.radians(b[0])
         x = (math.sin((p2 - p1) / 2) ** 2
              + math.cos(p1) * math.cos(p2) * math.sin(math.radians(b[1] - a[1]) / 2) ** 2)
         dist += 2 * 6371000 * math.asin(min(1.0, math.sqrt(x)))
-        if a[2] is not None and b[2] is not None:
-            if b[2] > a[2]:
-                asc += b[2] - a[2]
-            else:
-                desc += a[2] - b[2]
+    asc, desc = ambit_format.route_elevation_m(pts)
     step = max(1, len(pts) // PREVIEW_POINTS)
     track = [{"lat": round(p[0], 5), "lon": round(p[1], 5)} for p in pts[::step]]
-    return round(dist), round(asc), round(desc), len(pts), track
+    return round(dist), asc, desc, len(pts), track
 
 
 def _with_stats(d, r):
-    """Fill in stats/preview for an entry saved before they existed (persisted by the caller)."""
-    if "track" in r:
+    """Fill in stats/preview for an entry saved before they existed, or saved when the climb
+    used another rule (persisted by the caller)."""
+    if "track" in r and r.get("climbRule") == CLIMB_RULE:
         return False
     try:
         with open(os.path.join(d, r["id"] + ".gpx"), encoding="utf-8") as f:
@@ -84,7 +88,7 @@ def _with_stats(d, r):
     except OSError:
         return False
     r.update({"distanceMeters": dist, "ascentMeters": asc, "descentMeters": desc,
-              "pointCount": n, "track": track})
+              "pointCount": n, "track": track, "climbRule": CLIMB_RULE})
     return True
 
 
@@ -109,7 +113,7 @@ def save(d, name, gpx):
     dist, asc, desc, n, track = _stats(gpx)
     items.append({"id": rid, "name": name, "created": int(time.time()),
                   "distanceMeters": dist, "ascentMeters": asc, "descentMeters": desc,
-                  "pointCount": n, "track": track, "sha1": sha})
+                  "pointCount": n, "track": track, "climbRule": CLIMB_RULE, "sha1": sha})
     _write_index(d, items)
     return {"ok": True, "id": rid, "existed": False}
 

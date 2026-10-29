@@ -217,11 +217,15 @@ Column {
                         text: root.edited.autoLapType === 0
                               ? String((root.edited.autoLapValue || 0) / 10)
                               : String(root.edited.autoLapValue || 0)
-                        validator: DoubleValidator { bottom: root.edited.autoLapType === 0 ? 0.1 : 1
-                                                     top: root.edited.autoLapType === 0 ? 100 : 999 }
-                        onEditingFinished: if (acceptableInput)
-                            root.set("autoLapValue", root.edited.autoLapType === 0
-                                     ? Math.round(Number(text) * 10) : Math.round(Number(text)))
+                        // "," or "." as the decimal separator; the range is checked after reading
+                        // it (0.1-100 km, 1-999 min), as the DoubleValidator did.
+                        validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
+                        onEditingFinished: {
+                            const v = WatchUnits.parseDecimal(text)
+                            const km = root.edited.autoLapType === 0
+                            if (v >= (km ? 0.1 : 1) && v <= (km ? 100 : 999))
+                                root.set("autoLapValue", km ? Math.round(v * 10) : Math.round(v))
+                        }
                     }
                     RoundedComboBox {
                         width: 120

@@ -402,7 +402,9 @@ PageFlickable {
 
         ErrorBanner {
             width: parent.width
-            detail: CustomModesService.ok ? "" : CustomModesService.lastError
+            // Not gated on `ok`: every write ends in a re-read, and a successful re-read set ok
+            // and hid the write's own error (a failed Set showed nothing, 2026-10-29).
+            detail: CustomModesService.lastError
             context: qsTr("reading or writing sport modes")
         }
 
@@ -665,6 +667,16 @@ PageFlickable {
                 readonly property var mode: root.selectedMode
                 readonly property bool busy: mode && CustomModesService.writingMode === mode.name
 
+                // Fresh data from the watch, or another mode picked: show the watch's values
+                // again. Every write ends in CustomModesService.refresh(), so Set/Rename land
+                // here too - until then a typed value stays put, even when a button takes focus.
+                onModeChanged: {
+                    for (const field of [nameField, autolapField, itHighField, itLowField, itRepsField])
+                        field.edited = false
+                    autolapError = ""
+                }
+                property string autolapError: ""
+
                 // --- Name ---
                 Column {
                     width: parent.width
@@ -688,7 +700,8 @@ PageFlickable {
                                 target: nameField
                                 property: "text"
                                 value: modeColumn.mode ? modeColumn.mode.name : ""
-                                when: !nameField.activeFocus
+                                when: !nameField.edited
+                                restoreMode: Binding.RestoreNone
                             }
                         }
                         RoundedButton {
@@ -736,12 +749,17 @@ PageFlickable {
                             visible: autolapSwitch.checked
                             width: 70
                             enabled: !modeColumn.busy
-                            validator: DoubleValidator { bottom: 0; decimals: 2; notation: DoubleValidator.StandardNotation }
+                            // "," or "." as the decimal separator: a DoubleValidator follows the
+                            // system's number format and dropped a typed "." on a French system,
+                            // so "2.50" was sent as 250 km (2026-10-29).
+                            validator: RegularExpressionValidator { regularExpression: WatchUnits.decimalPattern }
+                            onTextEdited: modeColumn.autolapError = ""
                             Binding {
                                 target: autolapField
                                 property: "text"
                                 value: modeColumn.mode ? (modeColumn.mode.autolap / root.autolapUnitDivisor).toFixed(2) : "0"
-                                when: !autolapField.activeFocus
+                                when: !autolapField.edited
+                                restoreMode: Binding.RestoreNone
                             }
                         }
                         Text {
@@ -756,13 +774,28 @@ PageFlickable {
                             text: qsTr("Set")
                             enabled: !modeColumn.busy
                             onClicked: {
-                                const parsed = parseFloat(autolapField.text);
+                                const parsed = WatchUnits.parseDecimal(autolapField.text);
                                 if (isNaN(parsed) || parsed <= 0) return;
-                                CustomModesService.writeField(modeColumn.mode.name,
-                                    { "Autolap": Math.round(parsed * root.autolapUnitDivisor) })
+                                const metres = Math.round(parsed * root.autolapUnitDivisor);
+                                // The watch keeps Autolap in a 16-bit field: up to 65535 m.
+                                if (metres > 65535) {
+                                    modeColumn.autolapError = qsTr("The watch takes up to %1 %2.")
+                                        .arg((65535 / root.autolapUnitDivisor).toFixed(2))
+                                        .arg(root.autolapUnitSuffix)
+                                    return;
+                                }
+                                modeColumn.autolapError = ""
+                                CustomModesService.writeField(modeColumn.mode.name, { "Autolap": metres })
                             }
                         }
                     }
+                }
+
+                Text {
+                    visible: modeColumn.autolapError.length > 0
+                    text: modeColumn.autolapError
+                    color: Theme.error
+                    font.pixelSize: Theme.fontSizeCaption
                 }
 
                 // --- HR limits ---
@@ -780,9 +813,11 @@ PageFlickable {
                                 checked: modeColumn.mode ? modeColumn.mode.hrLimitsUse === 1 : false
                                 enabled: !modeColumn.busy
                             }
+                            // An action, like "Use interval timer" below: a fixed "enabled" here
+                            // read as the state while the switch was off (desktop audit 2026-10-29).
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: qsTr("enabled")
+                                text: qsTr("Use HR limits")
                                 color: Theme.text
                                 font.pixelSize: Theme.fontSizeLabel
                             }
@@ -903,7 +938,8 @@ PageFlickable {
                                 width: 90
                                 enabled: !modeColumn.busy
                                 Binding {
-                                    target: itHighField; property: "text"; when: !itHighField.activeFocus
+                                    target: itHighField; property: "text"; when: !itHighField.edited
+                                    restoreMode: Binding.RestoreNone
                                     value: !intervalCol.it ? "" : (intervalCol.isTime
                                         ? root.formatMmSs(intervalCol.it.high)
                                         : (intervalCol.it.high / root.autolapUnitDivisor).toFixed(2))
@@ -928,7 +964,8 @@ PageFlickable {
                                 width: 90
                                 enabled: !modeColumn.busy
                                 Binding {
-                                    target: itLowField; property: "text"; when: !itLowField.activeFocus
+                                    target: itLowField; property: "text"; when: !itLowField.edited
+                                    restoreMode: Binding.RestoreNone
                                     value: !intervalCol.it ? "" : (intervalCol.isTime
                                         ? root.formatMmSs(intervalCol.it.low)
                                         : (intervalCol.it.low / root.autolapUnitDivisor).toFixed(2))
@@ -954,7 +991,8 @@ PageFlickable {
                                 enabled: !modeColumn.busy
                                 validator: IntValidator { bottom: 1; top: 999 }
                                 Binding {
-                                    target: itRepsField; property: "text"; when: !itRepsField.activeFocus
+                                    target: itRepsField; property: "text"; when: !itRepsField.edited
+                                    restoreMode: Binding.RestoreNone
                                     value: intervalCol.it ? intervalCol.it.repetitions : 99
                                 }
                             }
@@ -971,10 +1009,12 @@ PageFlickable {
                             var reps = parseInt(itRepsField.text || "99", 10)
                             if (isNaN(reps) || reps < 1) reps = 99
                             var isTime = itTypeBox.currentIndex === 0
+                            // Distances with "," or "." as the separator (WatchUnits.parseDecimal).
                             var high = isTime ? root.parseMmSs(itHighField.text)
-                                : Math.round(parseFloat(itHighField.text || "0") * root.autolapUnitDivisor)
+                                : Math.round(WatchUnits.parseDecimal(itHighField.text || "0") * root.autolapUnitDivisor)
                             var low = isTime ? root.parseMmSs(itLowField.text)
-                                : Math.round(parseFloat(itLowField.text || "0") * root.autolapUnitDivisor)
+                                : Math.round(WatchUnits.parseDecimal(itLowField.text || "0") * root.autolapUnitDivisor)
+                            if (isNaN(high) || isNaN(low)) return
                             CustomModesService.setIntervalTimer(modeColumn.mode.name, true,
                                 isTime ? "time" : "distance", high, low, reps)
                         }

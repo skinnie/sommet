@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import Qt.labs.settings
+import AmbitApp
 
 // Persists the Plan page's loaded route + weather across navigation. The nav shell loads pages
 // through a Loader (Main.qml), which DESTROYS a page when you switch away and rebuilds it fresh
@@ -64,6 +65,25 @@ QtObject {
     // "More" = everything else in the export (bike parking, bike-share, historic sites...), off by default.
     property bool showPlaces: true
 
+    // A route's name: the GPX's own first <name>, else the file's name - the rule the import card
+    // already follows (RouteService::loadGpxFile), so the planner, Race Plan and the library show
+    // one name for one route (audit 2026-10-29: "Boucle 5km" on the card, "Boucle5km" in the
+    // library, which had taken the file name).
+    function routeNameOf(gpx, fileUrl) {
+        var re = /<(?:[\w.-]+:)?name\b[^>]*>\s*(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*?))\s*<\/(?:[\w.-]+:)?name>/g
+        var m
+        while ((m = re.exec(gpx || "")) !== null) {
+            let own = (m[1] !== undefined ? m[1] : m[2]) || ""
+            own = own.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"")
+                     .replace(/&apos;/g, "'").replace(/&#x([0-9a-fA-F]+);/g, function(_, h) { return String.fromCharCode(parseInt(h, 16)) })
+                     .replace(/&#(\d+);/g, function(_, d) { return String.fromCharCode(parseInt(d, 10)) })
+                     .replace(/&amp;/g, "&").trim()
+            if (own.length > 0) return own             // the first non-empty one, as the C++ reader
+        }
+        var s = (fileUrl || "").toString()
+        return decodeURIComponent(s.substring(s.lastIndexOf("/") + 1))
+    }
+
     // Read POIs from a PitStopper GPX (waypoints) against the route and publish the result to `pois`
     // (map pins, Race Plan alerts). `done(ok, res)` is optional. A result with zero recognised POIs
     // is NOT published - otherwise an ordinary GPX with a few unrelated waypoints would claim
@@ -87,8 +107,8 @@ QtObject {
         xhr.send(JSON.stringify({ gpx: routeGpx, poi_gpx: poiGpxText,
                                   reverse: !!reverse,     // km measured along the reversed route
                                   custom_tag: customTag,
-                                  water_l_per_100km: parseFloat(poiWaterRate) || 2.0,
-                                  carry_l: parseFloat(poiCarryL) || 1.5 }))
+                                  water_l_per_100km: WatchUnits.parseDecimal(poiWaterRate) || 2.0,
+                                  carry_l: WatchUnits.parseDecimal(poiCarryL) || 1.5 }))
     }
 
     // A PitStopper export loaded AS the route (GPX with waypoints + track) carries its own POIs:

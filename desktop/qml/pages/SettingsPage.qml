@@ -909,7 +909,7 @@ PageFlickable {
                             text: String(WeightService.bodyFatOffset)
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
                             Accessible.name: qsTr("Body-fat offset in points")
-                            onEditingFinished: { var v = parseFloat(text.replace(",", "."))
+                            onEditingFinished: { const v = WatchUnits.parseDecimal(text)
                                                  WeightService.bodyFatOffset = isNaN(v) ? 0 : v }
                         }
                     }
@@ -1061,8 +1061,8 @@ PageFlickable {
                     RoundedButton {
                         text: qsTr("Apply")
                         onClicked: {
-                            const lat = parseFloat(latField.text);
-                            const lon = parseFloat(lonField.text);
+                            const lat = WatchUnits.parseDecimal(latField.text);
+                            const lon = WatchUnits.parseDecimal(lonField.text);
                             if (!isNaN(lat)) WeatherService.latitude = lat;
                             if (!isNaN(lon)) WeatherService.longitude = lon;
                             WeatherService.refresh();

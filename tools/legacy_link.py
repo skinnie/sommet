@@ -376,7 +376,7 @@ def route_send(gpx_paths, write=False, backup_dir=None):
     `gpx_paths` are route GPX files (<rtept>, waypoints typed "Waypoint" - what route_pins.py
     --target ambit / --plain writes). Without `write` nothing is sent: the result says what
     would be. Before a write the current route region and waypoint list are saved to
-    `backup_dir` (the project's backups/ folder by default) so they can be put back."""
+    `backup_dir` (~/AmbitAppBackups/legacy_nav by default) so they can be put back."""
     import time                                               # noqa: PLC0415
     import legacy_route                                       # noqa: PLC0415
     from build_route import route_from_gpx                    # noqa: PLC0415
@@ -411,7 +411,9 @@ def route_send(gpx_paths, write=False, backup_dir=None):
               "waypoints_added": len(new_wpts), "region_bytes": len(blob)}
     if not write:
         return result
-    backup_dir = pathlib.Path(backup_dir or HERE.parent / "backups")
+    # Never the program's own folder: temporary or read-only in the packaged app.
+    from write_nav import DEFAULT_BACKUP_DIR                  # noqa: PLC0415
+    backup_dir = pathlib.Path(backup_dir or DEFAULT_BACKUP_DIR / "legacy_nav")
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     if region:

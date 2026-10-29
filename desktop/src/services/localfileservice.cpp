@@ -133,6 +133,28 @@ QString LocalFileService::backupDatabase(const QUrl &destFolder)
             failed.append(QStringLiteral("%1 (%2)").arg(name, err));
     }
 
+    // Weigh-ins live outside those databases (desktop audit 2026-10-29: this backup left them
+    // out): the ones typed in are in the app's settings ([weight] manual, the JSON list
+    // WeightService::loadManual() reads) and a Bluetooth scale's in ~/AmbitAppBackups/scale.
+    // Both are saved here in their own formats, so they can be put back exactly as they were.
+    const QByteArray manualWeighIns =
+        QSettings().value(QStringLiteral("weight/manual")).toString().toUtf8();
+    if (!manualWeighIns.isEmpty() && manualWeighIns != QByteArrayLiteral("[]")) {
+        QFile out(QDir(outDir).filePath(QStringLiteral("manual-weighins.json")));
+        if (out.open(QIODevice::WriteOnly) && out.write(manualWeighIns) == manualWeighIns.size())
+            ++copied;
+        else
+            failed.append(QStringLiteral("manual-weighins.json (%1)").arg(out.errorString()));
+    }
+    const QString scaleWeighIns =
+        QDir::homePath() + QStringLiteral("/AmbitAppBackups/scale/weighins.jsonl");
+    if (QFileInfo::exists(scaleWeighIns)) {
+        if (QFile::copy(scaleWeighIns, QDir(outDir).filePath(QStringLiteral("scale-weighins.jsonl"))))
+            ++copied;
+        else
+            failed.append(QStringLiteral("scale-weighins.jsonl"));
+    }
+
     if (copied == 0 && failed.isEmpty()) {
         QDir(outDir).removeRecursively();  // don't leave an empty stamped folder behind
         return tr("There's no activity database to back up yet.");

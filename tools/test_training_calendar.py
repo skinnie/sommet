@@ -3,6 +3,7 @@
 a generic Suunto App's position (sport-mode App displays point at apps by position)."""
 import contextlib
 import datetime
+import hashlib
 import io
 import json
 import os
@@ -225,14 +226,28 @@ class SyncReinstallsEdits(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
         self.apps = bytes([0, 0, 2, 0, 8, 0, 0, 0]) + b"\xff" * 64   # an empty Apps directory
+        self.apps_hash = hashlib.sha256(self.apps[:8]).hexdigest().upper()  # its written extent
+        self.writes = []                             # region names written, in order
         self.compiled = []
         self.fail_compile = False
         self.fail_names = set()
+        test = self
+
+        class Link:
+            """Answers the memory map (0x0b21) with the Apps hash of what was last written."""
+            def command(self, cmd, payload=b""):
+                assert cmd == TC.watch_holds.__globals__["CMD_MEMORY_MAP"]
+                return (b"\x00JNApps\x00" + test.apps_hash.encode() + b"\x00"
+                        + struct.pack("<II", 0x2000, 200000))
+        self.link = Link()
 
         def send(link, fi, parts, commit=False):
             for name, base, blob in parts:
+                if blob is not None:
+                    self.writes.append(name)
                 if name == "Apps" and blob is not None:
-                    self.apps = bytes(blob)
+                    self.apps = bytes(blob) + b"\xff" * 64
+                    self.apps_hash = hashlib.sha256(bytes(blob)).hexdigest().upper()
 
         def compile_workout(workout, lang=None):
             if self.fail_compile or workout["name"] in self.fail_names:
@@ -253,7 +268,7 @@ class SyncReinstallsEdits(unittest.TestCase):
             (TC, "INSTALLED_DIR", pathlib.Path(self.tmp)),
             (TC, "needs_hr_fix", lambda b: False), (TC, "needs_regate", lambda b: False),
             (TC, "is_gated", lambda b: False),
-            (TC, "__file__", os.path.join(self.tmp, "training_calendar.py")),  # backups go to tmp
+            (TC, "BACKUP_DIR", pathlib.Path(self.tmp) / "custom_modes"),     # backups go to tmp
             (TC.GW, "read_watch_language", lambda link: "en"),
             (TC.GW, "compile_workout", compile_workout),
             (TC.cm, "decode", lambda blob: json.loads(json.dumps(decoded))),
@@ -266,7 +281,7 @@ class SyncReinstallsEdits(unittest.TestCase):
         plan = {"entries": [{"date": "2026-10-24", "mode": "Running",
                              "workout": {"name": "Test", "steps": steps}}]}
         with contextlib.redirect_stdout(io.StringIO()):
-            return TC.sync(None, plan, self.TODAY, write=True, json_out=True)
+            return TC.sync(self.link, plan, self.TODAY, write=True, json_out=True)
 
     def on_watch(self):
         return [(e["name"], e["binary"]) for e in apps.decode(self.apps)]
@@ -299,7 +314,7 @@ class SyncReinstallsEdits(unittest.TestCase):
             plan = {"entries": [{"date": d, "mode": "Running",
                                  "workout": {"name": n, "steps": st}} for d, n, st in entries]}
             with contextlib.redirect_stdout(io.StringIO()):
-                return TC.sync(None, plan, self.TODAY, write=True, json_out=True)
+                return TC.sync(self.link, plan, self.TODAY, write=True, json_out=True)
         sync([("2026-10-24", "A", [{"s": 600}])])
         self.fail_names = {"A"}                     # the edit of A won't compile (offline)
         r = sync([("2026-10-24", "A", [{"s": 10}]), ("2026-10-25", "B", [{"s": 300}])])
@@ -318,6 +333,27 @@ class SyncReinstallsEdits(unittest.TestCase):
         self.assertIn("next sync", r["failed"][0]["error"])
         [(_name, binary)] = self.on_watch()
         self.assertIn(b'"s": 600', binary)          # the old version stays on the watch
+
+    def test_an_identical_sync_writes_nothing(self):
+        # The plug-in sync runs on every connection; it rewrote Apps each time (audit 2026-10-29).
+        first = self.sync([{"s": 600}])
+        self.assertEqual((first["written"], first["unchanged"], self.writes), (True, False, ["Apps"]))
+        backups = sorted((pathlib.Path(self.tmp) / "custom_modes").glob("CustomModes_pre_calendar_8A15TEST_*.bin"))
+        self.assertEqual(len(backups), 1)
+        again = self.sync([{"s": 600}])
+        self.assertEqual((again["ok"], again["written"], again["unchanged"]), (True, False, True))
+        self.assertEqual(self.writes, ["Apps"])                       # nothing sent the second time
+        self.assertEqual(len(list((pathlib.Path(self.tmp) / "custom_modes").glob("*.bin"))), 1)
+        changed = self.sync([{"s": 10}])                              # an edit is written again
+        self.assertEqual((changed["written"], changed["unchanged"]), (True, False))
+        self.assertEqual(self.writes, ["Apps", "Apps"])
+
+    def test_same_bytes_but_another_hash_is_written(self):
+        # The watch checks the hash it was given: a stale one is healed, never trusted.
+        self.sync([{"s": 600}])
+        self.apps_hash = "0" * 64
+        self.assertEqual(self.sync([{"s": 600}])["written"], True)
+        self.assertEqual(self.writes, ["Apps", "Apps"])
 
     def test_first_sync_without_a_record_trusts_the_watch(self):
         self.sync([{"s": 600}])

@@ -45,6 +45,22 @@ QtObject {
 
     readonly property var settingsRevision: SettingsWriteService.settings
 
+    // --- numbers the user types -------------------------------------------------------
+
+    // A typed number with "," or "." as the decimal separator. The app shows "1.00", but on a
+    // French or Portuguese system (LC_NUMERIC) a DoubleValidator drops a typed "." and people
+    // type "1,5", which parseFloat reads as 1: Autolap "2.50" reached the watch as 250 km
+    // (desktop check 2026-10-29, on André's own locale). NaN when it isn't a plain number.
+    function parseDecimal(text) {
+        const s = String(text === undefined || text === null ? "" : text).trim().replace(",", ".")
+        return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(s) ? Number(s) : NaN
+    }
+
+    // For a RegularExpressionValidator on a decimal box: digits, then "," or "." and up to two
+    // decimals. Use decimalSignedPattern where a value can be negative (coordinates).
+    readonly property var decimalPattern: /^\d{0,6}([.,]\d{0,2})?$/
+    readonly property var decimalSignedPattern: /^-?\d{0,3}([.,]\d{0,7})?$/
+
     // 0 = metric, 1 = imperial, 2 = advanced (per-quantity). Only consulted when a specific
     // unit field is missing.
     readonly property int mode: {

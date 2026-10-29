@@ -303,7 +303,7 @@ PageFlickable {
                         placeholderText: qsTr("Latitude")
                         text: root.poiLat.toFixed(6)
                         onEditingFinished: {
-                            const v = parseFloat(text)
+                            const v = WatchUnits.parseDecimal(text)
                             if (!isNaN(v) && v >= -90 && v <= 90) {
                                 root.poiLat = v
                                 root.coordError = ""
@@ -320,7 +320,7 @@ PageFlickable {
                         placeholderText: qsTr("Longitude")
                         text: root.poiLon.toFixed(6)
                         onEditingFinished: {
-                            const v = parseFloat(text)
+                            const v = WatchUnits.parseDecimal(text)
                             if (!isNaN(v) && v >= -180 && v <= 180) {
                                 root.poiLon = v
                                 root.coordError = ""

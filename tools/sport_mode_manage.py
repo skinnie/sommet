@@ -788,8 +788,9 @@ def main():
             time.sleep(STAMP_GAP_SECONDS)
         flash = FlashImage()
         flash.write(cm_base, body)
+        # No 0x0b04: SuuntoLink never sends it for CustomModes, and it empties the POI lists.
         send_plan(link, flash, [("CustomModes", cm_base, body), ("tail", cm_base, None)],
-                  commit=True)
+                  commit=False)
         print(f"  wrote {n}/{len(bodies)} ({len(body)} bytes)")
     print("Done.")
     return 0

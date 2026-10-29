@@ -515,7 +515,7 @@ def install_to_watch(workout: dict, mode: str, link, write: bool = False,
     import time
     with contextlib.redirect_stdout(sys.stderr):
         import guided_workout as GW
-        from write_nav import read_flash, read_memory_map, send_plan
+        from write_nav import pre_write_backup_path, read_flash, read_memory_map, send_plan
         from ambit_pcap import FlashImage
 
         mm = read_memory_map(link)
@@ -534,7 +534,7 @@ def install_to_watch(workout: dict, mode: str, link, write: bool = False,
             result["dryRun"] = True
             return result
 
-        backup = backup_to or f"backups/CustomModes_pre_workout_{int(time.time())}.bin"
+        backup = str(backup_to or pre_write_backup_path("CustomModes_pre_workout", link))
         pathlib.Path(backup).parent.mkdir(parents=True, exist_ok=True)
         pathlib.Path(backup).write_bytes(current_cm)
         for name, base, blob in [("Apps", apps_base, new_apps),

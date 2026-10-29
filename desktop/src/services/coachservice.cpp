@@ -310,6 +310,7 @@ void CoachService::computeLocalReadiness()
     applyReadiness(days, ctlArr, atlArr, freshness, rampPerWeek, QVariantMap{
         {QStringLiteral("basis"), QStringLiteral("local")},
         {QStringLiteral("hrMoves"), hrMoves}, {QStringLiteral("durationMoves"), durationMoves},
+        {QStringLiteral("noData"), loadByDay.isEmpty()},
     });
 }
 
@@ -323,9 +324,16 @@ void CoachService::applyReadiness(const QVector<QDate> &days, const QVector<doub
     QString light = finalTsb > -10 ? QStringLiteral("green")
                   : finalTsb > -25 ? QStringLiteral("yellow") : QStringLiteral("red");
     if (light == QStringLiteral("green") && rampPerWeek > 7) light = QStringLiteral("tempered");
+    // No moves stored at all (fresh install, nothing synced or imported yet): an empty history
+    // reads as "fully rested", which is no judgement at all - Coach said "go hard" with no data
+    // (desktop audit 2026-10-29). Say so instead; the picks fall back to endurance.
+    if (extra.value(QStringLiteral("noData")).toBool())
+        light = QStringLiteral("none");
 
     QString sentence;
-    if (light == QStringLiteral("green"))
+    if (light == QStringLiteral("none"))
+        sentence = QStringLiteral("Not enough data yet to tell how rested you are. Sync your watch or import some activities, then check back.");
+    else if (light == QStringLiteral("green"))
         sentence = QStringLiteral("You're fresh today — fully rested. Good day for something hard if you've got it planned.");
     else if (light == QStringLiteral("tempered"))
         sentence = QStringLiteral("You're fresh, but your fitness has climbed fast this month. Good day to train — ease into the hard part rather than going in cold.");

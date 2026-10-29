@@ -107,10 +107,10 @@ Item {
                             inputMethodHints: Qt.ImhFormattedNumbersOnly }
                         RoundedButton {
                             text: qsTr("Save")
-                            enabled: manualDate.text.length === 10 && parseFloat(manualKg.text) > 0
+                            enabled: manualDate.text.length === 10 && WatchUnits.parseDecimal(manualKg.text) > 0
                             onClicked: {
                                 WeightService.addManualWeight(manualDate.text,
-                                    parseFloat(manualKg.text), parseFloat(manualFat.text) || 0)
+                                    WatchUnits.parseDecimal(manualKg.text), WatchUnits.parseDecimal(manualFat.text) || 0)
                                 manualRow.visible = false
                             }
                         }

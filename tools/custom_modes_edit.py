@@ -510,8 +510,9 @@ def main():
     def send(payload):
         flash = FlashImage()
         flash.write(base, payload)
+        # No 0x0b04: SuuntoLink never sends it for CustomModes, and it empties the POI lists.
         send_plan(link, flash, [("CustomModes", base, payload), ("tail", base, None)],
-                  commit=True)
+                  commit=False)
 
     if staged:
         # Touch write, then the commit write. The ~2s between SuuntoLink's two writes is not

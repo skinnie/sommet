@@ -91,7 +91,7 @@ Item {
             }
         }
         onAccepted: {
-            const v = parseFloat(remValue.text) || 0
+            const v = WatchUnits.parseDecimal(remValue.text) || 0
             GearService.addReminder(gearId, remName.text.trim() || qsTr("Reminder"),
                                     remUnit.currentText === "km" ? v : 0,
                                     remUnit.currentText === "h" ? v : 0,
@@ -353,7 +353,7 @@ Item {
                                         spacing: Theme.spacingSmall
                                         RoundedButton { text: qsTr("Rename"); onClicked: root.askName(qsTr("Rename"), modelData.name, function (n) { GearService.renameGear(modelData.id, n) }) }
                                         // Set the manually-entered starting mileage; rides count on top from now on.
-                                        RoundedButton { text: qsTr("Set km"); onClicked: root.askName(qsTr("Starting mileage (km)"), String(modelData.baselineKm), function (n) { GearService.setGearBaseline(modelData.id, parseFloat(n) || 0, 0) }) }
+                                        RoundedButton { text: qsTr("Set km"); onClicked: root.askName(qsTr("Starting mileage (km)"), String(modelData.baselineKm), function (n) { GearService.setGearBaseline(modelData.id, WatchUnits.parseDecimal(n) || 0, 0) }) }
                                         RoundedButton { text: modelData.retired ? qsTr("Un-retire") : qsTr("Retire"); onClicked: GearService.setRetired(modelData.id, !modelData.retired) }
                                         RoundedButton { text: qsTr("Add part"); onClicked: root.askName(qsTr("Add component"), "", function (n) { GearService.addComponent(modelData.id, n, "Other") }) }
                                         RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }

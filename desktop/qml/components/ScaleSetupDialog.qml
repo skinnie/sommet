@@ -213,8 +213,8 @@ ThemedDialog {
                 spacing: Theme.spacingSmall
                 RoundedButton {
                     text: qsTr("Save")
-                    enabled: parseFloat(heightField.text) >= 100 && parseFloat(heightField.text) <= 230
-                    onClicked: { WeightService.setBodyProfile(parseFloat(heightField.text), sexF.checked ? "F" : "M")
+                    enabled: WatchUnits.parseDecimal(heightField.text) >= 100 && WatchUnits.parseDecimal(heightField.text) <= 230
+                    onClicked: { WeightService.setBodyProfile(WatchUnits.parseDecimal(heightField.text), sexF.checked ? "F" : "M")
                                  root.close() }
                 }
                 RoundedButton { text: qsTr("Skip"); onClicked: root.close() }

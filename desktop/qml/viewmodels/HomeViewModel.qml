@@ -1,4 +1,5 @@
 pragma Singleton
+import QtCore
 import QtQuick
 import AmbitApp
 
@@ -7,6 +8,7 @@ import AmbitApp
 // real presentation logic (the status text/color) - as Weather/Activities services land in
 // later steps, Home's view of them gets added here too, not scattered across HomePage.qml.
 QtObject {
+    id: hvm
     // Real, 2026-08-08 ("home page: instead of ambit it detects an etrex... like on the
     // android version"). Ambit and Garmin are two completely separate device mechanisms
     // (NSP flash protocol vs. plain USB-mass-storage GPX files - see GarminService's own
@@ -86,6 +88,47 @@ QtObject {
     function displayNameForModel(model) {
         if (!model) return "";
         return _modelNames[model] || model;
+    }
+
+    // The watch a move came off, by the tag it was saved under: its serial (or, for older
+    // reads, the USB product id as "0x1b"). "Recorded on" showed that bare serial (desktop audit
+    // 2026-10-29). Each serial's model is remembered from every connection ([watchModels] in the
+    // app's settings), so the name still shows with that watch unplugged. "" when unknown.
+    readonly property var _pidCodenames: ({
+        "0x10": "Bluebird", "0x19": "Duck", "0x1a": "Colibri", "0x1d": "Greentit",
+        "0x1b": "Emu", "0x1c": "Finch", "0x1e": "Ibisbill", "0x2c": "Kaka",
+        "0x2b": "Jabiru", "0x2d": "Loon", "0x2a": "Hoopoe",
+    })
+    property Settings _watchModelStore: Settings {
+        id: watchModelStore
+        category: "watchModels"
+        property string json: "{}"
+    }
+    readonly property var _watchModels: {
+        try { return JSON.parse(watchModelStore.json) || {} } catch (e) { return {} }
+    }
+    function watchNameForTag(tag) {
+        if (!tag) return ""
+        const codename = _watchModels[tag] || _pidCodenames[String(tag).toLowerCase()]
+        return codename ? displayNameForModel(codename) : ""
+    }
+    function _rememberWatch(serial, codename) {
+        if (!serial || !codename || codename === "BSL" || _watchModels[serial] === codename)
+            return
+        const next = Object.assign({}, _watchModels)
+        next[serial] = codename
+        watchModelStore.json = JSON.stringify(next)
+    }
+    function _rememberConnectedWatches() {
+        for (const w of (DeviceService.connectedWatches || []))
+            _rememberWatch(w.serial, w.codename)
+        if (DeviceService.deviceInfoOk)
+            _rememberWatch(DeviceService.serial, DeviceService.model)
+    }
+    property Connections _watchModelRecorder: Connections {
+        target: DeviceService
+        function onConnectedWatchesChanged() { hvm._rememberConnectedWatches() }
+        function onDeviceInfoChanged() { hvm._rememberConnectedWatches() }
     }
 
     readonly property string deviceDisplayName:

@@ -29,13 +29,15 @@ navigation database (routes/waypoints/POIs).
 
 import argparse
 import datetime
+import hashlib
 import json
+import re
 import struct
 import sys
 
 import ambit_format as F
 from ambit_pcap import FlashImage
-from write_nav import (CMD_DEVICE_INFO, Link, check_memory_map, read_flash,
+from write_nav import (CMD_DEVICE_INFO, CMD_MEMORY_MAP, Link, check_memory_map, read_flash,
                        read_memory_map, send_plan)
 
 # HEADER now READ BYTE-FOR-BYTE, 2026-08-19, out of the ACTUAL createBinary the Ambit3-Peak
@@ -337,6 +339,23 @@ def clear_layout():
                    ("tail", F.TRAINING_PROGRAM_BASE, None)]
 
 
+def watch_holds(link, name, base, blob, current=None):
+    """True when region `name` already starts with exactly `blob` AND the watch reports
+    SHA256(blob) as that region's hash in its memory map (0x0b21) - the hash it checks what was
+    last written against. Writing `blob` again would then change nothing, so the plug-in sync
+    skips it: Apps and TrainingProgram were rewritten on every plug-in (desktop audit
+    2026-10-29). Any doubt - another hash, no hash reported, different bytes - means write.
+    `current`: the region's bytes already read from `base`, to save a second read."""
+    blob = bytes(blob)
+    reply = bytes(link.command(CMD_MEMORY_MAP, b"\0\0\0\0") or b"")
+    m = re.search(re.escape(name.encode()) + rb"\x00([0-9A-Fa-f]{64})\x00", reply)
+    if not m or m.group(1).decode().upper() != hashlib.sha256(blob).hexdigest().upper():
+        return False
+    if current is None:
+        current = read_flash(link, base, len(blob), label=f"{name} (compare)")
+    return bytes(current[:len(blob)]) == blob
+
+
 def write_and_verify(link, flash, layout):
     """Sends a TrainingProgram layout over an open link (USB Link or ble_bridge) and reads
     the region back. Returns None when it matches, else an error string. Used by the
@@ -447,6 +466,10 @@ def main():
 
     if plan_items is not None:
         flash, layout, info = build_plan(plan_items, plan_zones, verbose=True)
+        if args.write and watch_holds(link, "TrainingProgram", layout[0][1], layout[0][2]):
+            print("  already up to date: the watch holds exactly this plan - nothing written")
+            emit_json(True, written=False, unchanged=True, **info)
+            return 0
         send_plan(link, flash, layout, commit=False)
         total = sum(len(payload) for _, payload, _ in link.sent)
         print(f"\n{len(link.sent)} messages, {total} payload bytes"
@@ -458,6 +481,10 @@ def main():
         flash, layout = clear_layout()
         blob = layout[0][2]
         print(f"  CLEAR: restoring {len(blob)} bytes of 0xFF (pristine empty region)")
+        if args.write and watch_holds(link, "TrainingProgram", layout[0][1], blob):
+            print("  already empty - nothing written")
+            emit_json(True, written=False, unchanged=True, count=0, dates=[], cleared=True)
+            return 0
     else:
         if args.emu:
             item = build_training_item_emu(args.activity_id, args.intensity, args.name,

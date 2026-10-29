@@ -1098,7 +1098,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     # session (local 2, global 18)
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
-        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
+        (9, 4, _U32), (22, 2, _U16), (23, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
     ] + _SESSION_HR_FIELDS)
     _u8(data, 2)
     _u16(data, 0)                             # message_index
@@ -1107,8 +1107,8 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u32(data, round(duration_s * 1000))      # total_elapsed_time (scale=1000)
     _u32(data, round(duration_s * 1000))      # total_timer_time
     _u32(data, round(dist_m * 100))           # total_distance (scale=100, cm)
-    _u16(data, d_plus)
-    _u16(data, d_minus)
+    _u16(data, d_plus)                        # total_ascent (field 22, m)
+    _u16(data, d_minus)                       # total_descent (field 23, m)
     _u8(data, sport)
     _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)
@@ -1508,7 +1508,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     swim_fields = [(44, 2, _U16), (46, 1, _E), (33, 2, _U16)] if lengths and pool_m else []
     _write_def(data, 2, 18, [
         (254, 2, _U16), (253, 4, _U32), (2, 4, _U32), (7, 4, _U32), (8, 4, _U32),
-        (9, 4, _U32), (25, 2, _U16), (26, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
+        (9, 4, _U32), (22, 2, _U16), (23, 2, _U16), (5, 1, _E), (6, 1, _E), (0, 1, _E), (1, 1, _E),
     ] + _SESSION_HR_FIELDS + swim_fields)
     _u8(data, 2)
     _u16(data, 0)                             # message_index
@@ -1517,8 +1517,8 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
     _u32(data, round(duration_s * 1000))      # total_elapsed_time (scale=1000)
     _u32(data, round(duration_s * 1000))      # total_timer_time
     _u32(data, round(dist_m * 100))           # total_distance (scale=100, cm)
-    _u16(data, d_plus)
-    _u16(data, d_minus)
+    _u16(data, d_plus)                        # total_ascent (field 22, m)
+    _u16(data, d_minus)                       # total_descent (field 23, m)
     _u8(data, sport)
     _u8(data, sub_sport)  # FIT sub_sport (indoor/virtual/etc.), 0 = none
     _u8(data, 8)          # event = 8 (session)

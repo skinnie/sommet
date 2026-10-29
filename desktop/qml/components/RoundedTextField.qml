@@ -27,6 +27,14 @@ TextField {
     leftPadding: Theme.spacingSmall
     rightPadding: Theme.spacingSmall
 
+    // True from the user's first keystroke until the page clears it (when fresh data arrives),
+    // so a page can stop overwriting an edit not yet sent:
+    // `Binding { ...; when: !field.edited; restoreMode: Binding.RestoreNone }`. Keying that
+    // Binding on activeFocus instead lost the edit the moment a Set/Rename button took focus
+    // (desktop audit 2026-10-29).
+    property bool edited: false
+    onTextEdited: edited = true
+
     // Real, 2026-08-25 (André, comparing Gear's "None ▾" pickers against its own grey Rename/
     // Retire/Delete buttons: "shouldn't they be all similar?") - every plain INPUT control
     // (button, text field, combo box) now shares RoundedButton's flat Theme.cardNested fill +

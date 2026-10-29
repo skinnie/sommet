@@ -49,17 +49,34 @@ Dialog {
     // while the buttons were almost touching the bottom edge. One value, used on both.
     padding: Theme.spacingMedium
 
-    header: Text {
-        text: root.title
+    // The title's natural width comes from TextMetrics, not from the Text itself: an eliding
+    // Text recomputes its implicitWidth whenever its width changes, and the dialog's width is
+    // computed from that implicitWidth - "Binding loop detected for property implicitWidth" on
+    // every dialog (desktop audit 2026-10-29). Same sizes to the pixel; it still elides when a
+    // dialog is narrower than its title.
+    header: Item {
         visible: root.title.length > 0
-        color: Theme.text
-        font.bold: true
-        font.pixelSize: Theme.fontSizeBodyLarge
-        elide: Text.ElideRight
-        leftPadding: Theme.spacingMedium
-        rightPadding: Theme.spacingMedium
-        topPadding: Theme.spacingMedium
-        bottomPadding: Theme.spacingSmall
+        implicitWidth: titleMetrics.advanceWidth + titleText.leftPadding + titleText.rightPadding
+        implicitHeight: titleText.implicitHeight
+
+        TextMetrics {
+            id: titleMetrics
+            font: titleText.font
+            text: root.title
+        }
+        Text {
+            id: titleText
+            anchors.fill: parent
+            text: root.title
+            color: Theme.text
+            font.bold: true
+            font.pixelSize: Theme.fontSizeBodyLarge
+            elide: Text.ElideRight
+            leftPadding: Theme.spacingMedium
+            rightPadding: Theme.spacingMedium
+            topPadding: Theme.spacingMedium
+            bottomPadding: Theme.spacingSmall
+        }
     }
 
     // The button row needs its background removed, not just recoloured - real bug, 2026-08-11

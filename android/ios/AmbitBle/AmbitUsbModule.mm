@@ -503,7 +503,7 @@ static std::vector<uint8_t> build(const ambit_log_entry_t *entry) {
 
     // session (local 2, global 18)
     std::vector<Buf::F> sfields = {{254,2,FU16},{253,4,FU32},{2,4,FU32},{7,4,FU32},{8,4,FU32},
-                  {9,4,FU32},{25,2,FU16},{26,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}};
+                  {9,4,FU32},{22,2,FU16},{23,2,FU16},{5,1,FE},{6,1,FE},{0,1,FE},{1,1,FE}};
     sfields.push_back({16,1,FU8}); sfields.push_back({17,1,FU8});   // avg / max heart rate, the watch's own
     if (pool) { sfields.push_back({44,2,FU16}); sfields.push_back({46,1,FE}); sfields.push_back({33,2,FU16}); }
     b.def(2, 18, sfields);

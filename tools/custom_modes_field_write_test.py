@@ -3,8 +3,8 @@
 fields (Autolap, HrHigh, HrLow, HrLimitsUse, ...) - the flat `SETTING_FIELDS` list
 `custom_modes.py`'s own `decode_settings()` already reads right after the 64-byte `Name`.
 Same real transport as `custom_modes_rename_test.py`/`custom_modes_writeback_test.py`
-(write_nav.py's send_plan: CMD_DATA_WRITE chunks + CMD_DATA_TAIL padded-region SHA256 +
-CMD_NAV_COMMIT) and the same discipline: the mode's settings-block offset is found live by
+(write_nav.py's send_plan: CMD_DATA_WRITE chunks of the used extent + CMD_DATA_TAIL with
+its SHA256, no CMD_NAV_COMMIT) and the same discipline: the mode's settings-block offset is found live by
 walking the real BXml tag tree (DEVICE_CUSTOM -> EXERCISE_MODES -> EXERCISE_MODES_MODE ->
 EXERCISE_MODES_SETTING_NAME_LEN64), not assumed from a prior dump - each field's own byte
 offset within that block is then computed from SETTING_FIELDS' own real, declared order
@@ -122,7 +122,17 @@ def main():
             msg = f"unknown field {field!r} - known: {sorted(FIELD_OFFSETS)}"
             out(f"ABORT: {msg}")
             return finish({"ok": False, "error": msg}, 1)
-        changes[field] = int(raw)
+        # A value the field can't hold is refused here, before the watch is opened: it used
+        # to crash in struct.pack after the read, so the app showed nothing (Autolap "2.50"
+        # typed on a comma-decimal system arrived as 250000, 2026-10-29).
+        try:
+            value = int(raw)
+            struct.pack("<" + FIELD_FORMATS[field], value)
+        except (ValueError, struct.error):
+            msg = f"{field}={raw} is not a value the watch can store"
+            out(f"ABORT: {msg}")
+            return finish({"ok": False, "error": msg}, 1)
+        changes[field] = value
 
     link = Link(dry_run=False, verbose=not quiet)
     link.open()
@@ -168,26 +178,29 @@ def main():
     backup_path.write_bytes(fresh)
     out(f"Backup written to {backup_path}")
 
+    # Only the used extent, hashed as written, and no 0x0b04: a padded region gets a hash the
+    # watch rejects after a restart (err:62), and 0x0b04 empties its POI lists.
+    payload = bytes(modified[:CM.used_extent(modified)])
     flash = FlashImage()
-    flash.write(F.CUSTOM_MODES_BASE, bytes(modified))
-    layout = [(f"CustomModes ({args.mode} field write)", F.CUSTOM_MODES_BASE, bytes(modified)),
+    flash.write(F.CUSTOM_MODES_BASE, payload)
+    layout = [(f"CustomModes ({args.mode} field write)", F.CUSTOM_MODES_BASE, payload),
               ("tail", F.CUSTOM_MODES_BASE, None)]
 
-    out("Writing modified content + CMD_DATA_TAIL (padded-region SHA256) + CMD_NAV_COMMIT...")
-    send_plan(link, flash, layout, commit=True)
+    out(f"Writing the used extent ({len(payload)} bytes) + CMD_DATA_TAIL (its SHA256)...")
+    send_plan(link, flash, layout, commit=False)
     out("  send_plan returned without raising - no protocol-level rejection seen")
 
     out("Reading CustomModes back to verify...")
-    after = read_flash(link, F.CUSTOM_MODES_BASE, F.CUSTOM_MODES_REGION_SIZE, label="CustomModes")
+    after = read_flash(link, F.CUSTOM_MODES_BASE, len(payload), label="CustomModes")
 
-    if bytes(after) == bytes(modified):
+    if bytes(after) == payload:
         out(f"\nSUCCESS: region read back byte-for-byte matching the intended edit.")
         for field, value in changes.items():
             out(f"  {args.mode}.{field} is now {value}")
         return finish({"ok": True, "dryRun": False, "mode": args.mode,
                         "fields": changed_fields, "bytesChanged": changed}, 0)
     else:
-        diffs = sum(1 for a, b in zip(after, modified) if a != b)
+        diffs = sum(1 for a, b in zip(after, payload) if a != b)
         out(f"\nMISMATCH: {diffs} bytes differ from what was intended.")
         mismatch_path = BACKUP_DIR / f"after_fieldwrite_{stamp}.bin"
         mismatch_path.write_bytes(after)
