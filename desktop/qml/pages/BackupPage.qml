@@ -120,6 +120,39 @@ PageFlickable {
         }
     }
 
+    // Swim styles (André, 2026-10-30): the strokes the watch learned in Swimming style training.
+    // Separate from Restore above: they are settings, put back on their own, and may go onto
+    // another watch that learns swim styles (a new watch, a second Ambit3).
+    ThemedDialog {
+        id: swimDialog
+        property var backup: null
+        title: qsTr("Restore swim styles?")
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(440, (parent ? parent.width : 440) - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Text {
+            text: swimDialog.backup
+                  ? qsTr("The swim styles %1 learned (%2) replace the ones on the plugged-in " +
+                         "watch. Nothing else changes, and the watch's current swim styles " +
+                         "are saved first.")
+                    .arg(swimDialog.backup.deviceModel
+                         ? HomeViewModel.displayNameForModel(swimDialog.backup.deviceModel) : qsTr("the watch"))
+                    .arg(swimDialog.backup.restoreSwimStyles === 1 ? qsTr("1 stroke")
+                         : qsTr("%1 strokes").arg(swimDialog.backup.restoreSwimStyles))
+                  : ""
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontSizeBody
+        }
+        onAccepted: {
+            root.restoredPrefix = ""
+            root.restoringPrefix = backup.prefix
+            BackupService.restoreSwimStyles(backup.prefix)
+        }
+    }
+
     Column {
         id: column
         anchors.horizontalCenter: parent.horizontalCenter
@@ -543,6 +576,17 @@ PageFlickable {
                                 onClicked: {
                                     restoreDialog.backup = modelData
                                     restoreDialog.open()
+                                }
+                            }
+                            // Any watch that is plugged in may take them (the backend checks the
+                            // watch learns swim styles and has the same strokes).
+                            RoundedButton {
+                                visible: (modelData.restoreSwimStyles || 0) > 0 && HomeViewModel.connected
+                                text: qsTr("Restore swim styles")
+                                enabled: root.restoringPrefix.length === 0
+                                onClicked: {
+                                    swimDialog.backup = modelData
+                                    swimDialog.open()
                                 }
                             }
                         }

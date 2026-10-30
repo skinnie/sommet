@@ -26,7 +26,7 @@ export type WriteDevice = 'ambit3' | 'traverse' | 'kailash';
 const MAGIC = [0x53, 0x42, 0x45, 0x4d, 0x30, 0x31, 0x30, 0x32]; // "SBEM0102"
 
 /** Every entry in an SBEM payload, in wire order: [entryId, data]. */
-function splitEntries(bytes: Uint8Array): { prefix: Uint8Array; entries: Array<[number, Uint8Array]> } | null {
+export function splitEntries(bytes: Uint8Array): { prefix: Uint8Array; entries: Array<[number, Uint8Array]> } | null {
   const head = findMagic(bytes);
   if (head < 0) return null;
   const entries: Array<[number, Uint8Array]> = [];
@@ -46,7 +46,7 @@ function splitEntries(bytes: Uint8Array): { prefix: Uint8Array; entries: Array<[
   return { prefix: bytes.subarray(0, head), entries };
 }
 
-function encodeEntry(id: number, data: Uint8Array): Uint8Array {
+export function encodeEntry(id: number, data: Uint8Array): Uint8Array {
   // Lengths of 0xff or more use the 4-byte escape, exactly as the reader expects.
   if (data.length < 0xff) {
     const out = new Uint8Array(2 + data.length);

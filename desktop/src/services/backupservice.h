@@ -61,6 +61,9 @@ public:
     Q_INVOKABLE void createBackup(const QUrl &destFolder = QUrl());
     // confirm=false rehearses (real dry-run through write_nav.py restore, nothing written).
     Q_INVOKABLE void restoreBackup(const QString &prefix, bool confirm);
+    // Put a backup's learned swim styles on the plugged-in watch (/api/swim-styles/restore):
+    // only those settings are written, the watch's current ones are saved first.
+    Q_INVOKABLE void restoreSwimStyles(const QString &prefix);
 
     Q_INVOKABLE void checkFirmware();
     Q_INVOKABLE void downloadFirmware();

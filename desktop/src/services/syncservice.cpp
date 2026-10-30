@@ -67,7 +67,8 @@ void SyncService::refreshState()
 // categories both slots actually captured.
 static const QVariantList kAllCategories = {QStringLiteral("settings"), QStringLiteral("pois"),
                                             QStringLiteral("routes"),
-                                            QStringLiteral("sportModes")};
+                                            QStringLiteral("sportModes"),
+                                            QStringLiteral("swimStyles")};
 
 void SyncService::snapshot(const QString &slot)
 {

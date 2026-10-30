@@ -26,7 +26,7 @@ PageFlickable {
     // Always source -> target, always a straight copy.
     readonly property string mode: "mirror"
     readonly property string direction: "AtoB"
-    readonly property var allCategories: ["settings", "pois", "routes", "sportModes"]
+    readonly property var allCategories: ["settings", "pois", "routes", "sportModes", "swimStyles"]
 
     function catSupported(slot, cat) {
         return !!(slot && slot.categories && slot.categories[cat]
@@ -67,14 +67,15 @@ PageFlickable {
         if (!slot || !slot.categories || !slot.categories[cat]) return 0;
         return slot.categories[cat].count || 0;
     }
-    // "42 settings · 3 routes · 12 POIs · 6 sport modes" - only supported categories with a
+    // "42 settings · 3 routes · 12 POIs · 6 sport modes · 4 swim styles" - only supported categories with a
     // real count, so a watch with no routes doesn't advertise "0 routes".
     function holdsText(slot) {
         if (!slot || !slot.categories) return "";
         var parts = [];
         var labels = {settings: qsTr("settings"), routes: qsTr("routes"),
-                      pois: qsTr("POIs"), sportModes: qsTr("sport modes")};
-        var order = ["settings", "routes", "pois", "sportModes"];
+                      pois: qsTr("POIs"), sportModes: qsTr("sport modes"),
+                      swimStyles: qsTr("swim styles")};
+        var order = ["settings", "routes", "pois", "sportModes", "swimStyles"];
         for (var i = 0; i < order.length; ++i) {
             var c = order[i];
             var n = root.catCount(slot, c);

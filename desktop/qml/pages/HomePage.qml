@@ -135,6 +135,7 @@ PageFlickable {
             root.mageneMsg = qsTr("Found the Bryton Aero 60");
             root.brytonBleStatusFor = "";
             BikeDevices.brytonBleAnswered(true);
+            root._autoBikeKind = "";
             DeviceService.selectBikeComputer("brytonble");
             root.fetchBrytonBleStatus();
         };
@@ -343,13 +344,21 @@ PageFlickable {
     // Keep the active device sensible as things are plugged/unplugged (André, 2026-09-04):
     // auto-pick the bike computer when nothing else is active and no watch is connected; and if
     // the active bike computer is unplugged, hand the active device back to the watch.
+    // The bike computer this page picked by itself (not the user), or "". A watch that answers
+    // after that pick takes over (André, 2026-10-30: the Peak was plugged in but the app opened
+    // on the asleep Magene, because the Peak answered after the 5 s fallback below).
+    property string _autoBikeKind: ""
+    function _autoSelectBike(kind) {
+        _autoBikeKind = kind
+        DeviceService.selectBikeComputer(kind)
+    }
     function reconcileActiveDevice() {
         if (DeviceService.bikeActive && !activeBike)
             DeviceService.selectBikeComputer("");
         else if (!DeviceService.bikeActive && !HomeViewModel.connected && !HomeViewModel.garminPicked) {
             // prefer a plugged one over a remembered Magene that may be asleep
             const live = bikeComputers.filter(b => b.kind !== "c406" && b.kind !== "brytonble" && b.transport !== "ble")
-            if (live.length > 0) DeviceService.selectBikeComputer(live[0].kind)
+            if (live.length > 0) _autoSelectBike(live[0].kind)
             // The remembered Magene is known at once, before the USB list and the watch have
             // answered - picking it straight away beat every plugged device (André, 2026-09-26).
             // Fall back to it only if nothing else has turned up a few seconds later.
@@ -361,7 +370,7 @@ PageFlickable {
         interval: 5000
         onTriggered: if (!DeviceService.bikeActive && !HomeViewModel.connected && !GarminService.connected
                          && root.bikeComputers.length > 0)
-                         DeviceService.selectBikeComputer(root.bikeComputers[0].kind)
+                         root._autoSelectBike(root.bikeComputers[0].kind)
     }
     onBikeComputersChanged: reconcileActiveDevice()
 
@@ -403,6 +412,52 @@ PageFlickable {
         };
         xhr.open("GET", "http://127.0.0.1:8766/api/bryton/info");
         xhr.send();
+    }
+
+    // Bryton GPS prediction data, System/AssitOff.alp (André, 2026-10-30): what the device holds
+    // and until when, and an update from Bryton's daily file (tools/bryton_ee.py).
+    property var brytonEe: null
+    property bool brytonEeBusy: false
+    property string brytonEeMsg: ""
+    function fetchBrytonEe() {
+        if (!root.activeBike || root.activeBike.kind !== "bryton") {
+            root.brytonEe = null;
+            return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            try {
+                const r = JSON.parse(xhr.responseText);
+                root.brytonEe = (r && r.ok && r.present && r.readable) ? r : null;
+            } catch (e) {
+                root.brytonEe = null;
+            }
+        };
+        xhr.open("GET", "http://127.0.0.1:8766/api/bryton/ee");
+        xhr.send();
+    }
+    function updateBrytonEe() {
+        root.brytonEeBusy = true;
+        root.brytonEeMsg = "";
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            root.brytonEeBusy = false;
+            try {
+                const r = JSON.parse(xhr.responseText);
+                root.brytonEeMsg = r.ok ? (r.wrote ? qsTr("GPS data updated") : (r.note || qsTr("Already up to date")))
+                                        : (r.error || qsTr("GPS data update failed"));
+            } catch (e) {
+                root.brytonEeMsg = qsTr("GPS data update failed");
+            }
+            root.fetchBrytonEe();
+        };
+        xhr.open("POST", "http://127.0.0.1:8766/api/bryton/ee/update");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ confirm: true }));
     }
 
     // Magene C406: battery + firmware for the device card, and the clock/timezone set on connect
@@ -454,7 +509,7 @@ PageFlickable {
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify({ action: "hello", address: addr }));
     }
-    onActiveBikeChanged: { fetchBrytonInfo(); fetchMageneStatus(); fetchBrytonBleStatus(); checkProfileSync(); }
+    onActiveBikeChanged: { fetchBrytonInfo(); fetchBrytonEe(); root.brytonEeMsg = ""; fetchMageneStatus(); fetchBrytonBleStatus(); checkProfileSync(); }
 
     // --- Bike computer profile vs intervals.icu (André, 2026-09-25). The first time a Bryton or
     // Magene shows values that differ from intervals.icu, ask ONCE (ProfileSyncPrompt). "Yes" is
@@ -605,6 +660,7 @@ PageFlickable {
                 "files": null
             }];
             root.mageneMsg = qsTr("Found %1").arg(dev.name || "Magene C406");
+            root._autoBikeKind = "";
             DeviceService.selectBikeComputer("c406");
             root.fetchMageneStatus();
         };
@@ -683,6 +739,15 @@ PageFlickable {
     // goes last so it can't block anything else from completing promptly.
     Connections {
         target: HomeViewModel
+        // A watch answered while a bike computer we picked by ourselves is active: the watch wins.
+        // A bike computer the user picked stays.
+        function onConnectedChanged() {
+            if (HomeViewModel.connected && DeviceService.bikeActive
+                    && DeviceService.activeBikeKind === root._autoBikeKind) {
+                root._autoBikeKind = ""
+                DeviceService.selectBikeComputer("")
+            }
+        }
         function onIsKailashChanged() {
             if (HomeViewModel.isKailash) {
                 KailashService.refreshHistory();
@@ -1016,6 +1081,21 @@ PageFlickable {
                                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                             }
                             Text {
+                                // Bryton only: how long its GPS prediction data lasts (fast fixes).
+                                visible: root.brytonEe !== null || root.brytonEeMsg.length > 0
+                                text: {
+                                    if (root.brytonEeMsg.length > 0) return root.brytonEeMsg;
+                                    const e = root.brytonEe;
+                                    if (!e || !e.last) return "";
+                                    const day = Qt.formatDate(new Date(e.last + "T12:00:00"), "d MMM");
+                                    return e.expired ? qsTr("GPS data out of date since %1").arg(day)
+                                                     : qsTr("GPS data good until %1").arg(day);
+                                }
+                                color: root.brytonEe && root.brytonEe.expired && root.brytonEeMsg.length === 0
+                                       ? Theme.warning : Theme.mutedText
+                                font.pixelSize: Theme.fontSizeCaption
+                            }
+                            Text {
                                 // Bryton over Bluetooth: battery + profile from its one-connection hello.
                                 visible: root.activeBike !== null && root.activeBike.kind === "brytonble"
                                          && root.brytonBleStatus !== null
@@ -1055,6 +1135,15 @@ PageFlickable {
                     }
                     Row {
                         spacing: Theme.spacingSmall
+                        RoundedButton {
+                            // Bryton: newer GPS prediction data exists (a fresh update lasts 13 whole
+                            // days, so once it's a day old it can be topped up).
+                            visible: root.activeBike !== null && root.activeBike.kind === "bryton"
+                                     && root.brytonEe !== null && (root.brytonEe.expired || root.brytonEe.daysLeft < 13)
+                            enabled: !root.brytonEeBusy
+                            text: root.brytonEeBusy ? qsTr("Updating…") : qsTr("Update GPS data")
+                            onClicked: root.updateBrytonEe()
+                        }
                         RoundedButton {
                             // Greyed out when there's nothing new to pull (André, 2026-09-12):
                             // the sync history already covers every ride on the device.
@@ -1624,7 +1713,7 @@ PageFlickable {
                                       : modelData.transport === "ble" ? (root.wahooBleTried ? qsTr(" (not found)") : "")
                                       : modelData.kind === "brytonble" ? qsTr(" (not found)") : qsTr(" (asleep)"))
                             active: DeviceService.activeBikeKind === modelData.kind
-                            onPicked: { HomeViewModel.garminPicked = false; DeviceService.selectBikeComputer(modelData.kind) }
+                            onPicked: { HomeViewModel.garminPicked = false; root._autoBikeKind = ""; DeviceService.selectBikeComputer(modelData.kind) }
                         }
                     }
                 }

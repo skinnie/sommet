@@ -4,6 +4,7 @@ import { readNavBases } from './MemoryMap';
 import { isAmbit12 } from './AmbitSettingsService';
 import { backupLegacyRoutes, restoreLegacyRoutes, backupLegacyWaypoints, restoreLegacyWaypoints, LegacyWaypoint } from './AmbitLegacyNav';
 import { base64ToBytes, bytesToBase64 } from './Base64';
+import { readSwimStyles, writeSwimStyles, isTaught, SwimStyle, SwimChange } from './SwimStyles';
 
 // v3.0 UI port (2026-08-09, "re do... backup to match entirely desktop") - real "Backup &
 // Restore" card from desktop's own BackupPage.qml ("the backup that milestone 4 asked for
@@ -29,6 +30,7 @@ export interface BackupEntry {
   legacy?: boolean;         // an Ambit1/2 backup (legacy-routes.bin / legacy-waypoints.json) - restorable
   legacyRoutes?: boolean;   // has a {prefix}_legacy-routes.bin
   legacyWaypoints?: boolean;// has a {prefix}_legacy-waypoints.json
+  swimStyles?: boolean;     // has a {prefix}_swim-styles.json (learned strokes; restorable)
 }
 
 // Ambit1/2 codenames - these use the legacy route region, not the SBEM nav regions.
@@ -65,6 +67,17 @@ export async function createNavBackup(deviceModel?: string): Promise<void> {
     ]);
     await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_waypoints.bin`, waypointsB64, 'base64');
     await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_routes.bin`, routesB64, 'base64');
+    // The swim styles the watch learned (André, 2026-10-30) - settings, so a separate file,
+    // restorable on its own (restoreSwimStylesBackup). A watch without them just has none.
+    try {
+      const styles = await readSwimStyles(deviceModel);
+      if (styles && styles.some(isTaught)) {
+        await RNFS.writeFile(`${BACKUPS_DIR}/${prefix}_swim-styles.json`, JSON.stringify(
+          { kind: 'sommet-swim-styles', version: 1, watch: { model: deviceModel }, styles }), 'utf8');
+      }
+    } catch {
+      // Never a reason to lose the navigation backup.
+    }
   } finally {
     await disconnect().catch(() => {});
   }
@@ -97,14 +110,29 @@ export async function restoreNavBackup(prefix: string): Promise<{ routeCount: nu
 }
 
 /** Every backup created so far, newest first - grouped by the shared timestamp prefix. */
+/** Put a backup's swim styles on the connected watch (it may be another watch that learns
+ * swim styles). Only those settings are written; the watch's current ones are saved first. */
+export async function restoreSwimStylesBackup(prefix: string, deviceModel?: string):
+  Promise<{ ok: boolean; changes: SwimChange[]; error?: string }> {
+  const file = JSON.parse(await RNFS.readFile(`${BACKUPS_DIR}/${prefix}_swim-styles.json`, 'utf8'));
+  const styles: SwimStyle[] = Array.isArray(file?.styles) ? file.styles : [];
+  if (!styles.length) return { ok: false, changes: [], error: 'this backup has no swim styles' };
+  await connect();
+  try {
+    return await writeSwimStyles(deviceModel, styles);
+  } finally {
+    await disconnect().catch(() => {});
+  }
+}
+
 export async function listNavBackups(): Promise<BackupEntry[]> {
   await ensureDir();
   const files = await RNFS.readDir(BACKUPS_DIR);
   // prefix -> {sbem, legacyRoutes, legacyWaypoints}
-  const seen = new Map<string, { sbem: boolean; legacyRoutes: boolean; legacyWaypoints: boolean }>();
+  const seen = new Map<string, { sbem: boolean; legacyRoutes: boolean; legacyWaypoints: boolean; swim: boolean }>();
   const get = (p: string) => {
     let e = seen.get(p);
-    if (!e) { e = { sbem: false, legacyRoutes: false, legacyWaypoints: false }; seen.set(p, e); }
+    if (!e) { e = { sbem: false, legacyRoutes: false, legacyWaypoints: false, swim: false }; seen.set(p, e); }
     return e;
   };
   for (const f of files) {
@@ -113,7 +141,9 @@ export async function listNavBackups(): Promise<BackupEntry[]> {
     const lr = /^(\d+)_legacy-routes\.bin$/.exec(f.name);
     if (lr) { get(lr[1]).legacyRoutes = true; continue; }
     const lw = /^(\d+)_legacy-waypoints\.json$/.exec(f.name);
-    if (lw) { get(lw[1]).legacyWaypoints = true; }
+    if (lw) { get(lw[1]).legacyWaypoints = true; continue; }
+    const sw = /^(\d+)_swim-styles\.json$/.exec(f.name);
+    if (sw) { get(sw[1]).swim = true; }
   }
   return Array.from(seen.entries())
     .map(([prefix, e]) => ({
@@ -122,6 +152,7 @@ export async function listNavBackups(): Promise<BackupEntry[]> {
       legacy: e.legacyRoutes || e.legacyWaypoints,
       legacyRoutes: e.legacyRoutes,
       legacyWaypoints: e.legacyWaypoints,
+      swimStyles: e.swim,
     }))
     .sort((a, b) => b.createdAt - a.createdAt);
 }

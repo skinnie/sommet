@@ -160,6 +160,7 @@ Item {
         const zs = Theme.isDark ? p.zones_dark : p.zones_light, out = {}
         for (let i = 0; i < zs.length; i++) out["z" + (i + 1)] = zs[i]
         out.down = Theme.isDark ? p.downhill_dark : p.downhill_light
+        out.back = Theme.isDark ? p.backstroke_dark : p.backstroke_light
         out.casing = Theme.isDark ? p.casing_dark : p.casing_light
         return out
     }

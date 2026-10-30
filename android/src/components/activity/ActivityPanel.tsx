@@ -177,6 +177,7 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
     const p = CFG.palette, zs = isDark ? p.zones_dark : p.zones_light, out: Record<string, string> = {};
     zs.forEach((c: string, i: number) => { out['z' + (i + 1)] = c; });
     out.down = isDark ? p.downhill_dark : p.downhill_light;
+    out.back = isDark ? p.backstroke_dark : p.backstroke_light;
     out.casing = isDark ? p.casing_dark : p.casing_light;
     return out;
   }, [isDark]);

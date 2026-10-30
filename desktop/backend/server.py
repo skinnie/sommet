@@ -291,7 +291,7 @@ DEMO_REFUSED_POSTS = {
     "/api/customodes/rename", "/api/customodes/field", "/api/customodes/interval-timer",
     "/api/customodes/display-field",
     "/api/legacy/sport-modes/write", "/api/legacy/sport-modes/write-presets",
-    "/api/watch/lend",
+    "/api/watch/lend", "/api/swim-styles/restore", "/api/bryton/ee/update",
 }
 # Lending the watch to the local browser tools (2026-10-22, a Linux Mint user: the Workout
 # Builder's "Install to Watch" always said "couldn't read the watch's sport modes"). This backend
@@ -818,6 +818,42 @@ def _sync_diff_sportmodes(src, tgt, mode):
     }], []
 
 
+def _swim_styles_of(snap):
+    """The swim styles a snapshot (or backup -sync.json) carries: [{id, style, vectors}]."""
+    cat = (snap.get("categories") or {}).get("swimStyles") or {}
+    return ((cat.get("items") or {}).get("styles") or []) if cat.get("supported") else []
+
+
+def _sync_diff_swimstyles(src, tgt):
+    """One change per stroke whose learned numbers differ. Allowed across models (they are the
+    swimmer's calibration, not hardware): swim_styles.py itself refuses a watch whose records
+    don't have the same shape. A stroke the base never learned isn't copied over one the target
+    did learn - copying "not taught" would only erase the target's teaching."""
+    s, t = _swim_styles_of(src), _swim_styles_of(tgt)
+    if not s or not t:
+        return [], []
+    tgt_by_id = {r.get("id"): r for r in t}
+    changes, skipped = [], []
+    for r in s:
+        cur = tgt_by_id.get(r.get("id"))
+        name = r.get("style") or "Style %s" % r.get("id")
+        if cur is None:
+            skipped.append({"key": "swim:%s" % r.get("id"),
+                            "reason": "%s is not on the target watch" % name})
+            continue
+        if cur.get("vectors") == r.get("vectors"):
+            continue
+        if not any(r.get("vectors") or []):
+            continue
+        changes.append({
+            "key": "swim:%s" % r.get("id"), "label": "Swim style: %s" % name,
+            "from": cur.get("vectors"), "to": r.get("vectors"), "style": r,
+            "fromText": "taught" if any(cur.get("vectors") or []) else "not taught",
+            "toText": "the base's %s" % name.lower(),
+        })
+    return changes, skipped
+
+
 def _read_cache_device_identity(info):
     """A stable identity for the connected watch from a device_info dict: its serial if it
     reports one, else model/product id. When this changes, the cache is dropped."""
@@ -1067,7 +1103,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # 2026-09-04). Run those tools WITHOUT the watch lock so watch traffic keeps flowing.
     NO_WATCH_LOCK = {"mtp_import.py", "fit_decode.py", "magene_import.py", "bt_bonds.py", "bryton_ble.py",
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
-                     "bryton_info.py", "bryton_track.py", "intervals_athlete.py",
+                     "bryton_info.py", "bryton_track.py", "bryton_ee.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
@@ -1483,6 +1519,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_tracks("list", {})
         elif self.path == "/api/bryton/info":
             self._handle_bryton_info()
+        elif self.path == "/api/bryton/ee":
+            self._handle_bryton_ee(False, {})
         elif self.path == "/api/magene/fields":
             self._handle_magene_fields()
         elif self.path == "/api/magene/devices":
@@ -1709,6 +1747,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_sync_apply(body)
         elif self.path == "/api/sync/clear":
             self._handle_sync_clear(body)
+        elif self.path == "/api/swim-styles/restore":
+            self._handle_swim_styles_restore(body)
         elif self.path == "/api/intervals/activity-level":
             self._handle_intervals_activity_level(body)
         elif self.path == "/api/intervals/stats-to-watch":
@@ -1787,6 +1827,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_tracks(self.path.rsplit("/", 1)[1], body or {})
         elif self.path == "/api/bryton/route":
             self._handle_bryton_route(body)
+        elif self.path == "/api/bryton/ee/update":
+            self._handle_bryton_ee(True, body or {})
         elif self.path == "/api/magene/import":
             self._handle_magene_import(body)
         elif self.path == "/api/brytonble/device":
@@ -2619,6 +2661,24 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
         except (json.JSONDecodeError, IndexError):
             payload = {"ok": False, "error": "bryton_info.py produced no JSON", "stderr": err}
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_bryton_ee(self, update, body):
+        """The Bryton's GPS prediction data (System/AssitOff.alp + date.txt, tools/bryton_ee.py).
+        GET /api/bryton/ee -> what the device holds and until when. POST /api/bryton/ee/update
+        {"confirm": bool} -> downloads u-blox's 14-day file and, with confirm, writes it and its
+        date (backup first; refused unless the device already holds the same kind of file)."""
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        args = ["status", "--mount", mount] if not update else \
+            ["update", "--mount", mount] + (["--write"] if body.get("confirm") else [])
+        code, out, err = run_tool("bryton_ee.py", args, timeout=90)
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {"ok": False}
+        except (json.JSONDecodeError, IndexError):
+            payload = {"ok": False, "error": "bryton_ee.py produced no JSON", "stderr": err}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_bryton_profile_compare(self, body):
@@ -4814,9 +4874,13 @@ class Handler(BaseHTTPRequestHandler):
             snap_file = Path(f"{b['prefix']}-sync.json")
             b["hasSettings"] = snap_file.exists()
             b["sync"] = None
+            b["restoreSwimStyles"] = 0
             if snap_file.exists():
                 try:
-                    b["sync"] = _sync_summary(json.loads(snap_file.read_text()))
+                    snap = json.loads(snap_file.read_text())
+                    b["sync"] = _sync_summary(snap)
+                    b["restoreSwimStyles"] = sum(1 for r in _swim_styles_of(snap)
+                                                 if any(r.get("vectors") or []))
                 except Exception:  # noqa: BLE001 - a bad snapshot just isn't offered as a source
                     b["hasSettings"] = False
             # What Restore puts back, for its confirmation: the routes the backup lists and
@@ -6376,6 +6440,76 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": err or "sync_write_sportmodes.py produced no JSON"}
         return info
 
+    def _sync_read_swimstyles(self):
+        """The connected watch's learned swim styles via swim_styles.py --json (read-only 0x1100).
+        Returns (items, error); items None when the watch has no swim style settings."""
+        code, out, err = run_tool("swim_styles.py", ["--json"])
+        info = self._parse_last_json_line(out)
+        if not info or not info.get("ok"):
+            return None, (info or {}).get("error") or err or "swim styles read failed"
+        if not info.get("supported"):
+            return None, "this watch has no swim style settings"
+        styles = info.get("styles") or []
+        return {"styles": styles, "taught": sum(1 for r in styles if any(r.get("vectors") or []))}, None
+
+    def _sync_write_swimstyles(self, styles, serial):
+        """Put `styles` ([{id, style, vectors}]) on the connected watch: swim_styles.py --restore
+        --write, which saves the watch's current settings first, writes only the swim style
+        entries and confirms by reading back. Strokes not listed keep the watch's own values."""
+        if not styles:
+            return {"ok": False, "error": "no swim styles to write"}
+        with tempfile.NamedTemporaryFile("w", suffix="-swim.json", delete=False) as f:
+            json.dump({"kind": "sommet-swim-styles", "version": 1, "styles": styles}, f)
+            path = f.name
+        try:
+            args = ["--restore", path, "--write", "--json"]
+            if serial:
+                args += ["--expect-serial", serial]
+            code, out, err = run_tool("swim_styles.py", args)
+            info = self._parse_last_json_line(out)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        if not info:
+            return {"ok": False, "error": err or "swim_styles.py produced no JSON"}
+        return info
+
+    def _handle_swim_styles_restore(self, body):
+        """POST /api/swim-styles/restore {"prefix", "confirm"}: put a backup's swim styles on the
+        plugged-in watch (the same watch, or another one that learns swim styles). Without
+        confirm:true it only says what would change."""
+        prefix = body.get("prefix")
+        snap_file = Path(f"{prefix}-sync.json") if prefix else None
+        if not snap_file or not snap_file.exists():
+            self._send_json(404, {"ok": False, "error": "this backup has no swim styles"})
+            return
+        try:
+            styles = _swim_styles_of(json.loads(snap_file.read_text()))
+        except Exception as exc:  # noqa: BLE001
+            self._send_json(502, {"ok": False, "error": f"backup unreadable: {exc}"})
+            return
+        if not styles:
+            self._send_json(404, {"ok": False, "error": "this backup has no swim styles"})
+            return
+        dev = self._sync_connected_device()
+        if not dev:
+            self._send_json(502, {"ok": False, "error": "no watch detected - plug in the watch"})
+            return
+        if not body.get("confirm"):
+            self._send_json(200, {"ok": True, "dryRun": True, "target": dev,
+                                  "taught": sum(1 for r in styles if any(r.get("vectors") or []))})
+            return
+        r = self._sync_write_swimstyles(styles, dev["serial"])
+        n = len(r.get("changes") or [])
+        if r.get("ok"):
+            read_cache_clear()
+            text = ("The watch already had these swim styles." if not n else
+                    "Restored %d swim style%s on %s." % (n, "" if n == 1 else "s", dev["displayName"]))
+        else:
+            text = r.get("error") or "swim styles restore failed"
+        self._send_json(200 if r.get("ok") else 502,
+                        {"ok": bool(r.get("ok")), "text": text, "changes": r.get("changes"),
+                         "backup": r.get("backup"), "target": dev})
+
     def _sync_capture(self, dev, categories, slot=None):
         """Read the CONNECTED watch's syncable state for `categories` into one snapshot dict -
         the exact shape _SYNC_SNAPSHOTS[slot] holds, so it can be stored in a sync slot OR
@@ -6421,13 +6555,20 @@ class Handler(BaseHTTPRequestHandler):
                     snap["categories"][cat] = {"supported": True, "count": data["count"],
                                                "signature": data.get("signature"),
                                                "items": data["items"]}
+            elif cat == "swimStyles":
+                items, err = self._sync_read_swimstyles()
+                if err:
+                    snap["categories"][cat] = {"supported": False, "error": err}
+                else:
+                    snap["categories"][cat] = {"supported": True, "count": items["taught"],
+                                               "items": items}
             else:
                 snap["categories"][cat] = {"supported": False,
                                            "error": f"category \"{cat}\" not wired yet"}
         return snap
 
     # Every category a copy source can carry: "everything available" (André, 2026-09-12).
-    SYNC_ALL_CATEGORIES = ["settings", "pois", "routes", "sportModes"]
+    SYNC_ALL_CATEGORIES = ["settings", "pois", "routes", "sportModes", "swimStyles"]
 
     def _handle_sync_snapshot(self, body):
         """POST /api/sync/snapshot. Body {"slot":"A"|"B", "categories":[...]}. Reads the
@@ -6551,6 +6692,8 @@ class Handler(BaseHTTPRequestHandler):
                 changes, skipped = _sync_diff_routes(src, tgt)
             elif cat == "sportModes":
                 changes, skipped = _sync_diff_sportmodes(src, tgt, mode)
+            elif cat == "swimStyles":
+                changes, skipped = _sync_diff_swimstyles(src, tgt)
             else:
                 cats_out.append({"category": cat, "changes": [], "skipped": [],
                                  "error": f"category \"{cat}\" not wired yet"})
@@ -6632,6 +6775,22 @@ class Handler(BaseHTTPRequestHandler):
                                  "error": None if ok else r.get("error")} for ch in poi_changes]
                     if ok:
                         applied += len(poi_changes)
+
+        swim_changes = [ch for cat in plan["categories"] if cat["category"] == "swimStyles"
+                        for ch in cat["changes"] if selected(ch)]
+        if swim_changes:
+            def sbase(ch):
+                return {"category": "swimStyles", "key": ch["key"], "label": ch["label"],
+                        "from": ch.get("from"), "to": ch.get("to"), "toText": ch.get("toText")}
+            if not confirm:
+                results += [{**sbase(ch), "dryRun": True, "ok": True} for ch in swim_changes]
+            else:
+                r = self._sync_write_swimstyles([ch["style"] for ch in swim_changes], dev["serial"])
+                ok = bool(r.get("ok"))
+                results += [{**sbase(ch), "ok": ok, "error": None if ok else r.get("error")}
+                            for ch in swim_changes]
+                if ok:
+                    applied += len(swim_changes)
 
         for cat in plan["categories"]:
             category = cat["category"]

@@ -16,6 +16,8 @@ What it saves, into backups/watch-YYYYmmdd-HHMMSS/ (or --out DIR):
   history.json      daily steps (30 days) + daily/weekly activity (kcal) + recovery ring
                     (tools/ambit_steps.py)
   settings.json     every readable device setting incl. activity_level (tools/settings_write.py)
+  swim_styles.json  the swim styles the watch has learned (tools/swim_styles.py; --restore takes
+                    this file back), on watches that learn them
   manifest.json     timestamp, model/fw/serial, the memory map, and the result of each step
 
 Read-only: region reads (0x0b17), the memory map (0x0b21), object queries (ambit_steps) and
@@ -274,6 +276,15 @@ def _run(args, real_out):
         s = settings.get("settings", settings)
         log(f"  {len(s)} setting(s) captured")
 
+    log("=== swim styles ===")
+    swim, _swim_raw = _run_json_tool("swim_styles.py",
+                                     ["--save", os.path.join(out_dir, "swim_styles.json")], log)
+    if swim and swim.get("supported"):
+        styles = swim.get("styles") or []
+        log(f"  {sum(1 for r in styles if any(r.get('vectors') or []))} taught stroke(s) captured")
+        # Part of the "anything changed?" check below: re-teaching a stroke changes no region.
+        shas["SwimStyles"] = hashlib.sha256(json.dumps(styles, sort_keys=True).encode()).hexdigest()
+
     manifest = {
         "timestamp": _dt.datetime.now().isoformat(timespec="seconds"),
         "model": model, "fw": fw, "serial": serial,
@@ -282,6 +293,7 @@ def _run(args, real_out):
         "moves": len(moves),
         "history_ok": bool(history),
         "settings_ok": bool(settings),
+        "swim_styles_ok": bool(swim and swim.get("supported")),
         "exercise_log_read": "full ring" if args.full else "used extent + margin",
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:

@@ -8,6 +8,8 @@ import {
   readBrytonProfile, writeBrytonProfile,
   type BrytonProfile,
 } from './BrytonProfile';
+import { EE_URL, EE_PATH, EE_DATE_PATH, decodeAlp, readDate, goodUntil, planEe, type EeInfo } from './BrytonEe';
+import { saveWatchBackup } from './WatchBackup';
 
 // High-level Bryton Aero 60 access over USB Mass Storage, bridging the native BrytonUsb module
 // (libaums, moves raw bytes) to the pure-TS FIT/profile logic (BrytonFit.ts / BrytonProfile.ts).
@@ -85,4 +87,44 @@ export async function sendSchemaWorkout(workout: any): Promise<string> {
   const thr: Thresholds = { ftp: prof.ftp, maxHr: prof.maxHr, lthr: prof.lthr };
   const bryton = schemaToBryton(workout, thr);
   return sendNativeWorkout(bryton);
+}
+
+// ── GPS prediction data (System/AssitOff.alp + date.txt, BrytonEe.ts; André 2026-10-30) ──
+const readOrNull = async (path: string): Promise<string | null> => {
+  try { return await Native.readFile(path); } catch { return null; }
+};
+
+// What the device holds and until when (null: no file / unreadable).
+export async function readGpsData(): Promise<EeInfo | null> {
+  const alp = await readOrNull(EE_PATH);
+  if (!alp) return null;
+  const info = decodeAlp(base64ToBytes(alp));
+  if (!info.ok) return null;
+  const date = await readOrNull(EE_DATE_PATH);
+  return goodUntil(info, readDate(date ? base64ToBytes(date) : null));
+}
+
+// Download u-blox's 14-day file and put it on the device with a matching date.txt - only over a
+// file of the same kind (planEe), after saving both old files in the app's backups, then read
+// both back to confirm.
+export async function updateGpsData(): Promise<{ ok: boolean; wrote: boolean; message: string }> {
+  const res = await fetch(EE_URL, { headers: { 'User-Agent': 'Sommet' } });
+  if (!res.ok) return { ok: false, wrote: false, message: `download failed (HTTP ${res.status})` };
+  const next = new Uint8Array(await res.arrayBuffer());
+  const oldB64 = await readOrNull(EE_PATH);
+  const oldDateB64 = await readOrNull(EE_DATE_PATH);
+  const plan = planEe(oldB64 ? base64ToBytes(oldB64) : null,
+    oldDateB64 ? base64ToBytes(oldDateB64) : null, next);
+  if (!plan.write) {
+    return { ok: !plan.error, wrote: false, message: plan.error ?? plan.note ?? 'nothing to do' };
+  }
+  await saveWatchBackup('bryton-ee', oldB64!, 'aero60');
+  if (oldDateB64) await saveWatchBackup('bryton-ee-date', oldDateB64, 'aero60');
+  const b64 = bytesToBase64(next), dateB64 = bytesToBase64(plan.date);
+  await Native.writeFile(EE_PATH, b64);
+  await Native.writeFile(EE_DATE_PATH, dateB64);
+  const ok = (await Native.readFile(EE_PATH)) === b64 && (await Native.readFile(EE_DATE_PATH)) === dateB64;
+  return ok
+    ? { ok: true, wrote: true, message: `GPS data updated, good until ${plan.next.last}` }
+    : { ok: false, wrote: true, message: 'the read-back differs from what was written' };
 }

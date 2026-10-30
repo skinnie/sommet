@@ -105,6 +105,28 @@ void BackupService::restoreBackup(const QString &prefix, bool confirm)
     });
 }
 
+void BackupService::restoreSwimStyles(const QString &prefix)
+{
+    QJsonObject body;
+    body[QStringLiteral("prefix")] = prefix;
+    body[QStringLiteral("confirm")] = true;
+
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/swim-styles/restore")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        m_lastActionOk = obj.value(QStringLiteral("ok")).toBool();
+        m_lastActionText = obj.value(QStringLiteral("text")).toString();
+        if (m_lastActionText.isEmpty())
+            m_lastActionText = obj.value(QStringLiteral("error")).toString();
+        if (m_lastActionText.isEmpty())
+            m_lastActionText = tr("No answer from the watch.");
+        emit lastActionChanged();
+    });
+}
+
 void BackupService::checkFirmware()
 {
     setFirmwareLoading(true);

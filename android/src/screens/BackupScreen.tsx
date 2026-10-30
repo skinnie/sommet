@@ -7,7 +7,9 @@ import {
 } from '../services/FirmwareBackupService';
 import {
   createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile, restoreNavBackup,
+  restoreSwimStylesBackup,
 } from '../services/NavBackupService';
+import { supportsSwimStyles } from '../services/SwimStyles';
 import {
   createKailashArchive, listKailashArchives, KailashArchiveEntry,
 } from '../services/KailashBackupService';
@@ -160,6 +162,30 @@ export default function BackupScreen() {
     ]);
   }
 
+  // Swim styles (André, 2026-10-30): the strokes the watch learned. Settings, restored on their
+  // own, onto this watch or another one that learns swim styles.
+  const canTakeSwimStyles = supportsSwimStyles(route.params?.deviceModel);
+  function handleSwimRestore(entry: BackupEntry) {
+    Alert.alert(t.backupSwimConfirmTitle, t.backupSwimConfirmMsg, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.backupRestoreBtn,
+        onPress: async () => {
+          setRestoreBusy(true);
+          try {
+            const r = await restoreSwimStylesBackup(entry.prefix, route.params?.deviceModel);
+            Alert.alert(t.backupNavSection, r.ok ? t.backupSwimDoneMsg(r.changes.length)
+                                                 : (r.error ?? t.unknownError));
+          } catch (e: any) {
+            Alert.alert(t.error, e?.message ?? t.unknownError);
+          } finally {
+            setRestoreBusy(false);
+          }
+        },
+      },
+    ]);
+  }
+
   // ── App data (activities + gear) - the app's OWN database, backed up/restored to a file the
   // user picks (André, 2026-08-30). Separate from every watch backup on this screen; always
   // shown because this data exists with or without a connected watch. ──
@@ -288,8 +314,13 @@ export default function BackupScreen() {
         {backups.length === 0 && <StatusLine text={t.backupExistingEmpty} />}
         {backups.map(b => (
           <View key={b.prefix} style={styles.backupRow}>
-            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}{b.legacy ? ` · ${[b.legacyRoutes && 'routes', b.legacyWaypoints && 'POIs'].filter(Boolean).join(' + ')}` : ''}</Text>
+            <Text style={styles.backupDate}>{fmtDateTime(b.createdAt)}{b.legacy ? ` · ${[b.legacyRoutes && 'routes', b.legacyWaypoints && 'POIs'].filter(Boolean).join(' + ')}` : ''}{b.swimStyles ? ` · ${t.backupSwimTag}` : ''}</Text>
             <View style={styles.backupRowBtns}>
+              {b.swimStyles && canTakeSwimStyles && (
+                <TouchableOpacity style={styles.shareBtn} disabled={restoreBusy} onPress={() => handleSwimRestore(b)}>
+                  <Text style={styles.shareBtnText}>{restoreBusy ? t.workoutCalendarSyncing : t.backupSwimRestoreBtn}</Text>
+                </TouchableOpacity>
+              )}
               {b.legacy && (
                 <TouchableOpacity style={styles.shareBtn} disabled={restoreBusy} onPress={() => handleRestore(b)}>
                   <Text style={styles.shareBtnText}>{restoreBusy ? t.workoutCalendarSyncing : t.backupRestoreBtn}</Text>

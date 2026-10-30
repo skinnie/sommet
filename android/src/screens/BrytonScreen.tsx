@@ -7,7 +7,9 @@ import { Button, StatusLine, Toggle } from '../components/ui/primitives';
 import { Card } from '../components/ui/Card';
 import {
   connectBryton, disconnectBryton, readProfile, writeProfile, isBrytonUsbAvailable,
+  readGpsData, updateGpsData,
 } from '../services/BrytonUsb';
+import type { EeInfo } from '../services/BrytonEe';
 import { getAthleteThresholds } from '../services/ApiIntervalsIcu';
 import type { BrytonProfile } from '../services/BrytonProfile';
 
@@ -39,6 +41,10 @@ export default function BrytonScreen() {
   const [cellPick, setCellPick] = useState<{ page: number; cell: number } | null>(null);
   const [gridBusy, setGridBusy] = useState(false);
   const [gridMsg, setGridMsg] = useState('');
+  // GPS prediction data (System/AssitOff.alp) - desktop Home Bryton card parity.
+  const [gps, setGps] = useState<EeInfo | null>(null);
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [gpsMsg, setGpsMsg] = useState('');
 
   const connect = useCallback(async () => {
     setStatus('connecting'); setError(''); setApplyMsg('');
@@ -47,6 +53,7 @@ export default function BrytonScreen() {
       setDeviceName(res.name || 'Bryton Aero 60');
       const dev = await readProfile();
       try { const g = await readGrid(); setGrid(g); setEditGrid(JSON.parse(JSON.stringify(g))); } catch { setGrid(null); }
+      setGps(await readGpsData());
       setDevice(dev);
       const icu = await getAthleteThresholds();
       setIntervals(icu ? { ftp: icu.ftp, lthr: icu.lthr, maxHr: icu.maxHr, map: icu.map, weight: icu.weight } : null);
@@ -85,6 +92,19 @@ export default function BrytonScreen() {
 
   const fmt = (f: Field, v: number | undefined) => (v == null ? '—' : String(v));
 
+  const updateGps = useCallback(async () => {
+    setGpsBusy(true); setGpsMsg('');
+    try {
+      const r = await updateGpsData();
+      setGpsMsg(r.message);
+      setGps(await readGpsData());
+    } catch (e: any) {
+      setGpsMsg(String(e?.message ?? e));
+    } finally {
+      setGpsBusy(false);
+    }
+  }, []);
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.background }}
       contentContainerStyle={{ padding: v3Spacing.medium, alignItems: 'center' }}>
@@ -119,6 +139,22 @@ export default function BrytonScreen() {
                 Device profile: FTP {device.ftp} W · LTHR {device.lthr} · Max HR {device.maxHr} · {device.weight} kg
               </Text>
             </Card>
+
+            {gps && (
+              <Card>
+                <Text style={{ color: t.text, fontSize: v3Type.heading, fontWeight: '700' }}>GPS data</Text>
+                <Text style={{ color: gps.expired ? t.warning : t.mutedText, fontSize: v3Type.body, marginTop: 2 }}>
+                  {gps.expired ? `Out of date since ${gps.last}.` : `Good until ${gps.last}.`} It helps the Bryton find satellites fast.
+                </Text>
+                {(gps.expired || (gps.daysLeft ?? 0) < 13) && (
+                  <View style={{ marginTop: v3Spacing.small }}>
+                    <Button label={gpsBusy ? 'Updating…' : 'Update GPS data'} icon="sync" onPress={updateGps}
+                      disabled={gpsBusy} grow={false} />
+                  </View>
+                )}
+                {!!gpsMsg && <StatusLine text={gpsMsg} />}
+              </Card>
+            )}
 
             {!intervals && (
               <Card><Text style={{ color: t.mutedText, fontSize: v3Type.body }}>

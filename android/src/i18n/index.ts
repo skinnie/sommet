@@ -689,6 +689,14 @@ const fr = {
     'La restauration nécessite une fonction native pas encore construite sur Android - ' +
     'ces sauvegardes sont pour l\'instant en lecture seule (utilisez le bureau pour restaurer).',
   backupRestoreBtn: 'Restaurer',
+  backupSwimTag: 'styles de nage',
+  backupSwimRestoreBtn: 'Restaurer les styles de nage',
+  backupSwimConfirmTitle: 'Restaurer les styles de nage ?',
+  backupSwimConfirmMsg:
+    'Les styles de nage appris dans cette sauvegarde remplacent ceux de la montre branchée. ' +
+    'Rien d\'autre ne change, et ses styles actuels sont sauvegardés avant.',
+  backupSwimDoneMsg: (n: number) => n === 0 ? 'La montre avait déjà ces styles de nage.'
+    : `${n} style${n === 1 ? '' : 's'} de nage restauré${n === 1 ? '' : 's'}.`,
   backupRestoreConfirmTitle: 'Restaurer la navigation ?',
   backupRestoreConfirmMsg:
     'Ceci remplace TOUS les itinéraires et POI de la montre par ceux de cette sauvegarde. Continuer ?',
@@ -1550,6 +1558,14 @@ const en: typeof fr = {
     'Restore needs a native capability not built on Android yet - these backups are ' +
     'read-only for now (use the desktop app to restore).',
   backupRestoreBtn: 'Restore',
+  backupSwimTag: 'swim styles',
+  backupSwimRestoreBtn: 'Restore swim styles',
+  backupSwimConfirmTitle: 'Restore swim styles?',
+  backupSwimConfirmMsg:
+    'The swim styles learned in this backup replace the ones on the plugged-in watch. ' +
+    'Nothing else changes, and its current swim styles are saved first.',
+  backupSwimDoneMsg: (n: number) => n === 0 ? 'The watch already had these swim styles.'
+    : `Restored ${n} swim style${n === 1 ? '' : 's'}.`,
   backupRestoreConfirmTitle: 'Restore navigation?',
   backupRestoreConfirmMsg:
     'This replaces ALL routes and POIs on the watch with the ones in this backup. Continue?',

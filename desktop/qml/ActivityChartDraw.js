@@ -397,8 +397,9 @@ function zoomRange(n, a, b) {
 // o = {L, st, yMode: "len"|"pace", colourMode: "stroke"|"speed", showHr, hover, colors, zone, labels}
 // Pool-swim stroke colours: one per stroke, so a backstroke length (Ambit swims record it) no
 // longer passes for breaststroke. Keys name a Theme colour in o.colors, or "zone:<k>" in o.zone.
+// Backstroke has its own magenta (palette.backstroke_*): the grey it had looked like the grey rests.
 var SWIM_STROKES = [["breaststroke", "primary", "Breaststroke"], ["freestyle", "zone:down", "Freestyle"],
-                    ["backstroke", "secondary", "Backstroke"], ["butterfly", "zone:z7", "Butterfly"],
+                    ["backstroke", "zone:back", "Backstroke"], ["butterfly", "zone:z7", "Butterfly"],
                     ["drill", "warning", "Drill"]];
 function legendColour(o, key) {
     return key.indexOf("zone:") === 0 ? o.zone[key.slice(5)] : (o.colors[key] || o.colors.muted);

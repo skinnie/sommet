@@ -164,6 +164,9 @@
     "zones_dark":  ["#249E5A", "#97CB3D", "#FADF6A", "#FA8E30", "#EC4744", "#BE3C92", "#8C7BE0"],
     "downhill_light": "#3F7FC4",
     "downhill_dark":  "#6FA8E8",
+    "_backstroke": "Swim chart backstroke bars (André, 2026-10-30: the grey they had looked like the grey rests). Magenta, checked with the same validator against the other stroke colours and both greys, in both themes.",
+    "backstroke_light": "#C2449A",
+    "backstroke_dark":  "#C2449A",
     "casing_light": "rgba(26,29,34,0.55)",
     "casing_dark":  "rgba(0,0,0,0.75)"
   },
