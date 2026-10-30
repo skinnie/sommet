@@ -7,7 +7,7 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
-## 2026-10-30: Swim styles in backups, Bryton GPS data
+## 2026-10-30: Swim styles in backups, Bryton GPS data (desktop 0.2.56 + Android)
 
 - **Learned swim styles are backed up, restored and copied.** They are settings
   (`Sports.Swimming.StyleCoeff`, one record per stroke: style byte + 4 int16), so no backup
@@ -21,6 +21,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
     styles", and the full backup (`backup_all.py`) saves `swim_styles.json`.
   - Android: watch backups save `_swim-styles.json`; the backup list offers "Restore swim
     styles" (`SwimStyles.ts`, same write).
+  - Checked in the desktop app with the Peak plugged in: "Restore swim styles" on its own
+    backup answers "The watch already had these swim styles" (nothing written), and Copy
+    lists "4 swim styles" for the backup.
 - **Bryton Aero 60 GPS prediction data.** The device's `System/AssitOff.alp` is u-blox's
   14-day AlmanacPlus file (`https://alp.u-blox.com/current_14d.alp`, no account) and
   `System/date.txt` says until when it is good (4 bytes, big-endian Unix time). Bryton's USB
@@ -33,7 +36,7 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   (`BrytonEe.ts`). Tried on André's Aero 60: its data had run out on 6 October; after the
   update it is good until 12 November, both files read back identical.
 
-## 2026-10-30: Backstroke colour, watch picked over an asleep Magene
+## 2026-10-30: Backstroke colour, watch picked over an asleep Magene (desktop 0.2.56 + Android)
 
 Found while checking André's Peak moves on 2026-10-29.
 
@@ -46,7 +49,8 @@ Found while checking André's Peak moves on 2026-10-29.
   no watch answering after 5 s, Home falls back to the remembered Magene C406; a Peak that was
   plugged in but answered after that stayed second. Now the watch becomes the active device
   when it connects, unless the user picked the bike computer. Desktop only (Android has no
-  automatic pick).
+  automatic pick). Checked with the Peak plugged in and the Magene asleep: the Peak
+  stays the active device.
 
 ## 2026-10-29: Sport-mode edits keep the POIs and survive a restart (desktop 0.2.55)
 
