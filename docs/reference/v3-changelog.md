@@ -7,6 +7,38 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-10-31: Intervals.icu copies without a date, Backup without the watch model, App Zone copy, speeds (Android)
+
+Found in the second part of the tablet audit (FZ-M1 + Ambit3 Peak, after the plug-in fix).
+
+- **816 copies of intervals.icu moves, without a date, and about 40 more per import.** Since
+  23/10 an intervals.icu move "icu:<n>" keeps its track as "icu_<n>.gpx" (Android can't take ':'
+  in a file name). The orphan-file scan on Activities compared that file name with the ids, took
+  every such file for a lost move and stored it again with no date and no duration. Deleting one
+  of those copies would also have deleted the real move's track. The scan now matches a file by
+  the name its row's file is saved under, and never adds a track with no time
+  (`OrphanGpx.ts`, tests: `OrphanGpx.test.ts`). The start-up tidy-up removes the copies already
+  stored, only where the real "icu:" row exists (checked on a copy of the tablet's database:
+  816 removed, all 4588 real intervals.icu moves kept).
+- **Backup never saved the swim styles, and would have backed up an Ambit1/2 the Ambit3 way.**
+  Backup opens from Settings since 31/08, which doesn't pass the watch model, and the screen
+  relied on it: no swim styles in the backup, no "Restore swim styles", and the Ambit1/2 and
+  Kailash checks always said no. The screen and the backup now ask the plugged-in watch; a swim
+  style restore reads the model of the watch it writes to (tests: `NavBackupModel.test.ts`).
+  Checked on the Peak: the backup holds the swim styles and offers "Restore swim styles".
+- **The Training Program sync and an app install rewrote the watch's App Zone with no copy.**
+  Both rewrite the whole region (Suunto Apps and the WORKOUT menu's workouts); the sport modes
+  already had their copy, the App Zone had none. A copy of what was read is now saved first,
+  under backups/Apps/<serial>/Apps_pre_<time>.bin, and nothing is written when it can't be
+  saved (`AppsBackup.ts`, tests: `AppsBackup.test.ts`).
+- **Average and max speed 10 times too high on an Ambit3's moves synced on Android** (since the
+  calories fix of this morning, never released): the move's summary already holds them in m/h,
+  and they were scaled again for the Ambit3 (68.0 km/h and 0:53 /km for a 7 km/h run). Fixed in
+  `jni_bridge.cpp`; the 7 moves on the test tablet were corrected by hand.
+- Checked on the Peak and working: the 30/10 swim (lengths, heart rate, calories, strokes chart),
+  Watch settings, a sport-mode save (the app's own re-read matched byte for byte), a route sent
+  and removed (the 6 POIs kept both times), Training Program, Apps.
+
 ## 2026-10-31: Watch link clash on plug-in, calories from the watch (Android)
 
 Found in the tablet audit of 30-31/10 (FZ-M1 + Ambit3 Peak).

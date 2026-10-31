@@ -5,6 +5,7 @@ import { decodeApps, buildAppsRegion } from './AppsCodec';
 import { resolveRegion } from './MemoryMap';
 import { CatalogEntry, getBinary } from './CatalogService';
 import { installShortcutIntoMode } from './AppInstallCore';
+import { backupApps } from './AppsBackup';
 
 // Re-export the pure core so callers have one import surface.
 export { installShortcutIntoMode, APP_SLOT_TYPES } from './AppInstallCore';
@@ -106,6 +107,9 @@ export async function installCompiledApp(
     }
     const cmImage = encodeRegion(cmNew, CUSTOM_MODES_SIZE);
 
+    // A copy of the App Zone first; no copy, no write (the sport modes get theirs in
+    // writeCustomModesRaw).
+    await backupApps(usedLen > 0 ? appsRegion : probe);
     // Write Apps first, then CustomModes - the order a real SuuntoLink install uses.
     onState({ phase: 'writingApps' });
     if (!await writeRegion(apps.base, bytesToBase64(newApps), newApps.length)) {

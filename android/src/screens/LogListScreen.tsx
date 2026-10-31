@@ -8,12 +8,12 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import {
-  ActivityRecord, markActivitySynced, getAllSyncedIds, rejectJunkActivity,
-  deleteActivity, isActivityDeleted,
+  ActivityRecord, deleteActivity,
   ActivityPageRow, getActivityPage, getActivityTypes, saveActivityMetrics, getActivitiesMissingMetrics,
   ACTIVITY_PAGE, GPX_METRIC_COLUMNS,
 } from '../database/db';
-import { readGpxFile, listGpxFiles } from '../services/GpxService';
+import { readGpxFile } from '../services/GpxService';
+import { adoptOrphanGpx } from '../services/OrphanGpx';
 import { extractGpxMetadata, GpxMetadata } from '../services/GpxParser';
 import RNFS from 'react-native-fs';
 import { t, fmtDate } from '../i18n';
@@ -211,28 +211,6 @@ export default function LogListScreen() {
       await cacheGpxMetrics(missing[i]);
     }
     setPreparing('');
-  }
-
-  // Background upkeep, after the first page is on screen: GPX files the DB doesn't know yet
-  // (orphans from an interrupted sync) become rows. Only re-pages when it actually added some.
-  async function adoptOrphanGpx() {
-    const [gpxPaths, ids] = await Promise.all([listGpxFiles(), getAllSyncedIds()]);
-    const known = new Set(ids);
-    let added = 0;
-    for (const path of gpxPaths) {
-      const id = path.split('/').pop()?.replace('.gpx', '') ?? '';
-      if (!id || known.has(id) || await isActivityDeleted(id)) continue;
-      try {
-        const meta = extractGpxMetadata(await readGpxFile(path));
-        if (await rejectJunkActivity(id, meta.durationS, meta.distanceM)) continue;
-        await markActivitySynced({
-          id, synced_at: Date.now(), gpx_path: path, date: meta.date, duration_s: meta.durationS,
-          distance_m: meta.distanceM, d_plus: meta.dPlus, activity_type: meta.activityType,
-        });
-        added++;
-      } catch (_) {}
-    }
-    return added;
   }
 
   // A new filter or sort starts from the top of the list (not wherever the old one was scrolled).

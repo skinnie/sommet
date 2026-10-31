@@ -43,10 +43,23 @@ async function ensureDir(): Promise<void> {
   }
 }
 
+/** The plugged-in watch's codename (Emu, Duck, Hoopoe...), read from the watch itself; '' when
+ * none answers. Backup opens from Settings, which doesn't know the watch (tablet audit F22,
+ * 2026-10-31): without the model, swim styles were never saved or offered for restore, and an
+ * Ambit1/2 would have been backed up the Ambit3 way. */
+export async function connectedWatchModel(): Promise<string> {
+  try { await connect(); } catch { return ''; }
+  try { return (await getDeviceInfo()).model || ''; }
+  catch { return ''; }
+  finally { await disconnect().catch(() => {}); }
+}
+
 /** Reads the watch's navigation database and saves it locally. Ambit3/Traverse: Waypoints+Routes
  * SBEM regions (read-only, restore not built there). Ambit1/2: the legacy route region 0x041EB0
- * (restorable - see restoreNavBackup). `deviceModel` (from Home) selects the path. */
+ * (restorable - see restoreNavBackup). `deviceModel` selects the path; without it, the watch is
+ * asked. */
 export async function createNavBackup(deviceModel?: string): Promise<void> {
+  deviceModel = deviceModel || await connectedWatchModel() || undefined;
   await ensureDir();
   const prefix = String(Date.now());
   if (isLegacyModel(deviceModel)) {
@@ -119,7 +132,10 @@ export async function restoreSwimStylesBackup(prefix: string, deviceModel?: stri
   if (!styles.length) return { ok: false, changes: [], error: 'this backup has no swim styles' };
   await connect();
   try {
-    return await writeSwimStyles(deviceModel, styles);
+    // The watch being written says what it is: it may not be the one the screen saw.
+    let model = deviceModel;
+    try { model = (await getDeviceInfo()).model || deviceModel; } catch { /* keep the given one */ }
+    return await writeSwimStyles(model, styles);
   } finally {
     await disconnect().catch(() => {});
   }

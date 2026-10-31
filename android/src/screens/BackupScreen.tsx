@@ -7,7 +7,7 @@ import {
 } from '../services/FirmwareBackupService';
 import {
   createNavBackup, listNavBackups, backupsFolderPath, BackupEntry, backupNavToFile, restoreNavBackup,
-  restoreSwimStylesBackup,
+  restoreSwimStylesBackup, connectedWatchModel,
 } from '../services/NavBackupService';
 import { supportsSwimStyles } from '../services/SwimStyles';
 import {
@@ -39,11 +39,14 @@ export default function BackupScreen() {
   // A Kailash (Hoopoe) has no Routes/Waypoints database to back up - what's irreplaceable is its
   // travel history + GPS track, so it gets its own archive card instead of the nav-backup cards
   // (parity with the desktop's DeviceCapabilities.supportsTravelArchive gating). The model is
-  // handed in from Home, which already knows the connected watch.
+  // handed in when the caller knows it; Settings doesn't, so the screen asks the watch (tablet
+  // audit F22, 2026-10-31).
   const route = useRoute<RouteProp<RootStackParamList, 'Backup'>>();
-  const isKailash = route.params?.deviceModel === 'Hoopoe';
+  const givenModel = route.params?.deviceModel;
+  const [model, setModel] = useState<string | undefined>(givenModel);
+  const isKailash = model === 'Hoopoe';
   // Ambit1/2 back up (and restore) the legacy route region, not the SBEM nav regions.
-  const isLegacy = ['Bluebird', 'Duck', 'Colibri', 'Greentit'].includes(route.params?.deviceModel ?? '');
+  const isLegacy = ['Bluebird', 'Duck', 'Colibri', 'Greentit'].includes(model ?? '');
   const [restoreBusy, setRestoreBusy] = useState(false);
 
   const [archives, setArchives] = useState<KailashArchiveEntry[]>([]);
@@ -64,7 +67,10 @@ export default function BackupScreen() {
     listNavBackups().then(setBackups).catch(() => {});
     listKailashArchives().then(setArchives).catch(() => {});
   }, []);
-  useFocusEffect(useCallback(() => { refreshBackups(); }, [refreshBackups]));
+  useFocusEffect(useCallback(() => {
+    refreshBackups();
+    if (!givenModel) connectedWatchModel().then(m => setModel(m || undefined)).catch(() => {});
+  }, [refreshBackups, givenModel]));
 
   async function handleCreateArchive() {
     if (archiveBusy) return;
@@ -119,7 +125,7 @@ export default function BackupScreen() {
     setNavBackupBusy(true);
     setNavBackupError(undefined);
     try {
-      await createNavBackup(route.params?.deviceModel);
+      await createNavBackup(model);
       refreshBackups();
     } catch (e: any) {
       setNavBackupError(e?.message ?? t.unknownError);
@@ -164,7 +170,7 @@ export default function BackupScreen() {
 
   // Swim styles (André, 2026-10-30): the strokes the watch learned. Settings, restored on their
   // own, onto this watch or another one that learns swim styles.
-  const canTakeSwimStyles = supportsSwimStyles(route.params?.deviceModel);
+  const canTakeSwimStyles = supportsSwimStyles(model);
   function handleSwimRestore(entry: BackupEntry) {
     Alert.alert(t.backupSwimConfirmTitle, t.backupSwimConfirmMsg, [
       { text: t.cancel, style: 'cancel' },
@@ -173,7 +179,7 @@ export default function BackupScreen() {
         onPress: async () => {
           setRestoreBusy(true);
           try {
-            const r = await restoreSwimStylesBackup(entry.prefix, route.params?.deviceModel);
+            const r = await restoreSwimStylesBackup(entry.prefix, model);
             Alert.alert(t.backupNavSection, r.ok ? t.backupSwimDoneMsg(r.changes.length)
                                                  : (r.error ?? t.unknownError));
           } catch (e: any) {

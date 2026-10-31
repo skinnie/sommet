@@ -350,6 +350,13 @@ async function tidyImportedActivities(db: SQLiteDatabase): Promise<void> {
     `INSERT OR IGNORE INTO deleted_activities (id, deleted_at)
        SELECT id, ? FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`, [Date.now()]);
   await db.executeSql(`DELETE FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`);
+  // Copies of intervals.icu moves made from their own track files (tablet audit F21,
+  // 2026-10-31): an "icu:<n>" move keeps its track as "icu_<n>.gpx", and the orphan-file scan
+  // took each such file for a lost move (OrphanGpx.ts). Only the copy goes: the real row keeps
+  // the file, and nothing else (gear, metrics, tombstones) points at the copies.
+  await db.executeSql(
+    `DELETE FROM activities WHERE id LIKE 'icu\\_%' ESCAPE '\\'
+       AND EXISTS (SELECT 1 FROM activities AS kept WHERE kept.id = 'icu:' || substr(activities.id, 5))`);
   const [res] = await db.executeSql(`SELECT DISTINCT activity_type FROM activities WHERE activity_type != ''`);
   for (let i = 0; i < res.rows.length; i++) {
     const from: string = res.rows.item(i).activity_type;

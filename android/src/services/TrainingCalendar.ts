@@ -6,6 +6,7 @@ import { resolveRegion } from './MemoryMap';
 import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE, modeActivityId, withLights } from './GuidedWorkoutCore';
 import { entryLabel, isManaged, planDiff, rebuildAppsRegion, staleKept, CalendarEntry } from './TrainingCalendarCore';
 import { ANY_MODE_ACTIVITY, freeRuleId, restampRuleIds, ruleIdOf, withRuleId } from './WorkoutRuleIds';
+import { backupApps } from './AppsBackup';
 
 // Orchestration for the Calendar feature (native I/O) - the Android counterpart to
 // tools/training_calendar.py's sync(), reusing the same read/write/verify shape as
@@ -71,17 +72,19 @@ function isCleanEmpty(probe: Uint8Array): boolean {
 
 /** Read + decode the App Zone, re-reading when a read decodes to empty but the region does NOT
  * look genuinely empty - a glitchy read must never be believed, because syncCalendar rewrites the
- * WHOLE region and an empty "existing" would wipe apps that are really on the watch. */
-async function readExistingAppsStable(base: number): Promise<AppEntry[]> {
-  let last: AppEntry[] = [];
+ * WHOLE region and an empty "existing" would wipe apps that are really on the watch. `raw` is
+ * the bytes read (the used extent, or the first block when there is none), for the copy taken
+ * before the write. */
+async function readExistingAppsStable(base: number): Promise<{ existing: AppEntry[]; raw: Uint8Array }> {
+  let last: { existing: AppEntry[]; raw: Uint8Array } = { existing: [], raw: new Uint8Array(0) };
   for (let attempt = 0; attempt < 3; attempt++) {
     const probe = base64ToBytes(await readRegion(base, 8192));
     const usedLen = appsUsedLength(probe);
     const region = usedLen > 0 ? base64ToBytes(await readRegion(base, usedLen)) : new Uint8Array(0);
     const existing = decodeApps(region);
-    if (existing.length > 0 || isCleanEmpty(probe)) return existing; // trustworthy result
-    last = existing;                                                 // suspect empty - re-read
-    await new Promise<void>((r) => setTimeout(() => r(), 300));
+    last = { existing, raw: usedLen > 0 ? region : probe };
+    if (existing.length > 0 || isCleanEmpty(probe)) return last;     // trustworthy result
+    await new Promise<void>((r) => setTimeout(() => r(), 300));     // suspect empty - re-read
   }
   return last;
 }
@@ -109,7 +112,7 @@ export async function syncCalendar(
     // that are actually on the watch (observed once during a heavy multi-watch session, 2026-08-27).
     // A genuinely empty region is either unwritten flash (0xFF) or a valid num_entries==0 header;
     // anything else that fails to decode is suspect, so re-read before believing it.
-    const existing = await readExistingAppsStable(apps.base);
+    const { existing, raw: appsBefore } = await readExistingAppsStable(apps.base);
 
     const diff = planDiff(existing, plan, today);
     const { waiting } = diff;
@@ -191,6 +194,9 @@ export async function syncCalendar(
     const result: SyncResult = { removed, added, pendingCompile, displaysAdded, waiting };
     if (!write) { onState({ phase: 'done' }); return result; }
 
+    // A copy of the workout list first; no copy, no write (the sport modes get theirs in
+    // writeCustomModesRaw).
+    await backupApps(appsBefore);
     onState({ phase: 'writingApps' });
     if (!await writeRegion(apps.base, bytesToBase64(newAppsBytes), newAppsBytes.length)) {
       onState({ phase: 'error', error: 'Apps region write was not acknowledged.' }); return null;
