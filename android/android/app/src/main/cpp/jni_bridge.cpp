@@ -35,6 +35,10 @@ extern "C" int libambit_protocol_command(ambit_object_t *object, uint16_t comman
                                          uint8_t **reply_data, size_t *replylen,
                                          uint8_t legacy_format);
 
+// The Ambit3-family driver (device_driver.h has no extern "C" guard either): its log-header
+// parse keeps speeds in the watch's 10 m/h units, the Ambit 1/2 driver's already in m/h.
+extern "C" struct ambit_device_driver_s ambit_device_driver_ambit3;
+
 // libambit_new_from_fd() est déclaré dans libambit_android.c
 extern "C" ambit_object_t *libambit_new_from_fd(int fd, int ep_in, int ep_out,
                                                  uint16_t vid, uint16_t pid);
@@ -259,8 +263,30 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
         << "      <duration>"    << entry->header.duration / 1000 << "</duration>\n"
         << "      <distance>"    << entry->header.distance         << "</distance>\n"
         << "      <ascent>"      << entry->header.ascent           << "</ascent>\n"
-        << "      <sport_type>"  << (int)act_type                  << "</sport_type>\n"
-        << "    </extensions>\n"
+        << "      <sport_type>"  << (int)act_type                  << "</sport_type>\n";
+    // The watch's own summary of the move, as the desktop writes it (tools/exercise_log.py):
+    // calories, heart rate, cadence, speed, descent, recovery, peak training effect. The app
+    // reads them for the activity's calories and its list columns (GpxParser extTag); without
+    // them every move synced on Android had 0 kcal (tablet audit, 2026-10-31). Units as on the
+    // desktop: kcal, bpm, rpm, m/h, m, s, effect x10.
+    {
+        const ambit_log_header_t &h = entry->header;
+        const uint32_t speed_scale = (g_device && g_device->driver == &ambit_device_driver_ambit3) ? 10 : 1;
+        gpx << "      <energy>"       << h.energy_consumption             << "</energy>\n"
+            << "      <avg_hr>"       << (int)h.heartrate_avg             << "</avg_hr>\n"
+            << "      <max_hr>"       << (int)h.heartrate_max             << "</max_hr>\n"
+            << "      <avg_cadence>"  << (int)h.cadence_avg               << "</avg_cadence>\n"
+            << "      <max_cadence>"  << (int)h.cadence_max               << "</max_cadence>\n"
+            << "      <avg_speed>"    << h.speed_avg * speed_scale        << "</avg_speed>\n"
+            << "      <max_speed>"    << h.speed_max * speed_scale        << "</max_speed>\n"
+            << "      <descent>"      << h.descent                        << "</descent>\n"
+            << "      <recovery_time>" << h.recovery_time / 1000          << "</recovery_time>\n"
+            << "      <peak_training_effect>" << (int)h.peak_training_effect << "</peak_training_effect>\n"
+            << "      <max_altitude>" << h.altitude_max                   << "</max_altitude>\n";
+        if (h.swimming_pool_lengths > 0)
+            gpx << "      <pool_lengths>" << h.swimming_pool_lengths << "</pool_lengths>\n";
+    }
+    gpx << "    </extensions>\n"
         << "  <trkseg>\n";
 
     // État GPS courant — mis à jour par gps_base, complété par gps_small/tiny/periodic

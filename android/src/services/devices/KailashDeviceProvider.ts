@@ -77,6 +77,11 @@ export class KailashDeviceProvider implements DeviceProvider {
   setClock(): Promise<boolean> {
     return AmbitUsbModule.setDateTime();
   }
+
+  // The serial the desktop saves moves under (its device column), from the device-info read.
+  async serial(): Promise<string> {
+    try { return (await AmbitUsbModule.getDeviceInfo()).serial || ''; } catch { return ''; }
+  }
 }
 
 export const kailashDeviceProvider = new KailashDeviceProvider();

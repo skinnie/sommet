@@ -15,6 +15,7 @@ export interface SyncState {
   newCount: number;   // logs effectivement écrits (nouveaux)
   error?: string;
   deviceName?: string; // nom du modèle détecté, ex. "Suunto Ambit3 Peak" (connu après connect())
+  clockSet?: boolean;  // the watch took the phone's time during this sync (step 2c)
 }
 
 type SyncListener = (state: SyncState) => void;
@@ -53,9 +54,15 @@ export async function runSync(
   // ── 1. Connexion ────────────────────────────────────────────────────────────
   emit({ phase: 'connecting' });
   let deviceName: string | undefined;
+  // The name new moves are saved under: the watch serial, as the desktop does (else "0x" + its
+  // USB product id, the desktop's own fallback), so a move has one identity on every device.
+  // Android used to leave it empty (tablet audit, 2026-10-31).
+  let device = '';
   try {
     const info = await provider.connect();
     deviceName = info.name;
+    device = (provider.serial ? await provider.serial().catch(() => '') : '')
+      || (info.productId ? `0x${info.productId.toString(16)}` : '');
   } catch (e: any) {
     emit({ phase: 'error', error: e?.message ?? 'Connection failed' });
     return 0;
@@ -125,9 +132,10 @@ export async function runSync(
   // change reaches the watch without a tap on Home's "Sync time" (André, 🟣26, 2026-10-25: the
   // Peak stayed on summer time after 25/10). Before the step read, so its read time is right.
   // Best-effort: a clock the watch refused never fails the sync.
+  let clockSet = false;
   if (provider.setClock) {
     try {
-      await provider.setClock();
+      clockSet = !!(await provider.setClock());
       console.log('[clock] watch clock set to the phone\'s time');
     } catch (e: any) {
       console.log('[clock] watch clock not set, sync goes on:', e?.message ?? e);
@@ -186,6 +194,8 @@ export async function runSync(
       distance_m: meta.distanceM,
       d_plus: meta.dPlus,
       activity_type: meta.activityType,
+      device,
+      energy_kcal: meta.energyKcal,   // the watch's own figure (its log header, <energy>)
     });
     // Attribute this move to its default gear in the local usage ledger (best-effort) so the app
     // tallies gear mileage itself — the step toward not needing intervals.icu (GearTotals).
@@ -195,6 +205,6 @@ export async function runSync(
 
   // ── 4. Déconnexion ───────────────────────────────────────────────────────────
   await provider.disconnect().catch(() => {});
-  emit({ phase: 'done', current: gpxLogs.length, total: gpxLogs.length, newCount, deviceName });
+  emit({ phase: 'done', current: gpxLogs.length, total: gpxLogs.length, newCount, deviceName, clockSet });
   return newCount;
 }

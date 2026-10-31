@@ -7,6 +7,37 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-10-31: Watch link clash on plug-in, calories from the watch (Android)
+
+Found in the tablet audit of 30-31/10 (FZ-M1 + Ambit3 Peak).
+
+- **Every plug-in broke the clock and GPS orbit, then the Peak stopped answering.** After the
+  activity read, the sync started the "activity class" update without waiting for it. It
+  opened the watch while Home was setting the clock, on the one native watch handle: the clock
+  write failed ("Failed to set watch clock"), the settings read failed, the orbit refresh got
+  "Not initialized". After that the Peak, on its time screen, answered only "who are you"
+  until the clip was pulled (3 times out of 3, also after a re-plug). Fixes:
+  - Native (`AmbitUsbModule.kt`): opening the link, closing it and the device-info read now
+    run on the same single thread as every other watch call. They ran on the React Native
+    module thread, so two jobs could talk to the watch at the same moment.
+  - `AmbitUsbModule.ts`: one USB session shared by every watch job. A job that starts while
+    another holds the watch joins it, and the last one to finish closes it; joining never
+    waits, so a job inside another can't block. A plug-in event makes the next job open a
+    fresh handle. Tests: `UsbSession.test.ts`.
+  - Home: one auto-sync at a time (a bouncing clip sends two plug-in events), the activity
+    class update is awaited, and the clock is set once per plug-in: the sync already sets it,
+    so Home only sets it again when the sync didn't.
+- **Calories, heart rate and the other summary values from the watch.** The tablet's track
+  writer (`jni_bridge.cpp`) wrote only duration, distance, ascent and sport; it now writes the
+  watch's calories, average/max heart rate and cadence, average/max speed, descent, recovery
+  time, peak training effect and max altitude, as the desktop does (`tools/exercise_log.py`).
+  The sync saves the calories with the move, and the watch serial as its device, the name the
+  desktop uses (else "0x" + the USB product id, the desktop's fallback). All 847 watch moves on
+  the tablet had 0 kcal and no device. Tests: `SyncDeviceKcal.test.ts`.
+- **The moves still on the watch are read again once** (`FitReimport.ts` generation 2), so they
+  get the values above and the FIT files the 30/10 clash lost. That one-time re-read was marked
+  done even when the sync failed; it is now marked only after a sync that finished.
+
 ## 2026-10-30: Swim styles in backups, Bryton GPS data (desktop 0.2.56 + Android)
 
 - **Learned swim styles are backed up, restored and copied.** They are settings

@@ -50,6 +50,10 @@ export interface DeviceProvider {
    *  daylight-saving change reaches the watch). Optional; resolves true once the watch took it. */
   setClock?(): Promise<boolean>;
 
+  /** The connected watch's serial number: the name a move is saved under, the same one the
+   *  desktop uses, so one move has one identity on every device. Optional; '' when unknown. */
+  serial?(): Promise<string>;
+
   /** When true, a sync REFRESHES already-synced activities (overwrites their GPX + row)
    *  instead of skipping them. For a live re-read device like the Kailash, getLogs() rebuilds
    *  every activity from a fresh read of the TrackLog + DeviceHistory each time, so re-syncing

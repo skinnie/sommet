@@ -120,7 +120,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitDisconnect()
 
     // ─── État interne ─────────────────────────────────────────────────────────
-    private var currentDevice: UsbDevice? = null
+    @Volatile private var currentDevice: UsbDevice? = null
     // Multi-watch switcher (2026-08-16): which attached Suunto to talk to when more than one is
     // plugged in, by its stable Android USB path (UsbDevice.deviceName, e.g. /dev/bus/usb/002/010).
     // null = "first found", the pre-switcher behaviour. Set from JS via selectDevice(); connect()
@@ -135,6 +135,11 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private var pendingPickGpxPromise: Promise? = null
     private var pendingSaveAsPromise: Promise? = null
     private var pendingSaveAsSourcePath: String? = null
+    // Every call that talks to the watch runs on this one thread, in order: opening the link,
+    // closing it and the device-info read too, not only the long reads and writes. When those
+    // three ran on the React Native module thread, two jobs could talk to the watch at the same
+    // moment over the one USB handle; the watch then answered nothing but "who are you" until
+    // the cable was pulled (tablet + Peak, 2026-10-31, audit F1).
     private val executor = Executors.newSingleThreadExecutor()
 
     private val activityEventListener = object : BaseActivityEventListener() {
@@ -240,7 +245,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                 promise.reject("USB_PERMISSION_DENIED", "USB permission denied by user")
                 return
             }
-            openDeviceAndInit(device, promise)
+            executor.execute { openDeviceAndInit(device, promise) }
         }
     }
 
@@ -270,10 +275,8 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
             promise.reject("AMBIT_NOT_FOUND", "No Suunto watch detected. Check the USB OTG cable.")
             return
         }
-        currentDevice = ambit
-
         if (usbManager.hasPermission(ambit)) {
-            openDeviceAndInit(ambit, promise)
+            executor.execute { openDeviceAndInit(ambit, promise) }
             return
         }
 
@@ -361,6 +364,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
         // nativeAmbitInit already let go of the previous device, so its connection can close now.
         val previous = currentConnection
         currentConnection = connection
+        currentDevice = device
         if (previous !== connection) try { previous?.close() } catch (_: Exception) {}
 
         val deviceName = SUUNTO_PID_NAMES[pid] ?: device.productName ?: "Suunto (0x${pid.toString(16)})"
@@ -389,6 +393,10 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
         // Gating on currentDevice here is exactly what made getDeviceInfo() reject
         // over BLE, so isKailash(model==='Hoopoe') was never true and the Kailash
         // branch was skipped (2026-08-09).
+        executor.execute { resolveDeviceInfo(promise) }
+    }
+
+    private fun resolveDeviceInfo(promise: Promise) {
         val device = currentDevice
         try {
             val json = JSONObject(nativeAmbitGetDeviceInfo())
@@ -1304,12 +1312,14 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     // ─── disconnect() ─────────────────────────────────────────────────────────
     @ReactMethod
     fun disconnect(promise: Promise) {
-        if (jniLoaded) nativeAmbitDisconnect()
-        // After the native side let go of the fd (hid_close leaves it to us), not before.
-        try { currentConnection?.close() } catch (_: Exception) {}
-        currentConnection = null
-        currentDevice = null
-        promise.resolve(true)
+        executor.execute {
+            if (jniLoaded) nativeAmbitDisconnect()
+            // After the native side let go of the fd (hid_close leaves it to us), not before.
+            try { currentConnection?.close() } catch (_: Exception) {}
+            currentConnection = null
+            currentDevice = null
+            promise.resolve(true)
+        }
     }
 
     // ─── Événements de progression vers React Native ──────────────────────────

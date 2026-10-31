@@ -15,7 +15,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // legitimate reason to re-run, so there's no manual button.
 
 // Bump this when a new build should re-import to pick up FIT-encoder improvements.
-const FIT_REIMPORT_GENERATION = 1;
+// 2 (2026-10-31): the moves still on the watch get the watch's own calories, heart rate and the
+// other summary values in their GPX, the watch serial as their device, and the FIT files the
+// USB clash of 30/10 lost (tablet audit F1/F13).
+const FIT_REIMPORT_GENERATION = 2;
 
 const GEN_KEY     = 'fit_reimport_generation_done';   // last generation that finished re-importing
 const PENDING_KEY = 'fit_reimport_pending';           // '1' while a re-import is owed

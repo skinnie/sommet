@@ -212,6 +212,8 @@ QuickConnect), or stay LAN-only (syncs on home wifi).
 5. **#SYNC-5** Reachability: reverse-proxy/HTTPS or Tailscale per §6; verify phone off-wifi.
 6. **#SYNC-6** Mac + Windows validation via CI packaging; three-desktop + phone convergence test.
 7. **#SYNC-7** (later) Settings/prefs sync; fold Ember into the same endpoint.
+8. **#SYNC-8..16** Send only what changed (a sync ledger, as FreeFileSync does), calories + device
+   saved at watch sync, duplicates, one sync at a time: see `sync-ledger-plan.md` (2026-10-31).
 
 ## 8. Open decisions for André
 

@@ -893,8 +893,15 @@ export default function HomeScreen() {
     return () => clearInterval(iv);
   }, [phase]);
 
+  // A sync already under way, as a ref: `isBusy` is React state and still reads false for a
+  // second call made in the same moment (a clip that bounces sends two plug-in events).
+  const syncRunningRef = useRef(false);
+  // When the last sync set the watch clock itself, so the auto-sync doesn't set it a second time.
+  const clockSetBySyncRef = useRef(false);
   async function handleSync(forceRefresh = false) {
-    if (isBusy) return;
+    if (isBusy || syncRunningRef.current) return;
+    syncRunningRef.current = true;
+    clockSetBySyncRef.current = false;
     setLastActive('sync');
     lastSyncAtRef.current = Date.now();
     try {
@@ -916,21 +923,31 @@ export default function HomeScreen() {
       // re-imports on the next sync. A user-triggered forceRefresh takes precedence and also
       // satisfies the pending re-import.
       const reimportForFit = !forceRefresh && await isFitReimportPending();
+      let syncDone = false;
       // Over Bluetooth, hold the watch's sync lock for the read, as the Suunto app does: without
       // it a "Sync now" pressed on the watch ended in "Sync failed" although the sync ran.
       const overBle = bleConnectedRef.current;
       if (overBle) await syncDisplay(true);
       try {
-        await runSync(setSync, provider, { forceRefresh, reimportForFit });
+        await runSync(s => {
+          if (s.phase === 'done') syncDone = true;
+          if (s.phase === 'done' && s.clockSet) clockSetBySyncRef.current = true;
+          setSync(s);
+        }, provider, { forceRefresh, reimportForFit });
       } finally {
         if (overBle) await syncDisplay(false);
       }
-      if (forceRefresh || reimportForFit) await markFitReimportDone();
+      // Only once the re-read actually finished: runSync reports a failure as its 'error' state
+      // rather than throwing, so this used to mark it done after a failed sync too.
+      if ((forceRefresh || reimportForFit) && syncDone) await markFitReimportDone();
       // Recalculate the watch's activity class from the athlete's latest intervals.icu
       // training on every sync (André, 2026-08-18: "recalculate activity level on each sync
       // usb and bluetooth"). No-op if intervals.icu isn't connected, or on Ambit1/2/Kailash;
-      // writes only when the class changed. Fire-and-forget - must never break activity sync.
-      refreshActivityClassOnWatch().catch(() => {});
+      // writes only when the class changed. Never breaks the activity sync (errors swallowed).
+      // Awaited: it reads and may write the watch settings, and running it alongside the clock
+      // and orbit writes that follow is what broke them on every plug-in (tablet audit F1,
+      // 2026-10-31).
+      await refreshActivityClassOnWatch().catch(() => {});
       // Sommet Sync (#SYNC-3): after a watch read, converge with the user's own shared store so
       // these moves reach their other devices and any logged elsewhere come down. No-op when
       // unconfigured; fire-and-forget, must never break activity sync.
@@ -941,6 +958,7 @@ export default function HomeScreen() {
       setSync(s => ({ ...s, phase: 'error' }));
     } finally {
       lastSyncAtRef.current = Date.now();
+      syncRunningRef.current = false;
     }
   }
 
@@ -965,10 +983,22 @@ export default function HomeScreen() {
   handleSyncTimeRef.current = handleSyncTime;
   const handleOrbitalRef = useRef(handleOrbital);
   handleOrbitalRef.current = handleOrbital;
+  // One auto-sync at a time: a second plug-in event while one runs (a bouncing clip) is
+  // dropped, the run under way already covers it (tablet audit F1, 2026-10-31).
+  const autoSyncRunningRef = useRef(false);
   async function autoSyncOnConnect() {
-    try { await handleSyncRef.current(); } catch { /* surfaced in the sync card */ }
-    try { await handleSyncTimeRef.current(); } catch { /* surfaced in the time field */ }
-    try { await handleOrbitalRef.current(true); } catch { /* silent; surfaced in the orbit field */ }
+    if (autoSyncRunningRef.current) return;
+    autoSyncRunningRef.current = true;
+    try {
+      try { await handleSyncRef.current(); } catch { /* surfaced in the sync card */ }
+      // The sync sets the clock itself (SyncService step 2c); a second write is only needed
+      // when it didn't (an error, or a watch without that step).
+      if (clockSetBySyncRef.current) setTimeSyncMsg(t.homeTimeSyncOk);
+      else { try { await handleSyncTimeRef.current(); } catch { /* surfaced in the time field */ } }
+      try { await handleOrbitalRef.current(true); } catch { /* silent; surfaced in the orbit field */ }
+    } finally {
+      autoSyncRunningRef.current = false;
+    }
   }
   const autoSyncOnConnectRef = useRef(autoSyncOnConnect);
   autoSyncOnConnectRef.current = autoSyncOnConnect;

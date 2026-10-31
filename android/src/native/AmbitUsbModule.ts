@@ -88,6 +88,43 @@ export function isWatchJobRunning(): boolean {
   return watchJobs > 0 && Date.now() - watchJobSince < WATCH_JOB_MAX_MS;
 }
 
+// One USB session, shared by every watch job (2026-10-31, tablet audit F1). Each job opened its
+// own link and closed it when done, but the native side holds one watch handle: a job that
+// started while another was running replaced that handle under it, and the first job's
+// disconnect then closed the second one's. Every plug-in hit it (the sync's "activity class"
+// update ran during Home's clock write): the clock and GPS orbit failed, and the Peak stopped
+// answering until the clip was pulled. Now a job that starts while the watch is open joins
+// that session, and the last job to finish closes it. Joining never waits, so a job that opens
+// a session inside another can't block itself. The native side runs every watch call on one
+// thread, in order (AmbitUsbModule.kt).
+let usbUsers = 0;
+let usbInfo: DeviceInfo | null = null;
+let usbOpening: Promise<DeviceInfo> | null = null;
+// The watch was plugged in again: the open handle belongs to the USB device that left, so the
+// next job opens a fresh one (the jobs already counted stay counted).
+let usbStale = false;
+emitter.addListener('AmbitUsbAttached', () => { usbStale = true; });
+
+async function openUsbSession(): Promise<DeviceInfo> {
+  usbUsers += 1;   // counted before waiting, so a job finishing meanwhile can't close it under us
+  try {
+    if (!usbInfo || usbStale) {
+      if (!usbOpening) {
+        usbStale = false;
+        usbOpening = ambitConnector.connect().finally(() => { usbOpening = null; });
+        lastCustomModes = null;   // a new USB session, maybe another watch: read before backing up
+      }
+      usbInfo = await usbOpening;
+    }
+    lastLinkWasBle = false;
+    return usbInfo;
+  } catch (e) {
+    usbUsers = Math.max(0, usbUsers - 1);
+    usbInfo = null;
+    throw e;
+  }
+}
+
 export const connect = async (): Promise<DeviceInfo> => {
   let info: DeviceInfo;
   if (bleActive) {
@@ -99,9 +136,7 @@ export const connect = async (): Promise<DeviceInfo> => {
     }
   } else {
     try {
-      info = await ambitConnector.connect();
-      lastLinkWasBle = false;
-      lastCustomModes = null;   // a new USB session, maybe another watch: read before backing up
+      info = await openUsbSession();
     } catch (e: any) {
       if (lastLinkWasBle && e?.code === 'AMBIT_NOT_FOUND') {
         const err: any = new Error(t.watchBleClosedError);
@@ -118,6 +153,9 @@ export const connect = async (): Promise<DeviceInfo> => {
 export const disconnect = async (): Promise<void> => {
   watchJobs = Math.max(0, watchJobs - 1);
   if (bleActive) return;           // leave the BLE link up; HomeScreen manages it
+  if (usbUsers > 1) { usbUsers -= 1; return; }   // another job still uses the watch
+  usbUsers = 0;
+  usbInfo = null;
   return ambitConnector.disconnect();
 };
 export const getLogs    = (knownIds?: string[]) => ambitConnector.getLogs(knownIds);
