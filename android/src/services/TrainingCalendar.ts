@@ -1,19 +1,21 @@
-import { connect, disconnect, readRegion, readCustomModesRaw, writeRegion, writeCustomModesRaw, isBleTransportActive } from '../native/AmbitUsbModule';
+import { connect, disconnect, readRegion, readCustomModesRaw, writeRegion, writeCustomModesRaw, isBleTransportActive, getDeviceInfo } from '../native/AmbitUsbModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { decode as decodeCM, encodeRegion } from './SportModeCodec';
 import { decodeApps, buildAppsRegion, CompiledApp, AppEntry } from './AppsCodec';
 import { resolveRegion } from './MemoryMap';
 import { findModeIndex, ensureGuidanceDisplay, GUIDANCE_ENTRY_TYPE, modeActivityId, withLights } from './GuidedWorkoutCore';
-import { entryLabel, isManaged, planDiff, rebuildAppsRegion, staleKept, CalendarEntry } from './TrainingCalendarCore';
+import { entryLabel, installRecord, isManaged, planDiff, rebuildAppsRegion, staleKept, CalendarEntry } from './TrainingCalendarCore';
 import { ANY_MODE_ACTIVITY, freeRuleId, restampRuleIds, ruleIdOf, withRuleId } from './WorkoutRuleIds';
 import { backupApps } from './AppsBackup';
+import { loadInstalled, saveInstalled } from './CalendarRecord';
 
 // Orchestration for the Calendar feature (native I/O) - the Android counterpart to
 // tools/training_calendar.py's sync(), reusing the same read/write/verify shape as
 // AppInstall.installCompiledApp. On sync: every managed "...dd/mm..." entry dated before today
 // is erased, and every plan entry dated today or later that already has a compiled binary
 // attached gets installed, all in one Apps-region rewrite + one CustomModes rewrite (adding a
-// guidance display to any newly-used mode).
+// guidance display to any newly-used mode). A dated workout another device (the PC) put there
+// whose day is still to come stays: each erases only its own (CalendarRecord, 2026-11-01).
 //
 // MANUAL COMPILE, DELIBERATELY (André, 2026-08-21 direction, matching IntervalsService.ts's
 // existing policy from 2026-08-14): this app ships no compiler key and makes no automated
@@ -46,6 +48,7 @@ export interface SyncResult {
   pendingCompile: string[]; // plan entries that are due but have no compiled binary yet
   displaysAdded: string[];
   waiting: string[];        // upcoming plan entries past the WORKOUT menu's 5 slots
+  othersKept: string[];     // another device's upcoming workouts, left on the watch
 }
 
 function u16(b: Uint8Array, o: number) { return b[o] | (b[o + 1] << 8); }
@@ -114,8 +117,14 @@ export async function syncCalendar(
     // anything else that fails to decode is suspect, so re-read before believing it.
     const { existing, raw: appsBefore } = await readExistingAppsStable(apps.base);
 
-    const diff = planDiff(existing, plan, today);
-    const { waiting } = diff;
+    // What this tablet put on this watch: only those, and past ones, are erased (CalendarRecord).
+    let serial = '';
+    try { serial = (await getDeviceInfo()).serial ?? ''; } catch { /* no record: nothing is its own */ }
+    const mine = await loadInstalled(serial);
+    const planLabels = new Set(plan.map((e) => entryLabel(e.date, e.workoutName)));
+
+    const diff = planDiff(existing, plan, today, undefined, mine);
+    const { waiting, othersKept } = diff;
     let { keptRawBlocks } = diff;
     const toAdd = [...diff.toAdd];
     let cmDecoded = decodeCM(base64ToBytes(await readCustomModesRaw()));
@@ -191,7 +200,7 @@ export async function syncCalendar(
     // Sport modes are written only when a guidance display was added (same as the desktop sync).
     const cmImage = displaysAdded.length ? encodeRegion(cmDecoded, CUSTOM_MODES_SIZE) : null;
 
-    const result: SyncResult = { removed, added, pendingCompile, displaysAdded, waiting };
+    const result: SyncResult = { removed, added, pendingCompile, displaysAdded, waiting, othersKept };
     if (!write) { onState({ phase: 'done' }); return result; }
 
     // A copy of the workout list first; no copy, no write (the sport modes get theirs in
@@ -201,6 +210,9 @@ export async function syncCalendar(
     if (!await writeRegion(apps.base, bytesToBase64(newAppsBytes), newAppsBytes.length)) {
       onState({ phase: 'error', error: 'Apps region write was not acknowledged.' }); return null;
     }
+    // The workouts are on the watch: record which are this tablet's before the checks below.
+    await saveInstalled(serial, installRecord(decodeApps(newAppsBytes).map((e) => e.name), planLabels, mine))
+      .catch(() => { /* next sync: the plan's still count as its own */ });
     if (cmImage) {
       onState({ phase: 'writingModes' });
       if (!await writeCustomModesRaw(bytesToBase64(cmImage))) {

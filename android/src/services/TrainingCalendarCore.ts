@@ -49,19 +49,47 @@ export function isExpired(name: string, today: Date): boolean {
 
 export interface CalendarEntry { date: string; mode: string; workoutName: string }
 
-/** Returns (keptRawBlocks, toAdd, waiting). The WORKOUT menu shows only the first
+const WEEKDAY_RE = /^[A-Z][a-z]{2} /;
+
+/** The dated workouts among `names` that another device put on the watch and whose day is still
+ * to come. The tablet and the PC keep separate plans, so a sync erases only past ones and its own
+ * (André, 2026-11-01): the tablet's sync had erased the PC's W9 Final Workout on its day. `mine`
+ * is this tablet's record of what it installed on the watch (CalendarRecord); a label in its plan
+ * counts as its own too, so the same workout in both plans goes on once. One named the old way
+ * ("dd/mm_name") is also the sync's own, so a re-sync still renames it. Port of
+ * training_calendar.py's left_to_others. */
+export function leftToOthers(names: string[], planLabels: ReadonlySet<string>, today: Date,
+                             mine: ReadonlySet<string>): string[] {
+  return names.filter((n) => isManaged(n) && WEEKDAY_RE.test(n) && !isExpired(n, today)
+    && !mine.has(n) && !planLabels.has(n));
+}
+
+/** What the tablet records as its own after a sync: the dated workouts now on the watch that are
+ * in its plan or were already its own - never another device's (desktop sync's `fresh`). */
+export function installRecord(namesOnWatch: string[], planLabels: ReadonlySet<string>,
+                              mine: ReadonlySet<string>): string[] {
+  return [...new Set(namesOnWatch.filter((n) => isManaged(n) && (planLabels.has(n) || mine.has(n))))].sort();
+}
+
+/** Returns (keptRawBlocks, toAdd, waiting, othersKept). The WORKOUT menu shows only the first
  * WORKOUT_MENU_MAX native workouts, so the calendar syncs to the space available: manually
  * installed native workouts keep their slots and the soonest upcoming plan entries fill the rest;
  * `waiting` is the later ones' labels, moved in by later syncs as past ones are erased. A managed
  * entry is kept only inside that window (expired, removed-from-plan and pushed-out ones are all
- * erased); unmanaged apps are never touched. Exact port of training_calendar.py's plan_diff. */
+ * erased) - except one another device put there whose day is still to come (`othersKept`,
+ * leftToOthers; `mine` is this tablet's record): it stays and keeps its slot, like a manual one.
+ * Unmanaged apps are never touched. Exact port of training_calendar.py's plan_diff. */
 export function planDiff(existing: AppEntry[], planEntries: CalendarEntry[], today: Date,
-                         menuMax: number = WORKOUT_MENU_MAX):
-    { keptRawBlocks: Uint8Array[]; toAdd: CalendarEntry[]; waiting: string[] } {
+                         menuMax: number = WORKOUT_MENU_MAX, mine: ReadonlySet<string> = new Set()):
+    { keptRawBlocks: Uint8Array[]; toAdd: CalendarEntry[]; waiting: string[]; othersKept: string[] } {
   const namesPresent = new Set(existing.map((e) => e.name));
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const manual = existing.filter((e) => e.rawBlock[0] === GUIDANCE_ENTRY_TYPE && !isManaged(e.name));
-  const slots = Math.max(menuMax - manual.length, 0);
+  const native = existing.filter((e) => e.rawBlock[0] === GUIDANCE_ENTRY_TYPE).map((e) => e.name);
+  const manual = native.filter((n) => !isManaged(n));
+  const planLabels = new Set(planEntries.map((e) => entryLabel(e.date, e.workoutName)));
+  const othersKept = leftToOthers(native, planLabels, today, mine);
+  const others = new Set(othersKept);
+  const slots = Math.max(menuMax - manual.length - othersKept.length, 0);
   const upcoming: [string, CalendarEntry][] = [];
   const seen = new Set<string>();
   for (const e of [...planEntries].sort((a, b) => a.date.localeCompare(b.date))) {
@@ -72,12 +100,12 @@ export function planDiff(existing: AppEntry[], planEntries: CalendarEntry[], tod
   const waiting = upcoming.slice(slots).map(([label]) => label);
 
   const keptRawBlocks = existing
-    .filter((e) => !isManaged(e.name) || window.has(e.name))
+    .filter((e) => !isManaged(e.name) || window.has(e.name) || others.has(e.name))
     .map((e) => e.rawBlock);
   const toAdd = upcoming.slice(0, slots)
     .filter(([label]) => !namesPresent.has(label))
     .map(([, e]) => e);
-  return { keptRawBlocks, toAdd, waiting };
+  return { keptRawBlocks, toAdd, waiting, othersKept };
 }
 
 /** The kept managed entries whose program on the watch differs from what the plan now installs

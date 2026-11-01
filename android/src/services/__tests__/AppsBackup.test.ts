@@ -46,6 +46,7 @@ jest.mock('../../native/AmbitUsbModule', () => {
   };
 });
 jest.mock('../MemoryMap', () => ({ resolveRegion: jest.fn(async () => ({ base: 0x0927c0, size: 0x10000 })) }));
+jest.mock('../CalendarRecord', () => ({ loadInstalled: async () => new Set(), saveInstalled: async () => {} }));
 jest.mock('../SportModeCodec', () => ({ decode: jest.fn(() => ({ modes: [] })), encodeRegion: jest.fn() }));
 jest.mock('../WatchBackup', () => ({
   saveWatchBackup: jest.fn(async (kind: string, b64: string, serial: string) => {

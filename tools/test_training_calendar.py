@@ -98,6 +98,49 @@ class PlanDiffWindow(unittest.TestCase):
         self.assertEqual((to_add, waiting), ([], [lbl("2026-09-28")]))
 
 
+class PlanDiffOtherDevice(unittest.TestCase):
+    """The PC and the tablet keep separate plans: a sync erases past workouts and its own, and
+    leaves another device's upcoming ones (André's Peak, 31/10: the tablet's sync erased the
+    PC's "Sat 31/10 W9 Final Workout" on its day)."""
+    TODAY = TC.datetime.date(2026, 10, 31)
+
+    def test_another_devices_upcoming_workout_stays(self):
+        w9 = TC.entry_label("2026-10-31", "W9 Final Workout")
+        data = region(("Couch-to-5K", 1), (w9, 1))
+        kept, to_add, waiting = TC.plan_diff(data, plan(), self.TODAY, mine={})
+        self.assertEqual(names(TC.rebuild_apps_region(kept)), [("Couch-to-5K", 1), (w9, 1)])
+        self.assertEqual((to_add, waiting), ([], []))
+
+    def test_past_ones_go_whoever_put_them_there(self):
+        data = region((TC.entry_label("2026-10-24", "T10s"), 1))
+        self.assertEqual(TC.plan_diff(data, plan(), self.TODAY)[0], [])
+
+    def test_its_own_taken_out_of_the_plan_goes(self):
+        own = lbl("2026-11-03")
+        data = region((own, 1))
+        self.assertEqual(TC.plan_diff(data, plan(), self.TODAY, mine={own: "f"})[0], [])
+
+    def test_another_devices_workouts_take_menu_slots(self):
+        theirs = [TC.entry_label(d, "Tablet") for d in ("2026-11-01", "2026-11-02", "2026-11-04")]
+        data = region(("Manual", 1), *[(t, 1) for t in theirs])
+        kept, to_add, waiting = TC.plan_diff(
+            data, plan("2026-11-03", "2026-11-05", "2026-11-07"), self.TODAY)
+        self.assertEqual(len(kept), 4)
+        self.assertEqual([e["date"] for e in to_add], ["2026-11-03"])
+        self.assertEqual(waiting, [lbl("2026-11-05"), lbl("2026-11-07")])
+
+    def test_the_same_workout_in_both_plans_goes_on_once(self):
+        data = region((lbl("2026-11-03"), 1))
+        kept, to_add, _ = TC.plan_diff(data, plan("2026-11-03"), self.TODAY)
+        self.assertEqual((len(kept), to_add), (1, []))
+
+    def test_an_old_style_name_is_still_renamed(self):
+        data = region(("03/11_W03", 1))
+        kept, to_add, _ = TC.plan_diff(data, plan("2026-11-03"), self.TODAY)
+        self.assertEqual(kept, [])
+        self.assertEqual([e["date"] for e in to_add], ["2026-11-03"])
+
+
 class BuilderMenuFull(unittest.TestCase):
     def test_refuses_a_sixth_and_replaces(self):
         import guided_workout as GW
@@ -183,6 +226,16 @@ class AutoStartRules(unittest.TestCase):
         self.assertEqual(out, [])
         for m in d["exercise_modes"]:
             self.assertEqual([r["RuleIdx"] for r in m["Rules"]], [0])   # the Sunrise app stays
+
+    def test_another_devices_rule_stays(self):
+        d = modes(("Running", 3))
+        theirs = TC.entry_label("2026-10-12", "Mac")
+        data = region(("Sunrise", 0), (theirs, 1))
+        d["exercise_modes"][0]["Rules"] = [{"RuleIdx": 1, "UseRule": True, "LogRule": False}]
+        existing = WI.apps_entries_with_raw_blocks(data)
+        touched, _ = TC.auto_start_rules(d, existing, data, plan(), self.TODAY, False, keep=[theirs])
+        self.assertEqual(touched, [])
+        self.assertEqual([r["RuleIdx"] for r in d["exercise_modes"][0]["Rules"]], [1])
 
     def test_five_slot_limit(self):
         d = modes(("Running", 3), ("Running workout", 3))
@@ -361,6 +414,21 @@ class SyncReinstallsEdits(unittest.TestCase):
         r = self.sync([{"s": 10}])                  # installed by an older version: no record
         self.assertEqual((r["added"], r["edited"]), ([], []))
         self.assertEqual(self.sync([{"s": 20}])["edited"], [TC.entry_label("2026-10-24", "Test")])
+
+    def test_another_devices_workout_stays_and_is_not_recorded(self):
+        theirs = TC.entry_label("2026-10-26", "Tablet")
+        self.apps = region((theirs, 1)) + b"\xff" * 64
+        own = TC.entry_label("2026-10-24", "Test")
+        r = self.sync([{"s": 600}])
+        self.assertEqual((r["added"], r["removed"], r["othersKept"]), ([own], [], [theirs]))
+        self.assertEqual(sorted(n for n, _ in self.on_watch()), sorted([own, theirs]))
+        self.assertEqual(list(TC.load_installed("8A15TEST")), [own])
+        # Taken out of this computer's plan: its own goes, the tablet's stays.
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = TC.sync(self.link, {"entries": []}, self.TODAY, write=True, json_out=True)
+        self.assertEqual((r["removed"], r["othersKept"]), ([own], [theirs]))
+        self.assertEqual([n for n, _ in self.on_watch()], [theirs])
+        self.assertEqual(TC.load_installed("8A15TEST"), {})
 
 if __name__ == "__main__":
     unittest.main()

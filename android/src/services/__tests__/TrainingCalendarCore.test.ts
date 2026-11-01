@@ -1,4 +1,4 @@
-import { entryLabel, isManaged, isExpired, planDiff, rebuildAppsRegion, staleKept } from '../TrainingCalendarCore';
+import { entryLabel, installRecord, isManaged, isExpired, planDiff, rebuildAppsRegion, staleKept } from '../TrainingCalendarCore';
 import { buildAppsRegion, decodeApps } from '../AppsCodec';
 
 // Same reasoning/values as this feature's desktop hardware+unit tests (training_calendar.py) -
@@ -54,12 +54,13 @@ describe('TrainingCalendarCore', () => {
     expect(toAdd.map((e) => e.date)).toEqual(['2026-09-01']);
   });
 
-  test('planDiff erases a still-future managed entry that was removed from the plan', () => {
+  test('planDiff erases a still-future entry of its own that was removed from the plan', () => {
     const region = fakeAppsRegion(['Couch-to-5K', lbl('2026-08-28', 'Interval'), lbl('2026-08-30', 'Tempo')]);
     const existing = decodeApps(region);
     const today = new Date(2026, 7, 27);
     const plan = [{ date: '2026-08-30', mode: 'Running', workoutName: 'Tempo' }];  // 28/08 removed
-    const { keptRawBlocks, toAdd } = planDiff(existing, plan, today);
+    const mine = new Set([lbl('2026-08-28', 'Interval'), lbl('2026-08-30', 'Tempo')]);   // the tablet put both there
+    const { keptRawBlocks, toAdd } = planDiff(existing, plan, today, undefined, mine);
     const keptNames = existing.filter((e) => keptRawBlocks.includes(e.rawBlock)).map((e) => e.name);
     expect(keptNames).toEqual(['Couch-to-5K', lbl('2026-08-30', 'Tempo')]);  // unmanaged app always kept
     expect(toAdd).toEqual([]);
@@ -117,5 +118,60 @@ describe('TrainingCalendarCore', () => {
     // A workout installed by hand (not managed) is never touched.
     expect(staleKept(existing, existing.map((e) => e.rawBlock), (l) => (l === label ? null : new Uint8Array([7]))))
       .toEqual([]);
+  });
+});
+
+// The PC and the tablet keep separate plans: a sync erases past workouts and its own, and leaves
+// another device's upcoming ones - same cases as test_training_calendar.py's PlanDiffOtherDevice.
+describe('planDiff with another device on the watch', () => {
+  const today = new Date(2026, 9, 31); // 31/10
+  const keptNames = (blocks: Uint8Array[]) => decodeApps(rebuildAppsRegion(blocks)).map((e) => e.name);
+  const run = (...dates: string[]) => dates.map((d) => ({ date: d, mode: 'Running', workoutName: `W${d.slice(-2)}` }));
+
+  test("another device's upcoming workout stays", () => {
+    const w9 = entryLabel('2026-10-31', 'W9 Final Workout');
+    const r = planDiff(decodeApps(fakeAppsRegion(['Couch-to-5K', w9])), [], today);
+    expect(keptNames(r.keptRawBlocks)).toEqual(['Couch-to-5K', w9]);
+    expect(r.othersKept).toEqual([w9]);
+  });
+
+  test('past ones go whoever put them there', () => {
+    const r = planDiff(decodeApps(fakeAppsRegion([entryLabel('2026-10-24', 'T10s')])), [], today);
+    expect(r.keptRawBlocks).toEqual([]);
+  });
+
+  test('its own taken out of the plan goes', () => {
+    const own = lbl('2026-11-03');
+    const r = planDiff(decodeApps(fakeAppsRegion([own])), [], today, undefined, new Set([own]));
+    expect(r.keptRawBlocks).toEqual([]);
+  });
+
+  test("another device's workouts take menu slots", () => {
+    const theirs = ['2026-11-01', '2026-11-02', '2026-11-04'].map((d) => entryLabel(d, 'PC'));
+    const r = planDiff(decodeApps(fakeAppsRegion(['Manual', ...theirs])),
+      run('2026-11-03', '2026-11-05', '2026-11-07'), today);
+    expect(r.keptRawBlocks).toHaveLength(4);
+    expect(r.toAdd.map((e) => e.date)).toEqual(['2026-11-03']);
+    expect(r.waiting).toEqual([lbl('2026-11-05'), lbl('2026-11-07')]);
+  });
+
+  test('the same workout in both plans goes on once', () => {
+    const r = planDiff(decodeApps(fakeAppsRegion([lbl('2026-11-03')])), run('2026-11-03'), today);
+    expect(r.keptRawBlocks).toHaveLength(1);
+    expect(r.toAdd).toEqual([]);
+  });
+
+  test('an old-style name is still renamed', () => {
+    const r = planDiff(decodeApps(fakeAppsRegion(['03/11_W03'])), run('2026-11-03'), today);
+    expect(r.keptRawBlocks).toEqual([]);
+    expect(r.toAdd.map((e) => e.date)).toEqual(['2026-11-03']);
+  });
+
+  test("the record keeps the plan's and its own, never another device's", () => {
+    const own = lbl('2026-11-03');
+    const pcs = entryLabel('2026-11-04', 'PC');
+    const planned = lbl('2026-11-05');
+    expect(installRecord(['Manual', own, pcs, planned], new Set([planned]), new Set([own])))
+      .toEqual([own, planned].sort());
   });
 });

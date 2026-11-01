@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-01: The PC and the tablet no longer erase each other's workouts (desktop + Android)
+
+- **The tablet's Sync to Watch erased the PC's workout of the day.** The PC and the tablet keep
+  separate Training Program plans, and each sync treated every dated workout on the watch
+  ("Www dd/mm name") as its own: anything not in its plan was erased. On 31/10 the PC had put
+  "Sat 31/10 W9 Final Workout" on the Peak, and the tablet's sync erased it that day. Each
+  device now erases only dated workouts whose day has passed, and its own workouts that left
+  its plan. Another device's upcoming workouts stay and keep their WORKOUT-menu places, like a
+  workout installed by hand; this device's later workouts wait for a free place. The same
+  date and name in both plans goes on the watch once. The PC already kept a record per watch
+  of what it installed (`~/AmbitAppBackups/calendar/installed-<serial>.json`); the tablet now
+  keeps one too (`files/calendar/installed-<serial>.json`). A desktop auto-start rule pointing
+  at another device's workout stays as well. (`training_calendar.left_to_others`,
+  `TrainingCalendarCore.leftToOthers`, `CalendarRecord.ts`; tests: `PlanDiffOtherDevice` and
+  `test_another_devices_workout_stays_and_is_not_recorded` in `test_training_calendar.py`,
+  `CalendarOwnership.test.ts`, `TrainingCalendarCore.test.ts`.)
+  Checked on the Peak (01/11): the tablet installed its own workout; the PC then added its
+  own and left the tablet's; the tablet then erased only its own, and kept the PC's.
+
 ## 2026-10-31: Intervals.icu copies without a date, Backup without the watch model, App Zone copy, speeds (Android)
 
 Found in the second part of the tablet audit (FZ-M1 + Ambit3 Peak, after the plug-in fix).

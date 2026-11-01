@@ -28,7 +28,9 @@ Rotation, per André ("on the sync we erase the ones past #today and put another
 whatever's next from the plan that isn't already installed. Managed entries are recognized by
 MANAGED_RE (the "Www dd/mm " prefix this tool writes, and the older "dd/mm_" so a re-sync
 renames rather than duplicates them); anything else already on the watch (a manually installed
-guided workout, a generic Suunto App) is left alone.
+guided workout, a generic Suunto App) is left alone. So is a dated workout another device (the
+tablet, another computer) put there whose day is still to come: the PC and the tablet keep
+separate plans, and each erases only the past ones and its own (left_to_others, 2026-11-01).
 
 Known v1 simplification: the watch only stores "dd/mm" in the app name, no year. Expiry is
 therefore judged by comparing (month, day) against today's (month, day) — correct for the
@@ -180,6 +182,22 @@ def is_expired(name, today):
     return (month, day) < (today.month, today.day)
 
 
+WEEKDAY_RE = re.compile(r"^[A-Z][a-z]{2} ")
+
+
+def left_to_others(names, plan_labels, today, mine):
+    """The dated workouts among `names` that another device put on the watch and whose day is
+    still to come. The PC and the tablet keep separate plans, so a sync erases only past ones
+    and its own (André, 2026-11-01): the tablet's sync had erased the PC's W9 Final Workout on
+    its day. `mine` is this computer's install record for the watch; a label in its plan
+    (`plan_labels`) counts as its own too, so the same workout in both plans goes on once. One
+    named the old way ("dd/mm_name", before 2026-10-20) is also the sync's own, so a re-sync
+    still renames it."""
+    return [n for n in names
+            if is_managed(n) and WEEKDAY_RE.match(n) and not is_expired(n, today)
+            and n not in mine and n not in plan_labels]
+
+
 def rebuild_apps_region(raw_blocks):
     """Same directory-format assembly as workout_install.build_apps_region's tail, for the
     pure-removal case (no new entry to hand it) — see that function's docstring for the format."""
@@ -269,7 +287,7 @@ def watch_serial(link):
         return None
 
 
-def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_MAX):
+def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_MAX, mine=()):
     """Returns (kept_raw_blocks, to_add, waiting).
 
     The WORKOUT menu shows only the first `menu_max` native workouts, so the calendar syncs to
@@ -279,12 +297,17 @@ def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_
 
     A managed entry is kept only if it's in that window - so an expired one, one removed from
     the calendar (TrainingProgramPage.qml's "Remove workout"), and one pushed out of the window
-    are all erased. Unmanaged entries (anything not "dd/mm_"-prefixed — a manually installed
+    are all erased - except one another device put there whose day is still to come
+    (left_to_others; `mine` is this computer's install record): it stays and keeps its slot, like
+    a manual one. Unmanaged entries (anything not "dd/mm_"-prefixed — a manually installed
     guided workout, a generic Suunto App) are never touched, matching the module docstring's
     standing rule."""
     existing = WI.apps_entries_with_raw_blocks(current_apps_bytes)
-    manual = [e for e in GW.native_names(existing) if not is_managed(e)]
-    slots = max(menu_max - len(manual), 0)
+    names = GW.native_names(existing)
+    manual = [n for n in names if not is_managed(n)]
+    plan_labels = {entry_label(e["date"], e["workout"]["name"]) for e in plan_entries}
+    others = left_to_others(names, plan_labels, today, mine)
+    slots = max(menu_max - len(manual) - len(others), 0)
     upcoming, seen = [], set()
     for e in sorted(plan_entries, key=lambda e: e["date"]):
         label = entry_label(e["date"], e["workout"]["name"])
@@ -295,13 +318,14 @@ def plan_diff(current_apps_bytes, plan_entries, today, menu_max=GW.WORKOUT_MENU_
     window = {label for label, _ in upcoming[:slots]}
     waiting = [label for label, _ in upcoming[slots:]]
 
-    kept = [e["_raw_block"] for e in existing if not is_managed(e["name"]) or e["name"] in window]
+    kept = [e["_raw_block"] for e in existing
+            if not is_managed(e["name"]) or e["name"] in window or e["name"] in others]
     names_present = {e["name"] for e in existing}
     to_add = [e for label, e in upcoming[:slots] if label not in names_present]
     return kept, to_add, waiting
 
 
-def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, auto_start):
+def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, auto_start, keep=()):
     """Edit `decoded` (custom_modes.decode output) in place so that the sport mode each plan
     entry names (plain "Running") runs every installed upcoming workout as an active rule - all
     of them at once, each gated on its own date (iamrule_code.add_date_gate), so the watch's own
@@ -319,7 +343,8 @@ def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, aut
     First every rule in ANY mode that points at a managed ("dd/mm_") entry is dropped (that is
     how the feature is switched off, auto_start=False, and how a "Running workout" left by an
     older sync is emptied); then each named mode gets one rule per workout, soonest first, as
-    far as the five slots go.
+    far as the five slots go. A rule pointing at a workout another device put there (`keep`,
+    left_to_others) is that device's and stays.
     Returns (touched_mode_names, [{"sport", "mode", "workouts"}])."""
     old_names = {i: e["name"] for i, e in enumerate(existing)}
     # Rules are compared at the end, so a sync that changes nothing rewrites no sport mode
@@ -332,7 +357,7 @@ def auto_start_rules(decoded, existing, new_apps_bytes, plan_entries, today, aut
         kept = []
         for r in mode.get("Rules") or []:
             name = old_names.get(r["RuleIdx"], "")
-            if is_managed(name) or name not in installed:
+            if (is_managed(name) and name not in keep) or name not in installed:
                 continue
             kept.append(dict(r, RuleIdx=installed[name]))
         mode["Rules"] = kept
@@ -377,8 +402,13 @@ def sync(link, plan, today, write, json_out, auto_start=None):
     current_cm = read_flash(link, cm_base, cm_size, label="CustomModes")
     current_apps = read_flash(link, apps_base, apps_size, label="Apps")
 
-    kept_blocks, to_add, waiting = plan_diff(current_apps, plan["entries"], today)
+    serial = watch_serial(link)
+    installed = load_installed(serial)
+    kept_blocks, to_add, waiting = plan_diff(current_apps, plan["entries"], today, mine=installed)
     existing = WI.apps_entries_with_raw_blocks(current_apps)
+    by_label = {entry_label(e["date"], e["workout"]["name"]): e for e in plan["entries"]}
+    # Another device's upcoming workouts: left on the watch, rules and all (plan_diff).
+    others = left_to_others(GW.native_names(existing), set(by_label), today, installed)
     kept_block_set = set(kept_blocks)
     # Everything managed that didn't survive the diff — expired or removed from the plan. One
     # moved back to waiting for a free slot is erased too, but reported under "waiting".
@@ -388,9 +418,6 @@ def sync(link, plan, today, write, json_out, auto_start=None):
 
     decoded = cm.decode(current_cm)
     lang = GW.read_watch_language(link)
-    by_label = {entry_label(e["date"], e["workout"]["name"]): e for e in plan["entries"]}
-    serial = watch_serial(link)
-    installed = load_installed(serial)
     edited = edited_labels(existing, kept_block_set, by_label, installed, lang)
     edited_blocks = {}   # label -> its block on the watch, kept if the new version fails to compile
     # Their rule ids stay taken until the new version is in: a failed compile puts the old block
@@ -478,7 +505,7 @@ def sync(link, plan, today, write, json_out, auto_start=None):
             mode.setdefault("Displays", []).append(GW.guidance_display())
             modes_touched.append(mode_name)
     rules_touched, auto = auto_start_rules(
-        decoded, existing, new_apps_bytes, plan["entries"], today, auto_start)
+        decoded, existing, new_apps_bytes, plan["entries"], today, auto_start, keep=others)
     modes_touched = sorted(set(modes_touched) | set(rules_touched))
     # Sport modes are written only when a display or rule actually changed, and then only as the
     # used extent. Writing back the raw 12 KB region read above (the old "unchanged" path) leaves a
@@ -499,7 +526,7 @@ def sync(link, plan, today, write, json_out, auto_start=None):
     apps_unchanged = watch_holds(link, "Apps", apps_base, new_apps_bytes, current=current_apps)
     result = {"ok": True, "today": str(today), "removed": removed, "added": added_names,
               "failed": [{"name": n, "error": err} for n, err in failed],
-              "waiting": waiting, "menuMax": GW.WORKOUT_MENU_MAX,
+              "waiting": waiting, "othersKept": others, "menuMax": GW.WORKOUT_MENU_MAX,
               "displaysAdded": modes_touched, "appsBytes": len(new_apps_bytes),
               "repaired": [n for n, _ in restamped], "autoStart": auto,
               "dateGated": gated, "edited": [n for n in edited if n in added_names],
@@ -511,6 +538,8 @@ def sync(link, plan, today, write, json_out, auto_start=None):
         print(f"  install: {added_names or '(none)'}")
         if waiting:
             print(f"  waiting for a free slot (menu shows {GW.WORKOUT_MENU_MAX}): {len(waiting)}")
+        if others:
+            print(f"  left on the watch (put there by another device): {others}")
         if failed:
             print(f"  FAILED to compile (skipped, rest of sync still applied):")
             for n, err in failed:
@@ -551,6 +580,18 @@ def sync(link, plan, today, write, json_out, auto_start=None):
     for name, base, blob in writes:
         fi = FlashImage(); fi.write(base, blob)
         send_plan(link, fi, [(name, base, blob), ("t", base, None)], commit=False)
+    # Remember what is on the watch now: new installs get their workout's fingerprint, the
+    # rest keep theirs (one never recorded gets the plan's - see edited_labels). Another
+    # device's are not this computer's (left_to_others). Saved before the sport-mode check
+    # below, which can return early: the workouts are on the watch either way.
+    on_watch = {e["name"] for e in apps.decode(new_apps_bytes) if is_managed(e["name"])}
+    fresh = {}
+    for name in on_watch:
+        if name in by_label and (name in added_names or name not in installed):
+            fresh[name] = workout_fingerprint(by_label[name]["workout"], lang)
+        elif name in installed:
+            fresh[name] = installed[name]
+    save_installed(serial, fresh)
     if new_cm_bytes is not None:
         # Read back and roll back on a mismatch - a CustomModes write once landed 54 bytes
         # shifted (2026-08-25, workout_install.py) and scrambled every mode after the target.
@@ -566,16 +607,6 @@ def sync(link, plan, today, write, json_out, auto_start=None):
             print(json.dumps(result) if json_out else f"  !! {result['error']}")
             return result
     result["written"] = bool(writes)
-    # Remember what is on the watch now: new installs get their workout's fingerprint, the
-    # rest keep theirs (one never recorded gets the plan's - see edited_labels).
-    on_watch = {e["name"] for e in apps.decode(new_apps_bytes) if is_managed(e["name"])}
-    fresh = {}
-    for name in on_watch:
-        if name in by_label and (name in added_names or name not in installed):
-            fresh[name] = workout_fingerprint(by_label[name]["workout"], lang)
-        elif name in installed:
-            fresh[name] = installed[name]
-    save_installed(serial, fresh)
     result["customModesWritten"] = new_cm_bytes is not None
     result["backup"] = backup
     if json_out:
