@@ -241,20 +241,23 @@ export default function RouteScreen() {
 
   async function runUpload() {
     if (!pending) return;
+    const route = pinned ? pinned.route : pending;
+    // The last state the send reported says how it ended. When it worked, say so, as removing a
+    // route already does (F23).
+    let last: SendRouteState = { phase: 'idle' };
     try {
-      await uploadRoute(pinned ? pinned.route : pending, setSendState, { legacy: params.legacy ?? false });
-      setSendState(s => {
-        if (s.phase === 'done') {
-          setPending(null);
-          loadOnWatch();
-        } else if (s.phase === 'error') {
-          Alert.alert(t.error, s.error ?? t.unknownError);
-        }
-        return s;
-      });
+      await uploadRoute(route, s => { last = s; setSendState(s); }, { legacy: params.legacy ?? false });
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
       setSendState({ phase: 'error', error: e?.message });
+      return;
+    }
+    if (last.phase === 'done') {
+      setPending(null);
+      loadOnWatch();
+      Alert.alert(t.sendRouteConfirmTitle, t.routeSent(route.name));
+    } else if (last.phase === 'error') {
+      Alert.alert(t.error, last.error ?? t.unknownError);
     }
   }
 

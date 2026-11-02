@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Linking, StatusBar } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -11,6 +11,8 @@ import { useV3Theme } from './src/theme/v3';
 import { ThemeModeProvider, useThemeMode } from './src/theme/ThemeModeContext';
 import { ExperimentalProvider } from './src/config/ExperimentalContext';
 import { DemoProvider } from './src/config/DemoContext';
+import { MenuProvider, useNavMenu } from './src/navigation/MenuContext';
+import { MenuHost, MenuBurger, menuBottomRoom } from './src/navigation/MenuHost';
 import HomeScreen from './src/screens/HomeScreen';
 import LogListScreen from './src/screens/LogListScreen';
 import MapScreen from './src/screens/MapScreen';
@@ -172,7 +174,30 @@ function AppShell() {
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={theme.background}
       />
-      <NavigationContainer>
+      <MenuProvider>
+        <AppNav />
+      </MenuProvider>
+    </SafeAreaProvider>
+  );
+}
+
+// The pages, with the menu drawn around them (André, 2026-11-02, 🟣113: the menu on every page, in
+// the style each device picks - see src/navigation/MenuHost.tsx).
+function AppNav() {
+  const theme = useV3Theme();
+  const menu = useNavMenu();
+  const navRef = useNavigationContainerRef<RootStackParamList>();
+  // The page on top, so the menu can light up its place and close when the page changes.
+  const [routeName, setRouteName] = useState('Home');
+  const track = () => setRouteName(navRef.getCurrentRoute()?.name ?? 'Home');
+  // Tablet side menu: its ☰ sits next to every page's back arrow, to fold it away.
+  const sideHeader = menu.style === 'side'
+    ? { headerLeft: () => <MenuBurger />, headerBackVisible: true }
+    : {};
+
+  return (
+    <NavigationContainer ref={navRef} onReady={track} onStateChange={track}>
+      <MenuHost navRef={navRef} routeName={routeName}>
         <Stack.Navigator
           initialRouteName="Home"
           screenOptions={{
@@ -181,6 +206,7 @@ function AppShell() {
             headerTitleStyle: { fontWeight: '700' },
             headerShadowVisible: false,
             contentStyle: { backgroundColor: theme.background },
+            ...sideHeader,
           }}
         >
           <Stack.Screen
@@ -202,6 +228,9 @@ function AppShell() {
             options={({ route }) => ({
               title: [route.params.activity.activity_type, fmtDate(route.params.activity.date)]
                 .filter(Boolean).join(' · ') || t.mapFallback,
+              // The map has its own round buttons at the bottom right, where the menu sits: keep
+              // that strip free so neither covers the other.
+              contentStyle: { backgroundColor: theme.background, paddingBottom: menuBottomRoom(menu.style) },
             })}
           />
           <Stack.Screen
@@ -340,7 +369,7 @@ function AppShell() {
             options={{ title: t.gearScreenTitle }}
           />
         </Stack.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
+      </MenuHost>
+    </NavigationContainer>
   );
 }

@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-02: A message after a save or a send, and a menu style per device (Android)
+
+- **Sport modes and Send a route said nothing when they worked** (audit 30/10, F23). A sport
+  mode change now shows "Saved to the watch." under the card it came from (settings or
+  displays), and a route send ends with a pop-up "“name” sent to the watch.". A failed send
+  shows its error as before. (`SportModesScreen.withWrite`, `RouteScreen.runUpload`.)
+  Checked on the Peak: an identical autolap write showed the line and left the sport modes
+  byte-identical; a test route showed the pop-up and was then removed (routes and POIs
+  byte-identical to the backup taken before).
+- **The menu, on every page, in the style that suits the device.** Settings › Appearance ›
+  Menu picks how the menu opens: a pop-up list, a fan of round buttons, a floating bar, or
+  (tablet only) the side menu, which now shows on every page and folds with ☰. The fan and
+  the bar show the places picked under the choice (up to 5 and 4, numbered, with "More" for
+  the rest). Each device keeps its own choice; the tablet starts on the side menu, a phone on
+  the pop-up list. A jump goes back to Home first, so Back always leads Home. The menu hides
+  while the keyboard is up, and the hardware Back closes it. Switching style changes only the
+  menu: the pages keep their place and the watch link stays. (`navigation/menuModel.ts`,
+  `MenuContext.tsx`, `MenuHost.tsx`, `MenuSettings.tsx`; `NavShell` is now Home's top bar;
+  tests: `menuModel.test.ts`.) Checked on the tablet in all four styles, and at a phone size
+  in the three phone styles.
+
 ## 2026-11-01: The PC and the tablet no longer erase each other's workouts (desktop + Android)
 
 - **The tablet's Sync to Watch erased the PC's workout of the day.** The PC and the tablet keep

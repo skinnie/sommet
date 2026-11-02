@@ -20,7 +20,7 @@ import { SPORT_MODE_ROWS, maxDisplaysForVariant } from '../services/SportModeRow
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Toggle } from '../components/ui/primitives';
+import { Toggle, StatusLine } from '../components/ui/primitives';
 import Icon from '../components/ui/Icon';
 import { WatchFacePreview, displayLayoutType } from '../components/WatchFacePreview';
 
@@ -88,6 +88,9 @@ export default function SportModesScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | undefined>();
   const [writingMode, setWritingMode] = useState<string | null>(null);
+  // The mode whose last change reached the watch, and in which card, for a short "Saved" line
+  // there (F23).
+  const [saved, setSaved] = useState<{ name: string; where: 'settings' | 'display' } | null>(null);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedDisplayIndex, setSelectedDisplayIndex] = useState(0);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
@@ -205,31 +208,42 @@ export default function SportModesScreen() {
     else if (kind === 'multi') await runEdit(plans.createMultisport(name, createActivityId, legs, variant));
   }
 
-  async function withWrite(modeName: string, action: () => Promise<{ ok: boolean; error?: string } | undefined>) {
+  // `savedAs` is the mode's name once the write is done (a rename changes it); `where` is the
+  // card the change was made in.
+  async function withWrite(modeName: string, action: () => Promise<{ ok: boolean; error?: string } | undefined>,
+                           savedAs = modeName, where: 'settings' | 'display' = 'settings') {
+    setSaved(null);
     setWritingMode(modeName);
     const result = await action();
     setWritingMode(null);
     if (result && !result.ok && result.error) Alert.alert(t.error, result.error);
+    // Say when it worked: a line under the mode, as a pop-up after every toggle would be too much.
+    if (result?.ok) setSaved({ name: savedAs, where });
     await handleRead();
   }
 
   // Ambit1/2 (legacy) edits go through the 0x2000 region read-modify-write, not the Ambit3
   // CustomModes path. Same {ok,error} contract as the Ambit3 writers so withWrite() is shared.
-  function legacyWrite(modeName: string, patch: LegacyModePatch) {
+  function legacyWrite(modeName: string, patch: LegacyModePatch, savedAs = modeName) {
     const idx = (modes ?? []).findIndex(m => m.settings.name === modeName);
     if (idx < 0) { Alert.alert(t.error, `Sport mode "${modeName}" not found.`); return; }
     withWrite(modeName, async () => {
       try { await writeLegacySportMode(idx, patch); return { ok: true }; }
       catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
-    });
+    }, savedAs);
   }
 
   function handleRename(originalName: string) {
     const newName = (nameEdits[originalName] ?? '').trim();
     if (!newName || newName === originalName) return;
-    if (isLegacy) { legacyWrite(originalName, { name: newName.slice(0, 16) }); setSelectedName(newName.slice(0, 16)); return; }
+    if (isLegacy) {
+      const short = newName.slice(0, 16);
+      legacyWrite(originalName, { name: short }, short);
+      setSelectedName(short);
+      return;
+    }
     withWrite(originalName, () =>
-      renameCustomMode(originalName, newName, () => {}, overBle));
+      renameCustomMode(originalName, newName, () => {}, overBle), newName);
     setSelectedName(newName);
   }
 
@@ -264,7 +278,7 @@ export default function SportModesScreen() {
     const { mode, display, field } = picker;
     setPicker(null);
     withWrite(mode, () =>
-      writeCustomModeDisplayField(mode, display, field, undefined, typeName, () => {}, overBle));
+      writeCustomModeDisplayField(mode, display, field, undefined, typeName, () => {}, overBle), mode, 'display');
   }
 
   const busy = phase === 'connecting' || phase === 'reading';
@@ -279,7 +293,7 @@ export default function SportModesScreen() {
 
     return (
       <ScrollView style={styles(theme).root} contentContainerStyle={styles(theme).content}>
-        <TouchableOpacity style={styles(theme).backRow} onPress={() => { setSelectedName(null); setSelectedDisplayIndex(0); }}>
+        <TouchableOpacity style={styles(theme).backRow} onPress={() => { setSelectedName(null); setSelectedDisplayIndex(0); setSaved(null); }}>
           <Icon name="chevronLeft" size={18} color={theme.text} />
           <Text style={[styles(theme).backText]}>{t.sportModesBackBtn}</Text>
         </TouchableOpacity>
@@ -370,6 +384,7 @@ export default function SportModesScreen() {
               <ActivityIndicator size="small" color={theme.primary} />
             </View>
           )}
+          {!isWriting && saved?.name === name && saved.where === 'settings' && <StatusLine text={t.sportModesSaved} />}
         </Card>
 
         <Card style={{ width: '100%' }}>
@@ -419,6 +434,7 @@ export default function SportModesScreen() {
               )}
             </View>
           )}
+          {!isWriting && saved?.name === name && saved.where === 'display' && <StatusLine text={t.sportModesSaved} />}
         </Card>
 
         <Modal visible={!!picker} animationType="slide" transparent onRequestClose={() => setPicker(null)}>

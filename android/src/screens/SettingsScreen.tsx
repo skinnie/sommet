@@ -10,6 +10,7 @@ import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navig
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { useThemeMode, ThemeMode } from '../theme/ThemeModeContext';
+import { MenuSettings } from '../navigation/MenuSettings';
 import { useExperimental } from '../config/ExperimentalContext';
 // The experimental features, one toggle each (André, 2026-08-17). Screen names must match the
 // RootStackParamList routes.
@@ -866,6 +867,8 @@ export default function SettingsScreen() {
             );
           })}
         </View>
+        {/* The menu's style on this device, and the places in the fan or the bar (🟣113). */}
+        <MenuSettings />
       </View>
 
       {/* ── Show in the sidebar (Settings split, decision 1): every switch that shows or hides a page

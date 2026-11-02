@@ -68,6 +68,8 @@ import { Card } from '../components/ui/Card';
 import { WeatherCard } from '../components/WeatherCard';
 import { TrackPreview } from '../components/TrackPreview';
 import { NavShell, NavShellItem } from '../navigation/NavShell';
+import { useNavMenu } from '../navigation/MenuContext';
+import { menuBottomRoom } from '../navigation/MenuHost';
 
 // Real, 2026-08-08: Kailash ("Hoopoe") answers the same USB init + 0x0000 device-info
 // commands every Ambit/Traverse does (AmbitUsbModule.kt's SUUNTO_PID_NAMES/
@@ -1100,6 +1102,7 @@ export default function HomeScreen() {
   // encoded (Kailash's own memory map has no route-following feature or CustomModes region).
   // Device-specific destinations only appear once a watch is connected (nothing to act on
   // otherwise) - Home/Activities/Settings are always reachable.
+  const { style: menuStyle } = useNavMenu();
   const showWatchCalendar = !!(expFeatures.workoutCalendar && connected && deviceType === 'ambit'
     && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo));
   // Which devices the Workout Calendar may create for / send to (its long-press menu).
@@ -1221,7 +1224,8 @@ export default function HomeScreen() {
       // ~50pt top inset) the "Sommet" header would otherwise sit under the notch. Floor at
       // the style's original 56pt so Android (insets.top ≈ status-bar height) is unchanged.
       // 2026-08-24, André — iPhone layout pass.
-      contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(56, insets.top + 12) }]}
+      // The bottom keeps room for the menu's round button or bar, so the last card is never under it.
+      contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(56, insets.top + 12), paddingBottom: Math.max(56, menuBottomRoom(menuStyle) + 16) }]}
       showsVerticalScrollIndicator={false}
     >
 
