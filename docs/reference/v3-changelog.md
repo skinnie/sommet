@@ -30,6 +30,14 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   An empty plan now syncs and only cleans up: past dated workouts and the tablet's own go;
   another device's upcoming workouts and workouts installed by hand stay.
   (`WorkoutCalendarScreen.doSync`; test: `CalendarOwnership.test.ts`.)
+- **The PC can sync an empty plan too (02/11).** Its Sync to watch button was greyed out with
+  nothing planned, and the backend refused an empty list. Now it syncs and only cleans up, the
+  same way; the planned-move cards are cleared, as they already were for a plan of guided
+  workouts only. The result line reads "Erase:" (it can be one of the PC's own upcoming
+  workouts, not only past ones), and a new line lists the workouts left on the watch for
+  another device. Plugging the watch in with an empty plan still syncs nothing by itself.
+  (`server._handle_trainingprogram_sync_calendar` / `_planned_moves`, `TrainingProgramPage`;
+  tests: `test_backend_training_calendar.py`, `test_an_empty_plan_only_cleans_up`.)
 
 ## 2026-10-31: Intervals.icu copies without a date, Backup without the watch model, App Zone copy, speeds (Android)
 

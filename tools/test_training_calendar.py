@@ -430,5 +430,20 @@ class SyncReinstallsEdits(unittest.TestCase):
         self.assertEqual([n for n, _ in self.on_watch()], [theirs])
         self.assertEqual(TC.load_installed("8A15TEST"), {})
 
+    def test_an_empty_plan_only_cleans_up(self):
+        # Sync to watch needed something planned, so the last workout stayed on the watch
+        # (2026-11-02). An empty plan erases past ones and this computer's own, nothing else.
+        past = TC.entry_label("2026-10-20", "Old")
+        own = TC.entry_label("2026-10-26", "Mine")
+        theirs = TC.entry_label("2026-10-27", "Tablet")
+        self.apps = region(("Couch-to-5K", 1), (past, 1), (own, 1), (theirs, 1)) + b"\xff" * 64
+        TC.save_installed("8A15TEST", {own: "x"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = TC.sync(self.link, {"entries": []}, self.TODAY, write=True, json_out=True)
+        self.assertEqual((r["ok"], r["added"], r["othersKept"]), (True, [], [theirs]))
+        self.assertEqual(sorted(r["removed"]), sorted([past, own]))
+        self.assertEqual(sorted(n for n, _ in self.on_watch()), sorted(["Couch-to-5K", theirs]))
+        self.assertEqual(TC.load_installed("8A15TEST"), {})
+
 if __name__ == "__main__":
     unittest.main()

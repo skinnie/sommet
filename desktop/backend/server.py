@@ -8373,10 +8373,12 @@ class Handler(BaseHTTPRequestHandler):
         rotating by date (upcoming installed, past erased) via tools/training_calendar.py --sync -
         the current design (2026-08-21) that supersedes the date-gated App-Zone install. write:false
         is a real dry-run (compile + diff, no watch write). Same shell-the-tool shape as the
-        standalone calendar GUI's own sync handler."""
+        standalone calendar GUI's own sync handler. An empty list syncs too and only cleans up:
+        past dated workouts and this computer's own go, another device's upcoming ones and
+        hand-installed ones stay (André, 2026-11-02)."""
         entries = body.get("entries")
-        if not entries:
-            self._send_json(400, {"ok": False, "error": 'need a non-empty "entries" list'})
+        if not isinstance(entries, list):
+            self._send_json(400, {"ok": False, "error": 'need an "entries" list'})
             return
         missing = [i for i, e in enumerate(entries)
                    if not (e.get("date") and e.get("mode") and e.get("workout"))]
@@ -8521,10 +8523,12 @@ class Handler(BaseHTTPRequestHandler):
         workout's targets (the watch's 0-based level, 0 Easy .. 4 Maximal), activityId = the watch's own ActivityID for the entry's
         sport-mode NAME (one custom_modes.py --json read, so user-named modes like "Running
         Couch25k -W1" resolve correctly), falling back to workout.activityId, then 3 (Running).
-        The response says which activityIds were resolved from the watch and which fell back."""
+        The response says which activityIds were resolved from the watch and which fell back.
+        An empty list (a sync of an empty plan) clears the cards, as a plan with no plain
+        session does."""
         entries = body.get("entries")
-        if not entries:
-            self._send_json(400, {"ok": False, "error": 'need a non-empty "entries" list'})
+        if not isinstance(entries, list):
+            self._send_json(400, {"ok": False, "error": 'need an "entries" list'})
             return
         missing = [i for i, e in enumerate(entries)
                    if not (e.get("date") and e.get("mode") and isinstance(e.get("workout"), dict))]

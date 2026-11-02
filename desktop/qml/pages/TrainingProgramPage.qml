@@ -939,8 +939,9 @@ Item {
                         RoundedButton {
                             text: TrainingProgramService.installing
                                   ? qsTr("Working…") : qsTr("Sync to watch")
-                            enabled: root.entries.length > 0
-                                     && !TrainingProgramService.installing
+                            // An empty plan syncs too: it then only cleans up (past workouts
+                            // and this computer's own), so its last workout can be erased.
+                            enabled: !TrainingProgramService.installing
                                      && HomeViewModel.anyDevice
                             onClicked: TrainingProgramService.syncCalendar(
                                 root.entriesWithMode(root.defaultMode), true,
@@ -992,9 +993,19 @@ Item {
                             text: {
                                 const r = TrainingProgramService.lastInstallResult
                                 const rem = (r.removed || [])
-                                return qsTr("Erase past: ") + (rem.length ? rem.join(", ")
-                                                                          : qsTr("(none)"))
+                                return qsTr("Erase: ") + (rem.length ? rem.join(", ")
+                                                                     : qsTr("(none)"))
                             }
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                        // Another device's upcoming workouts (the tablet's) stay on the watch.
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            visible: (TrainingProgramService.lastInstallResult.othersKept || []).length > 0
+                            text: qsTr("Left on the watch (put there by another device): ")
+                                + (TrainingProgramService.lastInstallResult.othersKept || []).join(", ")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }

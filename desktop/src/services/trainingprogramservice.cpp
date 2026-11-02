@@ -225,7 +225,7 @@ void TrainingProgramService::syncCalendar(const QVariantList &entries, bool writ
         result[QStringLiteral("dryRun")] = !write;
         result[QStringLiteral("rotation")] = true;
         for (const auto key : {"today", "removed", "added", "displaysAdded", "failed", "waiting",
-                                 "menuMax", "autoStart", "repaired", "dateGated"}) {
+                                 "menuMax", "autoStart", "repaired", "dateGated", "othersKept"}) {
             const QString k = QString::fromLatin1(key);
             if (obj.contains(k)) {
                 if (obj.value(k).isArray())
