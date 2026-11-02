@@ -884,7 +884,6 @@ const fr = {
   workoutCalendarSyncBtn: 'Synchroniser avec la montre',
   workoutCalendarSyncing: 'Synchronisation…',
   workoutCalendarSyncedMsg: 'Montre synchronisée.',
-  workoutCalendarEmptyPlanMsg: 'Le calendrier est vide.',
   workoutCalendarPickModeFirst: 'Choisissez un mode sportif.',
   // ── Gear tracker (v3) ──
   gearButton: 'Matériel',
@@ -1750,7 +1749,6 @@ const en: typeof fr = {
   workoutCalendarSyncBtn: 'Sync to Watch',
   workoutCalendarSyncing: 'Syncing...',
   workoutCalendarSyncedMsg: 'Watch synced.',
-  workoutCalendarEmptyPlanMsg: 'The calendar is empty.',
   workoutCalendarPickModeFirst: 'Pick a sport mode.',
   // ── Gear tracker (v3) ──
   gearButton: 'Gear',

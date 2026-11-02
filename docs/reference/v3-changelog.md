@@ -25,6 +25,11 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   `CalendarOwnership.test.ts`, `TrainingCalendarCore.test.ts`.)
   Checked on the Peak (01/11): the tablet installed its own workout; the PC then added its
   own and left the tablet's; the tablet then erased only its own, and kept the PC's.
+- **The tablet can sync an empty plan (02/11).** Sync to Watch used to stop with "The
+  calendar is empty", so the tablet's last workout stayed on the watch until its day passed.
+  An empty plan now syncs and only cleans up: past dated workouts and the tablet's own go;
+  another device's upcoming workouts and workouts installed by hand stay.
+  (`WorkoutCalendarScreen.doSync`; test: `CalendarOwnership.test.ts`.)
 
 ## 2026-10-31: Intervals.icu copies without a date, Backup without the watch model, App Zone copy, speeds (Android)
 

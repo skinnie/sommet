@@ -368,7 +368,8 @@ export default function WorkoutCalendarScreen() {
   }
 
   async function doSync(write: boolean) {
-    if (plan.length === 0) { Alert.alert(t.error, t.workoutCalendarEmptyPlanMsg); return; }
+    // An empty plan still syncs: it then only cleans up (past workouts and the tablet's own ones
+    // taken out of the plan), so the tablet's last workout can be erased (André, 2026-11-02).
     setLastSyncWasWrite(write);
     setSyncResult(null);
     // Only the watch's entries: bike-computer ones are sent from their own menu.

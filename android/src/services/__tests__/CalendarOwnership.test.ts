@@ -117,6 +117,21 @@ test("the tablet erases its own workout taken out of its plan, never the PC's", 
   expect(record()).toEqual([]);
 });
 
+// The screen used to refuse Sync with an empty plan, so the tablet's last workout stayed on the
+// watch. An empty plan now syncs and only cleans up.
+test('an empty plan only cleans up: past and its own go, the rest stays', async () => {
+  const past = entryLabel('2026-10-30', 'Old run');
+  const own = entryLabel('2026-11-03', 'Tablet run');
+  const pcs = entryLabel('2026-11-04', 'PC tempo');
+  mockFiles.set(recordPath('8A153C5111000900'), JSON.stringify([own]));
+  mockFlash = fakeAppsRegion(['Couch-to-5K', past, own, pcs]);
+  const r = await sync([], new Date(2026, 10, 2));
+  expect(r).toMatchObject({ added: [], othersKept: [pcs] });
+  expect(r!.removed.sort()).toEqual([own, past].sort());
+  expect(onWatch().sort()).toEqual(['Couch-to-5K', pcs].sort());
+  expect(record()).toEqual([]);
+});
+
 test("another watch's record is not this one's", async () => {
   const own = entryLabel('2026-11-02', 'Tablet run');
   mockFiles.set(recordPath('OTHERWATCH'), JSON.stringify([own]));
