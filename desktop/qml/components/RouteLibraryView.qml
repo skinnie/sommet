@@ -209,9 +209,11 @@ PageFlickable {
     function pendingName() { return (RouteService.pendingRoute.name || "route").replace(/\.gpx$/i, "") }
     property string brytonMsg: ""
     property bool brytonOk: false
+    property bool brytonSending: false
     function sendPendingToBryton() {
-        root.brytonMsg = qsTr("Sending to Bryton…"); root.brytonOk = false
+        root.brytonMsg = qsTr("Sending to Bryton…"); root.brytonOk = false; root.brytonSending = true
         root.api("POST", "/api/bryton/route", { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }, r => {
+            root.brytonSending = false
             root.brytonOk = !!r.ok
             root.brytonMsg = r.ok ? qsTr("Sent to the Bryton — it shows up once you unplug it.")
                                   : (r.error || qsTr("Send to Bryton failed"))
@@ -373,7 +375,9 @@ PageFlickable {
         property string title: ""
         property var items: []
         property bool loading: false
-        property string emptyText: qsTr("No routes.")
+        property string emptyTitle: qsTr("No routes here")
+        property string emptyText: ""
+        property string emptyActionText: ""
         width: parent ? parent.width : 0
         implicitHeight: sectionCol.implicitHeight
         height: implicitHeight
@@ -385,8 +389,15 @@ PageFlickable {
 
             Text { visible: section.title.length > 0; text: section.title; font.bold: true; color: Theme.text }
             Text { visible: section.loading; text: qsTr("Reading…"); color: Theme.mutedText }
-            Text { visible: !section.loading && section.items.length === 0
-                   text: section.emptyText; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
+            // An empty source says what to do next (desktop picks #11).
+            EmptyState {
+                visible: !section.loading && section.items.length === 0
+                glyph: Icons.routes
+                title: section.emptyTitle
+                text: section.emptyText
+                actionText: section.emptyActionText
+                onAction: importDialog.open()
+            }
 
             Column {
                 width: parent.width
@@ -441,8 +452,8 @@ PageFlickable {
                                     id: actions
                                     spacing: Theme.spacingSmall
                                     RoundedButton {
-                                        text: root.removingKey === routeDelegate.route.key ? qsTr("Removing…")
-                                              : root.busyKey === routeDelegate.route.key ? qsTr("Exporting…") : qsTr("Export")
+                                        text: root.removingKey === routeDelegate.route.key ? qsTr("Removing…") : qsTr("Export")
+                                        busy: root.removingKey === routeDelegate.route.key || root.busyKey === routeDelegate.route.key
                                         enabled: root.busyKey === "" && (routeDelegate.route.src !== "magene" || !!routeDelegate.route.libraryId)
                                         onClicked: root.exportItem(routeDelegate.route)
                                     }
@@ -556,8 +567,8 @@ PageFlickable {
                         id: sendButton
                         visible: root.hasPending
                         enabled: root.sendTargets.length > 0 && !root.mageneSending
-                        text: root.mageneSending ? qsTr("Sending…")
-                              : root.sendTargets.length > 1 ? qsTr("Send to device ▾") : qsTr("Send to device")
+                        text: root.sendTargets.length > 1 ? qsTr("Send to device ▾") : qsTr("Send to device")
+                        busy: root.mageneSending || root.brytonSending
                         onClicked: {
                             if (root.sendTargets.length === 1) root.sendPendingTo(root.sendTargets[0].key)
                             else sendMenu.popup(sendButton, 0, sendButton.height)
@@ -607,18 +618,18 @@ PageFlickable {
                     text: qsTr("%1 can't have routes written to it from this app yet - its routes are legacy waypoints, and only adding POIs is supported. You can still export this one.")
                         .arg(HomeViewModel.deviceDisplayName)
                 }
-                Text { visible: root.brytonMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
-                       font.pixelSize: Theme.fontSizeCaption; color: root.brytonOk ? Theme.success : Theme.error; text: root.brytonMsg }
-                Text { visible: root.mageneMsg.length > 0; width: parent.width; wrapMode: Text.WordWrap
-                       font.pixelSize: Theme.fontSizeCaption
-                       color: root.mageneSending ? Theme.mutedText : (root.mageneOk ? Theme.success : Theme.error); text: root.mageneMsg }
-                Text { visible: RouteService.uploadResultText.length > 0; width: parent.width
-                       wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption
-                       color: RouteService.uploadOk ? Theme.success : Theme.error; text: RouteService.uploadResultText }
-                Text { visible: root.etrexHere && GarminService.writeError.length > 0; width: parent.width
-                       wrapMode: Text.WordWrap; font.pixelSize: Theme.fontSizeCaption; color: Theme.error; text: GarminService.writeError }
-                Text { visible: root.etrexHere && GarminService.writeOk && GarminService.writeError.length === 0
-                       text: qsTr("Sent to the SD card."); color: Theme.success; font.pixelSize: Theme.fontSizeCaption }
+                // Results of a send / upload, under the buttons (desktop picks #7).
+                StatusNote { width: parent.width; text: root.brytonMsg
+                             tone: root.brytonSending ? "working" : root.brytonOk ? "success" : "error" }
+                StatusNote { width: parent.width; text: root.mageneMsg
+                             tone: root.mageneSending ? "working" : root.mageneOk ? "success" : "error" }
+                StatusNote { width: parent.width; text: RouteService.uploadResultText
+                             tone: RouteService.uploadOk ? "success" : "error" }
+                StatusNote { width: parent.width; tone: "error"
+                             text: root.etrexHere ? GarminService.writeError : "" }
+                StatusNote { width: parent.width; tone: "success"
+                             text: root.etrexHere && GarminService.writeOk && GarminService.writeError.length === 0
+                                   ? qsTr("Sent to the SD card.") : "" }
             }
         }
 
@@ -668,15 +679,18 @@ PageFlickable {
                         }
                     }
                 }
-                Text { visible: root.msg.length > 0; width: parent.width; wrapMode: Text.WordWrap
-                       text: root.msg; color: Theme.error; font.pixelSize: Theme.fontSizeCaption }
+                StatusNote { width: parent.width; tone: "error"; text: root.msg }
 
                 // Ambit1/2: readable but not writable, no track - read-only rows (as before).
                 Column {
                     visible: root.source === "watch" && root.legacyWatch
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    Text { visible: root.legacyRoutes.length === 0; text: qsTr("No routes on the watch."); color: Theme.mutedText }
+                    EmptyState {
+                        visible: root.legacyRoutes.length === 0
+                        glyph: Icons.routes
+                        title: qsTr("No routes on the watch")
+                    }
                     Repeater {
                         model: root.legacyRoutes
                         delegate: Column {
@@ -695,9 +709,13 @@ PageFlickable {
                     items: root.sourceItems
                     loading: (root.source === "watch" && RouteService.loading)
                              || (root.source === "etrex" && GarminService.deviceGpxLoading)
-                    emptyText: root.source === "library" ? qsTr("Nothing saved yet — Upload GPX keeps it here.")
+                    emptyTitle: root.source === "library" ? qsTr("Nothing saved yet")
+                              : root.source === "magene" ? qsTr("No route on the Magene")
+                              : qsTr("No routes here")
+                    emptyText: root.source === "library" ? qsTr("Upload a GPX and it's kept here.")
                              : root.source === "magene" ? qsTr("It holds one route — sending one replaces it.")
-                             : qsTr("No routes here.")
+                             : ""
+                    emptyActionText: root.source === "library" ? qsTr("Upload GPX…") : ""
                 }
             }
         }

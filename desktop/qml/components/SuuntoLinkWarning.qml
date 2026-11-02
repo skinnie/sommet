@@ -95,7 +95,8 @@ Rectangle {
         }
         RoundedButton {
             visible: root._running
-            text: root.quitting ? qsTr("Closing…") : qsTr("Quit SuuntoLink")
+            text: qsTr("Quit SuuntoLink")
+            busy: root.quitting
             enabled: !root.quitting
             onClicked: root.quit()
         }

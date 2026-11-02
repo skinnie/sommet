@@ -214,12 +214,10 @@ Column {
             }
         }
 
-        Text {
-            visible: root.msg.length > 0
-            width: parent.width; wrapMode: Text.WordWrap
+        StatusNote {
+            width: parent.width
+            tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
             text: root.msg
-            color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-            font.pixelSize: Theme.fontSizeCaption
         }
 
         Row {
@@ -228,7 +226,8 @@ Column {
             width: parent.width
             visible: !root.loading && root.error.length === 0
             RoundedButton {
-                text: root.saving ? qsTr("Saving…") : qsTr("Save to Bryton")
+                text: qsTr("Save to Bryton")
+                busy: root.saving
                 enabled: root.changed && !root.saving
                 onClicked: root.save()
             }

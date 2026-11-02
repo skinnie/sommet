@@ -985,8 +985,10 @@ Item {
                         RoundedButton {
                             accent: true      // primary action — clearly clickable, not greyed
                             text: root.wizardStep < root.wizardStepCount - 1 ? qsTr("Next ▸")
-                                  : (busy ? qsTr("Computing…") : qsTr("See my plan ▸"))
-                            enabled: root.wizardCanAdvance() && !busy
+                                                                             : qsTr("See my plan ▸")
+                            // root.busy, not busy: RoundedButton has its own busy now.
+                            busy: root.busy
+                            enabled: root.wizardCanAdvance() && !root.busy
                             onClicked: root.wizardNext()
                         }
                     }
@@ -1009,8 +1011,9 @@ Item {
                     RoundedButton { text: qsTr("◂ Edit answers"); onClicked: root.editAnswers() }
                     Item { Layout.fillWidth: true }
                     RoundedButton {
-                        text: busy ? qsTr("Computing…") : qsTr("Recompute")
-                        enabled: !busy && gpxText.length > 0
+                        text: qsTr("Recompute")
+                        busy: root.busy
+                        enabled: !root.busy && gpxText.length > 0
                         onClicked: computeTimeline()
                     }
                     RoundedButton {
@@ -1218,10 +1221,12 @@ Item {
                                     Layout.preferredWidth: 72; horizontalAlignment: Text.AlignRight
                                     color: (modelData.early_s !== undefined && modelData.early_s !== null && modelData.early_s > 600) ? "#e0912f" : Theme.text
                                     font.pixelSize: Theme.fontSizeCaption
-                                    ToolTip.visible: earlyMA.containsMouse && modelData.early_s > 600
-                                    ToolTip.text: qsTr("Opens %1 — you'd arrive %2 early and wait")
-                                        .arg(fmtClock(modelData.opens_dt)).arg(fmtDur(modelData.early_s))
                                     MouseArea { id: earlyMA; anchors.fill: parent; hoverEnabled: true }
+                                    ThemedToolTip {
+                                        visible: earlyMA.containsMouse && modelData.early_s > 600
+                                        text: qsTr("Opens %1 — you'd arrive %2 early and wait")
+                                            .arg(fmtClock(modelData.opens_dt)).arg(fmtDur(modelData.early_s))
+                                    }
                                 }
                                 Text { text: fmtDur(modelData.moving_time_s); Layout.preferredWidth: 60; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text { text: modelData.avg_speed_kmh; Layout.preferredWidth: 50; horizontalAlignment: Text.AlignRight; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
@@ -1291,7 +1296,8 @@ Item {
                                 Text { text: qsTr("Suggest my sleep"); color: Theme.text; font.weight: Font.Bold
                                        font.pixelSize: Theme.fontSizeCaption; Layout.fillWidth: true }
                                 RoundedButton {
-                                    text: root.sleepOptsBusy ? qsTr("Trying plans…") : qsTr("Try sleep plans")
+                                    text: qsTr("Try sleep plans")
+                                    busy: root.sleepOptsBusy
                                     enabled: !root.sleepOptsBusy && !!root.basePayload
                                     onClicked: root.suggestSleep()
                                 }

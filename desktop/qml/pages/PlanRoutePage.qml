@@ -1313,7 +1313,8 @@ Item {
                         }
                         RoundedButton {
                             width: parent.width
-                            text: root.weatherBusy ? qsTr("Fetching…") : qsTr("Forecast weather")
+                            text: qsTr("Forecast weather")
+                            busy: root.weatherBusy
                             enabled: !root.weatherBusy && root.plannedGpx.length > 0
                             onClicked: root.forecastWeather()
                         }

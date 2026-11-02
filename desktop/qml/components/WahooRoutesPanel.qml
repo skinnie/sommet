@@ -98,6 +98,7 @@ Column {
                 RoundedButton {
                     visible: root.confirmDelete !== row.modelData.name
                     text: qsTr("Delete")
+                    danger: true
                     enabled: !root.busy && root.via === "usb"
                     onClicked: root.confirmDelete = row.modelData.name
                 }
@@ -108,7 +109,7 @@ Column {
                 }
                 RoundedButton {
                     visible: root.confirmDelete === row.modelData.name
-                    text: qsTr("Yes"); onClicked: root.remove(row.modelData.name)
+                    text: qsTr("Yes"); danger: true; onClicked: root.remove(row.modelData.name)
                 }
                 RoundedButton {
                     visible: root.confirmDelete === row.modelData.name
@@ -123,12 +124,10 @@ Column {
         text: qsTr("Deleting a route needs the USB cable.")
         color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
     }
-    Text {
-        visible: root.msg.length > 0
-        width: parent.width; wrapMode: Text.WordWrap
+    StatusNote {
+        width: parent.width
+        tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
         text: root.msg
-        color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-        font.pixelSize: Theme.fontSizeCaption
     }
     RoundedButton {
         text: qsTr("Re-read"); enabled: !root.busy && !root.loading

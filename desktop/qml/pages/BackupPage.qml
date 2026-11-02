@@ -60,7 +60,7 @@ PageFlickable {
     // dedicated Ember card would just be a confusing duplicate "Create backup now" button.
     readonly property bool watchBackupShown: !HomeViewModel.isGarmin && DeviceCapabilities.supportsWatchBackup
 
-    // Restore asks first, says "Working…" until the watch answers and shows the result under
+    // Restore asks first, shows the busy dots until the watch answers and shows the result under
     // the backup it came from (desktop audit 2026-10-29: it ran on the first click, with no
     // sign of progress, and the result was the tool's raw log).
     property string restoringPrefix: ""
@@ -243,13 +243,10 @@ PageFlickable {
                     }
                 }
 
-                Text {
-                    visible: root.dbBackupResult.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: root.dbBackupOk ? Theme.success : Theme.error
                     text: root.dbBackupResult
+                    tone: root.dbBackupOk ? "success" : "error"
                 }
             }
         }
@@ -305,25 +302,23 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        text: qsTr("Create backup now")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: BackupService.createBackup()
                     }
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…")
-                                                    : qsTr("Save a backup to a folder…")
+                        text: qsTr("Save a backup to a folder…")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
                     }
                 }
 
-                Text {
-                    visible: BackupService.lastActionText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: BackupService.lastActionOk ? Theme.success : Theme.error
                     text: BackupService.lastActionText
+                    tone: BackupService.lastActionOk ? "success" : "error"
                 }
             }
         }
@@ -360,25 +355,23 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…") : qsTr("Save archive now")
+                        text: qsTr("Save archive now")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: BackupService.createBackup()
                     }
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…")
-                                                    : qsTr("Save a backup to a folder…")
+                        text: qsTr("Save a backup to a folder…")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
                     }
                 }
 
-                Text {
-                    visible: BackupService.lastActionText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: BackupService.lastActionOk ? Theme.success : Theme.error
                     text: BackupService.lastActionText
+                    tone: BackupService.lastActionOk ? "success" : "error"
                 }
             }
         }
@@ -448,26 +441,25 @@ PageFlickable {
                     width: parent.width
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        text: qsTr("Create backup now")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: { root.restoredPrefix = ""; BackupService.createBackup() }
                     }
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…")
-                                                    : qsTr("Save a backup to a folder…")
+                        text: qsTr("Save a backup to a folder…")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: { root.restoredPrefix = ""; backupFolderDialog.open() }
                     }
                 }
 
-                Text {
-                    visible: BackupService.lastActionText.length > 0
-                             && root.restoredPrefix.length === 0 && root.restoringPrefix.length === 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: BackupService.lastActionOk ? Theme.success : Theme.error
-                    text: BackupService.lastActionText
+                    text: (BackupService.lastActionText.length > 0
+                             && root.restoredPrefix.length === 0 && root.restoringPrefix.length === 0)
+                          ? BackupService.lastActionText : ""
+                    tone: BackupService.lastActionOk ? "success" : "error"
                 }
             }
         }
@@ -570,8 +562,8 @@ PageFlickable {
                                          && DeviceService.model === modelData.deviceModel
                                          && !(modelData.deviceSerial && DeviceService.serial
                                               && modelData.deviceSerial !== DeviceService.serial)
-                                text: root.restoringPrefix === modelData.prefix
-                                      ? qsTr("Working…") : qsTr("Restore")
+                                text: qsTr("Restore")
+                                busy: root.restoringPrefix === modelData.prefix
                                 enabled: root.restoringPrefix.length === 0
                                 onClicked: {
                                     restoreDialog.backup = modelData
@@ -590,14 +582,12 @@ PageFlickable {
                                 }
                             }
                         }
-                        Text {
-                            visible: root.restoredPrefix === modelData.prefix
-                                     && BackupService.lastActionText.length > 0
+                        StatusNote {
                             width: parent.width
-                            wrapMode: Text.WordWrap
-                            font.pixelSize: Theme.fontSizeCaption
-                            color: BackupService.lastActionOk ? Theme.success : Theme.error
-                            text: BackupService.lastActionText
+                            text: (root.restoredPrefix === modelData.prefix
+                                     && BackupService.lastActionText.length > 0)
+                                  ? BackupService.lastActionText : ""
+                            tone: BackupService.lastActionOk ? "success" : "error"
                         }
                     }
                 }
@@ -633,7 +623,8 @@ PageFlickable {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: BackupService.loading ? qsTr("Working…") : qsTr("Create backup now")
+                        text: qsTr("Create backup now")
+                        busy: BackupService.loading
                         enabled: !BackupService.loading
                         onClicked: BackupService.createBackup()
                     }
@@ -644,13 +635,10 @@ PageFlickable {
                     }
                 }
 
-                Text {
-                    visible: BackupService.lastActionText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: BackupService.lastActionOk ? Theme.success : Theme.error
                     text: BackupService.lastActionText
+                    tone: BackupService.lastActionOk ? "success" : "error"
                 }
 
                 Text {
@@ -682,8 +670,8 @@ PageFlickable {
                                 onClicked: LocalFileService.openFolder(LocalFileService.backupsLocation)
                             }
                             RoundedButton {
-                                text: root.restoringPrefix === modelData.prefix
-                                      ? qsTr("Working…") : qsTr("Restore")
+                                text: qsTr("Restore")
+                                busy: root.restoringPrefix === modelData.prefix
                                 enabled: root.restoringPrefix.length === 0
                                 onClicked: {
                                     restoreDialog.backup = modelData
@@ -733,18 +721,16 @@ PageFlickable {
                 // difference from Suunto's own fixed ~/AmbitAppBackups location), just
                 // worded the same way.
                 RoundedButton {
-                    text: GarminService.backingUp ? qsTr("Working…") : qsTr("Create backup now")
+                    text: qsTr("Create backup now")
+                    busy: GarminService.backingUp
                     enabled: !GarminService.backingUp
                     onClicked: garminBackupDialog.open()
                 }
 
-                Text {
-                    visible: GarminService.backupResultText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: GarminService.backupOk ? Theme.success : Theme.error
                     text: GarminService.backupResultText
+                    tone: GarminService.backupOk ? "success" : "error"
                 }
             }
         }

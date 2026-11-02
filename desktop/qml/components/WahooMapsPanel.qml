@@ -99,14 +99,12 @@ Column {
         width: parent.width; wrapMode: Text.WordWrap
         text: root.error; color: Theme.error; font.pixelSize: Theme.fontSizeBody
     }
-    // Job line: shown while running and after it ends.
-    Text {
-        visible: text.length > 0
-        width: parent.width; wrapMode: Text.WordWrap
+    // Job line: shown while running (pulsing) and after it ends (the result).
+    StatusNote {
+        width: parent.width
+        tone: root.job.running ? "working"
+            : root.job.stage === "error" || (root.job.kind === "setup" && root.job.stage !== "done") ? "error" : "success"
         text: root.stageText(root.job)
-        color: root.job.stage === "error" || (root.job.kind === "setup" && !root.job.running && root.job.stage !== "done")
-               ? Theme.error : root.job.running ? Theme.text : Theme.success
-        font.pixelSize: Theme.fontSizeBody
     }
     // Toolchain not installed yet.
     Row {
@@ -177,12 +175,10 @@ Column {
             onClicked: root.update(tileField.text.split(/[\s,;]+/).filter(t => /^\d+\/\d+$/.test(t)))
         }
     }
-    Text {
-        visible: root.msg.length > 0
-        width: parent.width; wrapMode: Text.WordWrap
+    StatusNote {
+        width: parent.width
+        tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
         text: root.msg
-        color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-        font.pixelSize: Theme.fontSizeCaption
     }
     RoundedButton {
         text: qsTr("Re-read"); enabled: !root.loading

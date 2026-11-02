@@ -60,7 +60,7 @@ Item {
         xhr.send()
     }
 
-    RoundedTextField {
+    SearchField {
         id: searchField
         width: parent.width
         placeholderText: qsTr("Search for a place")

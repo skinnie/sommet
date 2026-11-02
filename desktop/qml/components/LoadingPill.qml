@@ -59,29 +59,9 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: Theme.spacingSmall
 
-                Row {
+                PulseDots {
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
-                    Repeater {
-                        model: 3
-                        delegate: Rectangle {
-                            required property int index
-                            width: 6
-                            height: 6
-                            radius: 3
-                            color: Theme.primary
-                            SequentialAnimation on opacity {
-                                running: root.visible
-                                loops: Animation.Infinite
-                                // The stagger is what makes three dots read as motion rather
-                                // than three things blinking together.
-                                PauseAnimation { duration: index * 160 }
-                                NumberAnimation { to: 1.0; duration: 320; easing.type: Easing.InOutQuad }
-                                NumberAnimation { to: 0.25; duration: 320; easing.type: Easing.InOutQuad }
-                                PauseAnimation { duration: (2 - index) * 160 }
-                            }
-                        }
-                    }
+                    running: root.visible
                 }
 
                 Text {

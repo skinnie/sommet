@@ -173,12 +173,10 @@ Column {
             }
         }
 
-        Text {
-            visible: root.msg.length > 0
-            width: parent.width; wrapMode: Text.WordWrap
+        StatusNote {
+            width: parent.width
+            tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
             text: root.msg
-            color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-            font.pixelSize: Theme.fontSizeCaption
         }
 
         Row {
@@ -186,7 +184,8 @@ Column {
             layoutDirection: Qt.RightToLeft
             width: parent.width
             RoundedButton {
-                text: root.applying ? qsTr("Saving…") : qsTr("Save to Bryton")
+                text: qsTr("Save to Bryton")
+                busy: root.applying
                 enabled: !root.loading && !root.applying && root.changeCount > 0
                 onClicked: root.apply()
             }

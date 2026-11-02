@@ -157,13 +157,10 @@ PageFlickable {
                     }
                 }
 
-                Text {
-                    visible: root.lastResultText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: root.lastResultOk ? Theme.success : Theme.error
                     text: root.lastResultText
+                    tone: root.lastResultOk ? "success" : "error"
                 }
             }
         }

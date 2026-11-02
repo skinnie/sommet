@@ -472,8 +472,8 @@ Item {
                                                         color: Theme.card
                                                         radius: Theme.radiusSmall
                                                         border.width: 1
-                                                        border.color: Qt.rgba(Theme.mutedText.r,
-                                                            Theme.mutedText.g, Theme.mutedText.b, 0.3)
+                                                        // Same hairline as ThemedToolTip (desktop picks #10).
+                                                        border.color: Theme.border
                                                     }
                                                     contentItem: Column {
                                                         spacing: 2
@@ -681,18 +681,10 @@ Item {
             }
 
             // Simple vs Intervals
-            Row {
-                spacing: Theme.spacingLarge
-                RoundedRadioButton {
-                    text: qsTr("Simple")
-                    checked: !plannerDialog.complex
-                    onClicked: plannerDialog.complex = false
-                }
-                RoundedRadioButton {
-                    text: qsTr("Intervals")
-                    checked: plannerDialog.complex
-                    onClicked: plannerDialog.complex = true
-                }
+            SegmentedControl {
+                model: [qsTr("Simple"), qsTr("Intervals")]
+                currentIndex: plannerDialog.complex ? 1 : 0
+                onActivated: (i) => plannerDialog.complex = (i === 1)
             }
 
             // Simple: one duration - a number plus a Minutes/Hours unit (André, 2026-08-24),

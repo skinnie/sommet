@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import AmbitApp
 
@@ -292,23 +291,32 @@ Item {
                         }
                     }
                     Column {
+                        spacing: 2
                         Text { text: qsTr("Coach"); color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeBodyLarge }
+                        // "AI chat on" as the app's status tag (André, 2026-11-02, desktop picks #6).
+                        StatusChip {
+                            visible: CoachService.chatBackend === "claude" && CoachService.anthropicKeySet
+                            text: qsTr("AI chat on")
+                            tone: "success"
+                        }
                         Text {
+                            visible: !(CoachService.chatBackend === "claude" && CoachService.anthropicKeySet)
                             text: CoachService.chatBackend === "claude"
-                                ? (CoachService.anthropicKeySet
-                                    ? qsTr("AI chat on")
-                                    : qsTr("Add your API key in Settings → Coach to turn on AI chat"))
+                                ? qsTr("Add your API key in Settings → Coach to turn on AI chat")
                                 : qsTr("Pre-written answers — turn on AI chat in Settings → Coach")
                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                     Item { Layout.fillWidth: true }
                     RoundedButton {
+                        id: coachSettingsBtn
                         text: Icons.settings
                         font.family: Icons.fontFamily
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Chat backend & catalogue source: Settings → Coach")
                         onClicked: { NavBus.pendingSettingsSection = "coach"; NavBus.navigate("settings") }
+                        ThemedToolTip {
+                            visible: coachSettingsBtn.hovered
+                            text: qsTr("Chat backend & catalogue source: Settings → Coach")
+                        }
                     }
                 }
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.mutedText; opacity: 0.2 }
@@ -333,20 +341,38 @@ Item {
                         readonly property bool mine: modelData.role === "me"
 
                         Rectangle {
-                            width: Math.min(bubbleText.implicitWidth + 24, chatList.width * 0.78)
+                            visible: (modelData.text || "").length > 0
+                            width: Math.min(bubbleMeasure.implicitWidth + 24, chatList.width * 0.78)
                             height: bubbleText.implicitHeight + 18
                             radius: 14
                             color: mine ? Theme.primary : Theme.background
                             anchors.right: mine ? parent.right : undefined
                             anchors.left: mine ? undefined : parent.left
+                            // The coach's bubbles show Claude's formatting (bold, lists, links) instead
+                            // of raw ** and dashes; your own stay plain text (André, 2026-11-02,
+                            // desktop picks #4). The width comes from an unwrapped copy: a wrapping
+                            // Markdown text's own implicitWidth follows the width it's given.
+                            Text {
+                                id: bubbleMeasure
+                                visible: false
+                                text: modelData.text || ""
+                                textFormat: mine ? Text.PlainText : Text.MarkdownText
+                                font.pixelSize: Theme.fontSizeBody
+                            }
                             Text {
                                 id: bubbleText
                                 anchors.fill: parent
                                 anchors.margins: 9
                                 text: modelData.text || ""
+                                textFormat: mine ? Text.PlainText : Text.MarkdownText
                                 color: mine ? "white" : Theme.text
+                                linkColor: mine ? "white" : Theme.primary
                                 font.pixelSize: Theme.fontSizeBody
                                 wrapMode: Text.WordWrap
+                                onLinkActivated: (link) => Qt.openUrlExternally(link)
+                                HoverHandler {
+                                    cursorShape: bubbleText.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                }
                             }
                         }
                         Repeater {
@@ -358,49 +384,105 @@ Item {
                             // Theme.mutedText outline, the one place on Coach still standing
                             // out from the flat Theme.cardNested tile language every other
                             // control/option on this page now shares.
-                            delegate: Rectangle {
+                            // Cards from Claude carry a `type` (André, 2026-11-02, desktop picks
+                            // #18, OpenUI's idea): "workout" (the canned picks have no type and
+                            // are workouts too), "stat" (one number in a tile) or "note". Anything
+                            // else shows its text if it has one, and is skipped otherwise.
+                            delegate: Column {
+                                id: cardItem
+                                required property var modelData
+                                readonly property string kind: {
+                                    const t = cardItem.modelData.type || "workout"
+                                    if (t === "workout" || t === "stat" || t === "note")
+                                        return t
+                                    return cardItem.modelData.text ? "note" : ""
+                                }
                                 width: Math.min(280, chatList.width * 0.78)
-                                height: cardCol.implicitHeight + 20
-                                radius: Theme.radiusSmall
-                                color: Theme.cardNested
-                                Column {
-                                    id: cardCol
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 3
-                                    RowLayout {
-                                        width: parent.width
-                                        Text { text: modelData.name || ""; color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+
+                                Rectangle {
+                                    visible: cardItem.kind === "workout"
+                                    width: parent.width
+                                    height: cardCol.implicitHeight + 20
+                                    radius: Theme.radiusSmall
+                                    color: Theme.cardNested
+                                    Column {
+                                        id: cardCol
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 3
+                                        RowLayout {
+                                            width: parent.width
+                                            Text { text: cardItem.modelData.name || ""; color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                            Text {
+                                                text: cardItem.modelData.durationSec ? Math.round(cardItem.modelData.durationSec / 60) + qsTr("min") : ""
+                                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                            }
+                                        }
                                         Text {
-                                            text: modelData.durationSec ? Math.round(modelData.durationSec / 60) + qsTr("min") : ""
+                                            text: (cardItem.modelData.intensity || "") + " · IF " + (cardItem.modelData.intensityFactor ? cardItem.modelData.intensityFactor.toFixed(2) : "—")
+                                                  + " · " + (cardItem.modelData.load ? Math.round(cardItem.modelData.load) : "—") + " TSS"
                                             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                                         }
                                     }
+                                }
+
+                                StatTile {
+                                    visible: cardItem.kind === "stat"
+                                    width: parent.width
+                                    label: cardItem.modelData.label || ""
+                                    value: cardItem.modelData.value !== undefined ? String(cardItem.modelData.value) : ""
+                                    unit: cardItem.modelData.unit || ""
+                                    caption: cardItem.modelData.caption || ""
+                                }
+
+                                Rectangle {
+                                    visible: cardItem.kind === "note"
+                                    width: parent.width
+                                    height: noteText.implicitHeight + 20
+                                    radius: Theme.radiusSmall
+                                    color: Theme.cardNested
                                     Text {
-                                        text: (modelData.intensity || "") + " · IF " + (modelData.intensityFactor ? modelData.intensityFactor.toFixed(2) : "—")
-                                              + " · " + (modelData.load ? Math.round(modelData.load) : "—") + " TSS"
-                                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                                        id: noteText
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        text: cardItem.modelData.text || ""
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontSizeLabel
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
                         }
                     }
+                    // While Claude writes: a coach bubble with the app's pulsing dots, instead
+                    // of three dots that never moved (André, 2026-11-02, desktop picks #4).
                     footer: Item {
                         width: chatList.width
-                        height: CoachService.sending ? 24 : 0
+                        height: CoachService.sending ? typingBubble.height + Theme.spacingSmall : 0
                         visible: CoachService.sending
-                        Row {
-                            anchors.left: parent.left
-                            spacing: 4
-                            anchors.verticalCenter: parent.verticalCenter
-                            Repeater {
-                                model: 3
-                                delegate: Rectangle {
-                                    width: 6; height: 6; radius: 3
-                                    color: Theme.mutedText
-                                    opacity: 0.5
-                                }
+                        Rectangle {
+                            id: typingBubble
+                            y: Theme.spacingSmall
+                            width: typingDots.width + 28
+                            height: 34
+                            radius: 14
+                            color: Theme.background
+                            PulseDots {
+                                id: typingDots
+                                anchors.centerIn: parent
+                                color: Theme.mutedText
+                                running: CoachService.sending
                             }
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: qsTr("The coach is writing")
+                        }
+                    }
+                    // Keep the dots in view: they appear just after your message is added.
+                    Connections {
+                        target: CoachService
+                        function onSendingChanged() {
+                            if (CoachService.sending)
+                                Qt.callLater(chatList.positionViewAtEnd)
                         }
                     }
                 }
@@ -423,7 +505,10 @@ Item {
                     Layout.bottomMargin: 0
                     spacing: Theme.spacingSmall
                     Repeater {
-                        model: [qsTr("Something shorter"), qsTr("Outdoor instead"), qsTr("Send it to my watch")]
+                        // "Send it to my watch" is left out until sending from the Coach works:
+                        // today it only answered that it isn't wired up (André, 2026-11-02,
+                        // desktop picks #17). It comes back with that feature.
+                        model: [qsTr("Something shorter"), qsTr("Outdoor instead")]
                         // Real, 2026-08-25 (André, after trying the flat tile look here first:
                         // "let's make that type of button default for all app") - RoundedButton
                         // itself now IS this flat/no-outline style, so this is back to a plain

@@ -128,9 +128,10 @@ Rectangle {
                     font.pixelSize: Theme.fontSizeBody
                 }
                 HoverHandler { id: figureHover }
-                ToolTip.visible: figureHover.hovered && figure.text.length > 0
-                ToolTip.text: ActivityMetrics.labelFor(modelData)
-                ToolTip.delay: 300
+                ThemedToolTip {
+                    visible: figureHover.hovered && figure.text.length > 0
+                    text: ActivityMetrics.labelFor(modelData)
+                }
             }
         }
     }

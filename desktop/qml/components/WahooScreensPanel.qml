@@ -238,7 +238,7 @@ Column {
                                 onClicked: root.mutate(p => { const t = p[card.index]; p[card.index] = p[card.index + 1]; p[card.index + 1] = t })
                             }
                             RoundedButton {
-                                text: qsTr("Delete page"); visible: card.modelData.custom; enabled: !root.saving
+                                text: qsTr("Delete page"); danger: true; visible: card.modelData.custom; enabled: !root.saving
                                 onClicked: root.mutate(p => p.splice(card.index, 1))
                             }
                         }
@@ -316,6 +316,7 @@ Column {
             RoundedButton {
                 visible: !root.confirmReset
                 text: qsTr("Reset all pages to Wahoo default…")
+                danger: true
                 enabled: !root.saving && !root.changed
                 onClicked: root.confirmReset = true
             }
@@ -327,7 +328,7 @@ Column {
             }
             RoundedButton {
                 visible: root.confirmReset
-                text: qsTr("Yes, reset"); onClicked: root.resetPages()
+                text: qsTr("Yes, reset"); danger: true; onClicked: root.resetPages()
             }
             RoundedButton {
                 visible: root.confirmReset
@@ -336,12 +337,10 @@ Column {
         }
     }
 
-    Text {
-        visible: root.msg.length > 0
-        width: parent.width; wrapMode: Text.WordWrap
+    StatusNote {
+        width: parent.width
+        tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
         text: root.msg
-        color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-        font.pixelSize: Theme.fontSizeCaption
     }
 
     Row {
@@ -350,7 +349,8 @@ Column {
         width: parent.width
         visible: !root.loading && root.error.length === 0
         RoundedButton {
-            text: root.saving ? qsTr("Saving…") : qsTr("Save to ELEMNT")
+            text: qsTr("Save to ELEMNT")
+            busy: root.saving
             enabled: root.changed && !root.saving
             onClicked: root.save()
         }

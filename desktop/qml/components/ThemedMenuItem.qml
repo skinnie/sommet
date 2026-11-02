@@ -40,6 +40,9 @@ MenuItem {
         anchors.fill: parent
         anchors.margins: 2
         radius: Theme.radiusSmall
-        color: root.highlighted ? Theme.primary + "26" : "transparent"
+        // Qt.alpha, not Theme.primary + "26": Qt reads an 8-digit colour as #AARRGGBB, so the
+        // old string made every menu highlight brown (mustard in dark mode). React Native reads
+        // #RRGGBBAA, which is why the same trick works on Android (fixed 2026-11-02).
+        color: root.highlighted ? Qt.alpha(Theme.primary, 0.12) : "transparent"
     }
 }

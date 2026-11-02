@@ -22,7 +22,9 @@ Item {
     property var activity
     property string saveError: ""
     property string uploadStatus: ""
+    property bool uploadOk: false
     property bool uploading: false
+    property string _uploadTarget: ""      // "intervals" or "garmin": which button shows the dots
     signal back
 
     readonly property var cfg: ActivityService.viewConfig
@@ -62,9 +64,10 @@ Item {
         }
         function onExportFinished(uploaded, failed) {
             root.uploading = false
+            root.uploadOk = failed === 0
             root.uploadStatus = failed > 0 ? qsTr("Upload failed.") : qsTr("Uploaded to intervals.icu.")
         }
-        function onExportError(message) { root.uploading = false; root.uploadStatus = message }
+        function onExportError(message) { root.uploading = false; root.uploadOk = false; root.uploadStatus = message }
         function onIntervalsFitReady(idx, device, fitBase64, error) {
             if (!root.activity || idx !== root.activity.index || device !== (root.activity.device || "")) return
             if (!root._fetchingFit) return          // the charts fetch a FIT too - only Export opens the dialog
@@ -847,7 +850,8 @@ Item {
                             }
                         }
                         RoundedButton {
-                            text: root._fetchingFit ? qsTr("Getting FIT from intervals.icu…") : qsTr("Export as FIT")
+                            text: qsTr("Export as FIT")
+                            busy: root._fetchingFit
                             enabled: !root._fetchingFit && (root._hasFit || root._fitFromIntervals)
                             onClicked: {
                                 root._fitError = ""
@@ -883,21 +887,15 @@ Item {
                         text: qsTr("This activity came from intervals.icu: its FIT is downloaded from there "
                                    + "when you export it (the original file when it has one), then kept here.")
                     }
-                    Text {
-                        visible: root._fitError.length > 0
+                    StatusNote {
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        color: Theme.error
-                        font.pixelSize: Theme.fontSizeLabel
+                        tone: "error"
                         text: root._fitError
                     }
-                    Text {
-                        visible: root.saveError.length > 0
+                    StatusNote {
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        color: Theme.error
-                        font.pixelSize: Theme.fontSizeLabel
-                        text: qsTr("Couldn't save: %1").arg(root.saveError)
+                        tone: "error"
+                        text: root.saveError.length > 0 ? qsTr("Couldn't save: %1").arg(root.saveError) : ""
                     }
                 }
 
@@ -922,9 +920,11 @@ Item {
                         width: parent.width
                         spacing: Theme.spacingSmall
                         RoundedButton {
-                            text: root.uploading ? qsTr("Uploading…") : qsTr("Export to intervals.icu")
+                            text: qsTr("Export to intervals.icu")
+                            busy: root.uploading && root._uploadTarget === "intervals"
                             enabled: parent.parent._hasData && !root.uploading
                             onClicked: {
+                                root._uploadTarget = "intervals"
                                 root.uploading = true
                                 root.uploadStatus = ""
                                 ActivityService.exportActivityToIntervals(activity.name || "", activity.fitBase64 || "",
@@ -933,8 +933,10 @@ Item {
                         }
                         RoundedButton {
                             text: qsTr("Export to Garmin")
+                            busy: root.uploading && root._uploadTarget === "garmin"
                             enabled: parent.parent._hasData && !root.uploading
                             onClicked: {
+                                root._uploadTarget = "garmin"
                                 root.uploading = true
                                 root.uploadStatus = ""
                                 ActivityService.exportActivityToGarmin(activity.name || "", activity.fitBase64 || "",
@@ -942,13 +944,10 @@ Item {
                             }
                         }
                     }
-                    Text {
-                        visible: root.uploadStatus.length > 0
+                    StatusNote {
                         width: parent.width
-                        wrapMode: Text.WordWrap
+                        tone: root.uploadOk ? "success" : "error"
                         text: root.uploadStatus
-                        color: Theme.mutedText
-                        font.pixelSize: Theme.fontSizeCaption
                     }
                     Text {
                         visible: !parent._hasData

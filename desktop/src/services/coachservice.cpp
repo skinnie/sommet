@@ -468,10 +468,14 @@ void CoachService::refreshCatalogueLive(std::function<void()> onDone)
 
 void CoachService::refreshReadiness() { computeReadiness(); }
 
-void CoachService::appendBubble(const QString &role, const QString &text, const QVariantList &cards)
+void CoachService::appendBubble(const QString &role, const QString &text, const QVariantList &cards,
+                                bool local)
 {
-    m_messages.append(QVariantMap{{QStringLiteral("role"), role}, {QStringLiteral("text"), text},
-                                   {QStringLiteral("cards"), cards}});
+    QVariantMap bubble{{QStringLiteral("role"), role}, {QStringLiteral("text"), text},
+                       {QStringLiteral("cards"), cards}};
+    if (local)
+        bubble.insert(QStringLiteral("local"), true);
+    m_messages.append(bubble);
     emit messagesChanged();
 }
 
@@ -516,15 +520,166 @@ void CoachService::replyCanned(const QString &userText)
         appendBubble(QStringLiteral("coach"),
             QStringLiteral("Sending \"%1\" to your watch isn't wired up from this page yet — "
                            "Ambit3Sink exists in the coach scaffold (planned-move + App-Zone "
-                           "routes), it just isn't called from here.").arg(name));
+                           "routes), it just isn't called from here.").arg(name), {}, true);
     } else {
         appendBubble(QStringLiteral("coach"),
             QStringLiteral("I'm running in canned mode right now (Settings → Coach → Chat "
                            "backend, switch to Claude for a real conversation). I only "
-                           "recognise a few keywords here: try \"something shorter\", "
-                           "\"outdoor instead\", or \"send it to my watch\"."));
+                           "recognise a few keywords here: try \"something shorter\" or "
+                           "\"outdoor instead\"."), {}, true);
     }
     setSending(false);
+}
+
+namespace {
+// The one shape Claude answers in (André, 2026-11-02, desktop picks #18 — OpenUI's idea,
+// borrowed, not its library): a short Markdown text, plus cards the Coach page already knows
+// how to draw. Structured outputs (output_config.format) guarantee the JSON. Forced tool use
+// (tool_choice "tool") would too, but newer models (Sonnet 5.5, Opus 5.5) reject it with a 400.
+// A card type the page doesn't know shows its text, or is skipped (OpenUI's forgiving rule).
+const char *const kCoachReplySchema = R"({
+  "type": "object",
+  "properties": {
+    "text": {"type": "string"},
+    "cards": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {"type": "object",
+           "properties": {"type": {"type": "string", "const": "workout"},
+                          "name": {"type": "string"},
+                          "minutes": {"type": "integer"},
+                          "intensity": {"type": "string"},
+                          "if": {"type": "number"},
+                          "tss": {"type": "number"}},
+           "required": ["type", "name", "minutes", "intensity", "if", "tss"],
+           "additionalProperties": false},
+          {"type": "object",
+           "properties": {"type": {"type": "string", "const": "stat"},
+                          "label": {"type": "string"},
+                          "value": {"type": "string"},
+                          "unit": {"type": "string"},
+                          "caption": {"type": "string"}},
+           "required": ["type", "label", "value", "unit", "caption"],
+           "additionalProperties": false},
+          {"type": "object",
+           "properties": {"type": {"type": "string", "const": "note"},
+                          "text": {"type": "string"}},
+           "required": ["type", "text"],
+           "additionalProperties": false}
+        ]
+      }
+    }
+  },
+  "required": ["text", "cards"],
+  "additionalProperties": false
+})";
+}
+
+// The recent conversation for Claude (André, 2026-11-02, desktop picks #16): it used to get only
+// the last message, so a follow-up like "And tomorrow?" started from zero. The Messages API wants
+// turns that alternate and start with the user, so same-role bubbles are merged, the coach's
+// opening bubble (before the first question) is left out, and local notes (errors, canned-mode
+// help) are skipped. Cards become one line each. Kept to the last 12 turns / ~12,000 characters.
+QJsonArray CoachService::chatHistoryForClaude() const
+{
+    struct Turn { QString role; QString text; };
+    QVector<Turn> turns;
+    for (const auto &v : m_messages) {
+        const auto m = v.toMap();
+        if (m.value(QStringLiteral("local")).toBool())
+            continue;
+        const QString role = m.value(QStringLiteral("role")).toString() == QStringLiteral("me")
+            ? QStringLiteral("user") : QStringLiteral("assistant");
+        QString text = m.value(QStringLiteral("text")).toString().trimmed();
+        QStringList cardLines;
+        for (const auto &cv : m.value(QStringLiteral("cards")).toList()) {
+            const auto c = cv.toMap();
+            const QString type = c.value(QStringLiteral("type")).toString();
+            if (type == QStringLiteral("stat")) {
+                const QString stat = QStringLiteral("%1: %2 %3")
+                    .arg(c.value(QStringLiteral("label")).toString(),
+                         c.value(QStringLiteral("value")).toString(),
+                         c.value(QStringLiteral("unit")).toString()).trimmed();
+                cardLines << QStringLiteral("[") + stat + QStringLiteral("]");
+            } else if (type == QStringLiteral("note")) {
+                cardLines << c.value(QStringLiteral("text")).toString();
+            } else {
+                cardLines << QStringLiteral("[Workout card: %1, %2 min]")
+                    .arg(c.value(QStringLiteral("name")).toString())
+                    .arg(c.value(QStringLiteral("durationSec")).toInt() / 60);
+            }
+        }
+        if (!cardLines.isEmpty())
+            text += (text.isEmpty() ? QString() : QStringLiteral("\n")) + cardLines.join(QLatin1Char('\n'));
+        if (text.isEmpty())
+            continue;
+        if (!turns.isEmpty() && turns.last().role == role)
+            turns.last().text += QStringLiteral("\n\n") + text;
+        else
+            turns.append(Turn{role, text});
+    }
+
+    constexpr int kMaxTurns = 12;
+    constexpr int kMaxChars = 12000;
+    const int count = int(turns.size());
+    int start = count;
+    int chars = 0;
+    while (start > 0 && count - start < kMaxTurns) {
+        const int len = int(turns.at(start - 1).text.size());
+        if (chars + len > kMaxChars && start < count)
+            break;   // the newest turn always goes, even when it's long on its own
+        chars += len;
+        --start;
+    }
+    while (start < count && turns.at(start).role != QStringLiteral("user"))
+        ++start;
+
+    QJsonArray out;
+    for (int i = start; i < count; ++i) {
+        QJsonObject o;
+        o[QStringLiteral("role")] = turns.at(i).role;
+        o[QStringLiteral("content")] = turns.at(i).text;
+        out.append(o);
+    }
+    return out;
+}
+
+// Claude's cards -> the maps CoachPage draws. Workouts use the same fields as the canned picks
+// (name, durationSec, intensity, intensityFactor, load), so the existing workout card shows them.
+QVariantList CoachService::cardsFromClaude(const QJsonArray &cards)
+{
+    QVariantList out;
+    for (const auto &v : cards) {
+        if (out.size() >= 4)
+            break;
+        const auto c = v.toObject();
+        const QString type = c.value(QStringLiteral("type")).toString();
+        if (type == QStringLiteral("workout")) {
+            out.append(QVariantMap{
+                {QStringLiteral("type"), type},
+                {QStringLiteral("name"), c.value(QStringLiteral("name")).toString()},
+                {QStringLiteral("durationSec"), qRound(c.value(QStringLiteral("minutes")).toDouble() * 60.0)},
+                {QStringLiteral("intensity"), c.value(QStringLiteral("intensity")).toString()},
+                {QStringLiteral("intensityFactor"), c.value(QStringLiteral("if")).toDouble()},
+                {QStringLiteral("load"), c.value(QStringLiteral("tss")).toDouble()},
+            });
+        } else if (type == QStringLiteral("stat")) {
+            out.append(QVariantMap{
+                {QStringLiteral("type"), type},
+                {QStringLiteral("label"), c.value(QStringLiteral("label")).toString()},
+                {QStringLiteral("value"), c.value(QStringLiteral("value")).toString()},
+                {QStringLiteral("unit"), c.value(QStringLiteral("unit")).toString()},
+                {QStringLiteral("caption"), c.value(QStringLiteral("caption")).toString()},
+            });
+        } else {
+            const QString text = c.value(QStringLiteral("text")).toString().trimmed();
+            if (!text.isEmpty())
+                out.append(QVariantMap{{QStringLiteral("type"), QStringLiteral("note")},
+                                       {QStringLiteral("text"), text}});
+        }
+    }
+    return out;
 }
 
 void CoachService::replyClaude(const QString &userText)
@@ -533,15 +688,17 @@ void CoachService::replyClaude(const QString &userText)
     QStringList picksLines;
     for (const auto &pv : m_todaysPicks) {
         const auto p = pv.toMap();
-        picksLines << QStringLiteral("- %1 (%2 min, TSS %3)")
+        picksLines << QStringLiteral("- %1 (%2 min, intensity %3, intensity factor %4, TSS %5)")
             .arg(p.value(QStringLiteral("name")).toString())
             .arg(p.value(QStringLiteral("durationSec")).toInt() / 60)
+            .arg(p.value(QStringLiteral("intensity")).toString())
+            .arg(p.value(QStringLiteral("intensityFactor")).toDouble(), 0, 'f', 2)
             .arg(p.value(QStringLiteral("load")).toDouble(), 0, 'f', 0);
     }
     // No onboarding UI built yet for the rider profile coach/src/model.ts defines
     // (mainSports/secondarySports/weatherMatters/recoveryMenu) - honestly a placeholder
     // until that screen exists, not fabricated as if it were real user input.
-    const QString system = QStringLiteral(
+    QString system = QStringLiteral(
         "You are Sommet's training coach for a Suunto Ambit3 watch user. Be concise and warm, "
         "like a knowledgeable training partner, not a corporate assistant. Never use jargon "
         "(no \"TSS\"/\"CTL\"/\"TSB\" in your reply - translate to plain language).\n\n"
@@ -555,6 +712,17 @@ void CoachService::replyClaude(const QString &userText)
      .arg(r.value(QStringLiteral("freshness")).toDouble(), 0, 'f', 0)
      .arg(picksLines.isEmpty() ? QStringLiteral("(none match today's duration/intensity)")
                                 : picksLines.join(QStringLiteral("\n")));
+    // How the answer is laid out on the Coach page (desktop picks #18).
+    system += QStringLiteral(
+        "\n\nYour answer is shown in a chat bubble with cards under it. Put your reply in \"text\": "
+        "one to four short sentences; Markdown is fine (bold, a short list). Add \"cards\" only "
+        "when they help, usually none to two:\n"
+        "- \"workout\": a session from today's catalogue picks above, copying its name, minutes, "
+        "intensity, intensity factor (\"if\") and TSS (\"tss\") exactly. Never invent a workout card.\n"
+        "- \"stat\": one number worth showing, e.g. label \"Freshness\", value \"-12\", unit \"\", "
+        "caption \"tired, an easy day helps\". Plain words in label and caption.\n"
+        "- \"note\": a one-line tip.\n"
+        "Don't repeat in \"text\" what a card already shows.");
 
     QNetworkRequest req{QUrl(QStringLiteral("https://api.anthropic.com/v1/messages"))};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -563,32 +731,78 @@ void CoachService::replyClaude(const QString &userText)
 
     QJsonObject body;
     body[QStringLiteral("model")] = QStringLiteral("claude-sonnet-5");
-    body[QStringLiteral("max_tokens")] = 500;
+    // Room for the model's own thinking as well as the answer: a cap that's too low cuts the
+    // JSON off mid-way.
+    body[QStringLiteral("max_tokens")] = 16000;
     body[QStringLiteral("system")] = system;
-    QJsonArray messages;
-    QJsonObject userMsg;
-    userMsg[QStringLiteral("role")] = QStringLiteral("user");
-    userMsg[QStringLiteral("content")] = userText;
-    messages.append(userMsg);
+    QJsonArray messages = chatHistoryForClaude();
+    if (messages.isEmpty()
+            || messages.last().toObject().value(QStringLiteral("role")).toString() != QStringLiteral("user")) {
+        QJsonObject userMsg;
+        userMsg[QStringLiteral("role")] = QStringLiteral("user");
+        userMsg[QStringLiteral("content")] = userText;
+        messages = QJsonArray{userMsg};
+    }
     body[QStringLiteral("messages")] = messages;
+    QJsonObject format;
+    format[QStringLiteral("type")] = QStringLiteral("json_schema");
+    format[QStringLiteral("schema")] = QJsonDocument::fromJson(QByteArray(kCoachReplySchema)).object();
+    QJsonObject outputConfig;
+    outputConfig[QStringLiteral("format")] = format;
+    body[QStringLiteral("output_config")] = outputConfig;
 
     auto *reply = m_net.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             setLastError(QStringLiteral("Claude API error: %1").arg(backendErrorText(reply)));
-            appendBubble(QStringLiteral("coach"),
-                QStringLiteral("(couldn't reach Claude: %1 — falling back, try again in a moment)")
-                    .arg(backendErrorText(reply)));
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            // A refused key won't work "in a moment": say where to fix it.
+            if (status == 401 || reply->error() == QNetworkReply::AuthenticationRequiredError)
+                appendBubble(QStringLiteral("coach"),
+                    QStringLiteral("(Claude didn't accept your API key. Paste a new one in Settings → Coach.)"),
+                    {}, true);
+            else
+                appendBubble(QStringLiteral("coach"),
+                    QStringLiteral("(couldn't reach Claude: %1 — falling back, try again in a moment)")
+                        .arg(backendErrorText(reply)), {}, true);
             setSending(false);
             return;
         }
-        const auto doc = QJsonDocument::fromJson(reply->readAll());
-        const auto content = doc.object().value(QStringLiteral("content")).toArray();
-        QString text;
-        if (!content.isEmpty()) text = content.first().toObject().value(QStringLiteral("text")).toString();
-        if (text.isEmpty()) text = QStringLiteral("(empty reply from Claude)");
-        appendBubble(QStringLiteral("coach"), text);
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString stopReason = obj.value(QStringLiteral("stop_reason")).toString();
+        // The answer is in the text blocks; a thinking block can come first, so don't just take
+        // the first block.
+        QString raw;
+        for (const auto &bv : obj.value(QStringLiteral("content")).toArray()) {
+            const auto block = bv.toObject();
+            if (block.value(QStringLiteral("type")).toString() == QStringLiteral("text"))
+                raw += block.value(QStringLiteral("text")).toString();
+        }
+        if (stopReason == QStringLiteral("refusal")) {
+            appendBubble(QStringLiteral("coach"),
+                QStringLiteral("(Claude didn't answer that one — try asking another way.)"), {}, true);
+            setSending(false);
+            return;
+        }
+        const auto parsed = QJsonDocument::fromJson(raw.toUtf8());
+        if (parsed.isObject()) {
+            const auto answer = parsed.object();
+            const QString text = answer.value(QStringLiteral("text")).toString().trimmed();
+            const QVariantList cards = cardsFromClaude(answer.value(QStringLiteral("cards")).toArray());
+            if (text.isEmpty() && cards.isEmpty())
+                appendBubble(QStringLiteral("coach"), QStringLiteral("(empty reply from Claude)"), {}, true);
+            else
+                appendBubble(QStringLiteral("coach"), text, cards);
+        } else if (raw.trimmed().startsWith(QLatin1Char('{'))) {
+            // JSON cut off (e.g. stop_reason "max_tokens"): don't show half an object.
+            appendBubble(QStringLiteral("coach"),
+                QStringLiteral("(Claude's answer came back incomplete — try again.)"), {}, true);
+        } else if (!raw.trimmed().isEmpty()) {
+            appendBubble(QStringLiteral("coach"), raw.trimmed());   // plain text, as before
+        } else {
+            appendBubble(QStringLiteral("coach"), QStringLiteral("(empty reply from Claude)"), {}, true);
+        }
         setSending(false);
     });
 }

@@ -14,6 +14,44 @@ Item {
     function lastDate(series) {
         return series && series.length > 0 ? DateFormat.date(series[series.length - 1].date) : ""
     }
+    // For the number tiles (André, 2026-11-02, desktop picks #12): how old the latest value is,
+    // and how it compares with the 7 days before it.
+    function _day(iso) { return new Date(String(iso).slice(0, 10) + "T00:00:00") }
+    function oldBadge(series) {
+        if (!series || series.length === 0)
+            return ""
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const age = Math.round((today - _day(series[series.length - 1].date)) / 86400000)
+        return age > 2 ? qsTr("%1 days old").arg(age) : ""
+    }
+    // "▲ 4 bpm vs 7-day average": the latest value against the mean of the readings from the 7
+    // days before it. Needs at least 3 of them; otherwise the tile shows the date instead.
+    function trend(series, unit, decimals) {
+        if (!series || series.length < 4)
+            return ""
+        const last = series[series.length - 1]
+        const lastDay = _day(last.date)
+        let sum = 0, n = 0
+        for (let i = series.length - 2; i >= 0; --i) {
+            const days = Math.round((lastDay - _day(series[i].date)) / 86400000)
+            if (days > 7)
+                break
+            if (days >= 1) { sum += series[i].value; n++ }
+        }
+        if (n < 3)
+            return ""
+        const diff = last.value - sum / n
+        const size = Math.abs(diff).toFixed(decimals || 0)
+        if (Number(size) === 0)
+            return qsTr("Same as the 7-day average")
+        return (diff > 0 ? "▲ " : "▼ ") + size + (unit ? " " + unit : "") + qsTr(" vs 7-day average")
+    }
+    // The tile caption: the trend when there is one, else the date of the value.
+    function tileCaption(series, unit, decimals) {
+        const t = trend(series, unit, decimals)
+        return t.length > 0 ? t : lastDate(series)
+    }
     // "This week" (André, 2026-10-26: "how much activity you did this week"): the watch's daily
     // activity kcal from Monday to today. The days are already merged over every watch read.
     readonly property var weekActivity: {
@@ -116,131 +154,113 @@ Item {
                 width: parent.width
                 visible: HealthService.rhr.length > 0 || HealthService.steps.length > 0
                          || HealthService.watchActivity.length > 0 || root.hasRecovery
-                // Wraps: with every source on, the tiles are wider than the card.
+                // One tile per number (desktop picks #12). Wraps: with every source on, the
+                // tiles are wider than the card.
                 Flow {
+                    id: tiles
                     width: parent.width
-                    spacing: Theme.spacingLarge * 2
-                    Column {
-                        spacing: 2
+                    spacing: Theme.spacingSmall
+                    readonly property int tileWidth: 176
+                    StatTile {
+                        width: tiles.tileWidth
                         visible: HealthService.latestRhr > 0
-                        Text { text: qsTr("Resting HR"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestRhr) + qsTr(" bpm")
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.rhr); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Resting HR")
+                        value: Math.round(HealthService.latestRhr)
+                        unit: qsTr("bpm")
+                        caption: root.tileCaption(HealthService.rhr, qsTr("bpm"), 0)
+                        badge: root.oldBadge(HealthService.rhr)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         visible: HealthService.latestSteps > 0
-                        Text { text: qsTr("Steps (latest day)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
+                        label: qsTr("Steps (latest day)")
                         // Explicit locale + format, not the bare no-arg toLocaleString(): besides
                         // following the ambient OS locale (see DateFormat.qml's note), the
                         // no-arg form switches to scientific notation past 6 digits (e.g.
                         // "1,23457e+06"), which is a step count, never a number anyone wants in
                         // scientific notation.
-                        Text { text: Math.round(HealthService.latestSteps)
-                                     .toLocaleString(Qt.locale("en"), 'f', 0)
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.steps); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        value: Math.round(HealthService.latestSteps).toLocaleString(Qt.locale("en"), 'f', 0)
+                        caption: root.lastDate(HealthService.steps)
+                        badge: root.oldBadge(HealthService.steps)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         // The watch's "Activity today" (kcal), read with the steps.
                         visible: HealthService.watchActivity.length > 0
-                        Text { text: qsTr("Activity (watch)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestWatchActivity) + qsTr(" kcal")
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.watchActivity); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Activity (watch)")
+                        value: Math.round(HealthService.latestWatchActivity)
+                        unit: qsTr("kcal")
+                        caption: root.lastDate(HealthService.watchActivity)
+                        badge: root.oldBadge(HealthService.watchActivity)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         // The watch's activity kcal from Monday to today, every watch merged.
                         visible: root.weekActivity.days > 0
-                        Text { text: qsTr("This week (watch)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(root.weekActivity.kcal)
-                                     .toLocaleString(Qt.locale("en"), 'f', 0) + qsTr(" kcal")
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: qsTr("since Monday ") + DateFormat.date(root.weekActivity.from)
-                               color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("This week (watch)")
+                        value: Math.round(root.weekActivity.kcal).toLocaleString(Qt.locale("en"), 'f', 0)
+                        unit: qsTr("kcal")
+                        caption: qsTr("since Monday ") + DateFormat.date(root.weekActivity.from)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         // The watch's "Recovery time" at the last watch read, and its peak over
                         // the watch's last 24 h of quarter-hour samples.
                         visible: root.hasRecovery
-                        Text { text: qsTr("Recovery time (watch)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: root.hasRecovery ? root.recoveryText(HealthService.watchRecovery.hours) : ""
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text {
-                            color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
-                            text: !root.hasRecovery ? "" :
-                                  DateFormat.date(String(HealthService.watchRecovery.time).slice(0, 10))
-                                  + " " + String(HealthService.watchRecovery.time).slice(11, 16)
-                                  + qsTr(" · peak ") + root.recoveryText(HealthService.watchRecovery.peak)
-                        }
+                        label: qsTr("Recovery time (watch)")
+                        value: root.hasRecovery ? root.recoveryText(HealthService.watchRecovery.hours) : ""
+                        caption: !root.hasRecovery ? "" :
+                                 DateFormat.date(String(HealthService.watchRecovery.time).slice(0, 10))
+                                 + " " + String(HealthService.watchRecovery.time).slice(11, 16)
+                                 + qsTr(" · peak ") + root.recoveryText(HealthService.watchRecovery.peak)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         visible: HealthService.latestHrv > 0
-                        Text { text: qsTr("HRV (overnight)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestHrv) + qsTr(" ms")
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.hrv); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("HRV (overnight)")
+                        value: Math.round(HealthService.latestHrv)
+                        unit: qsTr("ms")
+                        caption: root.tileCaption(HealthService.hrv, qsTr("ms"), 0)
+                        badge: root.oldBadge(HealthService.hrv)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         // The Ambit3's own morning/spot rMSSD - a DIFFERENT measurement from the
                         // overnight value above, so it gets its own tile (and its own coloured
                         // line below), tracked against its own baseline, not compared to it.
                         visible: (HealthService.ambitHrvEnabled || HealthService.coospoHrvEnabled)
                                  && HealthService.latestHrvAmbit > 0
-                        Text { text: qsTr("Morning HRV"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestHrvAmbit) + qsTr(" ms")
-                               color: Theme.text
-                               font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.hrvAmbit); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Morning HRV")
+                        value: Math.round(HealthService.latestHrvAmbit)
+                        unit: qsTr("ms")
+                        caption: root.tileCaption(HealthService.hrvAmbit, qsTr("ms"), 0)
+                        badge: root.oldBadge(HealthService.hrvAmbit)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         visible: HealthService.latestBodyBattery > 0
-                        Text { text: qsTr("Body battery (peak)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestBodyBattery)
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.bodyBattery); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Body battery (peak)")
+                        value: Math.round(HealthService.latestBodyBattery)
+                        caption: root.lastDate(HealthService.bodyBattery)
+                        badge: root.oldBadge(HealthService.bodyBattery)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         visible: HealthService.latestSleep > 0
-                        Text { text: qsTr("Sleep (last night)"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: HealthService.latestSleep.toFixed(1) + qsTr(" h")
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.sleep); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Sleep (last night)")
+                        value: HealthService.latestSleep.toFixed(1)
+                        unit: qsTr("h")
+                        caption: root.tileCaption(HealthService.sleep, qsTr("h"), 1)
+                        badge: root.oldBadge(HealthService.sleep)
                     }
-                    Column {
-                        spacing: 2
+                    StatTile {
+                        width: tiles.tileWidth
                         // Train Libre's sleep health score (sleepscore.cpp), 0-100.
                         visible: HealthService.sleepScore.length > 0
-                        Text { text: qsTr("Sleep score"); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeLabel }
-                        Text { text: Math.round(HealthService.latestSleepScore)
-                               color: Theme.text; font.pixelSize: Theme.fontSizeDisplay; font.bold: true }
-                        Text { text: root.lastDate(HealthService.sleepScore); color: Theme.mutedText
-                               font.pixelSize: Theme.fontSizeCaption }
+                        label: qsTr("Sleep score")
+                        value: Math.round(HealthService.latestSleepScore)
+                        caption: root.lastDate(HealthService.sleepScore)
+                        badge: root.oldBadge(HealthService.sleepScore)
                     }
                 }
             }
@@ -456,17 +476,29 @@ Item {
                 }
             }
 
-            // --- Empty / error ---
-            Text {
-                width: parent.width
-                visible: !HealthService.needsLogin && !HealthService.loading
-                         && HealthService.rhr.length === 0 && HealthService.steps.length === 0
-                         && HealthService.hrv.length === 0 && HealthService.bodyBattery.length === 0
-                wrapMode: Text.WordWrap
-                color: Theme.mutedText
-                text: HealthService.lastError.length > 0
-                      ? HealthService.lastError
-                      : qsTr("No health data in the last year.")
+            // --- Loading / empty / error (desktop picks #11, #13) ---
+            readonly property bool _noData: HealthService.rhr.length === 0 && HealthService.steps.length === 0
+                                            && HealthService.hrv.length === 0 && HealthService.bodyBattery.length === 0
+            SkeletonList {
+                visible: !HealthService.needsLogin && HealthService.loading && parent._noData
+                count: 3
+            }
+            ErrorBanner {
+                detail: !HealthService.needsLogin && !HealthService.loading && parent._noData
+                        ? HealthService.lastError : ""
+                context: qsTr("reading health data")
+                showPlainDetail: true
+                canRetry: true
+                onRetry: HealthService.refresh()
+            }
+            EmptyState {
+                visible: !HealthService.needsLogin && !HealthService.loading && parent._noData
+                         && HealthService.lastError.length === 0
+                glyph: Icons.health
+                title: qsTr("No health data yet")
+                text: qsTr("Connect intervals.icu or Garmin Connect, or plug in your watch to read its steps and HRV.")
+                actionText: qsTr("Open Settings → Connections")
+                onAction: { NavBus.pendingSettingsSection = "connections"; NavBus.navigate("settings") }
             }
 
             Text {

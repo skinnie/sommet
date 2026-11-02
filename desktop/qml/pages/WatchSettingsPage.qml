@@ -154,13 +154,10 @@ PageFlickable {
                 // The settings read fine, so lastError here is the write's (read errors are cleared
                 // by a good read, and get the banner above). If the re-read after the failed write
                 // fails too (watch unplugged), the service keeps this message and the last values.
-                Text {
+                StatusNote {
                     width: parent.width
-                    visible: SettingsWriteService.ok && SettingsWriteService.lastError.length > 0
-                    text: SettingsWriteService.lastError
-                    wrapMode: Text.WordWrap
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeBody
+                    text: SettingsWriteService.ok ? SettingsWriteService.lastError : ""
+                    tone: "error"
                 }
 
                 // --- Orbital data - real, 2026-08-10 (André: "let's enable by default for
@@ -513,19 +510,13 @@ PageFlickable {
                             Row {
                                 visible: declRow.useDecl
                                 spacing: 8
-                                RoundedRadioButton {
-                                    autoExclusive: false
-                                    text: qsTr("West")
-                                    checked: declRow.west
+                                SegmentedControl {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    model: [qsTr("West"), qsTr("East")]
+                                    currentIndex: declRow.west ? 0 : 1
                                     enabled: !settingRow.busy
-                                    onClicked: { declRow.west = true; declRow.send(); }
-                                }
-                                RoundedRadioButton {
-                                    autoExclusive: false
-                                    text: qsTr("East")
-                                    checked: !declRow.west
-                                    enabled: !settingRow.busy
-                                    onClicked: { declRow.west = false; declRow.send(); }
+                                    opacity: enabled ? 1.0 : 0.5
+                                    onActivated: (i) => { declRow.west = (i === 0); declRow.send(); }
                                 }
                                 RoundedTextField {
                                     id: declField

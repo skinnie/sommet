@@ -15,7 +15,7 @@ CheckBox {
         implicitHeight: 22
         x: root.leftPadding
         y: root.topPadding + (root.availableHeight - height) / 2
-        radius: Theme.radiusSmall
+        radius: 6
         color: root.checked ? Theme.primary : Theme.card
         border.width: 1
         // Real, 2026-08-10 ("the contour of the buttons when not selected...they are
@@ -24,15 +24,21 @@ CheckBox {
         border.color: root.checked ? Theme.primary : Theme.mutedText
         Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
-        // No plain bare-checkmark glyph exists in this app's own subset font (see
-        // assets/fonts/NOTICE.md - not guessed here) - checkCircle is the closest real,
-        // already-available glyph and still reads clearly as "checked" at this size.
-        Icon {
+        // A drawn tick (André, 2026-11-02, desktop picks #15): the icon font has no bare
+        // checkmark, and the checkCircle glyph read as a circle inside a square. Two rounded
+        // bars in an L, turned 45°, popping in over 120 ms.
+        Item {
             anchors.centerIn: parent
-            visible: root.checked
-            glyph: Icons.checkCircle
-            size: 16
-            color: Theme.card
+            anchors.verticalCenterOffset: -1
+            width: 6
+            height: 11
+            rotation: 45
+            opacity: root.checked ? 1 : 0
+            scale: root.checked ? 1 : 0.4
+            Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            Rectangle { x: parent.width - width; width: 2.4; height: parent.height; radius: 1.2; color: Theme.card }
+            Rectangle { y: parent.height - height; width: parent.width; height: 2.4; radius: 1.2; color: Theme.card }
         }
     }
 

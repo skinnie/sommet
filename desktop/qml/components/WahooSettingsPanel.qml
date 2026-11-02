@@ -220,12 +220,10 @@ Column {
             SettingRow { label: qsTr("Strava Live Segments during workouts"); visible: root.has("plansSegments")
                 OnOff { key: "plansSegments" } }
         }
-        Text {
-            visible: root.msg.length > 0
-            width: parent.width; wrapMode: Text.WordWrap
+        StatusNote {
+            width: parent.width
+            tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
             text: root.msg
-            color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-            font.pixelSize: Theme.fontSizeCaption
         }
         Row {
             spacing: Theme.spacingSmall
@@ -233,7 +231,8 @@ Column {
             width: parent.width
             visible: !root.loading && root.error.length === 0
             RoundedButton {
-                text: root.applying ? qsTr("Saving…") : qsTr("Save to ELEMNT")
+                text: qsTr("Save to ELEMNT")
+                busy: root.applying
                 enabled: !root.applying && root.changeCount > 0
                 onClicked: root.apply()
             }

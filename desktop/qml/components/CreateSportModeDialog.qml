@@ -103,7 +103,7 @@ ThemedDialog {
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSizeLabel
             }
-            RoundedTextField {
+            SearchField {
                 id: searchField
                 width: parent.width
                 placeholderText: qsTr("Search activities")

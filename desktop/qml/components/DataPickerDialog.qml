@@ -222,11 +222,10 @@ ThemedDialog {
                     spacing: Theme.spacingSmall
                     RoundedButton {
                         enabled: !AppsService.importing
-                        text: AppsService.importing
-                              ? qsTr("Importing...")
-                              : (AppsService.hasCatalog
-                                 ? qsTr("Re-import from SuuntoLink...")
-                                 : qsTr("Import from SuuntoLink..."))
+                        text: AppsService.hasCatalog
+                              ? qsTr("Re-import from SuuntoLink...")
+                              : qsTr("Import from SuuntoLink...")
+                        busy: AppsService.importing
                         onClicked: indexFileDialog.open()
                     }
                     Text {
@@ -257,7 +256,7 @@ ThemedDialog {
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeCaption
                 }
-                RoundedTextField {
+                SearchField {
                     id: appSearchField
                     width: parent.width
                     visible: AppsService.hasCatalog

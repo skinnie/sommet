@@ -34,6 +34,20 @@ Rectangle {
     // expand the raw detail in place (as well as it going to the log). Never shown until asked.
     property bool _showDetail: false
 
+    // Opt-in (2026-11-02): when the detail is already one plain sentence for the user, like the
+    // watch helper's "Sommet's watch helper isn't running - close Sommet and open it again.",
+    // show that sentence instead of the general one. Raw text (addresses, tracebacks, Qt's
+    // network strings) still gets the general sentence and stays behind Details.
+    property bool showPlainDetail: false
+    readonly property bool _plain: showPlainDetail && _isPlain(detail)
+    function _isPlain(s) {
+        const t = s.trim()
+        return t.length > 0 && t.length <= 200
+            && /[.!?]$/.test(t)
+            && !/[\n\r]/.test(t)
+            && !/:\/\/|Traceback|Errno|Exception|server replied|Error transferring/i.test(t)
+    }
+
     visible: detail.length > 0
     width: parent ? parent.width : 0
     height: visible ? column.implicitHeight + Theme.spacingMedium * 2 : 0
@@ -57,7 +71,7 @@ Rectangle {
         Text {
             width: parent.width
             wrapMode: Text.WordWrap
-            text: LogService.userMessage()
+            text: root._plain ? root.detail.trim() : LogService.userMessage()
             color: Theme.text
             font.pixelSize: Theme.fontSizeBody
         }
@@ -70,6 +84,7 @@ Rectangle {
                 onClicked: root.retry()
             }
             RoundedButton {
+                visible: !root._plain
                 text: root._showDetail ? qsTr("Hide details") : qsTr("Details")
                 onClicked: root._showDetail = !root._showDetail
             }
@@ -85,7 +100,7 @@ Rectangle {
 
         // The raw detail, on demand only. Selectable so it can be copied into a bug report.
         Rectangle {
-            visible: root._showDetail && root.detail.length > 0
+            visible: root._showDetail && !root._plain && root.detail.length > 0
             width: parent.width
             height: visible ? detailText.implicitHeight + Theme.spacingSmall * 2 : 0
             radius: Theme.radiusSmall

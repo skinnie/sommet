@@ -41,7 +41,9 @@ Rectangle {
     // it just dissolves. Theme.card rather than Theme.background because that is what it
     // fades from; with matching r/g/b only the alpha actually changes.
     readonly property color _hoverClear: Qt.rgba(Theme.card.r, Theme.card.g, Theme.card.b, 0)
-    color: selected ? Theme.primary : (hoverHandler.hovered ? Theme.card : _hoverClear)
+    // Hover = cardNested, like the Settings rows: the rail itself is Theme.card, so hovering in
+    // card colour showed nothing (fixed 2026-11-02).
+    color: selected ? Theme.primary : (hoverHandler.hovered ? Theme.cardNested : _hoverClear)
     // AMBITAPP_SPEC.md's own Design Language lists "Subtle animations" as a real
     // requirement - real, 2026-08-09 ("general desktop polish pass"): before this, every
     // color in the app (hover, selection, theme changes) snapped instantly with zero

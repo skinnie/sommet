@@ -10,6 +10,56 @@ import AmbitApp
 Item {
     id: root
 
+    // One reminder as a wear bar (André, 2026-11-02, desktop picks #3): the part, a Soon/Due tag,
+    // "2,740 / 3,000 km", and a 4px bar that turns amber at 90% and red at 100%.
+    component WearRow: ColumnLayout {
+        id: wear
+        property var reminder: ({})
+        property bool removable: false
+        signal remove()
+        Layout.fillWidth: true
+        spacing: 4
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacingSmall
+            Text {
+                text: wear.reminder.name || ""
+                color: Theme.text
+                font.pixelSize: Theme.fontSizeBody
+            }
+            StatusChip {
+                visible: !!wear.reminder.due || !!wear.reminder.soon
+                text: wear.reminder.due ? qsTr("Due") : qsTr("Soon")
+                tone: wear.reminder.due ? "error" : "warning"
+            }
+            Item { Layout.fillWidth: true }
+            Text {
+                text: wear.reminder.progress || wear.reminder.label || ""
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeLabel
+            }
+            RoundedButton {
+                visible: wear.removable
+                text: "×"
+                Accessible.name: qsTr("Remove reminder")
+                onClicked: wear.remove()
+            }
+        }
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.rightMargin: wear.removable ? 36 + Theme.spacingSmall : 0
+            implicitHeight: 4
+            radius: 2
+            color: Theme.cardNested
+            Rectangle {
+                width: parent.width * Math.min(1, Math.max(0, (wear.reminder.percent || 0) / 100))
+                height: parent.height
+                radius: 2
+                color: wear.reminder.due ? Theme.error : wear.reminder.soon ? Theme.warning : Theme.primary
+            }
+        }
+    }
+
     readonly property var allGear: GearService.gears
     function topOfType(t) {
         return allGear.filter(function (g) { return !g.parentId && g.type.toLowerCase().indexOf(t) === 0 })
@@ -255,10 +305,17 @@ Item {
                 width: root.width - 2 * Theme.spacingLarge
                 spacing: Theme.spacingMedium
 
-                Text {
+                EmptyState {
+                    Layout.fillWidth: true
                     visible: root.allGear.length === 0
-                    text: qsTr("No gear yet. Connect Intervals.icu and import, or add one above.")
-                    color: Theme.mutedText
+                    glyph: Icons.gear
+                    title: qsTr("No gear yet")
+                    text: qsTr("Connect intervals.icu to import your bikes and shoes, or add one above.")
+                    actionText: GearService.connected ? "" : qsTr("Open Settings → Connections")
+                    onAction: {
+                        NavBus.pendingSettingsSection = "connections"
+                        NavBus.navigate("settings")
+                    }
                 }
 
                 // Default gear per sport — used when attributing an activity's mileage to gear.
@@ -360,23 +417,18 @@ Item {
                                         // Delete stands apart at the far end, not next to "Add reminder"
                                         // (André, 2026-10-03, Android Gear: "easy to hit by mistake").
                                         Item { Layout.fillWidth: true }
-                                        RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
+                                        RoundedButton { text: qsTr("Delete"); danger: true; onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                     }
 
                                     // Reminders on the gear
                                     Repeater {
                                         model: modelData.reminders
-                                        delegate: RowLayout {
+                                        delegate: WearRow {
                                             required property var modelData
                                             property var parentGear: gearCol.parent.modelData
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "⚠ " + modelData.name + " · " + modelData.label
-                                                      + (modelData.due ? qsTr(" · due") : modelData.soon ? qsTr(" · soon") : "")
-                                                color: modelData.due ? Theme.error : modelData.soon ? Theme.warning : Theme.mutedText
-                                                font.pixelSize: Theme.fontSizeCaption
-                                            }
-                                            RoundedButton { text: "×"; onClicked: GearService.removeReminder(parentGear.id, modelData.id) }
+                                            reminder: modelData
+                                            removable: true
+                                            onRemove: GearService.removeReminder(parentGear.id, modelData.id)
                                         }
                                     }
 
@@ -392,21 +444,14 @@ Item {
                                                 Text { Layout.fillWidth: true; text: "• " + modelData.name; color: Theme.text; font.pixelSize: Theme.fontSizeBody }
                                                 RoundedButton { text: qsTr("Add reminder"); onClicked: root.askReminder(modelData.id) }
                                                 Item { Layout.preferredWidth: Theme.spacingLarge }   // keep Delete clear of it
-                                                RoundedButton { text: qsTr("Delete"); onClicked: root.confirmDelete(modelData.id, modelData.name) }
+                                                RoundedButton { text: qsTr("Delete"); danger: true; onClicked: root.confirmDelete(modelData.id, modelData.name) }
                                             }
                                             Repeater {
                                                 model: modelData.reminders
-                                                delegate: RowLayout {
+                                                delegate: WearRow {
                                                     required property var modelData
-                                                    property var parentPart: gearCol.parent.modelData
                                                     Layout.leftMargin: Theme.spacingMedium
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: "⚠ " + modelData.name + " · " + modelData.label
-                                                              + (modelData.due ? qsTr(" · due") : modelData.soon ? qsTr(" · soon") : "")
-                                                        color: modelData.due ? Theme.error : modelData.soon ? Theme.warning : Theme.mutedText
-                                                        font.pixelSize: Theme.fontSizeCaption
-                                                    }
+                                                    reminder: modelData
                                                 }
                                             }
                                         }

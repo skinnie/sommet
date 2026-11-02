@@ -259,30 +259,49 @@ Item {
         text: qsTr("Showing cached activities from the last time the watch was connected.")
     }
 
+    // Grey rows while the first read runs and nothing is on screen yet (André, 2026-11-02,
+    // desktop picks #13). The loading pill at the bottom stays and says how long to expect.
+    SkeletonList {
+        visible: root.selectedActivity === null && root.loading
+                 && root.activeActivities.length === 0
+        x: Theme.spacingLarge
+        y: 44
+        width: parent.width - Theme.spacingLarge * 2
+        count: 6
+    }
+
+    // Nothing to show, or the read failed (André, 2026-11-02, desktop picks #11 and #19): an
+    // empty page says what to do next, and a failure goes through ErrorBanner (one sentence,
+    // Try again, Send logs) instead of printing the raw error.
     Column {
         visible: root.selectedActivity === null
                  && !root.loading && root.activeActivities.length === 0
         anchors.horizontalCenter: parent.horizontalCenter
         y: Theme.spacingLarge
+        width: Math.min(parent.width - Theme.spacingLarge * 2, 520)
         spacing: Theme.spacingSmall
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            color: Theme.mutedText
-            text: HomeViewModel.isGarmin
-                ? qsTr("Nothing to sync.")
-                : (ActivityService.ok
-                    ? qsTr("Nothing to sync.")
-                    : qsTr("Couldn't load activities: %1").arg(ActivityService.lastError))
+
+        ErrorBanner {
+            detail: (!HomeViewModel.isGarmin && !ActivityService.ok) ? ActivityService.lastError : ""
+            context: qsTr("reading activities")
+            showPlainDetail: true
+            canRetry: true
+            onRetry: ActivityService.refresh()
         }
-        // Real fix, not cosmetic: the only way to retry used to be navigating away and
-        // back (which happens to re-run Component.onCompleted since Main.qml's Loader
-        // recreates the page) - not discoverable, and a real problem if this page's very
-        // first load raced the watch still connecting (found 2026-08-07 via real testing).
-        RoundedButton {
-            visible: HomeViewModel.isGarmin ? false : !ActivityService.ok
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: qsTr("Retry")
-            onClicked: ActivityService.refresh()
+
+        EmptyState {
+            visible: HomeViewModel.isGarmin || ActivityService.ok
+            glyph: Icons.activities
+            title: qsTr("No activities yet")
+            text: HomeViewModel.connected || HomeViewModel.isGarmin
+                ? qsTr("Nothing on this device yet. Record a move, then plug it in again.")
+                : qsTr("Plug in your watch, or connect intervals.icu to bring in your history.")
+            actionText: HomeViewModel.connected || HomeViewModel.isGarmin
+                ? "" : qsTr("Open Settings → Connections")
+            onAction: {
+                NavBus.pendingSettingsSection = "connections"
+                NavBus.navigate("settings")
+            }
         }
     }
 

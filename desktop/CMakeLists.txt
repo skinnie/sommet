@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.56 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.57 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -242,6 +242,16 @@ qt_add_qml_module(ambitapp
         qml/components/RoundedCheckBox.qml
         qml/components/RoundedRadioButton.qml
         qml/components/RoundedSwitch.qml
+        qml/components/PulseDots.qml
+        qml/components/StatusChip.qml
+        qml/components/StatusNote.qml
+        qml/components/SearchField.qml
+        qml/components/ThemedToolTip.qml
+        qml/components/InfoDot.qml
+        qml/components/EmptyState.qml
+        qml/components/StatTile.qml
+        qml/components/SegmentedControl.qml
+        qml/components/SkeletonList.qml
         qml/components/SettingsSection.qml
         qml/components/ActivityBadge.qml
         qml/components/WatchFacePreview.qml

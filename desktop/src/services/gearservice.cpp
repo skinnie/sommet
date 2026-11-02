@@ -7,6 +7,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QLocale>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -63,6 +64,32 @@ QString reminderLabel(const QSqlQuery &r)
     if (days > 0) return QStringLiteral("%1 d").arg(days);
     if (acts > 0) return QStringLiteral("%1×").arg(acts);
     return QStringLiteral("—");
+}
+
+// How far along a reminder is, in the unit its label uses: "2,740 / 3,000 km". Same numbers as
+// reminderPercent, for the wear bar on the Gear page (André, 2026-11-02, desktop picks #3).
+QString reminderProgress(const QSqlQuery &r, double gearDistanceM, double gearTimeS, qint64 nowMs)
+{
+    const QLocale loc;
+    const double distInt = r.value(QStringLiteral("distance_m")).toDouble();
+    const double timeInt = r.value(QStringLiteral("time_s")).toDouble();
+    const int days = r.value(QStringLiteral("days")).toInt();
+    const qint64 lastReset = r.value(QStringLiteral("last_reset")).toLongLong();
+    if (distInt > 0) {
+        const double used = qMax(0.0, gearDistanceM - r.value(QStringLiteral("starting_distance_m")).toDouble());
+        return QStringLiteral("%1 / %2 km").arg(loc.toString(qRound(used / 1000.0)),
+                                                loc.toString(qRound(distInt / 1000.0)));
+    }
+    if (timeInt > 0) {
+        const double used = qMax(0.0, gearTimeS - r.value(QStringLiteral("starting_time_s")).toDouble());
+        return QStringLiteral("%1 / %2 h").arg(loc.toString(qRound(used / 3600.0)),
+                                               loc.toString(qRound(timeInt / 3600.0)));
+    }
+    if (days > 0 && lastReset > 0) {
+        const int used = int(qMax<qint64>(0, nowMs - lastReset) / 86400000);
+        return QStringLiteral("%1 / %2 d").arg(loc.toString(used), loc.toString(days));
+    }
+    return reminderLabel(r);
 }
 } // namespace
 
@@ -711,6 +738,7 @@ void GearService::loadFromDb()
             rm.insert(QStringLiteral("name"), rq.value(QStringLiteral("name")).toString());
             rm.insert(QStringLiteral("label"), reminderLabel(rq));
             rm.insert(QStringLiteral("percent"), qRound(pct));
+            rm.insert(QStringLiteral("progress"), reminderProgress(rq, distanceM, timeS, now));
             rm.insert(QStringLiteral("due"), pct >= 100.0);
             rm.insert(QStringLiteral("soon"), pct >= 90.0 && pct < 100.0);
             reminders.append(rm);

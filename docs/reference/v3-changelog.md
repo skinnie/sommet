@@ -7,6 +7,52 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-02: André's 19 picks for the look of the PC app (desktop 0.2.57)
+
+- **Menus highlight in light green.** Qt reads an 8-digit colour as `#AARRGGBB`, so
+  `Theme.primary + "26"` made every menu highlight olive. It is now
+  `Qt.alpha(Theme.primary, 0.12)` (`ThemedMenuItem`).
+- **The side menu shows where the mouse is.** Its hover colour was the menu's own background;
+  it is now `Theme.cardNested` (`NavItem`).
+- **Gear: a wear bar per reminder.** Each reminder shows how far it has come ("2 740 / 3 000 km",
+  in the computer's number format), a Soon or Due tag, a bar that turns orange then red, and a
+  × to remove it (`GearPage` `WearRow`, `GearService` `progress`).
+- **Coach.** Dots pulse while Claude writes. Bold text, italics, and lists show properly. Claude
+  now gets the recent conversation (up to 12 turns or 12,000 characters) instead of only the
+  last message, so "And tomorrow?" works. "Send it to my watch" is hidden until it works.
+  Answers come in a fixed shape (structured outputs) and can carry workout cards, number tiles
+  and tips. A refused API key now says so, and where to paste a new one, instead of "try again
+  in a moment" (`CoachPage`, `coachservice.cpp`).
+- **Buttons.** A busy button keeps its name, shows pulsing dots and ignores clicks until done
+  (`RoundedButton.busy`, about 40 buttons). Delete, Remove and Forget are a calm red
+  (`RoundedButton.danger`, 17 buttons).
+- **Status tags and result notes.** States like Connected, Not set up, Experimental, Soon and
+  Due are small tags (`StatusChip`). The result of an action is a note with a coloured bar, an
+  icon and a × (`StatusNote`), in place of 48 loose green or red lines; a step still
+  running shows pulsing dots.
+- **Firmware update** shows its steps as a checklist: Download, Recovery mode, Erase, Write
+  (with %), Check and Restart. The update itself is unchanged.
+- **Search boxes** have a magnifier and a clear ×; Esc clears the text (`SearchField`, 5
+  places).
+- **One tooltip style** with a hairline, round corners and a small arrow that points at its
+  item, also near the window's edge (`ThemedToolTip`, `InfoDot`).
+- **Empty pages say what to do** (`EmptyState`): Activities, Routes, Gear, Health, Weight,
+  and Totals.
+- **Health** shows the latest numbers as tiles. Resting HR, both HRVs and sleep compare with
+  the 7 days before, and an old value says how old it is (`StatTile`).
+- **Grey rows while a long list loads** (`SkeletonList`), on Activities and Health.
+- **Switches for 2 or 3 choices** in place of round buttons (`SegmentedControl`): appearance,
+  weigh-in source, map style, scale setup, calendar, and watch settings.
+- **Checkboxes have a drawn tick** that fades in.
+- **Errors on Activities, Health, and Weight** show one plain sentence with Try again and Send
+  logs, never raw text. When the cause is already a plain sentence ("Sommet's watch helper
+  isn't running - close Sommet and open it again."), that sentence is shown
+  (`ErrorBanner.showPlainDetail`).
+- Checked on a private test screen in light and dark: menus, side menu, Activities, Routes,
+  Coach, Health, Weight, Gear, Settings, Ember, and a sample page with every new piece. Not
+  seen yet: the firmware checklist (it needs a watch being updated) and an answer from the
+  real Claude API (the replies were checked with a local stand-in for the API).
+
 ## 2026-11-02: A message after a save or a send, and a menu style per device (Android)
 
 - **Sport modes and Send a route said nothing when they worked** (audit 30/10, F23). A sport

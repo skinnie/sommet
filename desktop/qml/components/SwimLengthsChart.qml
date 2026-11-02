@@ -76,8 +76,9 @@ Column {
             }
             onExited: { root._hover = -1; bars.requestPaint() }
         }
-        ToolTip {
+        ThemedToolTip {
             visible: root._hover >= 0
+            delay: 0
             x: Math.min(bars.width - width, Math.max(0, (bars._geo ? bars._geo.L + (root._hover + 0.5) * bars._geo.bw : 0) - width / 2))
             y: 0
             text: {

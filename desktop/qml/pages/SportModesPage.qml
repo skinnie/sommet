@@ -1003,7 +1003,8 @@ PageFlickable {
                         // Only shown while enabled: turning the switch off already commits the
                         // disable, so Set exists purely to write the Type/High/Low/Reps values.
                         visible: itSwitch.checked
-                        text: modeColumn.busy ? qsTr("Saving...") : qsTr("Set")
+                        text: qsTr("Set")
+                        busy: modeColumn.busy
                         enabled: modeColumn.mode && !modeColumn.busy
                         onClicked: {
                             var reps = parseInt(itRepsField.text || "99", 10)

@@ -58,30 +58,26 @@ PageFlickable {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: CiqUpdatesService.busy ? qsTr("Checking…") : qsTr("Check for updates")
+                        text: qsTr("Check for updates")
+                        busy: CiqUpdatesService.busy
                         enabled: !CiqUpdatesService.busy
                         onClicked: CiqUpdatesService.check()
                     }
                 }
 
-                Text {
-                    visible: CiqUpdatesService.lastError.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
                     text: CiqUpdatesService.lastError
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeBody
+                    tone: "error"
                 }
 
-                Text {
-                    visible: CiqUpdatesService.checked && CiqUpdatesService.lastError.length === 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: CiqUpdatesService.updateCount > 0
+                    text: !(CiqUpdatesService.checked && CiqUpdatesService.lastError.length === 0) ? ""
+                        : CiqUpdatesService.updateCount > 0
                         ? qsTr("%n update(s) available.", "", CiqUpdatesService.updateCount)
                         : qsTr("All apps are up to date.")
-                    color: CiqUpdatesService.updateCount > 0 ? Theme.success : Theme.mutedText
-                    font.pixelSize: Theme.fontSizeBody
+                    tone: "success"
                 }
             }
         }

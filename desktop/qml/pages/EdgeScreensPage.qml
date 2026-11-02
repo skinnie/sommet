@@ -288,15 +288,15 @@ Item {
                 text: qsTr("No Garmin Edge found over USB. Plug it in, unlock it, then press Refresh.")
                 color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
             }
-            Text {
-                visible: EdgeScreensService.lastError.length > 0
-                width: parent.width; wrapMode: Text.WordWrap
-                text: EdgeScreensService.lastError; color: Theme.error; font.pixelSize: Theme.fontSizeBody
+            StatusNote {
+                width: parent.width
+                text: EdgeScreensService.lastError
+                tone: "error"
             }
-            Text {
-                visible: EdgeScreensService.lastNote.length > 0
-                width: parent.width; wrapMode: Text.WordWrap
-                text: EdgeScreensService.lastNote; color: Theme.success; font.pixelSize: Theme.fontSizeBody
+            StatusNote {
+                width: parent.width
+                text: EdgeScreensService.lastNote
+                tone: "success"
             }
 
             // Profile picker (real ride names)
@@ -691,7 +691,7 @@ Item {
                 text: fieldPicker.cell >= 0 ? qsTr("Field %1 — choose a metric").arg(fieldPicker.cell + 1) : ""
                 color: Theme.text; font.pixelSize: Theme.fontSizeBodyLarge; font.bold: true
             }
-            RoundedTextField {
+            SearchField {
                 id: searchField
                 width: parent.width
                 placeholderText: qsTr("Search fields…")

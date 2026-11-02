@@ -936,22 +936,13 @@ PageFlickable {
                             font.bold: true
                             color: Theme.text
                         }
-                        Row {
-                            spacing: 6
-                            Rectangle {
-                                width: 8; height: 8; radius: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: HomeViewModel.isGarmin
-                                    ? Theme.success
-                                    : HomeViewModel.connectionStatusColor
-                            }
-                            Text {
-                                text: HomeViewModel.isGarmin
-                                    ? qsTr("Connected")
-                                    : HomeViewModel.connectionStatusText
-                                color: Theme.mutedText
-                                font.pixelSize: Theme.fontSizeBody
-                            }
+                        // One status tag for the app (desktop picks #6).
+                        StatusChip {
+                            text: HomeViewModel.isGarmin
+                                ? qsTr("Connected")
+                                : HomeViewModel.connectionStatusText
+                            tone: HomeViewModel.isGarmin || HomeViewModel.connected ? "success"
+                                : DeviceService.loading ? "neutral" : "error"
                         }
                     }
                 }
@@ -1141,7 +1132,8 @@ PageFlickable {
                             visible: root.activeBike !== null && root.activeBike.kind === "bryton"
                                      && root.brytonEe !== null && (root.brytonEe.expired || root.brytonEe.daysLeft < 13)
                             enabled: !root.brytonEeBusy
-                            text: root.brytonEeBusy ? qsTr("Updating…") : qsTr("Update GPS data")
+                            busy: root.brytonEeBusy
+                            text: qsTr("Update GPS data")
                             onClicked: root.updateBrytonEe()
                         }
                         RoundedButton {
@@ -1154,10 +1146,9 @@ PageFlickable {
                                     || root.activeBike.transport === "ble")
                                 && !root.activeBike.files
                             enabled: !ActivityService.loading && (root.activeBikeUnsynced > 0 || listUnknown)
-                            text: ActivityService.loading
-                                ? qsTr("Syncing…")
-                                : (root.activeBikeUnsynced > 0 || listUnknown ? qsTr("Sync rides")
-                                                               : qsTr("Up to date"))
+                            busy: ActivityService.loading
+                            text: root.activeBikeUnsynced > 0 || listUnknown ? qsTr("Sync rides")
+                                                                             : qsTr("Up to date")
                             onClicked: {
                                 root.bikeSyncMsg = "";
                                 // Route by transport: the Magene pulls over BLE (needs its address
@@ -1178,12 +1169,14 @@ PageFlickable {
                         // on the GPS settings page, workouts in the Training Program - both in the
                         // nav while this bike computer is selected (André, 2026-09-25: Home keeps
                         // only Sync rides, like the watch).
-                        Text {
+                        StatusNote {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: root.bikeSyncMsg.length > 0
+                            width: Math.min(implicitWidth, 420)
                             text: root.bikeSyncMsg
-                            color: root.bikeSyncOk ? Theme.success : Theme.error
-                            font.pixelSize: Theme.fontSizeCaption
+                            // Progress lines ("Reading rides from the Magene…") end in "…";
+                            // results never do.
+                            tone: root.bikeSyncMsg.endsWith("…") ? "working"
+                                : root.bikeSyncOk ? "success" : "error"
                         }
                     }
                 }
@@ -1445,9 +1438,10 @@ PageFlickable {
                             // happens on its own. Online, this syncs on connection now and
                             // there is nothing to excuse.
                             HoverHandler { id: orbitHover }
-                            ToolTip.visible: orbitHover.hovered && !DeviceService.online
-                            ToolTip.text: qsTr("This feature needs an internet connection.")
-                            ToolTip.delay: 300
+                            ThemedToolTip {
+                                visible: orbitHover.hovered && !DeviceService.online
+                                text: qsTr("This feature needs an internet connection.")
+                            }
                         }
                     }
                     // Real, 2026-08-10 ("I connected the kailash via usb... it didn't sync
@@ -1487,10 +1481,11 @@ PageFlickable {
                             // machine, no network involved); what needs a connection is the
                             // automatic sync on connection.
                             HoverHandler { id: clockHover }
-                            ToolTip.visible: clockHover.hovered && !DeviceService.online
-                            ToolTip.text: qsTr("Syncing on connection needs an internet " +
-                                                "connection. Tapping still works offline.")
-                            ToolTip.delay: 300
+                            ThemedToolTip {
+                                visible: clockHover.hovered && !DeviceService.online
+                                text: qsTr("Syncing on connection needs an internet " +
+                                           "connection. Tapping still works offline.")
+                            }
                         }
 
                         // Real, 2026-08-10 ("a button to sync time... opens a menu 'from
@@ -1835,6 +1830,7 @@ PageFlickable {
                             anchors.right: parent.right; anchors.rightMargin: Theme.spacingSmall
                             anchors.verticalCenter: parent.verticalCenter
                             text: qsTr("Forget")
+                            danger: true
                             onClicked: { forgetConfirm.device = modelData; forgetConfirm.open() }
                         }
                     }

@@ -245,16 +245,15 @@ PageFlickable {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: root.altBusy ? qsTr("Calibrating…") : qsTr("Calibrate altitude")
+                        text: qsTr("Calibrate altitude")
+                        busy: root.altBusy
                         enabled: !root.altBusy
                         onClicked: root.calibrateAltitude()
                     }
-                    Text {
+                    StatusNote {
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: root.altMsg.length > 0
                         text: root.altMsg
-                        color: root.altMsg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-                        font.pixelSize: Theme.fontSizeCaption
+                        tone: root.altMsg.indexOf("✓") >= 0 ? "success" : "error"
                     }
                 }
             }

@@ -156,9 +156,10 @@ ThemedDialog {
             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
         }
 
-        Text {
-            visible: root.applyMsg.length > 0
-            text: root.applyMsg; color: Theme.error; font.pixelSize: Theme.fontSizeCaption
+        StatusNote {
+            width: parent.width
+            tone: "error"
+            text: root.applyMsg
         }
 
         Row {
@@ -166,8 +167,8 @@ ThemedDialog {
             layoutDirection: Qt.RightToLeft
             width: parent.width
             RoundedButton {
-                text: root.applying ? qsTr("Writing…")
-                                    : (diffModel.count > 0 ? qsTr("Apply") : qsTr("Close"))
+                text: diffModel.count > 0 ? qsTr("Apply") : qsTr("Close")
+                busy: root.applying
                 enabled: !root.loading && !root.applying
                 onClicked: diffModel.count > 0 ? root.apply() : root.close()
             }

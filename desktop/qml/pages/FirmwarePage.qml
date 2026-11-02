@@ -23,6 +23,9 @@ PageFlickable {
     property string phase: ""
     property string suuntolinkNote: ""   // "SuuntoLink ... was closed" events during the flash
     property real percent: -1          // <0 = indeterminate (busy)
+    // Which step of the checklist is running: 0 Download, 1 Recovery mode, 2 Erase, 3 Write,
+    // 4 Check, 5 Restart (desktop picks #8). Display only.
+    property int step: 0
     property string doneFw: ""
     property string errorText: ""
     property int _consumed: 0
@@ -102,7 +105,7 @@ PageFlickable {
     // Download the right image, then flash. `spec` is null to use the connected watch, or
     // {model, hw, product} to recover a specific known watch that's currently in BSL.
     function downloadThenFlash(spec, expectModel) {
-        root.mode = "flashing"; root.phase = qsTr("Downloading firmware…"); root.percent = -1;
+        root.mode = "flashing"; root.phase = qsTr("Downloading firmware…"); root.percent = -1; root.step = 0;
         const xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE)
@@ -122,7 +125,7 @@ PageFlickable {
     }
 
     function startFlash(file, expectModel) {
-        root.phase = qsTr("Starting…"); root.percent = -1; root._consumed = 0; root.suuntolinkNote = "";
+        root.phase = qsTr("Starting…"); root.percent = -1; root._consumed = 0; root.suuntolinkNote = ""; root.step = 1;
         phraseTimer.i = 0; root.phrase = root.phrases[0]; phraseTimer.start();
         const xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function() {
@@ -154,16 +157,16 @@ PageFlickable {
         let ev = null;
         try { ev = JSON.parse(line); } catch (e) { return; }
         switch (ev.phase) {
-        case "connected":     root.phase = qsTr("Connected to your watch."); break;
-        case "enter_bsl":     root.phase = qsTr("Entering recovery mode…"); break;
+        case "connected":     root.phase = qsTr("Connected to your watch."); root.step = 1; break;
+        case "enter_bsl":     root.phase = qsTr("Entering recovery mode…"); root.step = 1; break;
         case "transfer_mode":
         case "header":        root.phase = qsTr("Preparing…"); break;
-        case "erase":         root.phase = qsTr("Erasing flash — this takes about a minute…"); root.percent = -1; break;
-        case "streaming":     root.phase = qsTr("Writing firmware…"); root.percent = ev.percent; break;
-        case "streamed":      root.phase = qsTr("Verifying…"); root.percent = 100; break;
+        case "erase":         root.phase = qsTr("Erasing flash — this takes about a minute…"); root.percent = -1; root.step = 2; break;
+        case "streaming":     root.phase = qsTr("Writing firmware…"); root.percent = ev.percent; root.step = 3; break;
+        case "streamed":      root.phase = qsTr("Verifying…"); root.percent = 100; root.step = 4; break;
         case "restart":       root.phase = qsTr("Little cable hiccup — retrying. Keep it still…"); root.percent = -1; break;
-        case "commit":        root.phase = qsTr("Writing the final image…"); root.percent = -1; break;
-        case "rebooting":     root.phase = qsTr("Rebooting your watch…"); root.percent = -1; break;
+        case "commit":        root.phase = qsTr("Writing the final image…"); root.percent = -1; root.step = 4; break;
+        case "rebooting":     root.phase = qsTr("Rebooting your watch…"); root.percent = -1; root.step = 5; break;
         case "done":          root.mode = "done"; root.doneFw = ev.fw || ""; break;
         case "error":         root.mode = "error"; root.errorText = ev.message || qsTr("The flash failed."); break;
         case "suuntolink":    root.suuntolinkNote = ev.message || ""; break;
@@ -383,25 +386,80 @@ PageFlickable {
                        color: Theme.warning; font.pixelSize: Theme.fontSizeLabel; width: parent.width
                        wrapMode: Text.WordWrap }
 
-                // rounded progress bar (indeterminate when percent < 0)
-                Rectangle {
-                    width: parent.width; height: 10; radius: 5
-                    color: Theme.background
-                    Rectangle {
-                        height: parent.height; radius: parent.radius; color: Theme.accent
-                        width: root.percent >= 0 ? parent.width * root.percent / 100 : parent.width * 0.3
-                        Behavior on width { NumberAnimation { duration: 200 } }
-                        SequentialAnimation on x {
-                            running: root.percent < 0; loops: Animation.Infinite
-                            NumberAnimation { from: 0; to: parent.parent.width * 0.7; duration: 1100; easing.type: Easing.InOutQuad }
-                            NumberAnimation { from: parent.parent.width * 0.7; to: 0; duration: 1100; easing.type: Easing.InOutQuad }
+                // The update as a checklist (André, 2026-11-02, desktop picks #8): done steps get a
+                // green tick, the current one pulses (or shows the % and a bar while writing),
+                // the steps to come wait in grey. Display only; the update itself is unchanged.
+                Column {
+                    width: parent.width
+                    spacing: 7
+                    Repeater {
+                        model: [qsTr("Download"), qsTr("Recovery mode"), qsTr("Erase"),
+                                qsTr("Write"), qsTr("Check"), qsTr("Restart")]
+                        delegate: Column {
+                            id: stepRow
+                            required property int index
+                            required property string modelData
+                            readonly property bool done: index < root.step
+                            readonly property bool current: index === root.step
+                            readonly property bool writing: current && index === 3 && root.percent >= 0
+                            width: parent.width
+                            spacing: 4
+
+                            Row {
+                                spacing: Theme.spacingSmall
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 18; height: 18; radius: 9
+                                    color: stepRow.done ? Theme.success : "transparent"
+                                    border.width: stepRow.done ? 0 : 1.5
+                                    border.color: stepRow.current ? Theme.primary : Theme.borderStrong
+                                    // tick, drawn like the checkbox's
+                                    Item {
+                                        visible: stepRow.done
+                                        anchors.centerIn: parent
+                                        anchors.verticalCenterOffset: -1
+                                        width: 4.5; height: 8.5; rotation: 45
+                                        Rectangle { x: parent.width - width; width: 2; height: parent.height; radius: 1; color: Theme.card }
+                                        Rectangle { y: parent.height - height; width: parent.width; height: 2; radius: 1; color: Theme.card }
+                                    }
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: stepRow.modelData
+                                    color: stepRow.done || stepRow.current ? Theme.text : Theme.mutedText
+                                    font.bold: stepRow.current
+                                    font.pixelSize: Theme.fontSizeBody
+                                }
+                                PulseDots {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: stepRow.current && !stepRow.writing
+                                    dotSize: 5
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: stepRow.writing
+                                    text: Math.round(root.percent) + "%"
+                                    color: Theme.mutedText
+                                    font.pixelSize: Theme.fontSizeLabel
+                                }
+                            }
+                            Rectangle {
+                                visible: stepRow.writing
+                                x: 26
+                                width: parent.width - 26
+                                height: 4
+                                radius: 2
+                                color: Theme.cardNested
+                                Rectangle {
+                                    height: parent.height
+                                    radius: 2
+                                    color: Theme.primary
+                                    width: parent.width * Math.max(0, Math.min(100, root.percent)) / 100
+                                    Behavior on width { NumberAnimation { duration: 200 } }
+                                }
+                            }
                         }
                     }
-                }
-                Text {
-                    visible: root.percent >= 0
-                    text: Math.round(root.percent) + "%"
-                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                 }
 
                 Rectangle { width: parent.width; height: 1; color: Theme.background }
@@ -512,7 +570,8 @@ PageFlickable {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: BackupService.firmwareLoading ? qsTr("Working…") : qsTr("Check again")
+                        text: qsTr("Check again")
+                        busy: BackupService.firmwareLoading
                         enabled: !BackupService.firmwareLoading
                         onClicked: BackupService.checkFirmware()
                     }
@@ -523,13 +582,10 @@ PageFlickable {
                     }
                 }
 
-                Text {
-                    visible: BackupService.firmwareActionText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: BackupService.firmwareActionOk ? Theme.success : Theme.error
                     text: BackupService.firmwareActionText
+                    tone: BackupService.firmwareActionOk ? "success" : "error"
                 }
             }
         }

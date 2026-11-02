@@ -197,40 +197,45 @@ PageFlickable {
     // One account in the Connections card: name, status, and a real button (a11y audit
     // 2026-10-21: the old "— tap to set up" lines could not be reached by keyboard or read
     // by a screen reader).
+    // The status is a StatusChip (desktop picks #6): green when connected, grey otherwise; the
+    // account detail (athlete id, e-mail) follows in grey.
     component ConnectionRow: Item {
         id: conn
         property string name
         property string status
+        property string detail: ""
         property bool connected: false
         property string actionText
         signal activated()
         width: parent ? parent.width : 0
         height: Math.max(connButton.implicitHeight, connName.implicitHeight)
-        Rectangle {
-            id: connDot
-            width: 8; height: 8; radius: 4
-            anchors.verticalCenter: parent.verticalCenter
-            color: conn.connected ? Theme.success : Theme.mutedText
-        }
         Text {
             id: connName
-            anchors.left: connDot.right
-            anchors.leftMargin: 6
+            anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             text: conn.name
             color: Theme.text
             font.pixelSize: Theme.fontSizeBody
         }
-        Text {
+        StatusChip {
+            id: connChip
             anchors.left: connName.right
-            anchors.leftMargin: 4
+            anchors.leftMargin: Theme.spacingSmall
+            anchors.verticalCenter: parent.verticalCenter
+            text: conn.status
+            tone: conn.connected ? "success" : "neutral"
+        }
+        Text {
+            anchors.left: connChip.right
+            anchors.leftMargin: Theme.spacingSmall
             anchors.right: connButton.left
             anchors.rightMargin: Theme.spacingSmall
             anchors.verticalCenter: parent.verticalCenter
-            text: "· " + conn.status
+            visible: conn.detail.length > 0
+            text: conn.detail
             elide: Text.ElideRight
             color: Theme.mutedText
-            font.pixelSize: Theme.fontSizeBody
+            font.pixelSize: Theme.fontSizeLabel
         }
         RoundedButton {
             id: connButton
@@ -278,22 +283,11 @@ PageFlickable {
                     color: Theme.text
                     anchors.verticalCenter: parent.verticalCenter
                 }
-                Rectangle {
+                StatusChip {
                     visible: sb.experimental
                     anchors.verticalCenter: parent.verticalCenter
-                    radius: Theme.radiusSmall
-                    color: "transparent"
-                    border.width: 1
-                    border.color: Theme.warning
-                    implicitWidth: sbChip.implicitWidth + Theme.spacingSmall
-                    implicitHeight: sbChip.implicitHeight + 4
-                    Text {
-                        id: sbChip
-                        anchors.centerIn: parent
-                        text: qsTr("experimental")
-                        color: Theme.warning
-                        font.pixelSize: Theme.fontSizeCaption
-                    }
+                    text: qsTr("Experimental")
+                    tone: "warning"
                 }
             }
             Text {
@@ -348,32 +342,30 @@ PageFlickable {
                 ConnectionRow {
                     name: qsTr("Intervals.icu")
                     connected: ConnectionsService.intervalsIcuConnected
-                    status: connected
-                        ? qsTr("connected (athlete %1)").arg(ConnectionsService.intervalsIcuAthleteId)
-                        : qsTr("not connected")
+                    status: connected ? qsTr("Connected") : qsTr("Not connected")
+                    detail: connected ? qsTr("athlete %1").arg(ConnectionsService.intervalsIcuAthleteId) : ""
                     actionText: connected ? qsTr("Manage") : qsTr("Set up")
                     onActivated: intervalsIcuDialog.open()
                 }
                 ConnectionRow {
                     name: qsTr("Garmin Connect")
                     connected: ConnectionsService.garminConnected
-                    status: connected
-                        ? qsTr("connected (%1)").arg(ConnectionsService.garminEmail)
-                        : qsTr("not signed in")
+                    status: connected ? qsTr("Connected") : qsTr("Not signed in")
+                    detail: connected ? ConnectionsService.garminEmail : ""
                     actionText: connected ? qsTr("Manage") : qsTr("Sign in")
                     onActivated: garminDialog.open()
                 }
                 ConnectionRow {
                     name: qsTr("Runalyze")
                     connected: ConnectionsService.runalyzeConnected
-                    status: connected ? qsTr("connected") : qsTr("not connected")
+                    status: connected ? qsTr("Connected") : qsTr("Not connected")
                     actionText: connected ? qsTr("Manage") : qsTr("Set up")
                     onActivated: runalyzeDialog.open()
                 }
                 ConnectionRow {
                     name: qsTr("Strava")
                     connected: ConnectionsService.stravaConnected
-                    status: connected ? qsTr("connected") : qsTr("not connected")
+                    status: connected ? qsTr("Connected") : qsTr("Not connected")
                     actionText: connected ? qsTr("Manage") : qsTr("Connect")
                     onActivated: stravaDialog.open()
                 }
@@ -381,8 +373,8 @@ PageFlickable {
                 ConnectionRow {
                     name: qsTr("Bluetooth scale")
                     connected: !!WeightService.scale.listening
-                    status: !WeightService.scale.address ? qsTr("not set up")
-                        : connected ? qsTr("listening") : qsTr("not listening")
+                    status: !WeightService.scale.address ? qsTr("Not set up")
+                        : connected ? qsTr("Listening") : qsTr("Not listening")
                     actionText: WeightService.scale.address ? qsTr("Manage") : qsTr("Set up")
                     onActivated: scaleSetupDialog.open()
                 }
@@ -415,26 +407,12 @@ PageFlickable {
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
-                Row {
-                    spacing: Theme.spacingSmall
-                    RoundedRadioButton {
-                        autoExclusive: false
-                        checked: Theme.override === "light"
-                        text: qsTr("Light")
-                        onClicked: Theme.override = "light"
-                    }
-                    RoundedRadioButton {
-                        autoExclusive: false
-                        checked: Theme.override === "dark"
-                        text: qsTr("Dark")
-                        onClicked: Theme.override = "dark"
-                    }
-                    RoundedRadioButton {
-                        autoExclusive: false
-                        checked: Theme.override === "system"
-                        text: qsTr("System")
-                        onClicked: Theme.override = "system"
-                    }
+                // One switch for the three choices (desktop picks #14).
+                SegmentedControl {
+                    readonly property var _keys: ["light", "dark", "system"]
+                    model: [qsTr("Light"), qsTr("Dark"), qsTr("System")]
+                    currentIndex: _keys.indexOf(Theme.override)
+                    onActivated: (i) => Theme.override = _keys[i]
                 }
 
                 // The map/list view choice moved out of Settings and onto each list page
@@ -754,13 +732,14 @@ PageFlickable {
                         width: parent.width
                         spacing: Theme.spacingSmall
                         RoundedButton {
-                            text: HealthService.hrvInstalling ? qsTr("Installing…")
-                                                              : qsTr("Install HRV app")
+                            text: qsTr("Install HRV app")
+                            busy: HealthService.hrvInstalling
                             enabled: !HealthService.hrvInstalling
                             onClicked: HealthService.installHrvApp()
                         }
                         RoundedButton {
-                            text: ActivityService.loading ? qsTr("Importing…") : qsTr("Import now")
+                            text: qsTr("Import now")
+                            busy: ActivityService.loading
                             enabled: !ActivityService.loading
                             onClicked: { hrvImport.requested = true; ActivityService.refresh() }
                         }
@@ -790,8 +769,8 @@ PageFlickable {
                     Row {
                         width: parent.width; spacing: Theme.spacingSmall
                         RoundedButton {
-                            text: HealthService.strapMeasuring ? qsTr("Measuring…")
-                                                               : qsTr("Measure HRV")
+                            text: qsTr("Measure HRV")
+                            busy: HealthService.strapMeasuring
                             enabled: !HealthService.strapMeasuring
                             onClicked: { strapMeasure.requested = true; HealthService.readStrapHrv(120) }
                         }
@@ -849,23 +828,11 @@ PageFlickable {
                     // Provider filter (André, 2026-08-26: "there is no toggle to choose from
                     // intervals.icu or garmin"). Previously this card only DESCRIBED the automatic
                     // merge with no way to change it. "Merge both" keeps that original behaviour.
-                    Row {
-                        spacing: Theme.spacingMedium
-                        RoundedRadioButton {
-                            text: qsTr("Merge both")
-                            checked: WeightService.source === "all"
-                            onToggled: if (checked) WeightService.source = "all"
-                        }
-                        RoundedRadioButton {
-                            text: qsTr("intervals.icu")
-                            checked: WeightService.source === "intervals"
-                            onToggled: if (checked) WeightService.source = "intervals"
-                        }
-                        RoundedRadioButton {
-                            text: qsTr("Garmin")
-                            checked: WeightService.source === "garmin"
-                            onToggled: if (checked) WeightService.source = "garmin"
-                        }
+                    SegmentedControl {
+                        readonly property var _keys: ["all", "intervals", "garmin"]
+                        model: [qsTr("Merge both"), qsTr("intervals.icu"), qsTr("Garmin")]
+                        currentIndex: _keys.indexOf(WeightService.source)
+                        onActivated: (i) => WeightService.source = _keys[i]
                     }
                     Text {
                         width: parent.width; wrapMode: Text.WordWrap; color: Theme.mutedText
@@ -940,40 +907,13 @@ PageFlickable {
                         color: Theme.text
                         font.pixelSize: Theme.fontSizeBody
                     }
-                    Flow {
-                        width: parent.width
-                        spacing: Theme.spacingSmall
-                        // autoExclusive (QQC2's default for same-parent RadioButtons) fights
-                        // with these declarative `checked` bindings - it explicitly assigns
-                        // `checked` on whichever button loses, which silently destroys that
-                        // button's binding so it stops following MapService.provider. Exclusivity
-                        // is already fully handled by the shared property (only one of these two
-                        // comparisons can ever be true), so autoExclusive is switched off, and
-                        // onClicked (a real user action) is used instead of onCheckedChanged
-                        // (which also fires from binding evaluation, not just clicks) - real bug,
-                        // 2026-08-07, likely also the cause of the earlier "clicks for CyclOSM
-                        // don't do anything" report.
-                        RoundedRadioButton {
-                            autoExclusive: false
-                            checked: MapService.provider === "osm"
-                            text: qsTr("OpenStreetMap (standard)")
-                            onClicked: MapService.provider = "osm"
-                        }
-                        RoundedRadioButton {
-                            autoExclusive: false
-                            checked: MapService.provider === "cyclosm"
-                            text: qsTr("CyclOSM (cycling-focused)")
-                            onClicked: MapService.provider = "cyclosm"
-                        }
-                        // André, 2026-08-11: "ok add IGN to desktop" - for parity with Android,
-                        // which has had it and defaults to it. Same layer, so both versions draw
-                        // the identical map.
-                        RoundedRadioButton {
-                            autoExclusive: false
-                            checked: MapService.provider === "ign"
-                            text: qsTr("IGN (France)")
-                            onClicked: MapService.provider = "ign"
-                        }
+                    // One switch (desktop picks #14). The full name of the chosen map is on the
+                    // "Provider:" line above.
+                    SegmentedControl {
+                        readonly property var _keys: ["osm", "cyclosm", "ign"]
+                        model: [qsTr("OpenStreetMap"), qsTr("CyclOSM (cycling)"), qsTr("IGN (France)")]
+                        currentIndex: _keys.indexOf(MapService.provider)
+                        onActivated: (i) => MapService.provider = _keys[i]
                     }
 
                     // Offline tile cache - real, 2026-08-11 (André: "put this offline map cache
@@ -1307,9 +1247,9 @@ PageFlickable {
                         title: qsTr("Choose where to keep your data")
                         onAccepted: {
                             var err = LocalFileService.moveDatabaseTo(selectedFolder)
-                            if (err) { dbStatus.text = err; dbStatus.color = Theme.error }
+                            if (err) { dbStatus.text = err; dbStatus.tone = "error" }
                             else { dbStatus.text = qsTr("Moved. Restart Sommet to use the new location.")
-                                   dbStatus.color = Theme.success }
+                                   dbStatus.tone = "success" }
                         }
                     }
 
@@ -1363,7 +1303,7 @@ PageFlickable {
                             text: qsTr("Test")
                             enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
                             onClicked: {
-                                sommetSyncStatus.text = qsTr("Testing…"); sommetSyncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Testing…"); sommetSyncStatus.tone = "working"
                                 ActivityService.sommetSyncTest(syncUrlField.text, syncTokenField.text)
                             }
                         }
@@ -1372,14 +1312,14 @@ PageFlickable {
                             enabled: syncUrlField.text.length > 0 && syncTokenField.text.length > 0
                             onClicked: {
                                 ActivityService.setSommetSync(syncUrlField.text, syncTokenField.text)
-                                sommetSyncStatus.text = qsTr("Saved."); sommetSyncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Saved."); sommetSyncStatus.tone = "success"
                             }
                         }
                         RoundedButton {
                             text: qsTr("Sync now")
                             enabled: databaseSection.syncOn
                             onClicked: {
-                                sommetSyncStatus.text = qsTr("Syncing…"); sommetSyncStatus.color = Theme.mutedText
+                                sommetSyncStatus.text = qsTr("Syncing…"); sommetSyncStatus.tone = "working"
                                 ActivityService.sommetSyncNow()
                             }
                         }
@@ -1390,40 +1330,33 @@ PageFlickable {
                         onClicked: {
                             ActivityService.setSommetSync("", "")
                             syncUrlField.text = ""; syncTokenField.text = ""
-                            sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.color = Theme.mutedText
+                            sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.tone = "success"
                         }
                     }
 
-                    Text {
+                    // Results as notes (desktop picks #7).
+                    StatusNote {
                         id: sommetSyncStatus
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: Theme.fontSizeCaption
-                        color: Theme.mutedText
-                        visible: text.length > 0
                     }
-                    Text {
+                    StatusNote {
                         id: dbStatus
                         width: parent.width
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: Theme.fontSizeCaption
-                        color: Theme.mutedText
-                        visible: text.length > 0
                     }
 
                     Connections {
                         target: ActivityService
                         function onSommetSyncTestResult(ok, message) {
                             sommetSyncStatus.text = message
-                            sommetSyncStatus.color = ok ? Theme.success : Theme.error
+                            sommetSyncStatus.tone = ok ? "success" : "error"
                         }
                         function onSommetSyncFinished(pulled, pushed) {
-                            sommetSyncStatus.text = qsTr("Synced ✓ — %1 received, %2 sent.").arg(pulled).arg(pushed)
-                            sommetSyncStatus.color = Theme.success
+                            sommetSyncStatus.text = qsTr("Synced: %1 received, %2 sent.").arg(pulled).arg(pushed)
+                            sommetSyncStatus.tone = "success"
                         }
                         function onSommetSyncError(message) {
                             sommetSyncStatus.text = qsTr("Sync problem: %1").arg(message)
-                            sommetSyncStatus.color = Theme.error
+                            sommetSyncStatus.tone = "error"
                         }
                     }
                 }
@@ -1964,8 +1897,8 @@ PageFlickable {
                     RoundedButton {
                         width: parent.width
                         enabled: !GearService.loading && !ActivityService.loading
-                        text: (GearService.loading || ActivityService.loading)
-                              ? qsTr("Syncing…") : qsTr("Sync now")
+                        busy: GearService.loading || ActivityService.loading
+                        text: qsTr("Sync now")
                         onClicked: root.intervalsSyncNow()
                     }
 
@@ -2065,7 +1998,8 @@ PageFlickable {
                     spacing: Theme.spacingSmall
                     RoundedButton {
                         visible: !ConnectionsService.garminConnected
-                        text: WeightService.loading ? qsTr("Signing in…") : qsTr("Sign in")
+                        busy: WeightService.loading
+                        text: qsTr("Sign in")
                         enabled: !WeightService.loading && gEmailField.text.length > 0
                                  && gPassField.text.length > 0
                         onClicked: {
@@ -2125,7 +2059,8 @@ PageFlickable {
                     RoundedButton {
                         width: parent.width
                         enabled: !ActivityService.loading
-                        text: ActivityService.loading ? qsTr("Syncing…") : qsTr("Sync Garmin now")
+                        busy: ActivityService.loading
+                        text: qsTr("Sync Garmin now")
                         onClicked: {
                             var scope = ConnectionsService.garminExportScope
                             if (ConnectionsService.garminImportActivities)
@@ -2265,8 +2200,8 @@ PageFlickable {
                 Row {
                     spacing: Theme.spacingSmall
                     RoundedButton {
-                        text: ConnectionsService.stravaConnecting
-                            ? qsTr("Connecting...") : qsTr("Connect")
+                        busy: ConnectionsService.stravaConnecting
+                        text: qsTr("Connect")
                         enabled: !ConnectionsService.stravaConnecting
                                  && stravaClientIdField.text.length > 0
                                  && stravaClientSecretField.text.length > 0

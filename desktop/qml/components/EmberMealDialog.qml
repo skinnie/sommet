@@ -60,10 +60,9 @@ ThemedDialog {
             Row {
                 width: parent.width
                 spacing: Theme.spacingSmall
-                RoundedTextField {
+                SearchField {
                     id: searchField
                     width: parent.width - (scanBtn.visible ? scanBtn.width + parent.spacing : 0)
-                    horizontalAlignment: TextInput.AlignLeft
                     placeholderText: qsTr("Search a food, or type a barcode")
                     onTextChanged: debounce.restart()
                     onAccepted: { debounce.stop(); EmberFoodService.search(text) }

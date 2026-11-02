@@ -21,6 +21,8 @@ ThemedDialog {
     property var chosen: null
     property string findError: ""
     property bool searching: false
+    // Body profile sex as picked in step 4, starting from the saved one.
+    property string _sex: WeightService.bodyProfile.sex === "F" ? "F" : "M"
     readonly property var sc: WeightService.scale
     readonly property bool setUp: !!sc.address
 
@@ -86,7 +88,7 @@ ThemedDialog {
                     text: root.sc.listening ? qsTr("Stop listening") : qsTr("Start listening")
                     onClicked: root.sc.listening ? WeightService.scaleStop() : WeightService.scaleStart()
                 }
-                RoundedButton { text: qsTr("Forget scale"); onClicked: { WeightService.scaleForget(); root.step = 1 } }
+                RoundedButton { text: qsTr("Forget scale"); danger: true; onClicked: { WeightService.scaleForget(); root.step = 1 } }
             }
             RoundedButton { text: qsTr("Body profile…"); onClicked: root.step = 4 }
         }
@@ -200,13 +202,12 @@ ThemedDialog {
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                     text: WeightService.bodyProfile.heightCm > 0 ? String(WeightService.bodyProfile.heightCm) : ""
                 }
-                RoundedRadioButton {
-                    id: sexM; text: qsTr("Male")
-                    checked: WeightService.bodyProfile.sex !== "F"
-                }
-                RoundedRadioButton {
-                    id: sexF; text: qsTr("Female")
-                    checked: WeightService.bodyProfile.sex === "F"
+                // Two choices = one switch (desktop picks #14).
+                SegmentedControl {
+                    anchors.verticalCenter: parent.verticalCenter
+                    model: [qsTr("Male"), qsTr("Female")]
+                    currentIndex: root._sex === "F" ? 1 : 0
+                    onActivated: (i) => root._sex = i === 1 ? "F" : "M"
                 }
             }
             Row {
@@ -214,7 +215,7 @@ ThemedDialog {
                 RoundedButton {
                     text: qsTr("Save")
                     enabled: WatchUnits.parseDecimal(heightField.text) >= 100 && WatchUnits.parseDecimal(heightField.text) <= 230
-                    onClicked: { WeightService.setBodyProfile(WatchUnits.parseDecimal(heightField.text), sexF.checked ? "F" : "M")
+                    onClicked: { WeightService.setBodyProfile(WatchUnits.parseDecimal(heightField.text), root._sex)
                                  root.close() }
                 }
                 RoundedButton { text: qsTr("Skip"); onClicked: root.close() }

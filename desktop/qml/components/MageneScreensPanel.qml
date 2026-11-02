@@ -148,7 +148,7 @@ Column {
                                     onClicked: root.mutate(p => { const x = p.splice(pageCard.index, 1)[0]; p.splice(pageCard.index + 1, 0, x) })
                                 }
                                 RoundedButton {
-                                    text: qsTr("Remove screen"); enabled: root.pages.length > 1
+                                    text: qsTr("Remove screen"); danger: true; enabled: root.pages.length > 1
                                     onClicked: root.mutate(p => p.splice(pageCard.index, 1))
                                 }
                             }
@@ -199,12 +199,10 @@ Column {
             onClicked: root.mutate(p => p.push([16, 177]))
         }
 
-        Text {
-            visible: root.msg.length > 0
-            width: parent.width; wrapMode: Text.WordWrap
+        StatusNote {
+            width: parent.width
+            tone: root.msg.indexOf("✓") >= 0 ? "success" : "error"
             text: root.msg
-            color: root.msg.indexOf("✓") >= 0 ? Theme.success : Theme.error
-            font.pixelSize: Theme.fontSizeCaption
         }
 
         Row {
@@ -212,7 +210,8 @@ Column {
             layoutDirection: Qt.RightToLeft
             width: parent.width
             RoundedButton {
-                text: root.saving ? qsTr("Saving…") : qsTr("Save to C406")
+                text: qsTr("Save to C406")
+                busy: root.saving
                 enabled: !root.loading && !root.saving && root.changed
                 onClicked: root.save()
             }

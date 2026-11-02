@@ -31,6 +31,7 @@ Item {
     // device's own FTP/Max HR/LTHR, done backend-side). Shown only when a Bryton is mounted.
     property bool brytonConnected: false
     property string brytonMsg: ""
+    property bool brytonFailed: false
     property bool brytonSending: false
 
     function pollBryton() {
@@ -64,6 +65,7 @@ Item {
         function next() {
             if (i >= root.entries.length) {
                 root.brytonSending = false
+                root.brytonFailed = fail > 0
                 root.brytonMsg = qsTr("Sent %1 workout(s) to Bryton").arg(ok)
                     + (fail ? qsTr(", %1 failed").arg(fail) : "")
                 return
@@ -515,6 +517,7 @@ Item {
                         }
                         RoundedButton {
                             text: qsTr("Delete")
+                            danger: true
                             enabled: TrainingProgramService.plans.some(
                                 p => p.name === root.planName)
                             onClicked: {
@@ -607,13 +610,10 @@ Item {
                         }
                     }
 
-                    Text {
+                    StatusNote {
                         width: parent.width
-                        visible: root.importStatus.length > 0
-                        wrapMode: Text.WordWrap
                         text: root.importStatus
-                        color: Theme.primary
-                        font.pixelSize: Theme.fontSizeCaption
+                        tone: "success"
                     }
                 }
             }
@@ -761,11 +761,12 @@ Item {
                                                 opacity: 0.9
 
                                                 HoverHandler { id: dotHover }
-                                                ToolTip.visible: dotHover.hovered
-                                                ToolTip.delay: 300
-                                                ToolTip.text: dayCell.planned
-                                                    ? dayCell.modelData.entry.workout.name
-                                                    : ""
+                                                ThemedToolTip {
+                                                    visible: dotHover.hovered && text.length > 0
+                                                    text: dayCell.planned
+                                                        ? dayCell.modelData.entry.workout.name
+                                                        : ""
+                                                }
                                             }
 
                                             Text {
@@ -816,21 +817,17 @@ Item {
                             }
                         }
 
-                        Text {
-                            visible: root.sendMsg.length > 0
+                        // A send still running shows the dots; its result says ✓ when it worked.
+                        StatusNote {
                             width: parent.width
-                            wrapMode: Text.WordWrap
                             text: root.sendMsg
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
+                            tone: root.sending ? "working"
+                                : root.sendMsg.indexOf("✓") >= 0 ? "success" : "error"
                         }
-                        Text {
-                            visible: root.mirrorMsg.length > 0
+                        StatusNote {
                             width: parent.width
-                            wrapMode: Text.WordWrap
                             text: root.mirrorMsg
-                            color: Theme.warning
-                            font.pixelSize: Theme.fontSizeCaption
+                            tone: "warning"
                         }
                     }
                 }
@@ -951,16 +948,15 @@ Item {
                             // Same planned workouts, sent to a mounted Bryton Aero 60 as its own
                             // .fit (watts/bpm converted to % of the device's own thresholds).
                             visible: root.brytonConnected
-                            text: root.brytonSending ? qsTr("Sending…") : qsTr("Send to Bryton")
+                            text: qsTr("Send to Bryton")
+                            busy: root.brytonSending
                             enabled: root.entries.length > 0 && !root.brytonSending
                             onClicked: root.sendAllToBryton()
                         }
-                        Text {
+                        StatusNote {
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: root.brytonMsg.length > 0
                             text: root.brytonMsg
-                            color: Theme.mutedText
-                            font.pixelSize: Theme.fontSizeCaption
+                            tone: root.brytonFailed ? "warning" : "success"
                         }
                         LoadingPill {
                             anchors.verticalCenter: parent.verticalCenter
@@ -1091,52 +1087,6 @@ Item {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // Small "(i)" that explains on hover or click. Drawn, not a glyph: the app's icon font has no
-    // info glyph (see RoundedCheckBox's note on not guessing glyphs).
-    component InfoDot: Rectangle {
-        id: infoDot
-        property string text: ""
-        property bool pinned: false
-        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-        width: 18
-        height: 18
-        radius: 9
-        color: "transparent"
-        border.width: 1
-        border.color: Theme.mutedText
-        Text {
-            anchors.centerIn: parent
-            text: "i"
-            color: Theme.mutedText
-            font.pixelSize: 11
-            font.bold: true
-        }
-        HoverHandler { id: infoHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: infoDot.pinned = !infoDot.pinned }
-        // Same themed hover card as CalendarPage's day tip (André, 2026-08-23: the default
-        // ToolTip "doesn't match at all our design").
-        Popup {
-            visible: infoHover.hovered || infoDot.pinned
-            x: infoDot.width / 2 - width / 2
-            y: -height - 6
-            width: 320
-            padding: Theme.spacingSmall
-            closePolicy: Popup.NoAutoClose
-            background: Rectangle {
-                color: Theme.card
-                radius: Theme.radiusSmall
-                border.width: 1
-                border.color: Qt.rgba(Theme.mutedText.r, Theme.mutedText.g, Theme.mutedText.b, 0.3)
-            }
-            contentItem: Text {
-                text: infoDot.text
-                wrapMode: Text.WordWrap
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeCaption
             }
         }
     }
@@ -1426,6 +1376,7 @@ Item {
                     onActivated: (i) => swimPrefs.words = SW.LANGUAGES[i].id
                 }
                 InfoDot {
+                    anchors.verticalCenter: parent.verticalCenter
                     text: qsTr("In the water a step can end on a distance, a time, the Lap button or "
                                + "pool lengths, and has no target: the heart-rate belt cannot reach "
                                + "the watch under water. Pick a stroke on a step to write its text "
@@ -1596,7 +1547,7 @@ Item {
                             checked: stepRow.modelData.lightStart !== false
                             onToggled: editor.mutate(stepRow.index, { lightStart: checked })
                         }
-                        InfoDot { visible: editor.forSuunto; text: editor.stepLightInfo }
+                        InfoDot { anchors.verticalCenter: parent.verticalCenter; visible: editor.forSuunto && text.length > 0; text: editor.stepLightInfo }
                         Item { width: Theme.spacingMedium; height: 1 }
                         RoundedCheckBox {
                             visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
@@ -1606,7 +1557,8 @@ Item {
                             onToggled: editor.mutate(stepRow.index, { lightLimits: checked })
                         }
                         InfoDot {
-                            visible: editor.forSuunto && stepRow.modelData.targetKind !== "none"
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: editor.forSuunto && stepRow.modelData.targetKind !== "none" && text.length > 0
                             text: editor.limitLightInfo
                         }
                     }
@@ -1653,6 +1605,7 @@ Item {
 
                 RoundedButton {
                     text: qsTr("Remove workout")
+                    danger: true
                     visible: root.entryForDate(editor.editDate) !== null
                     onClicked: {
                         root.removeEntry(editor.editDate)

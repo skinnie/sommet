@@ -236,6 +236,7 @@ Item {
                     }
                     RoundedButton {
                         text: qsTr("Clear all (%1 MB)").arg((TileCacheService.cacheSizeBytes / 1048576).toFixed(0))
+                        danger: true
                         enabled: !TileCacheService.downloading && TileCacheService.cacheSizeBytes > 0
                         onClicked: TileCacheService.clearCache()
                     }
@@ -298,6 +299,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: qsTr("Delete")
                                 enabled: !TileCacheService.downloading
+                                danger: true
                                 onClicked: TileCacheService.deleteSavedRegion(modelData.id)
                             }
                         }

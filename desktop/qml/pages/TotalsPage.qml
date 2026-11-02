@@ -182,16 +182,17 @@ Item {
                 }
             }
 
-            Text {
+            // Empty page that says what to do (desktop picks #11).
+            EmptyState {
                 visible: root.yearActivities.length === 0
-                width: parent.width
-                wrapMode: Text.WordWrap
+                glyph: Icons.activities
+                title: root.allActivities.length === 0 ? qsTr("Nothing to add up yet")
+                                                       : qsTr("No activities in this year")
                 text: root.allActivities.length === 0
-                      ? qsTr("Nothing to add up yet - read your activities off the watch " +
-                              "first and this fills in.")
-                      : qsTr("No activities in this year.")
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeBody
+                      ? qsTr("Read your activities off the watch first, and this page fills in.")
+                      : qsTr("Pick another year above.")
+                actionText: root.allActivities.length === 0 ? qsTr("Open Activities") : ""
+                onAction: NavBus.navigate("activities")
             }
 
             // --- Hours outside ---

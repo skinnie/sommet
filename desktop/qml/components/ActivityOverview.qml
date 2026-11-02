@@ -48,19 +48,6 @@ Column {
         return _zoneKinds.length ? _zoneKinds[0] : null
     }
 
-    component InfoDot: Rectangle {
-        property string tip: ""
-        visible: tip.length > 0
-        width: 15; height: 15; radius: 8
-        color: "transparent"
-        border.color: Theme.borderStrong
-        Text { anchors.centerIn: parent; text: "i"; font.pixelSize: 10; color: Theme.mutedText }
-        HoverHandler { id: infoHover }
-        ToolTip.visible: infoHover.hovered
-        ToolTip.text: tip
-        ToolTip.delay: 200
-    }
-
     // ---------------------------------------------------------------- level 1
     Grid {
         id: headline
@@ -82,7 +69,7 @@ Column {
                     Row {
                         spacing: 4
                         Text { text: modelData.label; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
-                        InfoDot { tip: modelData.info; anchors.verticalCenter: parent.verticalCenter }
+                        InfoDot { tip: modelData.info; size: 15; anchors.verticalCenter: parent.verticalCenter }
                     }
                     Row {
                         spacing: 3
@@ -133,7 +120,7 @@ Column {
                 Row {
                     spacing: 4
                     Text { text: modelData.label; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
-                    InfoDot { tip: modelData.info; anchors.verticalCenter: parent.verticalCenter }
+                    InfoDot { tip: modelData.info; size: 15; anchors.verticalCenter: parent.verticalCenter }
                 }
                 Row {
                     spacing: 2
@@ -262,7 +249,7 @@ Column {
                     Row {
                         x: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 4
                         Text { text: modelData.label; color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
-                        InfoDot { tip: modelData.info; anchors.verticalCenter: parent.verticalCenter }
+                        InfoDot { tip: modelData.info; size: 15; anchors.verticalCenter: parent.verticalCenter }
                     }
                     Text {
                         anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter

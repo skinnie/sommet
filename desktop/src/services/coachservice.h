@@ -122,9 +122,14 @@ private:
     void refreshCatalogueLive(std::function<void()> onDone);  // GET systmMcpUrl, async
     QVariantList pickWorkouts(const QString &intensity, int maxMinutes, int limit = 2) const;
 
-    void appendBubble(const QString &role, const QString &text, const QVariantList &cards = {});
+    // `local` marks a bubble that isn't part of the conversation (an error, the canned-mode
+    // help): it is shown but never sent to Claude as history.
+    void appendBubble(const QString &role, const QString &text, const QVariantList &cards = {},
+                      bool local = false);
     void replyCanned(const QString &userText);
     void replyClaude(const QString &userText);
+    QJsonArray chatHistoryForClaude() const;                 // recent turns, user first, alternating
+    static QVariantList cardsFromClaude(const QJsonArray &cards);   // reply JSON -> page card maps
     void setSending(bool v);
     void setLastError(const QString &e);
 

@@ -55,17 +55,26 @@ Item {
                 width: parent.width
                 spacing: 6
                 TapHandler { onTapped: scaleDialog.open() }
-                Rectangle {
-                    width: 8; height: 8; radius: 4; anchors.verticalCenter: parent.verticalCenter
-                    color: WeightService.scale.listening ? Theme.success : Theme.mutedText
+                // Status as a tag, like Settings › Connections (desktop picks #6).
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                    text: qsTr("Bluetooth scale")
+                }
+                StatusChip {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: !WeightService.scale.address ? qsTr("Not set up")
+                        : WeightService.scale.listening ? qsTr("Listening") : qsTr("Not listening")
+                    tone: WeightService.scale.listening ? "success" : "neutral"
                 }
                 Text {
-                    color: Theme.text; font.pixelSize: Theme.fontSizeBody
-                    text: !WeightService.scale.address ? qsTr("Bluetooth scale — tap to set up")
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeBody
+                    text: !WeightService.scale.address ? qsTr("tap to set up")
                         : WeightService.scale.listening
-                          ? qsTr("Bluetooth scale — listening, last weigh-in %1")
+                          ? qsTr("last weigh-in %1")
                                 .arg(scaleDialog.timeAgo(WeightService.scale.lastWeighIn ? WeightService.scale.lastWeighIn.t : 0))
-                          : qsTr("Bluetooth scale — not listening")
+                          : ""
                 }
                 Text {
                     visible: root.newWeighIn.length > 0
@@ -392,16 +401,21 @@ Item {
                 }
             }
 
-            // --- Empty / error ---
-            Text {
-                width: parent.width
+            // --- Empty / error (desktop picks #11): an error goes through ErrorBanner ---
+            ErrorBanner {
+                detail: WeightService.connected && root.series.length === 0 && !WeightService.loading
+                        ? WeightService.lastError : ""
+                context: qsTr("reading weigh-ins")
+                showPlainDetail: true
+                canRetry: true
+                onRetry: WeightService.refresh()
+            }
+            EmptyState {
                 visible: WeightService.connected && root.series.length === 0
-                         && !WeightService.loading
-                wrapMode: Text.WordWrap
-                color: Theme.mutedText
-                text: WeightService.lastError.length > 0
-                      ? WeightService.lastError
-                      : qsTr("No weigh-ins found for the last year.")
+                         && !WeightService.loading && WeightService.lastError.length === 0
+                glyph: Icons.weight
+                title: qsTr("No weigh-ins yet")
+                text: qsTr("Nothing in the last year. Add one by hand above, or step on your Bluetooth scale.")
             }
 
             // --- Merge note ---

@@ -16,7 +16,21 @@ Button {
     // mistaken for disabled - the default flat grey tile was too close to the dimmed disabled look
     // (André, 2026-09-20). Reuses the same fill the `checked` toggle state already uses.
     property bool accent: false
-    readonly property bool _filled: root.checked || root.accent
+    // Working (André, 2026-11-02, desktop picks #5): the label stays, so the button keeps its
+    // name, three dots pulse after it, and clicks and keys are ignored until it's done. Use it
+    // instead of swapping the text to "Working…".
+    property bool busy: false
+    // Delete / Remove / Forget: the calm red of the Activities delete dialog (10% red fill, red
+    // hairline and bold red text, 20% on hover).
+    property bool danger: false
+    readonly property bool _filled: (root.checked || root.accent) && !root.danger
+    // A button that is disabled only because it's working keeps full strength.
+    readonly property bool _live: root.enabled || root.busy
+    readonly property color _textColor: root.danger ? Theme.error
+        : root._filled ? Theme.card
+        : (root._live ? Theme.text : Theme.mutedText)
+
+    Accessible.description: root.busy ? qsTr("Working") : ""
 
     hoverEnabled: true
     implicitHeight: 36
@@ -40,23 +54,62 @@ Button {
     background: Rectangle {
         implicitHeight: 36
         radius: Theme.radiusSmall
-        color: root._filled
-            ? ((root.pressed || root.hovered) && root.enabled ? Qt.darker(Theme.primary, 1.15) : Theme.primary)
-            : ((root.pressed || root.hovered) ? Theme.borderStrong : Theme.cardNested)
+        color: root.danger
+            ? Qt.alpha(Theme.error, (root.pressed || root.hovered) && root.enabled && !root.busy ? 0.20 : 0.10)
+            : root._filled
+            ? ((root.pressed || root.hovered) && root.enabled && !root.busy ? Qt.darker(Theme.primary, 1.15) : Theme.primary)
+            : ((root.pressed || root.hovered) && !root.busy ? Theme.borderStrong : Theme.cardNested)
         border.width: root._filled ? 0 : 1
-        border.color: Theme.border
+        border.color: root.danger ? Theme.error : Theme.border
         Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     }
 
-    contentItem: Text {
-        text: root.text
-        color: root._filled ? Theme.card : (root.enabled ? Theme.text : Theme.mutedText)
-        font.pixelSize: Theme.fontSizeBody
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    contentItem: Item {
+        implicitWidth: label.implicitWidth + (root.busy ? dots.width + Theme.spacingSmall : 0)
+        implicitHeight: label.implicitHeight
+
+        Row {
+            anchors.centerIn: parent
+            spacing: Theme.spacingSmall
+
+            Text {
+                id: label
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.text
+                color: root._textColor
+                font.pixelSize: Theme.fontSizeBody
+                font.bold: root.danger
+                Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            }
+            PulseDots {
+                id: dots
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.busy
+                color: root._textColor
+                dotSize: 5
+            }
+        }
     }
 
-    opacity: root.enabled ? 1.0 : 0.5
+    // While busy: swallow clicks (and show the busy cursor) and the keys that would press it.
+    MouseArea {
+        anchors.fill: parent
+        visible: root.busy
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        cursorShape: Qt.BusyCursor
+    }
+    Keys.onPressed: (event) => {
+        if (root.busy && (event.key === Qt.Key_Space || event.key === Qt.Key_Return
+                          || event.key === Qt.Key_Enter))
+            event.accepted = true
+    }
+    Keys.onReleased: (event) => {
+        if (root.busy && (event.key === Qt.Key_Space || event.key === Qt.Key_Return
+                          || event.key === Qt.Key_Enter))
+            event.accepted = true
+    }
+
+    opacity: root._live ? 1.0 : 0.5
     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 }

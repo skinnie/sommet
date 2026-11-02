@@ -470,30 +470,21 @@ PageFlickable {
                     }
                 }
 
-                Text {
-                    visible: !HomeViewModel.isGarmin && PoiService.addResultText.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: PoiService.addOk ? Theme.success : Theme.error
-                    text: PoiService.addResultText
+                    text: !HomeViewModel.isGarmin ? PoiService.addResultText : ""
+                    tone: PoiService.addOk ? "success" : "error"
                 }
-                Text {
-                    visible: HomeViewModel.isGarmin && GarminService.writeError.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: Theme.error
-                    text: GarminService.writeError
+                    text: HomeViewModel.isGarmin ? GarminService.writeError : ""
+                    tone: "error"
                 }
-                Text {
-                    visible: HomeViewModel.isGarmin && GarminService.writeOk
-                             && GarminService.writeError.length === 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: Theme.success
-                    text: qsTr("Sent to the SD card.")
+                    text: HomeViewModel.isGarmin && GarminService.writeOk
+                          && GarminService.writeError.length === 0 ? qsTr("Sent to the SD card.") : ""
+                    tone: "success"
                 }
             }
         }
@@ -515,13 +506,10 @@ PageFlickable {
                     onClicked: poiFileDialog.open()
                 }
 
-                Text {
-                    visible: PoiService.importError.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeCaption
                     text: PoiService.importError
+                    tone: "error"
                 }
 
                 Repeater {
@@ -736,24 +724,17 @@ PageFlickable {
                     color: Theme.mutedText
                     text: qsTr("Nothing to sync.")
                 }
-                Text {
-                    visible: root.saveError.length > 0
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("Couldn't save: %1").arg(root.saveError)
+                    text: root.saveError.length > 0 ? qsTr("Couldn't save: %1").arg(root.saveError) : ""
+                    tone: "error"
                 }
-                Text {
-                    visible: !HomeViewModel.isGarmin
-                             && (PoiService.removing || PoiService.removeResultText.length > 0)
+                StatusNote {
                     width: parent.width
-                    wrapMode: Text.WordWrap
-                    font.pixelSize: Theme.fontSizeCaption
-                    color: PoiService.removing ? Theme.mutedText
-                         : PoiService.removeOk ? Theme.success : Theme.error
-                    text: PoiService.removing ? qsTr("Removing the POI from the watch...")
-                                              : PoiService.removeResultText
+                    text: HomeViewModel.isGarmin ? ""
+                        : PoiService.removing ? qsTr("Removing the POI from the watch...")
+                        : PoiService.removeResultText
+                    tone: PoiService.removing ? "working" : PoiService.removeOk ? "success" : "error"
                 }
 
                 Repeater {
@@ -821,6 +802,7 @@ PageFlickable {
                                 visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsNavRemove
                                 enabled: !PoiService.removing
                                 text: qsTr("Remove")
+                                danger: true
                                 onClicked: {
                                     removePoiDialog.poi = modelData
                                     removePoiDialog.open()
