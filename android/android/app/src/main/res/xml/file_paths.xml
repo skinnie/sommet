@@ -2,4 +2,6 @@
 <paths>
     <files-path name="activities" path="activities/" />
     <files-path name="exports"    path="exports/" />
+    <!-- A newer Sommet APK, handed to Android's installer (AppUpdateModule.kt) -->
+    <cache-path name="updates"    path="updates/" />
 </paths>

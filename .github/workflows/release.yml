@@ -70,13 +70,19 @@ jobs:
     permissions:
       contents: write        # needed to create the Release
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: apk
           path: out
+      # The release text = the changelog sections since the previous version. Both apps show
+      # its "## date: title" headings as the "What's new" list of their update note.
+      - name: Write the release notes from the changelog
+        run: python3 tools/release_notes.py "$GITHUB_REF_NAME" > release-notes.md
       - name: Publish the GitHub Release with the APK attached
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true                              # notes from your commits
+          body_path: release-notes.md
+          generate_release_notes: true                              # adds the "Full Changelog" link
           prerelease: ${{ contains(github.ref_name, '-') }}          # v..-rc.1 => pre-release
           files: out/*.apk

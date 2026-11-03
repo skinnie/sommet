@@ -1622,7 +1622,9 @@ PageFlickable {
                 SettingsSection {
                     id: aboutSection
                     title: qsTr("About")
-                    summary: qsTr("Sommet v") + Qt.application.version
+                    summary: UpdateService.available
+                             ? qsTr("Sommet v%1 · %2 is ready").arg(UpdateService.currentVersion).arg(UpdateService.latestVersion)
+                             : qsTr("Sommet v") + Qt.application.version
                     showDivider: false
                     expanded: root.sectionOpen("about")
                     onToggleRequested: root.setSectionOpen("about", !expanded)
@@ -1663,6 +1665,53 @@ PageFlickable {
                                 font.pixelSize: Theme.fontSizeBody
                             }
                         }
+                    }
+
+                    // Updates (André, 2026-11-03, 🟣124): is there a newer Sommet on GitHub?
+                    UpdateNotice {
+                        width: parent.width
+                        closable: false
+                        maxHighlights: 8
+                    }
+                    StatusNote {
+                        width: Math.min(implicitWidth, parent.width)
+                        closable: false
+                        tone: UpdateService.checking ? "working"
+                              : UpdateService.state === "error" ? "error" : "success"
+                        text: UpdateService.checking ? qsTr("Checking for a newer version…")
+                              : UpdateService.state === "error"
+                                ? qsTr("Couldn't reach GitHub to check. Try again later.")
+                              : UpdateService.state === "upToDate"
+                                ? qsTr("You have the newest version.")
+                              : ""
+                    }
+                    Row {
+                        spacing: Theme.spacingMedium
+                        RoundedButton {
+                            text: qsTr("Check for updates")
+                            busy: UpdateService.checking
+                            onClicked: UpdateService.check()
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: UpdateService.lastChecked.length > 0
+                            text: qsTr("Last checked %1").arg(UpdateService.lastChecked)
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                        }
+                    }
+                    RoundedSwitch {
+                        text: qsTr("Check for a new version once a day")
+                        checked: UpdateService.autoCheck
+                        onToggled: UpdateService.autoCheck = checked
+                    }
+                    Text {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        color: Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        text: qsTr("Asks GitHub which Sommet version is the newest. Nothing about " +
+                                    "you or your watches is sent.")
                     }
                     Text {
                         width: parent.width

@@ -70,6 +70,8 @@ import { TrackPreview } from '../components/TrackPreview';
 import { NavShell, NavShellItem } from '../navigation/NavShell';
 import { useNavMenu } from '../navigation/MenuContext';
 import { menuBottomRoom } from '../navigation/MenuHost';
+import UpdateNotice from '../components/UpdateNotice';
+import { initAppUpdate } from '../services/AppUpdate';
 
 // Real, 2026-08-08: Kailash ("Hoopoe") answers the same USB init + 0x0000 device-info
 // commands every Ambit/Traverse does (AmbitUsbModule.kt's SUUNTO_PID_NAMES/
@@ -668,6 +670,8 @@ export default function HomeScreen() {
   // Arm the one-time post-upgrade FIT re-import (see FitReimport.ts) once at mount. No-op on every
   // launch after the first for this build generation.
   useEffect(() => { initFitReimport(); }, []);
+  // Is there a newer Sommet on GitHub? At most once a day (André, 2026-11-03, 🟣124).
+  useEffect(() => { initAppUpdate().catch(() => {}); }, []);
   // Gear and activities from intervals.icu, by itself, like the desktop (IntervalsImport.ts).
   // In the background; must never get in the way of the screen.
   useEffect(() => { runIntervalsAutoSync().catch(() => {}); }, []);
@@ -1239,6 +1243,9 @@ export default function HomeScreen() {
         <Text style={styles.appName}>Sommet</Text>
         <Badge label={`v${APP_VERSION}`} />
       </View>
+
+      {/* A newer Sommet on GitHub (André, 2026-11-03, 🟣124); × hides it until the next one. */}
+      <UpdateNotice style={{ marginHorizontal: 16, marginBottom: 8 }} />
 
       {/* Gear maintenance summary — only when something needs attention; taps through to Gear. */}
       {(gearAlerts.due > 0 || gearAlerts.soon > 0) && (

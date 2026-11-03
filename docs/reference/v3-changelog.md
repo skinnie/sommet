@@ -7,6 +7,40 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-03: Both apps say when a newer Sommet is out (0.2.58)
+
+Until now, the only way to hear about a new version was to look at the GitHub page.
+
+- **The check.** Both apps ask GitHub's public releases API which version is the newest, at
+  most once a day (about 20 hours apart) and when you press **Check for updates** in Settings →
+  About. A switch there turns the daily check off. Only the request reaches GitHub; nothing
+  about you or your watches is sent. The answer is kept, so a note stays after a restart
+  without asking again.
+- **The note.** "Sommet 0.2.58 is ready", the version you have, the first lines of what's new,
+  and the buttons. On Home the × hides it until the next version; Settings → About always
+  shows it.
+- **PC:** **Download** opens the file for this computer in the browser (`Sommet-macos.dmg` on a
+  Mac, `Sommet-windows.zip` on Windows). Linux runs from source, so it opens the release page.
+  (`UpdateService`, `UpdateNotice.qml`.)
+- **Tablet:** **Download and install** downloads the release's APK, checks its size, then
+  checks it really is Sommet at that version before handing it to Android's installer, which
+  asks you to confirm. The first time, Android asks to allow Sommet to install apps. The APK
+  is deleted at the next start. (`AppUpdate.ts`, `UpdateNotice.tsx`, `AppUpdateModule.kt`;
+  test: `AppUpdate.test.ts`.)
+- Only links into this project's own release pages are opened or downloaded.
+- **What's new.** Each release page now lists the changelog sections since the previous
+  version (`tools/release_notes.py`, run by the release build; test: `test_release_notes.py`),
+  and the apps show their titles. The 0.2.57 page was published before this, so it has none.
+- It works from 0.2.58 on: 0.2.57 and older don't know how to check.
+- Checked with test builds that pretended to be 0.2.50, against the real 0.2.57 release.
+  On the PC (private test screen, light and dark): the note on Home, and × keeps it closed.
+  Settings → About shows Check for updates (busy dots, then the new time) and the switch.
+  A second test build looked like Windows and carried sample "what's new" lines, since
+  0.2.57's page has none. On the tablet (dark): the note, Download and install with its
+  percentage, the real 0.2.57 APK passing the checks, and Android's installer opening with its
+  "allow this source" question. The install itself wasn't done: allowing Sommet to install
+  apps is a choice for the tablet's owner.
+
 ## 2026-11-03: Finishing touches on both apps (0.2.57)
 
 Five small things spotted while doing the picks, fixed on the PC and the tablet before the

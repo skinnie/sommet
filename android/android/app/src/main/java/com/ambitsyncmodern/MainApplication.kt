@@ -34,6 +34,7 @@ class MainApplication : Application(), ReactApplication {
           add(BrytonUsbPackage())
           add(com.ambitsyncmodern.magene.MagenePackage())
           add(com.ambitsyncmodern.scale.ScaleBlePackage())
+          add(com.ambitsyncmodern.update.AppUpdatePackage())
         },
     )
   }

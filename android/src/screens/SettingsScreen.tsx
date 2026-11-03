@@ -71,6 +71,8 @@ import { APP_VERSION } from '../config/version';
 import { useV3Theme } from '../theme/v3';
 import { Button, Dropdown, FieldRow, IconBadge, Toggle, StatusChip, StatusNote, SegmentedControl } from '../components/ui/primitives';
 import { SettingsSection } from '../components/ui/SettingsSection';
+import UpdateNotice from '../components/UpdateNotice';
+import { checkNow, initAppUpdate, setAutoCheck, updateAvailable, updatesSupported, useAppUpdate } from '../services/AppUpdate';
 
 // Real, 2026-08-09 ("no button to change provider, nor in the settings like the desktop
 // version") - same 3 real choices MapScreen.tsx/TrackMapScreen.tsx's own in-map layer
@@ -176,8 +178,17 @@ function SidebarSwitch({ title, description, value, onValueChange, onOpen }: {
   );
 }
 
+// "03/11/2026 04:10", the date style used across the app.
+function fmtChecked(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function SettingsScreen() {
   const theme = useV3Theme();
+  const update = useAppUpdate();
+  useEffect(() => { initAppUpdate().catch(() => {}); }, []);
   const styles = createStyles(theme);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { features, setFeature, anyEnabled } = useExperimental();
@@ -1357,7 +1368,8 @@ export default function SettingsScreen() {
         {/* ── About / disclaimer ── */}
         <SettingsSection
           title={t.aboutSection}
-          summary={t.aboutVersion(APP_VERSION)}
+          summary={updateAvailable(update) && update.latest
+            ? t.aboutVersionReady(APP_VERSION, update.latest.version) : t.aboutVersion(APP_VERSION)}
           open={isOpen('about')}
           onToggle={toggleSection('about')}
           onLayout={recordRow('about')}
@@ -1366,6 +1378,31 @@ export default function SettingsScreen() {
           {/* The Ember easter egg (10 taps here) was retired 2026-08-29 - Ember is now an open
               opt-in toggle in its own card above, so the version is just plain text again. */}
           <Text style={styles.sectionDesc}>{t.aboutVersion(APP_VERSION)}</Text>
+
+          {/* Updates (André, 2026-11-03, 🟣124): is there a newer Sommet on GitHub? */}
+          {updatesSupported() && (
+            <View style={{ gap: 8, marginBottom: 6 }}>
+              <UpdateNotice closable={false} maxHighlights={8} />
+              <StatusNote
+                tone={update.phase === 'checking' ? 'working' : update.status === 'error' ? 'error' : 'success'}
+                closable={false}
+                text={update.phase === 'checking' ? t.updateChecking
+                  : update.status === 'error' ? t.updateError
+                  : update.status === 'upToDate' ? t.updateUpToDate : ''}
+              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <Button grow={false} label={t.updateCheck} busy={update.phase === 'checking'}
+                  onPress={() => { checkNow(); }} />
+                {update.lastChecked != null && (
+                  <Text style={{ fontSize: 12, color: theme.mutedText }}>
+                    {t.updateLastChecked(fmtChecked(update.lastChecked))}
+                  </Text>
+                )}
+              </View>
+              <SwitchLine value={update.autoCheck} onValueChange={v => { setAutoCheck(v); }} label={t.updateAutoCheck} />
+              <Text style={styles.sectionDesc}>{t.updateAutoCheckDesc}</Text>
+            </View>
+          )}
           <Text style={[styles.sectionDesc, { marginTop: 10 }]}>{t.aboutDisclaimer}</Text>
 
           <Text style={styles.creditsHeading}>{t.aboutCreditsSection}</Text>

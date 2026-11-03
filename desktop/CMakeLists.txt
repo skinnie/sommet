@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.57 LANGUAGES CXX)
+project(AmbitApp VERSION 0.2.58 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -245,6 +245,7 @@ qt_add_qml_module(ambitapp
         qml/components/PulseDots.qml
         qml/components/StatusChip.qml
         qml/components/StatusNote.qml
+        qml/components/UpdateNotice.qml
         qml/components/SearchField.qml
         qml/components/ThemedToolTip.qml
         qml/components/InfoDot.qml
@@ -390,6 +391,8 @@ qt_add_qml_module(ambitapp
         src/services/edgescreensservice.cpp
         src/services/ciqupdatesservice.h
         src/services/ciqupdatesservice.cpp
+        src/services/updateservice.h
+        src/services/updateservice.cpp
         src/services/trainingprogramservice.h
         src/services/trainingprogramservice.cpp
     RESOURCES

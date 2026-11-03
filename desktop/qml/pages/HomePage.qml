@@ -802,6 +802,11 @@ PageFlickable {
         // width; below that they stack, and nothing else changes.
         readonly property bool twoColumn: width >= 760
 
+        // A newer Sommet on GitHub (André, 2026-11-03, 🟣124); × hides it until the next one.
+        UpdateNotice {
+            width: parent.width
+        }
+
         // Gear maintenance summary — only when something needs attention; clicks through to Gear.
         Rectangle {
             id: gearAlert

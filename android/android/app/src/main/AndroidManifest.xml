@@ -2,6 +2,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- App updates: opens Android's installer for a newer Sommet APK from the GitHub release
+         (AppUpdateModule.kt). Android still asks the user to allow it and to confirm. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Ember meal search: read a food's barcode with the camera (issue #20, 2026-09-27).
          Optional hardware, so phones/tablets without a camera can still install the app. -->
     <uses-permission android:name="android.permission.CAMERA" />
