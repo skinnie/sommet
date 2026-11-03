@@ -94,7 +94,7 @@ export default function CoachScreen() {
   // Semantic colours, matching the desktop's own mapping of light -> Theme colour.
   const lightColor = (l: ReadinessLight): string =>
     l === 'green' ? t.success
-    : l === 'tempered' ? '#8FA33B'
+    : l === 'tempered' ? t.tempered
     : l === 'yellow' ? t.warning
     : t.error;
 
@@ -244,7 +244,7 @@ export default function CoachScreen() {
                 {/* The coach's bubbles show Claude's formatting (bold, lists, links) instead of
                     raw ** and dashes; your own stay plain text (desktop picks #4). */}
                 {m.role === 'me'
-                  ? <Text style={{ color: '#fff', fontSize: v3Type.body }}>{m.text}</Text>
+                  ? <Text style={{ color: t.card, fontSize: v3Type.body }}>{m.text}</Text>
                   : <Markdown text={m.text} color={t.text} linkColor={t.primary} fontSize={v3Type.body}
                       codeBackground={t.border} />}
               </View>

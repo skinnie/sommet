@@ -23,6 +23,8 @@ Menu {
         radius: Theme.radiusCard
         color: Theme.card
         border.width: 1
-        border.color: Theme.mutedText
+        // Floating surfaces (menus, dialogs, the open dropdown list) take the stronger hairline:
+        // no shadow lifts them, and the grey-text colour drew a heavy outline (2026-11-03).
+        border.color: Theme.borderStrong
     }
 }

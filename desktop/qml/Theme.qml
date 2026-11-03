@@ -128,6 +128,10 @@ QtObject {
     readonly property color _lightSuccess: "#3E7D52"
     readonly property color _lightWarning: "#9A7A22"
     readonly property color _lightHard: "#B5652F"
+    // Olive "tempered" semantic for the Coach's "Fresh, ease in" light, between success-green
+    // and warning-amber (2026-11-03: was a hard-coded #8FA33B in CoachPage, 2.8:1 on the white
+    // card; this is 4.7:1 so the words under the dot stay readable).
+    readonly property color _lightTempered: "#6A7B2C"
     readonly property color _lightError: "#B0473C"
     readonly property color _lightText: "#1A1D22"
     readonly property color _lightMutedText: "#5B6270"
@@ -147,6 +151,7 @@ QtObject {
     // dark card, the same way _darkWarning/_darkError already sit brighter than their light
     // counterparts.
     readonly property color _darkHard: "#CE8258"
+    readonly property color _darkTempered: "#9AA64C"
     // Real, 2026-08-10 ("desktop version in dark mode still has the cyan color like the
     // android version had, can you use the same scheme of colors we did for the android
     // (grey)") - primary/accent were still the original teal (#57C9B3/#7CD6C4) this whole
@@ -196,6 +201,7 @@ QtObject {
     readonly property color border: isDark ? _darkBorder : _lightBorder
     readonly property color borderStrong: isDark ? _darkBorderStrong : _lightBorderStrong
     readonly property color hard: isDark ? _darkHard : _lightHard
+    readonly property color tempered: isDark ? _darkTempered : _lightTempered
     readonly property color primary: isDark ? _darkPrimary : _lightPrimary
 
     // Ink drawn ON TOP OF MAP TILES - the track line and the POI markers. Deliberately NOT

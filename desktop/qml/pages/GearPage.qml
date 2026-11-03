@@ -12,51 +12,57 @@ Item {
 
     // One reminder as a wear bar (André, 2026-11-02, desktop picks #3): the part, a Soon/Due tag,
     // "2,740 / 3,000 km", and a 4px bar that turns amber at 90% and red at 100%.
-    component WearRow: ColumnLayout {
+    // The bar ends where "2,740 / 3,000 km" ends; the × sits beside both lines, so the bar no
+    // longer depends on a guessed button width (2026-11-03, same layout as the tablet).
+    component WearRow: RowLayout {
         id: wear
         property var reminder: ({})
         property bool removable: false
         signal remove()
         Layout.fillWidth: true
-        spacing: 4
-        RowLayout {
+        spacing: Theme.spacingSmall
+        ColumnLayout {
             Layout.fillWidth: true
-            spacing: Theme.spacingSmall
-            Text {
-                text: wear.reminder.name || ""
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeBody
+            spacing: 4
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacingSmall
+                Text {
+                    text: wear.reminder.name || ""
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeBody
+                }
+                StatusChip {
+                    visible: !!wear.reminder.due || !!wear.reminder.soon
+                    text: wear.reminder.due ? qsTr("Due") : qsTr("Soon")
+                    tone: wear.reminder.due ? "error" : "warning"
+                }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: wear.reminder.progress || wear.reminder.label || ""
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeLabel
+                }
             }
-            StatusChip {
-                visible: !!wear.reminder.due || !!wear.reminder.soon
-                text: wear.reminder.due ? qsTr("Due") : qsTr("Soon")
-                tone: wear.reminder.due ? "error" : "warning"
-            }
-            Item { Layout.fillWidth: true }
-            Text {
-                text: wear.reminder.progress || wear.reminder.label || ""
-                color: Theme.mutedText
-                font.pixelSize: Theme.fontSizeLabel
-            }
-            RoundedButton {
-                visible: wear.removable
-                text: "×"
-                Accessible.name: qsTr("Remove reminder")
-                onClicked: wear.remove()
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 4
+                radius: 2
+                color: Theme.cardNested
+                Rectangle {
+                    width: parent.width * Math.min(1, Math.max(0, (wear.reminder.percent || 0) / 100))
+                    height: parent.height
+                    radius: 2
+                    color: wear.reminder.due ? Theme.error : wear.reminder.soon ? Theme.warning : Theme.primary
+                }
             }
         }
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.rightMargin: wear.removable ? 36 + Theme.spacingSmall : 0
-            implicitHeight: 4
-            radius: 2
-            color: Theme.cardNested
-            Rectangle {
-                width: parent.width * Math.min(1, Math.max(0, (wear.reminder.percent || 0) / 100))
-                height: parent.height
-                radius: 2
-                color: wear.reminder.due ? Theme.error : wear.reminder.soon ? Theme.warning : Theme.primary
-            }
+        RoundedButton {
+            visible: wear.removable
+            Layout.alignment: Qt.AlignVCenter
+            text: "×"
+            Accessible.name: qsTr("Remove reminder")
+            onClicked: wear.remove()
         }
     }
 

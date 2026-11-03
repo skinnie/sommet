@@ -311,7 +311,8 @@ const styles = (t: V3Colors) => StyleSheet.create({
   seg: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: v3Radius.small, borderWidth: 1, borderColor: t.border, backgroundColor: t.cardNested },
   segOn: { backgroundColor: t.primary, borderColor: t.primary },
   segText: { fontSize: v3Type.label, color: t.text },
-  segTextOn: { color: '#fff', fontWeight: '700' as const },
+  // Card colour on green: white in light mode, dark ink on dark mode's lighter green (2026-11-03).
+  segTextOn: { color: t.card, fontWeight: '700' as const },
   label: { fontSize: v3Type.label, color: t.mutedText, marginBottom: 2 },
   muted: { fontSize: v3Type.caption, color: t.mutedText, marginTop: 3 },
   estRow: { flexDirection: 'row', alignItems: 'center' },

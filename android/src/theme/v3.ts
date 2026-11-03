@@ -35,6 +35,8 @@ export interface V3Colors {
   success: string;
   warning: string;
   hard: string;
+  // The Coach's "Fresh, ease in" olive, between success and warning (same as Theme.qml).
+  tempered: string;
   error: string;
   text: string;
   mutedText: string;
@@ -66,6 +68,7 @@ export const v3Light: V3Colors = {
   success:    '#3E7D52',
   warning:    '#9A7A22',
   hard:       '#B5652F',
+  tempered:   '#6A7B2C',
   error:      '#B0473C',
   text:       '#1A1D22',
   mutedText:  '#5B6270',
@@ -88,6 +91,7 @@ export const v3Dark: V3Colors = {
   success:    '#5C9E72',
   warning:    '#CB9A45',
   hard:       '#CE8258',
+  tempered:   '#9AA64C',
   error:      '#CE6A60',
   text:       '#E9EBEE',
   // 2026-08-11 (André, S2): was #9AA3AF, which measures 6.5:1 on the dark card but is the

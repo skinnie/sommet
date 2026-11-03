@@ -123,7 +123,9 @@ PageFlickable {
                             id: badgeText
                             anchors.centerIn: parent
                             text: qsTr("Update")
-                            color: "white"
+                            // Card colour on green: white in light mode, dark ink in dark mode,
+                            // where white on the lighter green was too faint (2026-11-03).
+                            color: Theme.card
                             font.pixelSize: Theme.fontSizeCaption
                             font.bold: true
                         }

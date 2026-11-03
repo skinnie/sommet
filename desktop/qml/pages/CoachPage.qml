@@ -17,7 +17,7 @@ Item {
     readonly property color lightColor:
         light === "none" ? Theme.mutedText
         : light === "green" ? Theme.success
-        : light === "tempered" ? "#8FA33B"
+        : light === "tempered" ? Theme.tempered
         : light === "yellow" ? Theme.warning
         : Theme.error
 
@@ -235,7 +235,7 @@ Item {
                             Column {
                                 anchors.centerIn: parent
                                 spacing: 1
-                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.k; color: Theme.mutedText; font.pixelSize: 9 }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.k; color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                                 Text {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     text: modelData.v === undefined ? "—" : Math.round(modelData.v)
@@ -345,7 +345,9 @@ Item {
                             width: Math.min(bubbleMeasure.implicitWidth + 24, chatList.width * 0.78)
                             height: bubbleText.implicitHeight + 18
                             radius: 14
-                            color: mine ? Theme.primary : Theme.background
+                            // Inside the chat card, so the nested-card fill (the tablet uses the same);
+                            // Theme.background read as a dark hole in dark mode (2026-11-03).
+                            color: mine ? Theme.primary : Theme.cardNested
                             anchors.right: mine ? parent.right : undefined
                             anchors.left: mine ? undefined : parent.left
                             // The coach's bubbles show Claude's formatting (bold, lists, links) instead
@@ -365,8 +367,10 @@ Item {
                                 anchors.margins: 9
                                 text: modelData.text || ""
                                 textFormat: mine ? Text.PlainText : Text.MarkdownText
-                                color: mine ? "white" : Theme.text
-                                linkColor: mine ? "white" : Theme.primary
+                                // Card colour on your green bubble: white in light mode, dark ink on dark
+                                // mode's lighter green, where white was too faint (2026-11-03).
+                                color: mine ? Theme.card : Theme.text
+                                linkColor: mine ? Theme.card : Theme.primary
                                 font.pixelSize: Theme.fontSizeBody
                                 wrapMode: Text.WordWrap
                                 onLinkActivated: (link) => Qt.openUrlExternally(link)
@@ -466,7 +470,7 @@ Item {
                             width: typingDots.width + 28
                             height: 34
                             radius: 14
-                            color: Theme.background
+                            color: Theme.cardNested
                             PulseDots {
                                 id: typingDots
                                 anchors.centerIn: parent

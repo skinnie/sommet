@@ -283,21 +283,25 @@ export default function GearScreen() {
                   const pct = Math.min(100, Math.max(0, percentOf(owner, r)));
                   const barColor = st === 'due' ? theme.error : st === 'soon' ? theme.warning : theme.primary;
                   return (
+                    // The bar ends where "2,740 / 3,000 km" ends; Snooze and × sit beside both
+                    // lines (same layout as the desktop, 2026-11-03).
                     <View key={r.id} style={s.wear}>
-                      <View style={s.remRow}>
-                        <Text style={s.remText} numberOfLines={2}>{r.name}</Text>
-                        {!!st && <StatusChip label={st === 'due' ? t.gearDue : t.gearDueSoon} tone={st === 'due' ? 'error' : 'warning'} />}
-                        <View style={{ flex: 1 }} />
-                        <Text style={s.remProgress}>{progressOf(owner, r)}</Text>
-                        <TouchableOpacity onPress={() => snoozeReminderNow(owner, r, 30).then(reload)}><Text style={s.smallLink}>{t.gearSnooze}</Text></TouchableOpacity>
-                        <TouchableOpacity onPress={() => confirmDeleteReminder(owner, r)} style={s.rowDelete} hitSlop={8}
-                          accessibilityRole="button" accessibilityLabel={t.gearRemoveReminder}>
-                          <Icon name="close" size={16} color={theme.mutedText} />
-                        </TouchableOpacity>
+                      <View style={s.wearMain}>
+                        <View style={s.remRow}>
+                          <Text style={s.remText} numberOfLines={2}>{r.name}</Text>
+                          {!!st && <StatusChip label={st === 'due' ? t.gearDue : t.gearDueSoon} tone={st === 'due' ? 'error' : 'warning'} />}
+                          <View style={{ flex: 1 }} />
+                          <Text style={s.remProgress}>{progressOf(owner, r)}</Text>
+                        </View>
+                        <View style={s.wearTrack} accessible accessibilityLabel={`${Math.round(pct)}%`}>
+                          <View style={{ width: `${pct}%`, height: 4, borderRadius: 2, backgroundColor: barColor }} />
+                        </View>
                       </View>
-                      <View style={s.wearTrack} accessible accessibilityLabel={`${Math.round(pct)}%`}>
-                        <View style={{ width: `${pct}%`, height: 4, borderRadius: 2, backgroundColor: barColor }} />
-                      </View>
+                      <TouchableOpacity onPress={() => snoozeReminderNow(owner, r, 30).then(reload)}><Text style={s.smallLink}>{t.gearSnooze}</Text></TouchableOpacity>
+                      <TouchableOpacity onPress={() => confirmDeleteReminder(owner, r)} style={s.rowDelete} hitSlop={8}
+                        accessibilityRole="button" accessibilityLabel={t.gearRemoveReminder}>
+                        <Icon name="close" size={16} color={theme.mutedText} />
+                      </TouchableOpacity>
                     </View>
                   );
                 })}
@@ -400,7 +404,8 @@ const styles = (th: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   gearSub: { fontSize: 12, color: th.mutedText, marginTop: 2 },
   partRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingLeft: 4 },
   partName: { fontSize: 13.5, color: th.text },
-  wear: { marginTop: 10, paddingLeft: 4, gap: 4 },
+  wear: { marginTop: 10, paddingLeft: 4, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  wearMain: { flex: 1, gap: 4 },
   remRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   remText: { fontSize: 13, color: th.text, flexShrink: 1 },
   remProgress: { fontSize: 12, color: th.mutedText },

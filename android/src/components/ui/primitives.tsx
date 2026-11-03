@@ -195,8 +195,10 @@ export function Dropdown({
           onPress={() => setOpen(false)}
           style={{ flex: 1, backgroundColor: '#00000066', justifyContent: 'center', padding: 28 }}
         >
+          {/* The open list floats with no shadow: the stronger hairline, like the desktop's
+              menus and dialogs (the grey-text colour drew a heavy outline, 2026-11-03). */}
           <View style={{
-            backgroundColor: t.card, borderColor: t.mutedText, borderWidth: 1,
+            backgroundColor: t.card, borderColor: t.borderStrong, borderWidth: 1,
             borderRadius: v3Radius.card, maxHeight: '70%', overflow: 'hidden',
           }}>
             <ScrollView>

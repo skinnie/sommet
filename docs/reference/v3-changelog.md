@@ -7,6 +7,36 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-03: Finishing touches on both apps (0.2.57)
+
+Five small things spotted while doing the picks, fixed on the PC and the tablet before the
+0.2.57 download.
+
+- **Coach "Fresh, ease in" colour** is now a theme colour (`tempered`, an olive between the
+  green and the amber) instead of a fixed `#8FA33B`. It colours the words under the dot, and
+  the old green was hard to read on white (2.8:1). The new one is 4.7:1 in light mode and
+  6.2:1 in dark mode.
+- **Coach number tiles:** the labels (Fitness, Fatigue, Freshness) were 9 px; they now use the
+  caption size, 11 px.
+- **Chat bubbles in dark mode.** On the PC the coach's bubbles used the page background, so
+  they looked like dark holes in the chat card; they now use the nested-card colour, like the
+  tablet. Your own green bubble had white text that was too faint in dark mode (2.8:1); it
+  now uses the card colour, which is white in light mode and dark ink in dark mode (5.8:1).
+  Two other white-on-green spots got the same fix: the "Update" tag on the PC's Connect IQ
+  apps page and the choice buttons on the tablet's offline maps page.
+- **Softer outlines on floating surfaces.** Menus, dialogs, and open dropdown lists on the PC,
+  and the open dropdown list on the tablet, had an outline in the grey text colour; they now
+  use the stronger hairline (`borderStrong`). Buttons, switches, and closed dropdowns keep
+  their darker outline.
+- **Gear wear bar.** On both apps the bar now ends where "2,740 / 3,000 km" ends, with the ×
+  (and Snooze on the tablet) beside both lines. The PC no longer guesses the width of the ×.
+- **Esc in dialogs,** checked again: Esc does close a dialog while you type in it. The earlier
+  test sent the key to the wrong window, so nothing needed changing.
+- Checked in light and dark on the PC (Coach, Gear, the Rename dialog, an open dropdown list)
+  and on the tablet (Coach, Gear with sample reminders in a temporary build, the Sleep score
+  list, offline maps). The "Fresh, ease in" colour itself wasn't on screen: both readiness
+  lights read "Fresh" today.
+
 ## 2026-11-02: The same picks on the tablet (Android 0.2.57)
 
 The 15 of the 19 PC picks that apply to Android, so both apps look and behave alike. Not
