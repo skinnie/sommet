@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { EmptyState } from '../components/ui/primitives';
 import { ActivityRecord, getAllActivities } from '../database/db';
 import { activityForName, colorForName } from '../services/ActivityColors';
 import { distanceLines, hoursLines, energyLines } from '../services/TotalsFacts';
@@ -38,6 +39,7 @@ function formatKm(meters: number): string {
 export default function TotalsScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
+  const navigation = useNavigation<any>();
 
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
   const [selectedYear, setSelectedYear] = useState<number>(0);
@@ -138,10 +140,17 @@ export default function TotalsScreen() {
         </View>
       </View>
 
+      {/* Empty page that says what to do (desktop picks #11). */}
       {yearActivities.length === 0 && (
-        <Text style={styles.emptyText}>
-          {activities.length === 0 ? t.totalsEmptyNoData : t.totalsEmptyYear}
-        </Text>
+        <Card style={{ width: '100%' }}>
+          <EmptyState
+            icon="activity"
+            title={activities.length === 0 ? t.totalsEmptyNoDataTitle : t.totalsEmptyYearTitle}
+            text={activities.length === 0 ? t.totalsEmptyNoDataText : t.totalsEmptyYearText}
+            actionLabel={activities.length === 0 ? t.openActivities : undefined}
+            onAction={() => navigation.navigate('LogList')}
+          />
+        </Card>
       )}
 
       {yearActivities.length > 0 && (

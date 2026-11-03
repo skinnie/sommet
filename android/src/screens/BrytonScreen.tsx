@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Pre
 import { readGrid, writeGrid, GRID_GROUPS, FIELD_NAME, type GridPage, type GridChange } from '../services/BrytonGrid';
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Spacing, v3Radius, v3Type } from '../theme/v3';
-import { Button, StatusLine, Toggle } from '../components/ui/primitives';
+import { Button, Toggle, StatusNote } from '../components/ui/primitives';
 import { Card } from '../components/ui/Card';
 import {
   connectBryton, disconnectBryton, readProfile, writeProfile, isBrytonUsbAvailable,
@@ -45,6 +45,7 @@ export default function BrytonScreen() {
   const [gps, setGps] = useState<EeInfo | null>(null);
   const [gpsBusy, setGpsBusy] = useState(false);
   const [gpsMsg, setGpsMsg] = useState('');
+  const [gpsFailed, setGpsFailed] = useState(false);
 
   const connect = useCallback(async () => {
     setStatus('connecting'); setError(''); setApplyMsg('');
@@ -93,13 +94,15 @@ export default function BrytonScreen() {
   const fmt = (f: Field, v: number | undefined) => (v == null ? '—' : String(v));
 
   const updateGps = useCallback(async () => {
-    setGpsBusy(true); setGpsMsg('');
+    setGpsBusy(true); setGpsMsg(''); setGpsFailed(false);
     try {
       const r = await updateGpsData();
       setGpsMsg(r.message);
+      setGpsFailed(!r.ok);
       setGps(await readGpsData());
     } catch (e: any) {
       setGpsMsg(String(e?.message ?? e));
+      setGpsFailed(true);
     } finally {
       setGpsBusy(false);
     }
@@ -148,11 +151,11 @@ export default function BrytonScreen() {
                 </Text>
                 {(gps.expired || (gps.daysLeft ?? 0) < 13) && (
                   <View style={{ marginTop: v3Spacing.small }}>
-                    <Button label={gpsBusy ? 'Updating…' : 'Update GPS data'} icon="sync" onPress={updateGps}
+                    <Button label="Update GPS data" busy={gpsBusy} icon="sync" onPress={updateGps}
                       disabled={gpsBusy} grow={false} />
                   </View>
                 )}
-                {!!gpsMsg && <StatusLine text={gpsMsg} />}
+                <StatusNote text={gpsMsg} tone={gpsFailed ? 'error' : 'success'} />
               </Card>
             )}
 
@@ -185,8 +188,8 @@ export default function BrytonScreen() {
                 {diffs.includes('map') && !!mapSource && (
                   <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginBottom: v3Spacing.small }}>MAP from intervals.icu: {mapSource}</Text>
                 )}
-                {applyMsg ? <StatusLine text={applyMsg} tone={applyMsg === 'Saved.' ? 'muted' : 'alert'} /> : null}
-                <Button label={applying ? 'Saving…' : 'Apply'} icon="check"
+                <StatusNote text={applyMsg} tone={applyMsg === 'Saved.' ? 'success' : 'error'} />
+                <Button label="Apply" busy={applying} icon="check"
                   onPress={apply} disabled={applying} />
               </Card>
             )}
@@ -229,9 +232,9 @@ export default function BrytonScreen() {
                     </View>
                   );
                 })}
-                {gridMsg ? <StatusLine text={gridMsg} tone={gridMsg.includes('✓') ? 'muted' : 'alert'} /> : null}
+                <StatusNote text={gridMsg} tone={gridMsg.includes('✓') ? 'success' : 'error'} />
                 <View style={{ marginTop: v3Spacing.medium }}>
-                  <Button label={gridBusy ? 'Saving…' : 'Save to Bryton'} icon="check" disabled={gridBusy || JSON.stringify(grid) === JSON.stringify(editGrid)}
+                  <Button label="Save to Bryton" busy={gridBusy} icon="check" disabled={gridBusy || JSON.stringify(grid) === JSON.stringify(editGrid)}
                     onPress={async () => {
                       const changes: GridChange[] = [];
                       editGrid.forEach((p, i) => {

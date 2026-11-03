@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #define FW_CMD_BOOTLOADER 0x0202  // enter bootloader: app model -> "BSL" (re-enumerates)
 #define FW_CMD_MODE       0x0102  // enter firmware-transfer mode; sequence counter resets here
@@ -45,6 +46,32 @@
 #define FW_CHUNK_RETRIES  5
 
 extern void libambit_protocol_set_read_timeout(int ms);
+
+/* Progress for the Firmware screen's checklist (André, 2026-11-02, desktop picks #8). Display
+ * only: the streaming thread writes these, Kotlin polls them through nativeAmbitFwProgress() on
+ * another thread, and nothing in the flash sequence below reads them.
+ *   stage : 0 idle, 1 transfer mode + header, 2 data chunks, 3 commit, 4 finished
+ *   done  : chunks acked so far. While stage is 2 and done is 0, the watch is erasing (the first
+ *           chunk acks only when the ~57 s flash erase ends).
+ *   total : chunks in the image */
+static atomic_int g_fw_stage = 0;
+static atomic_int g_fw_chunks_done = 0;
+static atomic_int g_fw_chunks_total = 0;
+
+/* Back to idle, so a poller started before the next stream can't read the last run's numbers. */
+void ambit3_fw_progress_reset(void)
+{
+    atomic_store(&g_fw_stage, 0);
+    atomic_store(&g_fw_chunks_done, 0);
+    atomic_store(&g_fw_chunks_total, 0);
+}
+
+void ambit3_fw_progress(int *stage, int *done, int *total)
+{
+    if (stage) *stage = atomic_load(&g_fw_stage);
+    if (done) *done = atomic_load(&g_fw_chunks_done);
+    if (total) *total = atomic_load(&g_fw_chunks_total);
+}
 
 /* Sends one firmware opcode and treats a successful (empty) reply as the ack. Frees any reply.
  * Returns 0 on ack, -1 on failure. */
@@ -97,6 +124,10 @@ int ambit3_fw_stream(ambit_object_t *object,
 {
     if (object == NULL || header == NULL || header_len != FW_HEADER_LEN) return -1;
 
+    atomic_store(&g_fw_chunks_done, 0);
+    atomic_store(&g_fw_chunks_total, 0);
+    atomic_store(&g_fw_stage, 1);
+
     if (resume) {
         // The watch is ALREADY in BSL (an interrupted transfer). SuuntoLink then skips both
         // 0x0202 and 0x0102 and just re-streams the whole file from offset 0 - confirmed in
@@ -128,6 +159,8 @@ int ambit3_fw_stream(ambit_object_t *object,
     // window for the whole stream, then restore it no matter how we exit.
     size_t n_chunks = (payload_len + FW_CHUNK - 1) / FW_CHUNK;
     LOG_INFO("firmware: streaming %zu bytes in %zu chunks", payload_len, n_chunks);
+    atomic_store(&g_fw_chunks_total, (int)n_chunks);
+    atomic_store(&g_fw_stage, 2);
     libambit_protocol_set_read_timeout(FW_ERASE_ACK_MS);
 
     int ok = 0;
@@ -152,6 +185,7 @@ int ambit3_fw_stream(ambit_object_t *object,
             ok = -1;
             break;
         }
+        atomic_store(&g_fw_chunks_done, (int)(idx + 1));
         if ((idx % 200) == 0 || idx + 1 == n_chunks) {
             LOG_INFO("firmware: chunk %zu/%zu (%zu B)", idx + 1, n_chunks, off + clen);
         }
@@ -161,6 +195,7 @@ int ambit3_fw_stream(ambit_object_t *object,
     if (ok != 0) return -1;
 
     if (do_commit) {
+        atomic_store(&g_fw_stage, 3);
         LOG_INFO("firmware: 0x0e03 commit (flashing)");
         libambit_protocol_set_read_timeout(FW_ERASE_ACK_MS);
         int cret = fw_cmd(object, FW_CMD_COMMIT, NULL, 0);
@@ -169,5 +204,6 @@ int ambit3_fw_stream(ambit_object_t *object,
     } else {
         LOG_INFO("firmware: stream complete, NOT committed (watch stays in BSL, recoverable)");
     }
+    atomic_store(&g_fw_stage, 4);
     return 0;
 }

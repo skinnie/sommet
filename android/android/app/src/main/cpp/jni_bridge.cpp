@@ -73,6 +73,9 @@ extern "C" int ambit3_fw_enter_bsl(ambit_object_t *object);
 extern "C" int ambit3_fw_reboot(ambit_object_t *object);
 extern "C" int ambit3_fw_stream(ambit_object_t *object, const uint8_t *header, size_t header_len,
                                 const uint8_t *payload, size_t payload_len, int do_commit, int resume);
+// Display-only progress of the stream above (stage, chunks done, chunks total).
+extern "C" void ambit3_fw_progress(int *stage, int *done, int *total);
+extern "C" void ambit3_fw_progress_reset(void);
 extern "C" int ambit3_read_object_by_id_raw(ambit_object_t *object, uint8_t entry_id, uint8_t **out, size_t *out_len);
 extern "C" int ambit3_read_settings_raw(ambit_object_t *object, uint8_t **out, size_t *out_len);
 extern "C" int ambit3_write_settings_raw(ambit_object_t *object, const uint8_t *data, size_t datalen, uint8_t **out, size_t *out_len);
@@ -1404,6 +1407,28 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitFwStream(
     env->ReleaseByteArrayElements(header, hbytes, JNI_ABORT);
     env->ReleaseByteArrayElements(payload, pbytes, JNI_ABORT);
     return ret == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+/* [stage, chunksDone, chunksTotal] of the stream above, for the Firmware screen's checklist.
+ * Read-only and lock-free: Kotlin polls it from another thread while nativeAmbitFwStream
+ * blocks. Sends nothing to the watch. */
+JNIEXPORT jintArray JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitFwProgress(
+        JNIEnv *env, jobject /* thiz */)
+{
+    int stage = 0, done = 0, total = 0;
+    ambit3_fw_progress(&stage, &done, &total);
+    jint vals[3] = { stage, done, total };
+    jintArray out = env->NewIntArray(3);
+    if (out) env->SetIntArrayRegion(out, 0, 3, vals);
+    return out;
+}
+
+JNIEXPORT void JNICALL
+Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitFwProgressReset(
+        JNIEnv *env, jobject /* thiz */)
+{
+    ambit3_fw_progress_reset();
 }
 
 /**

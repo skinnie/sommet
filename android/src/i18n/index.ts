@@ -192,6 +192,10 @@ const fr = {
   connectHint:  'Connectez la montre et lancez une synchronisation',
   loadingActivities: 'Chargement des activités…',
   noFilter:     'Aucune activité pour ce filtre',
+  // Activities, empty and failed (André, 2026-11-02, desktop picks #11/#19).
+  activitiesEmptyTitle: 'Aucune activité pour l’instant',
+  activitiesEmptyText: 'Branchez votre montre, ou connectez intervals.icu pour importer votre historique.',
+  activitiesLoadContext: 'lecture des activités',
   deleteHint:   'Appui long sur une activité pour la supprimer',
   unknownDate:  'Date inconnue',
 
@@ -581,8 +585,8 @@ const fr = {
   mapsSection: 'Cartes',
   mapsProviderDesc: (name: string) => `Fournisseur : tuiles de ${name}`,
   mapProviderIgnLabel: 'IGN (France)',
-  mapProviderOsmLabel: 'OpenStreetMap (standard)',
-  mapProviderCyclosmLabel: 'CyclOSM (axé cyclisme)',
+  mapProviderOsmLabel: 'OpenStreetMap',
+  mapProviderCyclosmLabel: 'CyclOSM (cyclisme)',
   offlineMapCacheSize: (size: string) => `Cache de cartes hors-ligne : ${size}`,
   offlineMapClearCache: 'Vider le cache',
 
@@ -953,6 +957,19 @@ const fr = {
   gearPickClear: 'Retirer',
   gearDueCount: (n: number) => n === 1 ? '1 entretien à faire' : `${n} entretiens à faire`,
   gearSoonCount: (n: number) => n === 1 ? '1 entretien bientôt dû' : `${n} entretiens bientôt dus`,
+  gearEmptyTitle: 'Pas encore de matériel',
+  gearEmptyText: 'Connectez intervals.icu pour importer vos vélos et chaussures, ou ajoutez-en un ci-dessous.',
+  openConnections: 'Ouvrir Réglages → Connexions',
+  gearRemoveReminder: 'Retirer le rappel',
+  routeLibraryEmptyTitle: 'Rien d’enregistré pour l’instant',
+  routeLibraryEmptyText: 'Importez un GPX et il est gardé ici.',
+  routeLibraryEmptyAction: 'Importer un GPX…',
+  routeOnWatchEmptyTitle: 'Aucun itinéraire ici',
+  totalsEmptyNoDataTitle: 'Rien à additionner pour l’instant',
+  totalsEmptyNoDataText: 'Lisez d’abord vos activités sur la montre, et cette page se remplit.',
+  totalsEmptyYearTitle: 'Aucune activité cette année',
+  totalsEmptyYearText: 'Choisissez une autre année ci-dessus.',
+  openActivities: 'Ouvrir Activités',
 };
 
 const en: typeof fr = {
@@ -1097,6 +1114,10 @@ const en: typeof fr = {
   connectHint:  'Connect the watch and start a sync',
   loadingActivities: 'Loading activities…',
   noFilter:     'No activities for this filter',
+  // Activities, empty and failed (André, 2026-11-02, desktop picks #11/#19).
+  activitiesEmptyTitle: 'No activities yet',
+  activitiesEmptyText: 'Plug in your watch, or connect intervals.icu to bring in your history.',
+  activitiesLoadContext: 'reading activities',
   deleteHint:   'Long press on an activity to delete it',
   unknownDate:  'Unknown date',
 
@@ -1470,8 +1491,8 @@ const en: typeof fr = {
   mapsSection: 'Maps',
   mapsProviderDesc: (name: string) => `Provider: tiles from ${name}`,
   mapProviderIgnLabel: 'IGN (France)',
-  mapProviderOsmLabel: 'OpenStreetMap (standard)',
-  mapProviderCyclosmLabel: 'CyclOSM (cycling-focused)',
+  mapProviderOsmLabel: 'OpenStreetMap',
+  mapProviderCyclosmLabel: 'CyclOSM (cycling)',
   offlineMapCacheSize: (size: string) => `Offline map cache: ${size}`,
   offlineMapClearCache: 'Clear cache',
 
@@ -1836,6 +1857,19 @@ const en: typeof fr = {
   gearPickClear: 'Clear',
   gearDueCount: (n: number) => n === 1 ? '1 service due' : `${n} services due`,
   gearSoonCount: (n: number) => n === 1 ? '1 service due soon' : `${n} services due soon`,
+  gearEmptyTitle: 'No gear yet',
+  gearEmptyText: 'Connect intervals.icu to import your bikes and shoes, or add one below.',
+  openConnections: 'Open Settings → Connections',
+  gearRemoveReminder: 'Remove reminder',
+  routeLibraryEmptyTitle: 'Nothing saved yet',
+  routeLibraryEmptyText: 'Upload a GPX and it\'s kept here.',
+  routeLibraryEmptyAction: 'Upload GPX…',
+  routeOnWatchEmptyTitle: 'No routes here',
+  totalsEmptyNoDataTitle: 'Nothing to add up yet',
+  totalsEmptyNoDataText: 'Read your activities off the watch first, and this page fills in.',
+  totalsEmptyYearTitle: 'No activities in this year',
+  totalsEmptyYearText: 'Pick another year above.',
+  openActivities: 'Open Activities',
 };
 
 // Forced to English regardless of device locale (was `isFrench ? fr : en`,

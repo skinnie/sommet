@@ -13,7 +13,7 @@ import { WatchRoute } from '../services/RouteReader';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Button, StatusLine, Dropdown } from '../components/ui/primitives';
+import { Button, Dropdown, EmptyState, StatusNote } from '../components/ui/primitives';
 import { buildRoutePins } from '../services/RoutePins';
 import { TrackPreview } from '../components/TrackPreview';
 import { SortBar } from '../components/ui/SortBar';
@@ -166,6 +166,10 @@ export default function RouteScreen() {
     }
   };
   const [sendState, setSendState] = useState<SendRouteState>({ phase: 'idle' });
+  // The result of a send or a removal, as a note under its card (desktop picks #7, like
+  // RouteLibraryView's StatusNote) instead of a pop-up.
+  const [sendNote, setSendNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [removeNote, setRemoveNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
   const sendBusy = sendState.phase === 'connecting' || sendState.phase === 'writing';
 
   const [onWatch, setOnWatch] = useState<WatchRoute[] | null>(null);
@@ -245,19 +249,20 @@ export default function RouteScreen() {
     // The last state the send reported says how it ended. When it worked, say so, as removing a
     // route already does (F23).
     let last: SendRouteState = { phase: 'idle' };
+    setSendNote(null);
     try {
       await uploadRoute(route, s => { last = s; setSendState(s); }, { legacy: params.legacy ?? false });
     } catch (e: any) {
-      Alert.alert(t.error, e?.message ?? t.unknownError);
+      setSendNote({ text: e?.message ?? t.unknownError, tone: 'error' });
       setSendState({ phase: 'error', error: e?.message });
       return;
     }
     if (last.phase === 'done') {
       setPending(null);
       loadOnWatch();
-      Alert.alert(t.sendRouteConfirmTitle, t.routeSent(route.name));
+      setSendNote({ text: t.routeSent(route.name), tone: 'success' });
     } else if (last.phase === 'error') {
-      Alert.alert(t.error, last.error ?? t.unknownError);
+      setSendNote({ text: last.error ?? t.unknownError, tone: 'error' });
     }
   }
 
@@ -267,11 +272,12 @@ export default function RouteScreen() {
       { text: t.cancel, style: 'cancel' },
       { text: t.routeItemRemoveBtn, style: 'destructive', onPress: async () => {
         setRemovingName(route.name);
+        setRemoveNote(null);
         try {
           await removeRouteFromWatch(route.name);
-          Alert.alert(t.routeRemoveTitle, t.routeRemoved(route.name));
+          setRemoveNote({ text: t.routeRemoved(route.name), tone: 'success' });
         } catch (e: any) {
-          Alert.alert(t.error, e?.message ?? t.unknownError);
+          setRemoveNote({ text: e?.message ?? t.unknownError, tone: 'error' });
         } finally {
           setRemovingName(null);
           loadOnWatch();
@@ -341,6 +347,7 @@ export default function RouteScreen() {
               repeating the card's title. */}
           <Button label="Open planner" variant="outline" onPress={() => navigation.navigate('RouteWeather')} />
         </View>
+        {!pending && sendNote && <StatusNote text={sendNote.text} tone={sendNote.tone} />}
 
         {pending && (
           <View style={{ marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
@@ -362,14 +369,15 @@ export default function RouteScreen() {
             </View>
             {(brytonPlugged || magene) && (
               <View style={styles.row}>
-                {brytonPlugged && <Button label={bikeBusy === 'bryton' ? 'Sending…' : 'Send to Bryton'} variant="text" grow={false}
+                {brytonPlugged && <Button label="Send to Bryton" variant="text" grow={false} busy={bikeBusy === 'bryton'}
                   disabled={!!bikeBusy} onPress={() => sendToBike('bryton')} />}
-                {magene && <Button label={bikeBusy === 'magene' ? 'Sending…' : 'Send to Magene'} variant="text" grow={false}
+                {magene && <Button label="Send to Magene" variant="text" grow={false} busy={bikeBusy === 'magene'}
                   disabled={!!bikeBusy} onPress={() => sendToBike('magene')} />}
               </View>
             )}
-            {bikeMsg ? <StatusLine text={bikeMsg} tone={bikeMsg.includes('✓') ? 'muted' : 'alert'} /> : null}
-            {sendBusy && <StatusLine text={sendState.phase === 'connecting' ? t.connecting : t.routeWritingMsg} />}
+            <StatusNote text={bikeMsg} tone={bikeMsg.includes('✓') ? 'success' : 'error'} />
+            {sendBusy && <StatusNote text={sendState.phase === 'connecting' ? t.connecting : t.routeWritingMsg} tone="working" />}
+            {sendNote && <StatusNote text={sendNote.text} tone={sendNote.tone} />}
           </View>
         )}
       </Card>
@@ -387,9 +395,8 @@ export default function RouteScreen() {
         </View>
 
         {source === 1 && library.length === 0 && (
-          <Text style={[styles.itemStats, { marginTop: v3Spacing.small }]}>
-            Routes you import or plan are kept here.
-          </Text>
+          <EmptyState icon="route" title={t.routeLibraryEmptyTitle} text={t.routeLibraryEmptyText}
+            actionLabel={t.routeLibraryEmptyAction} onAction={handlePick} />
         )}
         {source === 1 && library.map((r, i) => (
           <View key={r.id} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
@@ -406,7 +413,7 @@ export default function RouteScreen() {
                 if (pr) { setPending(pr); scrollRef.current?.scrollTo({ y: 0, animated: true }); }
               }} />
               <Button label="Rename" variant="text" grow={false} onPress={() => setRenaming({ id: r.id, value: r.name })} />
-              <Button label="Delete" variant="text" tone="alert" grow={false} onPress={() => Alert.alert(
+              <Button label="Delete" variant="text" danger grow={false} onPress={() => Alert.alert(
                 'Delete route', `Remove “${r.name}” from the Library?`, [
                   { text: t.cancel, style: 'cancel' },
                   { text: t.delete, style: 'destructive', onPress: () => deleteLibraryRoute(r.id).then(refreshLibrary) },
@@ -418,15 +425,14 @@ export default function RouteScreen() {
         {source === 0 && watchHere && (<>
 
         {onWatchLoading && (
-          <StatusLine text={t.routeOnWatchReading} />
+          <StatusNote text={t.routeOnWatchReading} tone="working" />
         )}
         {!onWatchLoading && onWatchError && (
-          <Text style={[styles.itemStats, { color: theme.error, marginTop: v3Spacing.small }]}>
-            {t.routeOnWatchError(onWatchError)}
-          </Text>
+          <StatusNote text={t.routeOnWatchError(onWatchError)} tone="error" />
         )}
+        {removeNote && <StatusNote text={removeNote.text} tone={removeNote.tone} />}
         {!onWatchLoading && !onWatchError && onWatch && onWatch.length === 0 && (
-          <Text style={[styles.itemStats, { marginTop: v3Spacing.small }]}>{t.routeOnWatchEmpty}</Text>
+          <EmptyState icon="route" title={t.routeOnWatchEmptyTitle} />
         )}
 
         {!onWatchLoading && sortedOnWatch && sortedOnWatch.length > 1 && (
@@ -443,24 +449,12 @@ export default function RouteScreen() {
                   {t.routeStats(formatDist(route.distanceM), route.points.length, route.ascentM, route.descentM)}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={styles.exportBtn}
-                disabled={exportingIndex !== null}
-                onPress={() => handleExportItem(route, i)}
-              >
-                <Text style={styles.exportBtnText}>
-                  {exportingIndex === i ? '…' : t.routeItemExportBtn}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.exportBtn}
-                disabled={removingName !== null || onWatchLoading}
-                onPress={() => handleRemoveItem(route)}
-              >
-                <Text style={styles.exportBtnText}>
-                  {removingName === route.name ? '…' : t.routeItemRemoveBtn}
-                </Text>
-              </TouchableOpacity>
+              <Button label={t.routeItemExportBtn} grow={false} busy={exportingIndex === i}
+                disabled={exportingIndex !== null} onPress={() => handleExportItem(route, i)}
+                style={{ paddingVertical: 6, paddingHorizontal: 12 }} />
+              <Button label={t.routeItemRemoveBtn} grow={false} danger busy={removingName === route.name}
+                disabled={removingName !== null || onWatchLoading} onPress={() => handleRemoveItem(route)}
+                style={{ paddingVertical: 6, paddingHorizontal: 12 }} />
             </View>
             {route.points.length > 1 && (
               <Button label="Open in planner" variant="text" grow={false}

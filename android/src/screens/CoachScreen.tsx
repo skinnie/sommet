@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl,
   TextInput, TouchableOpacity,
@@ -10,9 +10,12 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import { loadCoachData, CoachData, ReadinessLight, WorkoutPick } from '../services/CoachService';
 import {
-  sendCoachMessage, hasAnthropicKey, getChatBackend, ChatMessage, ChatBackend,
+  sendCoachMessage, hasAnthropicKey, getChatBackend, ChatMessage, ChatBackend, CoachCard,
+  msgUnreachable,
 } from '../services/CoachChat';
 import Icon from '../components/ui/Icon';
+import Markdown from '../components/Markdown';
+import { Button, PulseDots, StatTile, StatusChip, StatusNote } from '../components/ui/primitives';
 
 // Coach — the Android counterpart of desktop/qml/pages/CoachPage.qml's readiness beacon
 // (André, 2026-08-26: "port everything to android").
@@ -52,6 +55,15 @@ export default function CoachScreen() {
   const [sending, setSending] = useState(false);
   const [backend, setBackend] = useState<ChatBackend>('canned');
   const [keySet, setKeySet] = useState(false);
+  const aiOn = backend === 'claude' && keySet;
+
+  // Keep the newest bubble (and the writing dots) in view, like the desktop's chat list: scroll
+  // to the end once the content has grown after a message was added or sending started.
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollPending = useRef(false);
+  useEffect(() => {
+    if (messages.length > 0 || sending) scrollPending.current = true;
+  }, [messages.length, sending]);
 
   // Settings -> Coach picks the replies (desktop parity). Re-read on every visit, so coming back
   // from Settings shows the new choice. Claude without a key still answers pre-written
@@ -69,14 +81,15 @@ export default function CoachScreen() {
     setInput('');
     setSending(true);
     try {
-      const reply = await sendCoachMessage(next, data.readiness, backend);
-      setMessages([...next, { role: 'coach', text: reply }]);
+      const reply = await sendCoachMessage(next, data.readiness, backend, data.picks);
+      setMessages([...next, { role: 'coach', ...reply }]);
     } catch (e: any) {
-      setMessages([...next, { role: 'coach', text: String(e?.message ?? e) }]);
+      // A local note (desktop wording): shown, never sent back to Claude.
+      setMessages([...next, { role: 'coach', text: msgUnreachable(String(e?.message ?? e)), local: true }]);
     } finally {
       setSending(false);
     }
-  }, [input, sending, messages, data.readiness, backend]);
+  }, [input, sending, messages, data.readiness, data.picks, backend]);
 
   // Semantic colours, matching the desktop's own mapping of light -> Theme colour.
   const lightColor = (l: ReadinessLight): string =>
@@ -95,17 +108,19 @@ export default function CoachScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
+      onContentSizeChange={() => {
+        if (!scrollPending.current) return;
+        scrollPending.current = false;
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }}
       style={{ flex: 1, backgroundColor: t.background }}
       contentContainerStyle={{ padding: v3Spacing.medium }}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={t.primary} />}
     >
       {loading && !r && <ActivityIndicator color={t.primary} style={{ marginVertical: v3Spacing.large }} />}
 
-      {error.length > 0 && (
-        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <Text style={{ color: t.error, fontSize: v3Type.body }}>{error}</Text>
-        </View>
-      )}
+      <StatusNote text={error} tone="error" style={{ marginTop: 0, marginBottom: v3Spacing.medium }} />
 
       {!loading && !r && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
@@ -153,19 +168,7 @@ export default function CoachScreen() {
           {data.picks.length > 0 && (
             <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
               <Text style={[styles.label, { color: t.mutedText, marginBottom: v3Spacing.small }]}>Today's picks</Text>
-              {data.picks.map((p: WorkoutPick, i) => (
-                <View key={i} style={[styles.pick, { backgroundColor: t.cardNested, borderRadius: v3Radius.small }]}>
-                  <View style={styles.pickHead}>
-                    <Text style={[styles.pickName, { color: t.text }]} numberOfLines={2}>{p.name}</Text>
-                    <Text style={[styles.pickDur, { color: t.mutedText }]}>
-                      {p.durationSec ? Math.round(p.durationSec / 60) + 'min' : ''}
-                    </Text>
-                  </View>
-                  <Text style={[styles.pickMeta, { color: t.mutedText }]}>
-                    {p.intensity} · IF {p.intensityFactor ? p.intensityFactor.toFixed(2) : '—'} · {p.load ? Math.round(p.load) : '—'} TSS
-                  </Text>
-                </View>
-              ))}
+              {data.picks.map((p: WorkoutPick, i) => <WorkoutCard key={i} pick={p} />)}
             </View>
           )}
 
@@ -199,11 +202,16 @@ export default function CoachScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small, marginBottom: v3Spacing.small }}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.label, { color: t.mutedText }]}>Coach</Text>
-            <Text style={[styles.caption, { color: t.mutedText }]}>
-              {backend === 'claude'
-                ? (keySet ? 'AI chat on' : 'Add your API key in Settings → Coach to turn on AI chat')
-                : 'Pre-written answers — turn on AI chat in Settings → Coach'}
-            </Text>
+            {/* "AI chat on" as the app's status tag (desktop picks #6). */}
+            {aiOn
+              ? <StatusChip label="AI chat on" tone="success" style={{ marginTop: 2 }} />
+              : (
+                <Text style={[styles.caption, { color: t.mutedText }]}>
+                  {backend === 'claude'
+                    ? 'Add your API key in Settings → Coach to turn on AI chat'
+                    : 'Pre-written answers — turn on AI chat in Settings → Coach'}
+                </Text>
+              )}
           </View>
           <TouchableOpacity
             onPress={() => navigation.navigate('Settings', { section: 'coach' })}
@@ -216,32 +224,52 @@ export default function CoachScreen() {
           </TouchableOpacity>
         </View>
 
-        {messages.length === 0 && backend === 'claude' && keySet && (
+        {messages.length === 0 && aiOn && (
           <Text style={[styles.caption, { color: t.mutedText, marginBottom: v3Spacing.small }]}>
             Ask about today, and I read your real training when I answer.
           </Text>
         )}
 
         {messages.map((m, i) => (
-          <View
-            key={i}
-            style={[
-              styles.bubble,
-              m.role === 'me'
-                ? { backgroundColor: t.primary, alignSelf: 'flex-end' }
-                : { backgroundColor: t.cardNested, alignSelf: 'flex-start' },
-            ]}
-          >
-            <Text style={{ color: m.role === 'me' ? '#fff' : t.text, fontSize: v3Type.body }}>{m.text}</Text>
+          <View key={i} style={{ marginBottom: v3Spacing.small }}>
+            {m.text.length > 0 && (
+              <View
+                style={[
+                  styles.bubble,
+                  m.role === 'me'
+                    ? { backgroundColor: t.primary, alignSelf: 'flex-end' }
+                    : { backgroundColor: t.cardNested, alignSelf: 'flex-start' },
+                ]}
+              >
+                {/* The coach's bubbles show Claude's formatting (bold, lists, links) instead of
+                    raw ** and dashes; your own stay plain text (desktop picks #4). */}
+                {m.role === 'me'
+                  ? <Text style={{ color: '#fff', fontSize: v3Type.body }}>{m.text}</Text>
+                  : <Markdown text={m.text} color={t.text} linkColor={t.primary} fontSize={v3Type.body}
+                      codeBackground={t.border} />}
+              </View>
+            )}
+            {/* Cards from Claude (desktop picks #18): a workout, one number in a tile, or a tip. */}
+            {m.role === 'coach' && (m.cards ?? []).map((c, ci) => <ChatCard key={ci} card={c} />)}
           </View>
         ))}
 
-        {sending && <ActivityIndicator color={t.primary} style={{ marginVertical: v3Spacing.small }} />}
+        {/* While Claude writes: a coach bubble with the app's pulsing dots (desktop picks #4). */}
+        {sending && (
+          <View
+            accessible
+            accessibilityLabel="The coach is writing"
+            style={[styles.bubble, styles.typing, { backgroundColor: t.cardNested, alignSelf: 'flex-start' }]}
+          >
+            <PulseDots color={t.mutedText} />
+          </View>
+        )}
 
-        {/* Suggestion chips - the same three the desktop offers. */}
+        {/* Suggestion chips. "Send it to my watch" is left out until sending from the Coach
+            works: today it only answered that it isn't wired up (desktop picks #17). */}
         {!sending && (
           <View style={styles.chips}>
-            {['Something shorter', 'Outdoor instead', 'Send it to my watch'].map(label => (
+            {['Something shorter', 'Outdoor instead'].map(label => (
               <TouchableOpacity
                 key={label}
                 onPress={() => { setInput(label); }}
@@ -263,19 +291,60 @@ export default function CoachScreen() {
             returnKeyType="send"
             style={[styles.input, { color: t.text, backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]}
           />
-          <TouchableOpacity
-            onPress={send}
-            disabled={!input.trim() || sending}
-            style={[styles.sendBtn, {
-              backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small,
-              opacity: !input.trim() || sending ? 0.5 : 1,
-            }]}
-          >
-            <Text style={{ color: t.text, fontSize: v3Type.body, fontWeight: '600' }}>Send</Text>
-          </TouchableOpacity>
+          {/* Busy while Claude writes: keeps its name, dots pulse, taps are ignored (picks #5). */}
+          <Button label="Send" onPress={send} busy={sending} disabled={!input.trim()} grow={false} />
         </View>
       </View>
     </ScrollView>
+  );
+}
+
+// One workout: today's catalogue picks and Claude's workout cards use the same look.
+function WorkoutCard({ pick, inChat }: { pick: Partial<WorkoutPick>; inChat?: boolean }) {
+  const t = useV3Theme();
+  return (
+    <View style={[styles.pick, { backgroundColor: t.cardNested, borderRadius: v3Radius.small },
+                  inChat && { marginBottom: 0 }]}>
+      <View style={styles.pickHead}>
+        <Text style={[styles.pickName, { color: t.text }]} numberOfLines={2}>{pick.name}</Text>
+        <Text style={[styles.pickDur, { color: t.mutedText }]}>
+          {pick.durationSec ? Math.round(pick.durationSec / 60) + 'min' : ''}
+        </Text>
+      </View>
+      <Text style={[styles.pickMeta, { color: t.mutedText }]}>
+        {pick.intensity} · IF {pick.intensityFactor ? pick.intensityFactor.toFixed(2) : '—'} · {pick.load ? Math.round(pick.load) : '—'} TSS
+      </Text>
+    </View>
+  );
+}
+
+// A card under a coach bubble. Same width rule as the desktop: at most 280, or 78% of the chat.
+function ChatCard({ card }: { card: CoachCard }) {
+  const t = useV3Theme();
+  const box = { alignSelf: 'flex-start' as const, width: '78%' as const, maxWidth: 280 };
+  if (card.type === 'stat') {
+    return (
+      <StatTile
+        label={card.label ?? ''}
+        value={card.value ?? ''}
+        unit={card.unit}
+        caption={card.caption}
+        style={[box, { marginTop: v3Spacing.small }]}
+      />
+    );
+  }
+  if (card.type === 'note') {
+    if (!card.text) return null;
+    return (
+      <View style={[box, styles.note, { backgroundColor: t.cardNested, borderRadius: v3Radius.small }]}>
+        <Text style={{ color: t.text, fontSize: v3Type.label }}>{card.text}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[box, { marginTop: v3Spacing.small }]}>
+      <WorkoutCard pick={card} inChat />
+    </View>
   );
 }
 
@@ -347,12 +416,13 @@ const styles = StyleSheet.create({
   pickDur: { fontSize: v3Type.caption },
   pickMeta: { fontSize: v3Type.caption, marginTop: 3 },
   legend: { flexDirection: 'row', alignItems: 'center', marginBottom: v3Spacing.small },
-  bubble: { maxWidth: '85%', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, marginBottom: v3Spacing.small },
+  bubble: { maxWidth: '85%', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14 },
+  typing: { minHeight: 34, paddingHorizontal: 14, justifyContent: 'center', marginBottom: v3Spacing.small },
+  note: { padding: 10, marginTop: v3Spacing.small },
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: v3Spacing.medium },
   chip: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, marginRight: 6, marginBottom: 6 },
   inputRow: { flexDirection: 'row', alignItems: 'center' },
   input: { flex: 1, borderWidth: 1, paddingHorizontal: v3Spacing.small, paddingVertical: 9, fontSize: v3Type.body, marginRight: v3Spacing.small },
-  sendBtn: { borderWidth: 1, paddingHorizontal: v3Spacing.medium, paddingVertical: 10 },
   swatch: { width: 12, height: 4, borderRadius: 2, marginRight: 6 },
   caption: { fontSize: v3Type.caption },
 });

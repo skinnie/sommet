@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal, Pressable, View, Text, TextInput, ScrollView, ActivityIndicator, StyleSheet,
 } from 'react-native';
+import { SearchField } from './ui/primitives';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
 import {
   Food, portion, searchFoods, recentFoods, rememberFood, isBarcode,
@@ -82,8 +83,8 @@ export function EmberMealModal({ visible, fasting, onClose, onLog }: {
           {!picked && (
             <>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <TextInput style={[input, { flex: 1 }]} value={query} onChangeText={setQuery} autoFocus
-                  placeholder="Search a food or type a barcode" placeholderTextColor={t.mutedText} />
+                <SearchField style={{ flex: 1 }} value={query} onChangeText={setQuery} autoFocus
+                  placeholder="Search a food or type a barcode" />
                 <Pressable onPress={() => setScanning(v => !v)}
                   style={[styles.btn, { borderColor: t.border, marginLeft: v3Spacing.small }]}>
                   <Text style={{ color: t.primary, fontWeight: '700' }}>{scanning ? 'Stop' : 'Scan'}</Text>

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Modal, Pressable } from 'react-native';
 import { useV3Theme, v3Spacing, v3Radius, v3Type } from '../theme/v3';
-import { Button, StatusLine, Toggle } from '../components/ui/primitives';
+import { Button, Toggle, StatusNote } from '../components/ui/primitives';
 import { Card } from '../components/ui/Card';
 import { getAthleteThresholds, type AthleteThresholds } from '../services/ApiIntervalsIcu';
 import {
@@ -162,9 +162,9 @@ export default function MageneScreen() {
                 Device profile: FTP {device.ftp} W · LTHR {device.lthr} · Max HR {device.maxHr} · {device.weight} kg · age {device.age}
               </Text>}
               <View style={{ flexDirection: 'row', gap: v3Spacing.small, marginTop: v3Spacing.medium, flexWrap: 'wrap' }}>
-                <Button label={busy === 'alt' ? 'Calibrating…' : 'Calibrate altitude'} onPress={doAltitude} disabled={!!busy} variant="text" grow={false} />
+                <Button label="Calibrate altitude" busy={busy === 'alt'} onPress={doAltitude} disabled={!!busy} variant="text" grow={false} />
               </View>
-              {msg ? <StatusLine text={msg} tone={msg.includes('✓') ? 'muted' : 'alert'} /> : null}
+              <StatusNote text={msg} tone={msg.includes('✓') ? 'success' : 'error'} />
             </Card>
 
             <Card>
@@ -184,7 +184,7 @@ export default function MageneScreen() {
                       </Text>
                     </View>
                   ))}
-                  <Button label={busy === 'profile' ? 'Saving…' : 'Apply'} icon="check" onPress={applyProfile} disabled={!!busy} />
+                  <Button label="Apply" busy={busy === 'profile'} icon="check" onPress={applyProfile} disabled={!!busy} />
                 </>
               )}
             </Card>
@@ -213,7 +213,7 @@ export default function MageneScreen() {
                 ))}
                 <View style={{ flexDirection: 'row', gap: v3Spacing.small, marginTop: v3Spacing.medium, flexWrap: 'wrap' }}>
                   <Button label="+ Screen" onPress={() => editPages(p => { p.push([0x10, 0xb1]); })} disabled={editedPages.length >= MAX_PAGES} variant="text" grow={false} />
-                  <Button label={busy === 'pages' ? 'Saving…' : pagesChanged ? 'Save to C406' : 'No changes'} icon="check"
+                  <Button label={pagesChanged ? 'Save to C406' : 'No changes'} busy={busy === 'pages'} icon="check"
                     onPress={savePages} disabled={!!busy || !pagesChanged} grow={false} />
                 </View>
               </Card>
@@ -258,7 +258,7 @@ export default function MageneScreen() {
                   </View>
                 )}
                 <View style={{ marginTop: v3Spacing.medium }}>
-                  <Button label={busy === 'settings' ? 'Saving…' : Object.keys(changes).length ? 'Save to C406' : 'No changes'}
+                  <Button label={Object.keys(changes).length ? 'Save to C406' : 'No changes'} busy={busy === 'settings'}
                     icon="check" onPress={saveSettings} disabled={!!busy || Object.keys(changes).length === 0} />
                 </View>
               </Card>

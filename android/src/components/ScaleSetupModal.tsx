@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
+import { PulseDots, SegmentedControl, StatusChip, StatusNote } from './ui/primitives';
 import {
   FoundScale, findScales, forgetScale, getBodyProfile, getScaleAddress, isScaleAvailable, scaleStatus,
   setBodyProfile, setScaleAddress, startListening, stopListening, BodyProfile,
@@ -48,6 +49,9 @@ export function ScaleSetupModal({ visible, onClose, onChanged }: {
 
   const btn = [styles.button, { backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }];
   const txt = { color: t.text, fontSize: v3Type.body, fontWeight: '600' as const };
+  // Forget: the calm red of a delete (desktop picks #5, RoundedButton.danger).
+  const dangerBtn = [styles.button, { backgroundColor: t.error + '1A', borderColor: t.error, borderRadius: v3Radius.small }];
+  const dangerTxt = { color: t.error, fontSize: v3Type.body, fontWeight: '700' as const };
   const body = { color: t.text, fontSize: v3Type.body, marginBottom: v3Spacing.small };
   const muted = { color: t.mutedText, fontSize: v3Type.caption, marginBottom: v3Spacing.small };
   const h = parseFloat(heightText.replace(',', '.'));
@@ -61,14 +65,16 @@ export function ScaleSetupModal({ visible, onClose, onChanged }: {
           </Text>
 
           {step === 0 && (<>
-            <Text style={body}>{status.listening ? 'Listening' : 'Not listening'}</Text>
+            {/* The state as a tag, like the Weight page (desktop picks #6). */}
+            <StatusChip label={status.listening ? 'Listening' : 'Not listening'}
+              tone={status.listening ? 'success' : 'neutral'} style={{ marginBottom: v3Spacing.small }} />
             <Text style={muted}>Scale {address}</Text>
-            {status.error && <Text style={{ color: t.error, fontSize: v3Type.caption, marginBottom: v3Spacing.small }}>{status.error}</Text>}
+            <StatusNote text={status.error} tone="error" style={{ marginTop: 0, marginBottom: v3Spacing.small }} />
             <TouchableOpacity style={btn} onPress={async () => { status.listening ? stopListening() : await startListening(); onChanged(); }}>
               <Text style={txt}>{status.listening ? 'Stop listening' : 'Start listening'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={btn} onPress={async () => { await forgetScale(); setAddress(null); setStep(1); onChanged(); }}>
-              <Text style={txt}>Forget scale</Text>
+            <TouchableOpacity style={dangerBtn} onPress={async () => { await forgetScale(); setAddress(null); setStep(1); onChanged(); }}>
+              <Text style={dangerTxt}>Forget scale</Text>
             </TouchableOpacity>
             <TouchableOpacity style={btn} onPress={() => setStep(4)}><Text style={txt}>Body profile…</Text></TouchableOpacity>
             <Text style={muted}>Android listens while the app is open.</Text>
@@ -81,16 +87,23 @@ export function ScaleSetupModal({ visible, onClose, onChanged }: {
               The scale only talks while someone is on it.
             </Text>
             <Text style={muted}>Supported: Etekcity FIT 8S. No pairing, no app and no account are needed.</Text>
-            {!isScaleAvailable() && <Text style={{ color: t.error, fontSize: v3Type.caption, marginBottom: v3Spacing.small }}>This build has no Bluetooth scale support.</Text>}
-            <TouchableOpacity style={btn} disabled={searching || !isScaleAvailable()} onPress={search}>
-              {searching ? <ActivityIndicator color={t.primary} /> : <Text style={txt}>Search</Text>}
+            {!isScaleAvailable() && (
+              <StatusNote text="This build has no Bluetooth scale support." tone="warning" closable={false}
+                style={{ marginTop: 0, marginBottom: v3Spacing.small }} />
+            )}
+            {/* Busy (desktop picks #5): the name stays and dots pulse while it searches. */}
+            <TouchableOpacity style={[btn, { flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+              disabled={searching || !isScaleAvailable()} onPress={search}
+              accessibilityRole="button" accessibilityState={{ busy: searching }}>
+              <Text style={txt}>Search</Text>
+              {searching && <PulseDots color={t.text} size={5} />}
             </TouchableOpacity>
             {searching && <Text style={muted}>Searching… step on the scale</Text>}
           </>)}
 
           {step === 2 && (<>
             <Text style={muted}>Step 2 of 4</Text>
-            {error.length > 0 && <Text style={{ color: t.error, fontSize: v3Type.body, marginBottom: v3Spacing.small }}>{error}</Text>}
+            <StatusNote text={error} tone="error" style={{ marginTop: 0, marginBottom: v3Spacing.small }} />
             {error.length === 0 && found.length === 0 && (
               <Text style={body}>No scale heard. Check that Bluetooth is on and that you stood on the scale while searching, then try again.</Text>
             )}
@@ -130,11 +143,9 @@ export function ScaleSetupModal({ visible, onClose, onChanged }: {
               <TextInput value={heightText} onChangeText={setHeightText} placeholder="height cm" keyboardType="decimal-pad"
                 placeholderTextColor={t.mutedText}
                 style={[styles.input, { color: t.text, backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]} />
-              {(['M', 'F'] as const).map(s => (
-                <TouchableOpacity key={s} onPress={() => setSex(s)} style={[styles.chip, { borderColor: sex === s ? t.primary : t.border, borderRadius: v3Radius.small }]}>
-                  <Text style={{ color: sex === s ? t.primary : t.text, fontSize: v3Type.body }}>{s === 'M' ? 'Male' : 'Female'}</Text>
-                </TouchableOpacity>
-              ))}
+              {/* Two choices = one switch (desktop picks #14). */}
+              <SegmentedControl options={['Male', 'Female']} index={sex === 'F' ? 1 : 0}
+                onChange={i => setSex(i === 1 ? 'F' : 'M')} />
             </View>
             <View style={{ flexDirection: 'row' }}>
               <TouchableOpacity style={[btn, { marginRight: v3Spacing.small, opacity: h >= 100 && h <= 230 ? 1 : 0.4 }]} disabled={!(h >= 100 && h <= 230)}
@@ -157,5 +168,4 @@ const styles = StyleSheet.create({
   sheet: { width: '100%', maxWidth: 420, borderWidth: 1, padding: v3Spacing.medium },
   button: { borderWidth: 1, paddingVertical: 10, paddingHorizontal: v3Spacing.medium, alignItems: 'center', marginBottom: v3Spacing.small },
   input: { borderWidth: 1, paddingHorizontal: v3Spacing.small, paddingVertical: 8, fontSize: v3Type.body, width: 120, marginRight: v3Spacing.small },
-  chip: { borderWidth: 1, paddingVertical: 8, paddingHorizontal: v3Spacing.small, marginRight: v3Spacing.small },
 });

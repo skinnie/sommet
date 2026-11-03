@@ -69,7 +69,7 @@ import { getTileCacheSizeBytes, clearTileCache } from '../services/TileCache';
 import { t } from '../i18n';
 import { APP_VERSION } from '../config/version';
 import { useV3Theme } from '../theme/v3';
-import { Button, Chip, Dropdown, FieldRow, IconBadge, StatusLine, Toggle } from '../components/ui/primitives';
+import { Button, Dropdown, FieldRow, IconBadge, Toggle, StatusChip, StatusNote, SegmentedControl } from '../components/ui/primitives';
 import { SettingsSection } from '../components/ui/SettingsSection';
 
 // Real, 2026-08-09 ("no button to change provider, nor in the settings like the desktop
@@ -107,17 +107,17 @@ const COACH_SAMPLE_SESSIONS = 55;
 
 // One account in the Connections card: name, status, and a real button (desktop parity, and the
 // a11y audit of 2026-10-21: the old "— Log in" lines read as plain text, not as something to tap).
-function ConnectionRow({ name, status, connected, action, onPress }: {
-  name: string; status: string; connected: boolean; action: string; onPress: () => void;
+// The state is a status tag, as on desktop (André, 2026-11-02, desktop picks #6): green when
+// connected, grey otherwise, with the detail (the athlete id) beside it in grey.
+function ConnectionRow({ name, status, connected, detail, action, onPress }: {
+  name: string; status: string; connected: boolean; detail?: string; action: string; onPress: () => void;
 }) {
   const t = useV3Theme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: connected ? t.success : t.mutedText }} />
-      <Text style={{ flex: 1, fontSize: 14, color: t.text }} numberOfLines={1}>
-        {name}
-        <Text style={{ fontSize: 14, color: t.mutedText }}>{` · ${status}`}</Text>
-      </Text>
+      <Text style={{ fontSize: 14, color: t.text, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
+      <StatusChip label={status} tone={connected ? 'success' : 'neutral'} />
+      <Text style={{ flex: 1, fontSize: 13, color: t.mutedText }} numberOfLines={1}>{detail ?? ''}</Text>
       <Button label={action} variant="outline" grow={false} onPress={onPress} />
     </View>
   );
@@ -166,9 +166,7 @@ function SidebarSwitch({ title, description, value, onValueChange, onOpen }: {
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: t.text }}>{title}</Text>
-            <View style={{ borderWidth: 1, borderColor: t.warning, borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
-              <Text style={{ fontSize: 11, color: t.warning }}>experimental</Text>
-            </View>
+            <StatusChip label="Experimental" tone="warning" />
           </View>
           <Text style={{ fontSize: 13, color: t.mutedText, lineHeight: 19, marginTop: 2 }}>{description}</Text>
         </View>
@@ -345,6 +343,7 @@ export default function SettingsScreen() {
   // Whether a server is saved (for the Database row's summary; the fields can hold unsaved edits).
   const [sommetSaved, setSommetSaved]               = useState(false);
   const [sommetStatus, setSommetStatus]             = useState('');
+  const [sommetTone, setSommetTone] = useState<'success' | 'error' | 'working'>('success');
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
   const [savingIntervals, setSavingIntervals]       = useState(false);
@@ -502,10 +501,10 @@ export default function SettingsScreen() {
     try {
       const url = sommetSyncUrl.trim();
       await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
-      setSommetStatus(url ? 'Saved.' : 'Sync turned off.');
+      setSommetStatus(url ? 'Saved.' : 'Sync turned off.'); setSommetTone('success');
       setSommetSaved(!!url);
     } catch (e: any) {
-      setSommetStatus(e?.message ?? 'Failed to save');
+      setSommetStatus(e?.message ?? 'Failed to save'); setSommetTone('error');
     } finally {
       setSavingSommet(false);
     }
@@ -517,19 +516,19 @@ export default function SettingsScreen() {
     setSommetSyncUrl('');
     setSommetSyncToken('');
     setSommetSaved(false);
-    setSommetStatus('Stopped syncing.');
+    setSommetStatus('Stopped syncing.'); setSommetTone('success');
   }
 
   async function handleTestSommet() {
-    setSommetStatus('Testing…');
+    setSommetStatus('Testing…'); setSommetTone('working');
     const r = await testSommetSync(sommetSyncUrl, sommetSyncToken);
-    setSommetStatus(r.message);
+    setSommetStatus(r.message); setSommetTone(r.ok ? 'success' : 'error');
   }
 
   async function handleSyncNow() {
     // Save first so the sync uses the fields as shown, then run and report the counts.
     setSyncingSommet(true);
-    setSommetStatus('Syncing…');
+    setSommetStatus('Syncing…'); setSommetTone('working');
     try {
       const url = sommetSyncUrl.trim();
       await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
@@ -538,8 +537,9 @@ export default function SettingsScreen() {
       setSommetStatus(r.ok
         ? `Synced — ${r.pulled} received, ${r.pushed} sent.`
         : 'Couldn’t reach the server — will retry later.');
+      setSommetTone(r.ok ? 'success' : 'error');
     } catch (e: any) {
-      setSommetStatus(e?.message ?? 'Sync failed');
+      setSommetStatus(e?.message ?? 'Sync failed'); setSommetTone('error');
     } finally {
       setSyncingSommet(false);
     }
@@ -682,23 +682,22 @@ export default function SettingsScreen() {
         <ConnectionRow
           name={t.intervalsSection}
           connected={intervalsSaved}
-          status={intervalsSaved
-            ? (intervalsAthleteId ? `connected (athlete ${intervalsAthleteId})` : 'connected')
-            : 'not connected'}
+          status={intervalsSaved ? 'Connected' : 'Not connected'}
+          detail={intervalsSaved && intervalsAthleteId ? `athlete ${intervalsAthleteId}` : ''}
           action={intervalsSaved ? 'Manage' : 'Set up'}
           onPress={() => setOpenConnection('intervals')}
         />
         <ConnectionRow
           name={t.runalyzeSection}
           connected={!!savedKey}
-          status={savedKey ? 'connected' : 'not connected'}
+          status={savedKey ? 'Connected' : 'Not connected'}
           action={savedKey ? 'Manage' : 'Set up'}
           onPress={() => setOpenConnection('runalyze')}
         />
         <ConnectionRow
           name={t.stravaSection}
           connected={stravaAuth}
-          status={stravaAuth ? 'connected' : 'not connected'}
+          status={stravaAuth ? 'Connected' : 'Not connected'}
           action={stravaAuth ? 'Manage' : 'Connect'}
           onPress={() => setOpenConnection('strava')}
         />
@@ -706,7 +705,7 @@ export default function SettingsScreen() {
         <ConnectionRow
           name="Bluetooth scale"
           connected={!!scaleAddr && scaleStatus().listening}
-          status={!scaleAddr ? 'not set up' : scaleStatus().listening ? 'listening' : 'not listening'}
+          status={!scaleAddr ? 'Not set up' : scaleStatus().listening ? 'Listening' : 'Not listening'}
           action={scaleAddr ? 'Manage' : 'Set up'}
           onPress={() => setScaleOpen(true)}
         />
@@ -724,7 +723,7 @@ export default function SettingsScreen() {
             <Text style={styles.sectionDesc}>{t.stravaSettingsDesc}</Text>
             {stravaAuth ? (
               <>
-                <Chip icon="check" label={t.stravaConnectedStatus} />
+                <StatusChip label={t.stravaConnectedStatus} tone="success" style={{ marginTop: 8 }} />
                 <View style={styles.row}>
                   <Button label={t.stravaDisconnectBtn} variant="text" grow={false} onPress={handleStravaDisconnect} />
                 </View>
@@ -763,7 +762,7 @@ export default function SettingsScreen() {
                 <Button label={t.deleteBtn} icon="delete" variant="outline" tone="alert" grow={false} onPress={handleRemoveRunalyze} />
               )}
             </View>
-            {!!savedKey && <StatusLine text={t.keyStored} />}
+            {!!savedKey && <StatusChip label={t.keyStored} tone="success" style={{ marginTop: 10 }} />}
             <Button label={t.closeBtn} variant="text" onPress={() => setOpenConnection(null)} style={{ marginTop: 12 }} />
           </View>
         </View>
@@ -801,7 +800,7 @@ export default function SettingsScreen() {
                 <Button label={t.deleteBtn} icon="delete" variant="outline" tone="alert" grow={false} onPress={handleRemoveIntervals} />
               )}
             </View>
-            {intervalsSaved && <StatusLine text={t.credsStored} />}
+            {intervalsSaved && <StatusChip label={t.credsStored} tone="success" style={{ marginTop: 10 }} />}
 
             {/* Gear import/sync - lives here in the intervals.icu connection (André, 2026-08-18),
                 only once credentials are stored. Import pulls your gear down; Sync is two-way. */}
@@ -849,24 +848,13 @@ export default function SettingsScreen() {
           <Text style={styles.cardTitle}>{t.appearanceSection}</Text>
         </View>
         <Text style={styles.sectionDesc}>{t.appearanceDesc}</Text>
-        <View style={styles.themeRow}>
-          {THEME_OPTIONS.map(opt => {
-            const selected = mode === opt.mode;
-            return (
-              <TouchableOpacity
-                key={opt.mode}
-                onPress={() => setMode(opt.mode)}
-                activeOpacity={0.75}
-                style={[styles.themeOption, selected && styles.themeOptionSelected]}
-              >
-                <Icon name={opt.icon} size={17} color={selected ? theme.card : theme.text} />
-                <Text style={[styles.themeOptionLabel, selected && styles.themeOptionLabelSelected]}>
-                  {opt.label()}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {/* One switch for the three choices (André, 2026-11-02, desktop picks #14). */}
+        <SegmentedControl
+          style={{ marginTop: 12 }}
+          options={THEME_OPTIONS.map(o => o.label())}
+          index={THEME_OPTIONS.findIndex(o => o.mode === mode)}
+          onChange={i => setMode(THEME_OPTIONS[i].mode)}
+        />
         {/* The menu's style on this device, and the places in the fan or the bar (🟣113). */}
         <MenuSettings />
       </View>
@@ -942,7 +930,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionDesc}>
           Back up your watch and app data, and restore from a backup.
         </Text>
-        <Button label={'Open backup & restore…'} icon="backup" variant="outline"
+        <Button label="Open backup & restore…" icon="backup" variant="outline"
           onPress={() => navigation.navigate('Backup')} style={{ marginTop: 10 }} />
       </View>
 
@@ -1013,19 +1001,12 @@ export default function SettingsScreen() {
           onLayout={recordRow('maps')}
         >
           <Text style={styles.sectionDesc}>{t.mapsProviderDesc(MAP_PROVIDER_LABELS[mapProvider])}</Text>
-          <View style={[styles.chipRow, { justifyContent: 'flex-start', marginTop: 6 }]}>
-            {MAP_PROVIDER_OPTIONS.map(opt => (
-              <TouchableOpacity
-                key={opt.provider}
-                style={[styles.chip, opt.provider === mapProvider && styles.chipActive]}
-                onPress={() => handleSetMapProvider(opt.provider)}
-              >
-                <Text style={[styles.chipText, opt.provider === mapProvider && styles.chipTextActive]}>
-                  {opt.label()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <SegmentedControl
+            style={{ marginTop: 6 }}
+            options={MAP_PROVIDER_OPTIONS.map(o => o.label())}
+            index={MAP_PROVIDER_OPTIONS.findIndex(o => o.provider === mapProvider)}
+            onChange={i => handleSetMapProvider(MAP_PROVIDER_OPTIONS[i].provider)}
+          />
           {/* Offline maps — desktop parity: SettingsPage.qml's Maps card has this button; on Android
               it used to be a top-level menu item (moved here, André 2026-09-24). Download any area of
               the world so the map works with no signal. */}
@@ -1195,7 +1176,7 @@ export default function SettingsScreen() {
                 <Button label={t.saveBtn} variant="filled" grow={false} loading={savingAnthropic}
                         disabled={!anthropicKey.trim()} onPress={handleSaveAnthropic} />
                 {anthropicSaved && (
-                  <Button label="Clear" variant="outline" grow={false} onPress={handleRemoveAnthropic} />
+                  <Button label="Clear" variant="outline" danger grow={false} onPress={handleRemoveAnthropic} />
                 )}
               </View>
             </>
@@ -1250,7 +1231,7 @@ export default function SettingsScreen() {
             <Button label="Stop syncing" variant="outline" grow={false} onPress={handleStopSommet}
               style={{ marginTop: 8, alignSelf: 'flex-start' }} />
           )}
-          {sommetStatus ? <StatusLine text={sommetStatus} /> : null}
+          <StatusNote text={sommetStatus} tone={sommetTone} />
         </SettingsSection>
 
         {/* ── Suunto Apps Catalog (desktop parity, 2026-10-22). Same import the App Zone screen has. ── */}
@@ -1284,9 +1265,9 @@ export default function SettingsScreen() {
               </Text>
             </View>
           )}
-          {!!catalogError && <StatusLine text={catalogError} tone="alert" />}
+          <StatusNote text={catalogError} tone="error" />
           <Button
-            label={catalogImporting ? 'Importing…' : catalogImported ? 'Import a different copy' : 'Import Catalog'}
+            label={catalogImported ? 'Import a different copy' : 'Import Catalog'}
             icon="download" variant="outline" grow={false} loading={catalogImporting}
             disabled={catalogImporting || catalogEntries === null}
             onPress={handleImportCatalog} style={{ marginTop: 10, alignSelf: 'flex-start' }} />

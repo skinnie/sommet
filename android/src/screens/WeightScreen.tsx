@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Alert,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
@@ -12,6 +12,8 @@ import {
 } from '../services/WellnessService';
 import { getScaleAddress, onScaleChange, resumeIfConfigured, scaleStatus } from '../services/ScaleService';
 import { ScaleSetupModal } from '../components/ScaleSetupModal';
+import { Button, EmptyState, StatusChip, StatusNote } from '../components/ui/primitives';
+import { ErrorBanner } from '../components/ui/ErrorBanner';
 
 // Where a reading came from, in the words used everywhere (glossary: "source").
 const SOURCE_LABEL: Record<string, string> = {
@@ -50,6 +52,7 @@ export default function WeightScreen() {
   const [scaleAddr, setScaleAddr] = useState<string | null>(null);
   const [scaleTick, setScaleTick] = useState(0);          // re-render when the scale reports
   const [fresh, setFresh] = useState('');                 // "74.6 kg" for a few seconds
+  const [formError, setFormError] = useState('');         // why Save didn't save, under the form
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -105,14 +108,16 @@ export default function WeightScreen() {
     const dm = dateInput.trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
     const iso = dm ? `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}`
       : /^\d{4}-\d{2}-\d{2}$/.test(dateInput.trim()) ? dateInput.trim() : '';
+    // Shown as a note under the form (desktop picks #7), not a pop-up.
     if (!iso || isNaN(new Date(iso).getTime())) {
-      Alert.alert('Invalid date', 'Enter the date as DD/MM/YYYY (for example 02/09/2026).');
+      setFormError('Enter the date as DD/MM/YYYY (for example 02/09/2026).');
       return;
     }
     if (!(kg > 0)) {
-      Alert.alert('Invalid weight', 'Enter a valid weight in kg.');
+      setFormError('Enter a valid weight in kg.');
       return;
     }
+    setFormError('');
     await addManualWeight(iso, kg);
     setShowAdd(false); setKgInput('');
     refresh();
@@ -124,17 +129,22 @@ export default function WeightScreen() {
       contentContainerStyle={{ padding: v3Spacing.medium }}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={t.primary} />}
     >
-      {/* Bluetooth scale status - tap to set up or manage */}
-      <TouchableOpacity onPress={() => setScaleOpen(true)} style={[styles.row, { marginBottom: v3Spacing.medium }]}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, marginRight: 6,
-                       backgroundColor: sc.listening ? t.success : t.mutedText }} />
-        <Text style={{ color: t.text, fontSize: v3Type.body }}>
-          {!scaleAddr ? 'Bluetooth scale — tap to set up'
-            : sc.listening ? `Bluetooth scale — listening, last weigh-in ${timeAgo(lastScale?.t ?? null)}`
-            : 'Bluetooth scale — not listening'}
-        </Text>
+      {/* Bluetooth scale status - tap to set up or manage. The state is a tag, like Settings ›
+          Connections (desktop picks #6). */}
+      <TouchableOpacity onPress={() => setScaleOpen(true)}
+        style={[styles.row, { marginBottom: v3Spacing.medium, flexWrap: 'wrap', gap: v3Spacing.small }]}>
+        <Text style={{ color: t.text, fontSize: v3Type.body }}>Bluetooth scale</Text>
+        <StatusChip
+          label={!scaleAddr ? 'Not set up' : sc.listening ? 'Listening' : 'Not listening'}
+          tone={sc.listening ? 'success' : 'neutral'}
+        />
+        {(!scaleAddr || sc.listening) && (
+          <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
+            {!scaleAddr ? 'tap to set up' : `last weigh-in ${timeAgo(lastScale?.t ?? null)}`}
+          </Text>
+        )}
         {fresh.length > 0 && (
-          <Text style={{ color: t.success, fontSize: v3Type.body, fontWeight: '700', marginLeft: v3Spacing.small }}>
+          <Text style={{ color: t.success, fontSize: v3Type.body, fontWeight: '700' }}>
             New weigh-in: {fresh}
           </Text>
         )}
@@ -146,25 +156,25 @@ export default function WeightScreen() {
         <ActivityIndicator color={t.primary} style={{ marginVertical: v3Spacing.large }} />
       )}
 
-      {error.length > 0 && (
-        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <Text style={{ color: t.error, fontSize: v3Type.body }}>{error}</Text>
-        </View>
-      )}
+      {/* A failed read: one plain sentence, Try again and Send logs (desktop picks #19). */}
+      <ErrorBanner
+        detail={loading ? '' : error}
+        context="reading weigh-ins"
+        showPlainDetail
+        onRetry={refresh}
+      />
 
+      {/* Nothing yet: what to do next (desktop picks #11). #9 (André, 2026-09-02): one-tap
+          route to the shared connection settings. */}
       {!loading && series.length === 0 && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No weigh-ins yet. Connect intervals.icu, or add one below.
-          </Text>
-          {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings', { section: 'connections' })}
-            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
-                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
-                     borderRadius: v3Radius.card, borderWidth: 1, borderColor: t.border }}>
-            <Text style={{ color: t.primary, fontSize: v3Type.body }}>Open Settings → Connections</Text>
-          </TouchableOpacity>
+          <EmptyState
+            icon="weight"
+            title="No weigh-ins yet"
+            text="Nothing in the last year. Connect intervals.icu, add one by hand below, or step on your Bluetooth scale."
+            actionLabel="Open Settings → Connections"
+            onAction={() => navigation.navigate('Settings', { section: 'connections' })}
+          />
         </View>
       )}
 
@@ -231,6 +241,7 @@ export default function WeightScreen() {
         <TouchableOpacity
           onPress={() => {
             setDateInput(fmtDate(new Date()));
+            setFormError('');
             setShowAdd(true);
           }}
           style={[styles.button, { backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small }]}
@@ -256,9 +267,10 @@ export default function WeightScreen() {
               style={[styles.input, { color: t.text, backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small, flex: 1 }]}
             />
           </View>
+          <StatusNote text={formError} tone="error" style={{ marginTop: v3Spacing.small }} />
           <View style={[styles.row, { marginTop: v3Spacing.small, justifyContent: 'flex-end' }]}>
             <TouchableOpacity
-              onPress={() => setShowAdd(false)}
+              onPress={() => { setShowAdd(false); setFormError(''); }}
               style={[styles.button, { backgroundColor: t.cardNested, borderColor: t.border, borderRadius: v3Radius.small, marginRight: v3Spacing.small }]}
             >
               <Text style={{ color: t.text, fontSize: v3Type.body }}>Cancel</Text>
@@ -282,9 +294,10 @@ export default function WeightScreen() {
             <View key={p.date} style={[styles.row, { justifyContent: 'space-between', paddingVertical: 6 }]}>
               <Text style={{ color: t.text, fontSize: v3Type.body }}>{fmtDate(p.date) || p.date}</Text>
               <Text style={{ color: t.text, fontSize: v3Type.body }}>{p.weightKg.toFixed(1)} kg</Text>
-              <TouchableOpacity onPress={async () => { await removeManualWeight(p.date); refresh(); }} hitSlop={8}>
-                <Text style={{ color: t.error, fontSize: v3Type.body }}>Remove</Text>
-              </TouchableOpacity>
+              {/* Remove is a calm red button (desktop picks #5, RoundedButton.danger). */}
+              <Button label="Remove" danger grow={false}
+                style={{ paddingVertical: 5, paddingHorizontal: 12 }}
+                onPress={async () => { await removeManualWeight(p.date); refresh(); }} />
             </View>
           ))}
         </View>

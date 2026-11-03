@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
@@ -12,6 +12,9 @@ import {
 } from '../services/AmbitSteps';
 import { isHrStrapAvailable, measureHrv, type HrStrapReading } from '../services/HrStrapService';
 import { isStrapHrvEnabled } from '../services/StrapHrvPref';
+import { oldBadge, tileCaption } from '../services/HealthTrend';
+import { Button, EmptyState, SkeletonList, StatTile, StatusNote } from '../components/ui/primitives';
+import { ErrorBanner } from '../components/ui/ErrorBanner';
 
 // Health — the Android counterpart of desktop/qml/pages/HealthPage.qml (André, 2026-08-26:
 // "port everything to android"). Resting HR, HRV, sleep, steps and VO2max from intervals.icu's
@@ -32,14 +35,17 @@ interface Metric {
   label: string;
   unit: string;
   decimals: number;
+  // The tile compares the latest value with the 7 days before it (desktop picks #12: resting
+  // HR, HRV and sleep); the others show the date of the value.
+  trend?: boolean;
 }
 
 // Ordered by how much they matter day to day for training readiness, which is what this screen
 // is actually for - not by how much data happens to exist for each.
 const METRICS: Metric[] = [
-  { key: 'restingHR', label: 'Resting heart rate', unit: ' bpm', decimals: 0 },
-  { key: 'hrv',       label: 'HRV',                unit: ' ms',  decimals: 0 },
-  { key: 'sleepHours',label: 'Sleep',              unit: ' h',   decimals: 1 },
+  { key: 'restingHR', label: 'Resting heart rate', unit: ' bpm', decimals: 0, trend: true },
+  { key: 'hrv',       label: 'HRV',                unit: ' ms',  decimals: 0, trend: true },
+  { key: 'sleepHours',label: 'Sleep',              unit: ' h',   decimals: 1, trend: true },
   // Train Libre's sleep health score (SleepScore.ts) - from duration alone here, see WellnessService.
   { key: 'sleepScore', label: 'Sleep score',       unit: '',     decimals: 0 },
   { key: 'steps',     label: 'Steps',              unit: '',     decimals: 0 },
@@ -65,6 +71,9 @@ function withWatchSteps(list: WellnessDay[], watch: Array<{ date: string; steps:
   }
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
+
+const TILE_MIN = 150;
+const TILE_GAP = v3Spacing.small;
 
 function recoveryText(h: number): string {
   const m = Math.round(h * 60);
@@ -142,6 +151,10 @@ export default function HealthScreen() {
   }, [days]);
 
   const present = METRICS.filter(m => (seriesFor.get(m.key as string) ?? []).length > 0);
+  // Tiles about 150 wide (desktop 176 on a wider window), as many per row as fit, sharing it.
+  const [tilesWidth, setTilesWidth] = useState(0);
+  const tileCols = Math.max(1, Math.floor((tilesWidth + TILE_GAP) / (TILE_MIN + TILE_GAP)));
+  const tileWidth = tilesWidth > 0 ? Math.floor((tilesWidth - TILE_GAP * (tileCols - 1)) / tileCols) : TILE_MIN;
   const week = useMemo(() => weekActivity(days.map(d => ({ date: d.date, kcal: d.watchKcal }))),
                        [days]);
   const stepsWeek = useMemo(() => weekSteps(days.map(d => ({ date: d.date, steps: d.steps ?? undefined }))),
@@ -151,17 +164,20 @@ export default function HealthScreen() {
     <ScrollView
       style={{ flex: 1, backgroundColor: t.background }}
       contentContainerStyle={{ padding: v3Spacing.medium }}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={t.primary} />}
+      refreshControl={<RefreshControl refreshing={loading && days.length > 0} onRefresh={refresh} tintColor={t.primary} />}
     >
+      {/* Grey rows while the first read runs (desktop picks #13). */}
       {loading && days.length === 0 && (
-        <ActivityIndicator color={t.primary} style={{ marginVertical: v3Spacing.large }} />
+        <View style={{ marginBottom: v3Spacing.medium }}><SkeletonList count={3} /></View>
       )}
 
-      {error.length > 0 && (
-        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <Text style={{ color: t.error, fontSize: v3Type.body }}>{error}</Text>
-        </View>
-      )}
+      {/* A failed read: one plain sentence, Try again and Send logs (desktop picks #19). */}
+      <ErrorBanner
+        detail={loading ? '' : error}
+        context="reading health data"
+        showPlainDetail
+        onRetry={refresh}
+      />
 
       {/* Sleep & Recovery: overnight HRV + resting-HR trend from a Polar Verity Sense recorded
           offline. A whole-night companion to the morning spot reading below. */}
@@ -189,17 +205,15 @@ export default function HealthScreen() {
             Wear your heart-rate strap (Polar Verity Sense, COOSPO HW9, …), sit or lie still, and
             tap Measure. It reads ~2 min of heart-beats over Bluetooth and computes your RMSSD.
           </Text>
-          <TouchableOpacity
-            disabled={measuring}
-            onPress={measureStrap}
-            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
-                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
-                     borderRadius: v3Radius.card, borderWidth: 1,
-                     borderColor: measuring ? t.border : t.primary, opacity: measuring ? 0.6 : 1 }}>
-            <Text style={{ color: t.primary, fontSize: v3Type.body }}>
-              {measuring ? 'Measuring… stay still' : 'Measure HRV'}
+          {/* Busy button (desktop picks #5): the name stays and dots pulse while it measures. */}
+          <View style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start' }}>
+            <Button label="Measure HRV" onPress={measureStrap} busy={measuring} grow={false} />
+          </View>
+          {measuring && (
+            <Text style={{ color: t.mutedText, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
+              Stay still while it reads.
             </Text>
-          </TouchableOpacity>
+          )}
           {strapResult && (
             <Text style={{ color: t.text, fontSize: v3Type.subtitle, fontWeight: '700',
                            marginTop: v3Spacing.medium }}>
@@ -209,70 +223,66 @@ export default function HealthScreen() {
               </Text>
             </Text>
           )}
-          {strapErr.length > 0 && (
-            <Text style={{ color: t.error, fontSize: v3Type.caption, marginTop: v3Spacing.small }}>
-              {strapErr}
-            </Text>
-          )}
+          <StatusNote text={strapErr} tone="error" />
         </View>
       )}
 
-      {!loading && present.length === 0 && error.length === 0 && (
+      {/* Nothing to show yet: what to do next (desktop picks #11). #9 (André, 2026-09-02):
+          one-tap route to the shared connection settings. */}
+      {!loading && present.length === 0 && !recovery && week.days === 0 && error.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <Text style={{ color: t.mutedText, fontSize: v3Type.body }}>
-            No health data yet. Connect intervals.icu — resting HR, HRV, sleep and
-            steps sync from whatever device feeds it. An Ambit3 adds its own daily steps,
-            activity calories and recovery time at each sync.
-          </Text>
-          {/* #9 (André, 2026-09-02): one-tap route to the shared connection settings. */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings', { section: 'connections' })}
-            style={{ marginTop: v3Spacing.medium, alignSelf: 'flex-start',
-                     paddingVertical: v3Spacing.small, paddingHorizontal: v3Spacing.medium,
-                     borderRadius: v3Radius.card, borderWidth: 1, borderColor: t.border }}>
-            <Text style={{ color: t.primary, fontSize: v3Type.body }}>Open Settings → Connections</Text>
-          </TouchableOpacity>
+          <EmptyState
+            icon="health"
+            title="No health data yet"
+            text="Connect intervals.icu, or plug in your watch to read its steps, activity calories and recovery time."
+            actionLabel="Open Settings → Connections"
+            onAction={() => navigation.navigate('Settings', { section: 'connections' })}
+          />
         </View>
       )}
 
       {/* Current values first, then the trends - the summary before the detail. */}
+      {/* One tile per number (desktop picks #12): resting HR, HRV and sleep compare with the 7
+          days before, and an old value says how old it is. The tiles share each row evenly. */}
       {(present.length > 0 || recovery || week.days > 0) && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
-          <View style={styles.tiles}>
+          <View style={styles.tiles} onLayout={e => setTilesWidth(Math.floor(e.nativeEvent.layout.width))}>
             {present.map(m => {
               const s = seriesFor.get(m.key as string)!;
               const last = s[s.length - 1];
+              const unit = m.unit.trim();
               return (
-                <View key={m.key as string} style={styles.tile}>
-                  <Text style={[styles.label, { color: t.mutedText }]}>{m.label}</Text>
-                  <Text style={[styles.big, { color: t.text }]}>
-                    {last.value.toFixed(m.decimals)}{m.unit}
-                  </Text>
-                  <Text style={[styles.caption, { color: t.mutedText }]}>{fmtDate(last.date) || last.date}</Text>
-                </View>
+                <StatTile
+                  key={m.key as string}
+                  style={{ width: tileWidth }}
+                  label={m.label}
+                  value={last.value.toFixed(m.decimals)}
+                  unit={unit}
+                  caption={m.trend ? tileCaption(s, unit, m.decimals) : (fmtDate(last.date) || last.date)}
+                  badge={oldBadge(s)}
+                />
               );
             })}
             {/* The watch's activity kcal from Monday to today, every watch merged. */}
             {week.days > 0 && (
-              <View style={styles.tile}>
-                <Text style={[styles.label, { color: t.mutedText }]}>This week (watch)</Text>
-                <Text style={[styles.big, { color: t.text }]}>{Math.round(week.kcal)} kcal</Text>
-                <Text style={[styles.caption, { color: t.mutedText }]}>
-                  since Monday {fmtDate(week.from) || week.from}
-                </Text>
-              </View>
+              <StatTile
+                style={{ width: tileWidth }}
+                label="This week (watch)"
+                value={String(Math.round(week.kcal))}
+                unit="kcal"
+                caption={`since Monday ${fmtDate(week.from) || week.from}`}
+              />
             )}
             {/* The watch's "Recovery time" at the last watch read, and its peak over the
                 watch's last 24 h of quarter-hour samples. */}
             {recovery && (
-              <View style={styles.tile}>
-                <Text style={[styles.label, { color: t.mutedText }]}>Recovery time (watch)</Text>
-                <Text style={[styles.big, { color: t.text }]}>{recoveryText(recovery.hours)}</Text>
-                <Text style={[styles.caption, { color: t.mutedText }]}>
-                  {(fmtDate(recovery.time.slice(0, 10)) || recovery.time.slice(0, 10))} {recovery.time.slice(11, 16)}
-                  {' · peak '}{recoveryText(recovery.peak)}
-                </Text>
-              </View>
+              <StatTile
+                style={{ width: tileWidth }}
+                label="Recovery time (watch)"
+                value={recoveryText(recovery.hours)}
+                caption={`${fmtDate(recovery.time.slice(0, 10)) || recovery.time.slice(0, 10)} ${recovery.time.slice(11, 16)}`
+                  + ` · peak ${recoveryText(recovery.peak)}`}
+              />
             )}
           </View>
         </View>
@@ -327,10 +337,7 @@ export default function HealthScreen() {
 
 const styles = StyleSheet.create({
   card: { borderWidth: 1, padding: v3Spacing.medium, marginBottom: v3Spacing.medium },
-  tiles: { flexDirection: 'row', flexWrap: 'wrap' },
-  tile: { minWidth: '33%', marginBottom: v3Spacing.small, paddingRight: v3Spacing.small },
-  label: { fontSize: v3Type.tiny, fontWeight: '600' },
-  big: { fontSize: v3Type.subtitle, fontWeight: '700' },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: TILE_GAP },
   caption: { fontSize: v3Type.caption },
   bars: { flexDirection: 'row', height: 130, marginTop: v3Spacing.small },
   barCol: { flex: 1, alignItems: 'center' },

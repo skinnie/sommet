@@ -297,8 +297,19 @@ export function firmwareFlash(path: string, commit: boolean, confirm: boolean): 
   return NativeAmbit.firmwareFlash(path, commit, confirm);
 }
 
+/** One firmware-flash progress event. `phase` is one of resume_bsl, enter_bsl, reopen_bsl,
+ * header, erase (the watch erases its flash, ~1 min), streaming (with `percent` 0-100 and the
+ * chunk counts), streamed, commit, stream_only_done, reboot, done. */
+export interface FirmwarePhaseEvent {
+  phase: string;
+  message: string;
+  percent?: number;
+  done?: number;
+  total?: number;
+}
+
 /** Subscribe to firmware-flash phase updates. Returns an unsubscribe function. */
-export function onFirmwarePhase(cb: (e: { phase: string; message: string }) => void): () => void {
+export function onFirmwarePhase(cb: (e: FirmwarePhaseEvent) => void): () => void {
   const sub = emitter.addListener('AmbitFirmwarePhase', cb);
   return () => sub.remove();
 }

@@ -20,7 +20,7 @@ import { SPORT_MODE_ROWS, maxDisplaysForVariant } from '../services/SportModeRow
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Toggle, StatusLine } from '../components/ui/primitives';
+import { Toggle, StatusNote } from '../components/ui/primitives';
 import Icon from '../components/ui/Icon';
 import { WatchFacePreview, displayLayoutType } from '../components/WatchFacePreview';
 
@@ -384,7 +384,7 @@ export default function SportModesScreen() {
               <ActivityIndicator size="small" color={theme.primary} />
             </View>
           )}
-          {!isWriting && saved?.name === name && saved.where === 'settings' && <StatusLine text={t.sportModesSaved} />}
+          {!isWriting && saved?.name === name && saved.where === 'settings' && <StatusNote text={t.sportModesSaved} tone="success" />}
         </Card>
 
         <Card style={{ width: '100%' }}>
@@ -434,7 +434,7 @@ export default function SportModesScreen() {
               )}
             </View>
           )}
-          {!isWriting && saved?.name === name && saved.where === 'display' && <StatusLine text={t.sportModesSaved} />}
+          {!isWriting && saved?.name === name && saved.where === 'display' && <StatusNote text={t.sportModesSaved} tone="success" />}
         </Card>
 
         <Modal visible={!!picker} animationType="slide" transparent onRequestClose={() => setPicker(null)}>

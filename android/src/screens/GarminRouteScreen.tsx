@@ -11,7 +11,7 @@ import RNFS from 'react-native-fs';
 import { t } from '../i18n';
 import type { RootStackParamList } from '../../App';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
-import { Button, ExportedFileRow, Section, StatusLine, WarningNote } from '../components/ui/primitives';
+import { Button, ExportedFileRow, Section, WarningNote, StatusNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
 import { buildEtrexGpx } from '../services/EtrexExport';
 
@@ -146,9 +146,9 @@ export default function GarminRouteScreen() {
           />
         </View>
 
-        {!sdCardVolume && <StatusLine text={t.garminNoSdCardMsg} tone="alert" />}
-        {sendState === 'done' && <StatusLine text={t.garminRouteSendDone} />}
-        {sendState === 'error' && <StatusLine text={sendError ?? t.error} tone="alert" />}
+        {!sdCardVolume && <StatusNote text={t.garminNoSdCardMsg} tone="warning" />}
+        {sendState === 'done' && <StatusNote text={t.garminRouteSendDone} tone="success" />}
+        {sendState === 'error' && <StatusNote text={sendError ?? t.error} tone="error" />}
       </Section>
 
       {/* ── eTrex: convert a GPX so the unit can actually guide you (turn waypoints / smart route) ── */}
@@ -159,7 +159,7 @@ export default function GarminRouteScreen() {
           <Button label={t.garminEtrexRouteBtn} variant="outline" disabled={busy || !sdCardVolume}
             onPress={() => handleSendEtrex('route')} />
         </View>
-        {etrexDone && <StatusLine text={etrexDone} />}
+        {etrexDone && <StatusNote text={etrexDone} tone="success" />}
       </Section>
 
       {/* ── Export routes/tracks from the device to Downloads ── */}
@@ -174,8 +174,8 @@ export default function GarminRouteScreen() {
           />
         </View>
 
-        {exportState.phase === 'error' && <StatusLine text={exportState.error ?? t.error} tone="alert" />}
-        {exportState.phase === 'done' && <StatusLine text={t.garminRouteExportDone(exportedFiles.length)} />}
+        {exportState.phase === 'error' && <StatusNote text={exportState.error ?? t.error} tone="error" />}
+        {exportState.phase === 'done' && <StatusNote text={t.garminRouteExportDone(exportedFiles.length)} tone="success" />}
         {exportedFiles.map(f => (
           <ExportedFileRow
             key={f.localPath}
@@ -190,7 +190,7 @@ export default function GarminRouteScreen() {
           them on the maps"). Same real map-thumbnail-per-item pattern as RouteScreen.tsx's
           own "On the watch" card. ── */}
       <Section title={t.garminRouteOnDeviceSection}>
-        {onDeviceLoading && <StatusLine text={t.garminRouteOnDeviceReading} />}
+        {onDeviceLoading && <StatusNote text={t.garminRouteOnDeviceReading} tone="working" />}
         {!onDeviceLoading && onDeviceError && (
           <Text style={[styles.itemStats, { color: theme.error, marginTop: v3Spacing.small }]}>{onDeviceError}</Text>
         )}

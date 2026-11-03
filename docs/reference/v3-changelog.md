@@ -7,6 +7,55 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-02: The same picks on the tablet (Android 0.2.57)
+
+The 15 of the 19 PC picks that apply to Android, so both apps look and behave alike. Not
+needed on Android: the menu colour bug (React Native reads `#RRGGBBAA`, so it never happened;
+the menu highlight is now 12% like the PC) and the side-menu hover (touch screens have none).
+Already there: the info buttons (tap shows the explanation).
+
+- **Shared pieces** in `components/ui/primitives.tsx`, ported from the PC components of the
+  same name: `PulseDots`, `StatusChip`, `StatusNote`, `SearchField`, `EmptyState`,
+  `StatTile`, `SegmentedControl`, `SkeletonList` and `Checkbox`. Three icons were added
+  (magnifier, ×, error).
+- **Buttons.** A busy button keeps its name and shows pulsing dots (`Button busy`; `loading`
+  works the same). About 20 buttons no longer change their name to "Saving…". Delete, Remove,
+  Forget and Clear are the calm red (`danger`, or the older `tone="alert"`).
+- **Status tags** for Connected / Not connected / Listening / Experimental / Soon / Due, on
+  Home, the Settings connections, Show in the sidebar, Weight, Gear, and Coach.
+- **Result notes** in place of about 45 dot-and-text lines, and of the route send and route
+  removal pop-ups: Routes, Backup, Garmin routes and POIs, Bryton, Magene, Sport modes, Home,
+  Settings, Health, Weight, Firmware. A line that only gives information, such as "No backups
+  yet", stays as it was.
+- **Gear: a wear bar per reminder,** with a Soon or Due tag, "2,740 / 3,000 km" and a ×.
+- **Coach.** Pulsing dots while Claude writes; bold, italics, and lists in its answers (a small
+  Markdown renderer, `components/Markdown.tsx`). The recent conversation goes to Claude with
+  the PC's rules (12 turns or 12,000 characters, error notes left out). Answers come in the
+  PC's fixed shape (structured outputs) and can carry workout cards, number tiles, and tips.
+  A refused API key says so. "Send it to my watch" is hidden until it works.
+  (`CoachChat.ts`; tests: `CoachChat.test.ts`, `Markdown.test.tsx`.)
+- **Firmware update as a checklist:** Download, Recovery mode, Erase, Write (with %), Check,
+  Restart. The native side now reports the erase and the write percentage: counters in
+  `firmware_flash_android.c`, read every 400 ms by `AmbitUsbModule.kt`. The flash itself is
+  unchanged (same commands, order, timeouts, and retries).
+- **Search boxes** with a magnifier and a clear × (App Zone, Ember meals).
+- **Empty pages say what to do:** Activities, Routes (library and watch), Gear, Health,
+  Weight, Totals.
+- **Health** shows its numbers as tiles, with the 7-day comparison and an "N days old" tag
+  (`HealthTrend.ts`; test: `HealthTrend.test.ts`).
+- **Grey rows while a list loads** on Activities and Health.
+- **Switches for 2 or 3 choices:** appearance, map style, and the scale's sex setting.
+- **The workout builder's checkboxes** have the drawn tick.
+- **Plain errors** on Activities, Health, and Weight: one sentence, Try again, Details and Send
+  logs (`ErrorBanner.tsx`). Android now keeps a log file (`ambitapp.log` in the app's files,
+  kept under 200,000 characters); Send logs opens a mail with its last lines, like the PC
+  (`LogService.ts`; test: `LogService.test.ts`).
+- Checked on the tablet, in light and dark: Home, Settings, Routes, Activities, Health,
+  Weight, Coach, Training Program, Gear. A temporary build with sample data showed the gear
+  wear bars, a Coach answer with cards, the firmware checklist, the grey rows, and both kinds
+  of error. Not seen yet: a real update going through the checklist, and a real answer from
+  the Claude API (the tablet's Coach is on pre-written answers).
+
 ## 2026-11-02: André's 19 picks for the look of the PC app (desktop 0.2.57)
 
 - **Menus highlight in light green.** Qt reads an 8-digit colour as `#AARRGGBB`, so

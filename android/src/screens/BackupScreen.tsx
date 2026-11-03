@@ -17,7 +17,7 @@ import { backupAppDataToFile, restoreAppDataFromFile } from '../services/AppData
 import { shareFile } from '../native/AmbitUsbModule';
 import { t, fmtDateTime } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
-import { Button, Section, StatusLine, WarningNote } from '../components/ui/primitives';
+import { Button, Section, StatusLine, WarningNote, StatusNote } from '../components/ui/primitives';
 
 /*
  * v2.3.2 beta — Ambit firmware backup screen.
@@ -281,8 +281,8 @@ export default function BackupScreen() {
           <View style={styles.row}>
             <Button label={t.backupKailashSaveBtn} variant="filled" loading={archiveBusy} disabled={archiveBusy} onPress={handleCreateArchive} />
           </View>
-          {archiveBusy && <StatusLine text={t.backupNavWorking} />}
-          {!!archiveError && <StatusLine text={archiveError} tone="alert" />}
+          {archiveBusy && <StatusNote text={t.backupNavWorking} tone="working" />}
+          <StatusNote text={archiveError} tone="error" />
           {archives.length === 0 && !archiveBusy && <StatusLine text={t.backupExistingEmpty} />}
           {archives.map(a => (
             <View key={a.prefix} style={styles.backupRow}>
@@ -312,8 +312,8 @@ export default function BackupScreen() {
         <View style={styles.row}>
           <Button label={t.backupNavCreateBtn} variant="filled" loading={navBackupBusy} disabled={navBackupBusy} onPress={handleCreateNavBackup} />
         </View>
-        {navBackupBusy && <StatusLine text={t.backupNavWorking} />}
-        {!!navBackupError && <StatusLine text={navBackupError} tone="alert" />}
+        {navBackupBusy && <StatusNote text={t.backupNavWorking} tone="working" />}
+        <StatusNote text={navBackupError} tone="error" />
       </Section>
 
       <Section title={t.backupExistingSection}>
@@ -357,8 +357,8 @@ export default function BackupScreen() {
           <Button label={t.backupFolderBtn} variant="filled" loading={folderBusy} disabled={folderBusy}
             onPress={handleBackupToFolder} />
         </View>
-        {folderBusy && <StatusLine text={t.backupNavWorking} />}
-        {!!folderError && <StatusLine text={folderError} tone="alert" />}
+        {folderBusy && <StatusNote text={t.backupNavWorking} tone="working" />}
+        <StatusNote text={folderError} tone="error" />
       </Section>
       </>)}
 
@@ -376,9 +376,9 @@ export default function BackupScreen() {
           />
         </View>
 
-        {state.phase === 'reading' && <StatusLine text={t.backupReading} />}
-        {state.phase === 'checking' && <StatusLine text={t.backupChecking} />}
-        {state.phase === 'error' && <StatusLine text={state.error ?? t.error} tone="alert" />}
+        {state.phase === 'reading' && <StatusNote text={t.backupReading} tone="working" />}
+        {state.phase === 'checking' && <StatusNote text={t.backupChecking} tone="working" />}
+        {state.phase === 'error' && <StatusNote text={state.error ?? t.error} tone="error" />}
 
         {state.phase === 'done' && state.deviceInfo && (
           <View style={styles.deviceInfoBox}>
@@ -398,7 +398,7 @@ export default function BackupScreen() {
               )}
             </View>
           ) : (
-            <StatusLine text={t.backupNoUpdateInfo} tone="alert" />
+            <StatusNote text={t.backupNoUpdateInfo} tone="warning" />
           )
         )}
       </Section>
@@ -410,9 +410,9 @@ export default function BackupScreen() {
             <Button label={t.backupDownloadBtn} variant="filled" loading={downloading} disabled={busy} onPress={handleDownload} />
           </View>
 
-          {downloading && <StatusLine text={t.backupDownloading(downloadPct)} />}
-          {!!downloadedTo && <StatusLine text={t.backupDownloadDone} />}
-          {!!downloadError && <StatusLine text={downloadError} tone="alert" />}
+          {downloading && <StatusNote text={t.backupDownloading(downloadPct)} tone="working" />}
+          {!!downloadedTo && <StatusNote text={t.backupDownloadDone} tone="success" />}
+          <StatusNote text={downloadError} tone="error" />
         </Section>
       )}
 

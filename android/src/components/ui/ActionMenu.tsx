@@ -21,7 +21,7 @@ export function ActionMenu({ visible, title, items, onClose }: {
         <Pressable style={s.card} onPress={() => {}}>
           {!!title && <Text style={s.heading}>{title}</Text>}
           {shown.map((it, i) => (
-            <Pressable key={i} disabled={it.disabled} style={({ pressed }) => [s.row, pressed && { backgroundColor: th.primary + '26' }]}
+            <Pressable key={i} disabled={it.disabled} style={({ pressed }) => [s.row, pressed && { backgroundColor: th.primary + '1F' }]}
               onPress={() => { onClose(); it.onPress(); }}>
               <Text style={[s.rowText, it.tone === 'alert' && { color: th.error }, it.disabled && { color: th.mutedText }]}>{it.label}</Text>
             </Pressable>

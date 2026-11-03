@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, RefreshControl, Alert, ScrollView, ActivityIndicator,
+  StyleSheet, RefreshControl, Alert, ScrollView,
 } from 'react-native';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -31,6 +31,8 @@ import {
 } from '../services/ActivityMetrics';
 import { MetricColumnMenu } from '../components/ui/MetricColumnMenu';
 import { deleteIntervalsIcuActivity } from '../services/ApiIntervalsIcu';
+import { EmptyState, PulseDots, SkeletonList } from '../components/ui/primitives';
+import { ErrorBanner } from '../components/ui/ErrorBanner';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'LogList'>;
 
@@ -104,6 +106,8 @@ export default function LogListScreen() {
   const [sortKey, setSortKey] = useState<string>('date');
   const [sortDesc, setSortDesc] = useState(true);
   const [loading, setLoading] = useState(true);   // first load in progress (vs genuinely empty)
+  // A failed page read (desktop picks #19): ErrorBanner shows one plain sentence, not the raw text.
+  const [loadErr, setLoadErr] = useState('');
   const [menuCol, setMenuCol] = useState<number | null>(null);   // which column's dropdown is open
   useFocusEffect(useCallback(() => {
     getViewMode('activities').then(setViewMode);
@@ -194,8 +198,9 @@ export default function LogListScreen() {
         return prev.concat(enriched.filter(a => !seen.has(a.id)));
       });
       setHasMore(rows.length === ACTIVITY_PAGE);
-    } catch (e) {
-      Alert.alert(t.loadError, String(e));
+      setLoadErr('');
+    } catch (e: any) {
+      if (req === reqRef.current) setLoadErr(String(e?.message ?? e));
     } finally {
       if (req === reqRef.current) { busyRef.current = false; setLoadingMore(false); setLoading(false); }
     }
@@ -272,26 +277,39 @@ export default function LogListScreen() {
 
   // ─── Rendu ──────────────────────────────────────────────────────────────────
 
-  // While the first load is still running, show a spinner - not the "Nothing to sync" empty state,
-  // which wrongly implied there was no data when the DB query simply hadn't returned yet.
+  // While the first load is still running, grey rows shaped like the list (desktop picks #13) -
+  // not the empty page, which wrongly implied there was no data when the DB query simply hadn't
+  // returned yet.
   if (loading && activities.length === 0) {
     return (
-      <View style={styles.empty}>
-        <ActivityIndicator size="large" color={theme.primary} />
-        <Text style={styles.emptyHint}>{t.loadingActivities}</Text>
+      <View style={styles.root}>
+        <View style={styles.skeleton}>
+          <SkeletonList count={6} />
+          <Text style={[styles.emptyHint, { marginTop: 12 }]}>{t.loadingActivities}</Text>
+        </View>
       </View>
     );
   }
 
+  // Nothing to show, or the read failed (desktop picks #11 and #19): an empty page says what to
+  // do next, and a failure goes through ErrorBanner (one sentence, Try again, Send logs).
   if (activities.length === 0 && activeFilter === ALL && !preparing) {
     return (
-      <View style={styles.empty}>
-        {/* 2026-08-11 (André, A1): was a raw mailbox emoji, which Android renders
-            in full colour (orange) and no style can tint. */}
-        <Icon name="list" size={44} color={theme.mutedText} />
-        <Text style={styles.emptyText}>{t.noActivities}</Text>
-        <Text style={styles.emptyHint}>{t.connectHint}</Text>
-      </View>
+      <ScrollView style={styles.root} contentContainerStyle={styles.empty}>
+        <View style={styles.emptyBox}>
+          {loadErr ? (
+            <ErrorBanner detail={loadErr} context={t.activitiesLoadContext} showPlainDetail onRetry={() => { load(); }} />
+          ) : (
+            <EmptyState
+              icon="activity"
+              title={t.activitiesEmptyTitle}
+              text={t.activitiesEmptyText}
+              actionLabel={t.openConnections}
+              onAction={() => navigation.navigate('Settings', { section: 'connections' })}
+            />
+          )}
+        </View>
+      </ScrollView>
     );
   }
 
@@ -379,8 +397,11 @@ export default function LogListScreen() {
         }
         ListHeaderComponent={preparing ? <Text style={styles.deleteHint}>{preparing}</Text> : null}
         ListFooterComponent={
-          loadingMore
-            ? <ActivityIndicator style={{ marginVertical: 16 }} color={theme.primary} />
+          loadErr
+            ? <ErrorBanner detail={loadErr} context={t.activitiesLoadContext} showPlainDetail
+                onRetry={() => { loadPage(false); }} style={{ marginTop: 8 }} />
+            : loadingMore
+            ? <View style={{ marginVertical: 16, alignItems: 'center' }}><PulseDots /></View>
             : <Text style={styles.deleteHint}>{t.deleteHint}</Text>
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.text} />}
@@ -511,11 +532,11 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   chipText: { fontSize: 13, color: t.mutedText, fontWeight: '500' },
   chipTextActive: { color: t.primary, fontWeight: '700' },
   empty: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: t.background, padding: 32,
+    flexGrow: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: t.background, padding: 24,
   },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyText: { fontSize: 18, color: t.text, fontWeight: '600', marginBottom: 8 },
+  emptyBox: { width: '100%', maxWidth: 520 },
+  skeleton: { padding: 12 },
   emptyHint: { fontSize: 13, color: t.mutedText, textAlign: 'center' },
   emptyFilter: { paddingVertical: 40, alignItems: 'center' },
   emptyFilterText: { color: t.mutedText, fontSize: 14 },

@@ -5,6 +5,9 @@ import {
 } from 'react-native';
 import { Card } from '../components/ui/Card';
 import Icon from '../components/ui/Icon';
+import { Button, EmptyState, StatusChip } from '../components/ui/primitives';
+import { useNavigation } from '@react-navigation/native';
+import { getIntervalsIcuCredentials } from '../services/ApiIntervalsIcu';
 import { useV3Theme } from '../theme/v3';
 import { t } from '../i18n';
 import {
@@ -29,9 +32,26 @@ const SPORT_TYPES = ['Cycling', 'Mountain biking', 'Running', 'Trail running', '
 
 interface GearWithReminders extends LocalGear { reminders: LocalReminder[] }
 
+// How far along a reminder is, in the unit its label uses: "2 740 / 3 000 km" (André, 2026-11-02,
+// desktop picks #3, GearService reminderProgress). Same numbers as reminderPercentUsed.
+function fmtInt(n: number): string {
+  try { return Math.round(n).toLocaleString(); } catch { return String(Math.round(n)); }
+}
+function reminderProgress(r: LocalReminder, distanceM: number, timeS: number, now: number): string | null {
+  if (r.distanceM > 0) return `${fmtInt(Math.max(0, distanceM - r.startingDistanceM) / 1000)} / ${fmtInt(r.distanceM / 1000)} km`;
+  if (r.timeS > 0) return `${fmtInt(Math.max(0, timeS - r.startingTimeS) / 3600)} / ${fmtInt(r.timeS / 3600)} h`;
+  if (r.days > 0 && r.lastReset != null && r.lastReset > 0) {
+    return `${fmtInt(Math.max(0, now - r.lastReset) / 86_400_000)} / ${fmtInt(r.days)} d`;
+  }
+  return null;
+}
+
 export default function GearScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
+  const navigation = useNavigation<any>();
+  const [intervalsOn, setIntervalsOn] = useState(true);
+  useEffect(() => { getIntervalsIcuCredentials().then(c => setIntervalsOn(!!c)).catch(() => {}); }, []);
 
   const [gear, setGear] = useState<GearWithReminders[]>([]);
   const [assignments, setAssignments] = useState<Record<string, string>>({});
@@ -175,17 +195,25 @@ export default function GearScreen() {
   // Due-ness computed LOCALLY from the reminder's reset-baseline and the gear's tracked total
   // (independent of intervals' percent_used). Snoozed reminders don't read as due until the snooze
   // lapses.
-  function dueState(owner: LocalGear, r: LocalReminder): 'due' | 'soon' | null {
-    if (r.snoozedUntil != null && Date.now() < r.snoozedUntil) return null;
+  function percentOf(owner: LocalGear, r: LocalReminder): number {
     const gt = totals.get(owner.id);
-    const pct = reminderPercentUsed(r, {
+    return reminderPercentUsed(r, {
       distanceM: gt?.distanceM ?? owner.distanceM,
       timeS: gt?.timeS ?? owner.timeS,
       activitiesSinceReset: gt?.addedCount ?? 0,
     }, Date.now());
+  }
+  function dueState(owner: LocalGear, r: LocalReminder): 'due' | 'soon' | null {
+    if (r.snoozedUntil != null && Date.now() < r.snoozedUntil) return null;
+    const pct = percentOf(owner, r);
     if (pct >= 100) return 'due';
     if (pct >= 90) return 'soon';
     return null;
+  }
+  function progressOf(owner: LocalGear, r: LocalReminder): string {
+    const gt = totals.get(owner.id);
+    return reminderProgress(r, gt?.distanceM ?? owner.distanceM, gt?.timeS ?? owner.timeS, Date.now())
+      ?? reminderLabel(r);
   }
   function reminderLabel(r: LocalReminder): string {
     if (r.distanceM > 0) return `${(r.distanceM / 1000).toFixed(0)} km`;
@@ -201,7 +229,17 @@ export default function GearScreen() {
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
-      {gear.length === 0 && <Text style={s.desc}>{t.gearEmpty}</Text>}
+      {gear.length === 0 && (
+        <Card style={{ width: '100%' }}>
+          <EmptyState
+            icon="cycling"
+            title={t.gearEmptyTitle}
+            text={t.gearEmptyText}
+            actionLabel={intervalsOn ? undefined : t.openConnections}
+            onAction={() => navigation.navigate('Settings', { section: 'connections' })}
+          />
+        </Card>
+      )}
 
       {/* Bikes & shoes */}
       {([['Bike', t.gearBikes, bikes], ['Shoes', t.gearShoes, shoes]] as const).map(([type, label, list]) => (
@@ -239,14 +277,27 @@ export default function GearScreen() {
               {/* Reminders on the gear itself and its parts */}
               {[g, ...partsOf(g.id)].flatMap(owner => owner.reminders.map(r => ({ owner, r })))
                 .map(({ owner, r }) => {
+                  // One reminder as a wear bar (desktop picks #3): the part, a Soon/Due tag,
+                  // "2 740 / 3 000 km", and a 4px bar that turns amber at 90% and red at 100%.
                   const st = dueState(owner, r);
-                  const color = st === 'due' ? theme.error : st === 'soon' ? theme.warning : theme.mutedText;
+                  const pct = Math.min(100, Math.max(0, percentOf(owner, r)));
+                  const barColor = st === 'due' ? theme.error : st === 'soon' ? theme.warning : theme.primary;
                   return (
-                    <View key={r.id} style={s.remRow}>
-                      <Icon name="warning" size={13} color={color} />
-                      <Text style={[s.remText, { color }]}>{r.name} · {reminderLabel(r)}{st ? ` · ${st === 'due' ? t.gearDue : t.gearDueSoon}` : ''}</Text>
-                      <TouchableOpacity onPress={() => snoozeReminderNow(owner, r, 30).then(reload)}><Text style={s.smallLink}>{t.gearSnooze}</Text></TouchableOpacity>
-                      <TouchableOpacity onPress={() => confirmDeleteReminder(owner, r)} style={s.rowDelete} hitSlop={8}><Icon name="delete" size={14} color={theme.mutedText} /></TouchableOpacity>
+                    <View key={r.id} style={s.wear}>
+                      <View style={s.remRow}>
+                        <Text style={s.remText} numberOfLines={2}>{r.name}</Text>
+                        {!!st && <StatusChip label={st === 'due' ? t.gearDue : t.gearDueSoon} tone={st === 'due' ? 'error' : 'warning'} />}
+                        <View style={{ flex: 1 }} />
+                        <Text style={s.remProgress}>{progressOf(owner, r)}</Text>
+                        <TouchableOpacity onPress={() => snoozeReminderNow(owner, r, 30).then(reload)}><Text style={s.smallLink}>{t.gearSnooze}</Text></TouchableOpacity>
+                        <TouchableOpacity onPress={() => confirmDeleteReminder(owner, r)} style={s.rowDelete} hitSlop={8}
+                          accessibilityRole="button" accessibilityLabel={t.gearRemoveReminder}>
+                          <Icon name="close" size={16} color={theme.mutedText} />
+                        </TouchableOpacity>
+                      </View>
+                      <View style={s.wearTrack} accessible accessibilityLabel={`${Math.round(pct)}%`}>
+                        <View style={{ width: `${pct}%`, height: 4, borderRadius: 2, backgroundColor: barColor }} />
+                      </View>
                     </View>
                   );
                 })}
@@ -257,7 +308,8 @@ export default function GearScreen() {
                 <TouchableOpacity onPress={() => openReminder(g)}><Text style={s.smallLink}>＋ {t.gearAddReminder}</Text></TouchableOpacity>
                 <TouchableOpacity onPress={() => toggleRetired(g)}><Text style={s.smallLink}>{g.retired ? t.gearUnretire : t.gearRetire}</Text></TouchableOpacity>
                 <View style={{ flex: 1 }} />
-                <TouchableOpacity onPress={() => confirmDelete(g)} hitSlop={8}><Text style={[s.smallLink, { color: theme.error }]}>{t.gearDelete}</Text></TouchableOpacity>
+                <Button label={t.gearDelete} danger grow={false} onPress={() => confirmDelete(g)}
+                  style={{ paddingVertical: 5, paddingHorizontal: 12 }} />
               </View>
             </Card>
           ))}
@@ -348,9 +400,12 @@ const styles = (th: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   gearSub: { fontSize: 12, color: th.mutedText, marginTop: 2 },
   partRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingLeft: 4 },
   partName: { fontSize: 13.5, color: th.text },
-  remRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, paddingLeft: 4 },
-  remText: { flex: 1, fontSize: 12 },
-  gearActions: { flexDirection: 'row', gap: 18, marginTop: 12, flexWrap: 'wrap' },
+  wear: { marginTop: 10, paddingLeft: 4, gap: 4 },
+  remRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  remText: { fontSize: 13, color: th.text, flexShrink: 1 },
+  remProgress: { fontSize: 12, color: th.mutedText },
+  wearTrack: { height: 4, borderRadius: 2, backgroundColor: th.cardNested, overflow: 'hidden' },
+  gearActions: { flexDirection: 'row', gap: 18, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' },
   // a row's bin sits well clear of the action next to it
   rowDelete: { marginLeft: 28, paddingHorizontal: 4 },
   assignRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: th.mutedText + '22' },

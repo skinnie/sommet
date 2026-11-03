@@ -8,6 +8,7 @@ import { View, Text, TextInput, Pressable } from 'react-native';
 import { useV3Theme, v3Radius, v3Type } from '../theme/v3';
 import type { Workout, WorkoutStep } from '../services/WorkoutSource';
 import Icon from './ui/Icon';
+import { Checkbox } from './ui/primitives';
 import { PHASE_WORD } from '../services/GuidedWorkoutCore';
 
 // Swimming in the builders - shared with the desktop (shared/swim_workout.js).
@@ -173,20 +174,10 @@ const LIGHT_INFO = {
     + 'this step\'s target for 5 s, then every 15 s while you stay outside.',
 };
 
-/** Rounded tick - the Android twin of desktop's RoundedCheckBox (22px, primary fill when on). */
+/** Rounded tick - the Android twin of desktop's RoundedCheckBox, with its drawn tick (desktop
+ * picks #15, the shared Checkbox). */
 function Tick({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  const t = useV3Theme();
-  return (
-    <Pressable onPress={() => onChange(!value)} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <View style={{
-        width: 22, height: 22, borderRadius: v3Radius.small, borderWidth: 1, alignItems: 'center', justifyContent: 'center',
-        borderColor: value ? t.primary : t.mutedText, backgroundColor: value ? t.primary : t.card,
-      }}>
-        {value && <Icon name="check" size={16} color={t.card} />}
-      </View>
-      <Text style={{ color: t.text, fontSize: v3Type.caption }}>{label}</Text>
-    </Pressable>
-  );
+  return <Checkbox label={label} value={value} onValueChange={onChange} labelSize={v3Type.caption} gap={6} />;
 }
 
 const cycle = (list: string[], cur: string) => list[(Math.max(0, list.indexOf(cur)) + 1) % list.length];

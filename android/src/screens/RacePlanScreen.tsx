@@ -673,7 +673,8 @@ export default function RacePlanScreen() {
 
           <View style={[s.row, { marginTop: v3Spacing.medium, justifyContent: 'space-between' }]}>
             {step > 0 ? <Button label="◂ Back" variant="text" grow={false} onPress={() => setStep(step - 1)} /> : <View />}
-            <Button label={step < STEP_TITLES.length - 1 ? 'Next ▸' : (busy ? 'Computing…' : 'See my plan ▸')} variant="filled" grow={false}
+            <Button label={step < STEP_TITLES.length - 1 ? 'Next ▸' : 'See my plan ▸'} variant="filled" grow={false}
+              busy={busy && step === STEP_TITLES.length - 1}
               disabled={(step === 0 && !gpxText) || busy} onPress={next} />
           </View>
           {!!statusMsg && <Cap color={/^(Error|Couldn't|No )/.test(statusMsg) ? BAD : t.mutedText}>{statusMsg}</Cap>}
@@ -684,7 +685,7 @@ export default function RacePlanScreen() {
         <View style={[s.row, { flexWrap: 'wrap' }]}>
           <Button label="◂ Edit answers" variant="text" grow={false} onPress={() => setShowResults(false)} />
           <View style={{ flex: 1 }} />
-          <Button label={busy ? 'Computing…' : 'Recompute'} variant="text" grow={false} disabled={busy || !gpxText} onPress={() => computeTimeline({ results: true })} />
+          <Button label="Recompute" variant="text" grow={false} busy={busy} disabled={busy || !gpxText} onPress={() => computeTimeline({ results: true })} />
           {tlOk && <Button label="Export roadbook" variant="text" grow={false} onPress={() => Share.share({ message: buildRoadbook(), title: (eventName || gpxName || 'Race') + ' roadbook' })} />}
           {tlOk && <Button label="Save scenario" variant="text" grow={false} onPress={() => { setSaveName(eventName || gpxName || 'Scenario'); setSaveOpen(true); }} />}
         </View>

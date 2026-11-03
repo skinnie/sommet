@@ -197,9 +197,9 @@ export default function RouteWeatherScreen() {
               placeholderTextColor={theme.mutedText} style={s.input} keyboardType="decimal-pad" />
           </View>
         </View>
-        <Button label={loading ? 'Fetching forecast…' : 'Forecast'} icon="sun" variant="filled"
+        <Button label="Forecast" icon="sun" variant="filled"
           onPress={handleForecast} loading={loading} style={{ marginTop: v3Spacing.medium }} />
-        <Button label={importing ? 'Opening…' : 'Load GPX'} icon="route" variant="outline"
+        <Button label="Load GPX" icon="route" variant="outline"
           onPress={handleImportGpx} loading={importing} style={{ marginTop: v3Spacing.small }} />
         {/* One "Send to…" (desktop parity): back to Routes with this route, ready to send to
             whichever device is connected. Not for the built-in demo route. */}

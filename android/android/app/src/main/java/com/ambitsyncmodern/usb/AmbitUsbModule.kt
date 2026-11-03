@@ -102,6 +102,9 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     private external fun nativeAmbitFwEnterBsl(): Boolean
     private external fun nativeAmbitFwReboot(): Boolean
     private external fun nativeAmbitFwStream(header: ByteArray, payload: ByteArray, doCommit: Boolean, resume: Boolean): Boolean
+    // [stage, chunksDone, chunksTotal] of the running stream - display only (FirmwareScreen's checklist).
+    private external fun nativeAmbitFwProgress(): IntArray?
+    private external fun nativeAmbitFwProgressReset()
     private external fun nativeAmbitReadDeviceHistoryRaw(): String?
     private external fun nativeAmbitReadDeviceLogRaw(): String?
     private external fun nativeAmbitReadObjectRaw(entryId: Int): String?
@@ -751,6 +754,73 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
             .emit("AmbitFirmwarePhase", params)
     }
 
+    /** Turns the native stream's progress counters into checklist events for the Firmware
+     * screen (André, 2026-11-02, desktop picks #8): "erase" while the first chunk's ack is
+     * pending (the watch erases its flash, ~1 min), "streaming" with an integer `percent` each
+     * time it changes, then "streamed" and "commit" once the chunks are in. Display only: it
+     * reads counters and sends nothing to the watch. Polled because nativeAmbitFwStream blocks
+     * this module's executor for minutes. */
+    private inner class FwProgressPoller(private val commit: Boolean) {
+        private val timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+        private var eraseSent = false
+        private var streamedSent = false
+        private var commitSent = false
+        private var lastPercent = -1
+
+        fun start() {
+            timer.scheduleWithFixedDelay({ poll() }, 0, 400, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }
+
+        /** Stops polling, then reports a finished stream once (for an image so small the poller
+         * never saw its last chunk). Call it after nativeAmbitFwStream returns. */
+        fun stop(streamOk: Boolean) {
+            timer.shutdownNow()
+            try { timer.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+            if (streamOk) {
+                synchronized(this) {
+                    if (!streamedSent) emitStreamed()
+                }
+            }
+        }
+
+        private fun emitStreamed() {
+            streamedSent = true
+            emitFwPhase("streamed", "All the firmware is on the watch.",
+                Arguments.createMap().apply { putInt("percent", 100) })
+        }
+
+        @Synchronized private fun poll() {
+            try {
+                val p = nativeAmbitFwProgress() ?: return
+                if (p.size < 3) return
+                val stage = p[0]; val done = p[1]; val total = p[2]
+                if (stage == 2 && done == 0) {
+                    if (!eraseSent) {
+                        eraseSent = true
+                        emitFwPhase("erase", "Erasing the watch's firmware memory, about a minute…")
+                    }
+                } else if (stage == 2 && total > 0) {
+                    val pct = ((done.toLong() * 100L) / total).toInt().coerceIn(0, 100)
+                    if (pct != lastPercent) {
+                        lastPercent = pct
+                        emitFwPhase("streaming", if (commit) "Writing the firmware…" else "Writing the firmware (stream only)…",
+                            Arguments.createMap().apply {
+                                putInt("percent", pct); putInt("done", done); putInt("total", total)
+                            })
+                    }
+                } else if (stage >= 3) {
+                    if (!streamedSent) emitStreamed()
+                    if (stage == 3 && !commitSent) {
+                        commitSent = true
+                        emitFwPhase("commit", "Writing the final image…")
+                    }
+                }
+            } catch (_: Throwable) {
+                // Display only - a failed poll must never affect the flash.
+            }
+        }
+    }
+
     /** Opens a device and inits libambit on it, closing any previously-tracked connection.
      * Returns true on success. Used both by connect() and the firmware re-enumeration reopen. */
     private fun openAndInitDevice(device: UsbDevice): Boolean {
@@ -871,8 +941,19 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
                     }
                 }
 
-                emitFwPhase("streaming", if (commit) "Flashing… (do not disconnect)" else "Streaming (stream-only, will not commit)…")
-                if (!nativeAmbitFwStream(header, payload, commit, alreadyBsl)) {
+                // "header", not "streaming": the screen's Write step starts with the first acked
+                // chunk, which FwProgressPoller reports (after the erase).
+                emitFwPhase("header", if (commit) "Preparing… (do not disconnect)" else "Preparing (stream only, will not commit)…")
+                nativeAmbitFwProgressReset()
+                val poller = FwProgressPoller(commit)
+                poller.start()
+                var streamOk = false
+                try {
+                    streamOk = nativeAmbitFwStream(header, payload, commit, alreadyBsl)
+                } finally {
+                    poller.stop(streamOk)
+                }
+                if (!streamOk) {
                     promise.reject("FW_STREAM_FAILED", "streaming failed - watch is in BSL, restartable")
                     return@execute
                 }

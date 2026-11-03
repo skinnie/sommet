@@ -269,13 +269,13 @@ export function MenuHost({ navRef, routeName, children }: {
                   if (!it) return null;
                   const sel = id === selectedId && !sheet;
                   return (
-                    <TouchableOpacity key={id} style={[s.barBtn, sel && { backgroundColor: th.primary + '26' }]}
+                    <TouchableOpacity key={id} style={[s.barBtn, sel && { backgroundColor: th.primary + '1F' }]}
                       onPress={() => go(id)} accessibilityLabel={it.label}>
                       <Icon name={it.icon} size={22} color={sel ? th.primary : th.mutedText} />
                     </TouchableOpacity>
                   );
                 })}
-                <TouchableOpacity style={[s.barBtn, sheet && { backgroundColor: th.primary + '26' }]}
+                <TouchableOpacity style={[s.barBtn, sheet && { backgroundColor: th.primary + '1F' }]}
                   onPress={() => setSheet(v => !v)} accessibilityLabel={sheet ? tr.menuClose : tr.menuMore}>
                   <Text style={[s.dots, { color: sheet ? th.primary : th.mutedText }]}>⋯</Text>
                 </TouchableOpacity>

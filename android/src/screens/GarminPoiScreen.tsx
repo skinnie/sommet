@@ -11,7 +11,7 @@ import RNFS from 'react-native-fs';
 import { t } from '../i18n';
 import type { RootStackParamList } from '../../App';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
-import { Button, ExportedFileRow, Section, StatusLine, WarningNote } from '../components/ui/primitives';
+import { Button, ExportedFileRow, Section, WarningNote, StatusNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
 
 /*
@@ -125,9 +125,9 @@ export default function GarminPoiScreen() {
           />
         </View>
 
-        {!sdCardVolume && <StatusLine text={t.garminNoSdCardMsg} tone="alert" />}
-        {sendState === 'done' && <StatusLine text={t.garminPoiSendDone} />}
-        {sendState === 'error' && <StatusLine text={sendError ?? t.error} tone="alert" />}
+        {!sdCardVolume && <StatusNote text={t.garminNoSdCardMsg} tone="warning" />}
+        {sendState === 'done' && <StatusNote text={t.garminPoiSendDone} tone="success" />}
+        {sendState === 'error' && <StatusNote text={sendError ?? t.error} tone="error" />}
       </Section>
 
       {/* ── Retrieve POIs from the device to Downloads ── */}
@@ -142,8 +142,8 @@ export default function GarminPoiScreen() {
           />
         </View>
 
-        {retrieveState.phase === 'error' && <StatusLine text={retrieveState.error ?? t.error} tone="alert" />}
-        {retrieveState.phase === 'done' && <StatusLine text={t.garminPoiRetrieveDone(retrievedFiles.length)} />}
+        {retrieveState.phase === 'error' && <StatusNote text={retrieveState.error ?? t.error} tone="error" />}
+        {retrieveState.phase === 'done' && <StatusNote text={t.garminPoiRetrieveDone(retrievedFiles.length)} tone="success" />}
         {retrievedFiles.map(f => (
           <ExportedFileRow
             key={f.localPath}
@@ -158,7 +158,7 @@ export default function GarminPoiScreen() {
           them on the maps"). Same real pin-preview-per-item pattern as PoiScreen.tsx's own
           "On the watch" card. ── */}
       <Section title={t.garminPoiOnDeviceSection}>
-        {onDeviceLoading && <StatusLine text={t.garminPoiOnDeviceReading} />}
+        {onDeviceLoading && <StatusNote text={t.garminPoiOnDeviceReading} tone="working" />}
         {!onDeviceLoading && onDeviceError && (
           <Text style={[styles.itemStats, { color: theme.error, marginTop: v3Spacing.small }]}>{onDeviceError}</Text>
         )}

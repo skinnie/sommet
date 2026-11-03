@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Card } from '../components/ui/Card';
 import Icon from '../components/ui/Icon';
+import { SearchField } from '../components/ui/primitives';
 import { useV3Theme } from '../theme/v3';
 import { t } from '../i18n';
 import {
@@ -120,16 +121,8 @@ export default function AppZoneScreen() {
   return (
     <View style={s.root}>
       <View style={s.header}>
-        <View style={s.searchRow}>
-          <Icon name="list" size={16} color={theme.mutedText} />
-          <TextInput
-            style={s.search}
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t.appZoneSearchPlaceholder}
-            placeholderTextColor={theme.mutedText}
-          />
-        </View>
+        {/* One search box for the app (desktop picks #9): magnifier, and a × once there's text. */}
+        <SearchField value={query} onChangeText={setQuery} placeholder={t.appZoneSearchPlaceholder} />
         <View style={s.headerMeta}>
           <Text style={s.metaText}>{t.appZoneAppsCount(filtered.length)}</Text>
           <TouchableOpacity onPress={handleImport} disabled={importing}>

@@ -16,7 +16,9 @@ export type IconName =
   // Symbol the desktop's Icons.qml picks for the same page, so the two rails read alike:
   // coach = forum, weight = monitor_weight, health = monitor_heart, ember = local_fire_department.
   // Before this they all fell back to 'chart' and the rail showed four identical bar charts.
-  | 'coach' | 'weight' | 'health' | 'ember';
+  | 'coach' | 'weight' | 'health' | 'ember'
+  // For the search box, closing a note, and error notes (2026-11-02, desktop picks #7/#9).
+  | 'search' | 'close' | 'error';
 
 interface Props {
   name: IconName;
@@ -438,6 +440,28 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
       return (
         <Svg width={size} height={size} viewBox="0 0 24 24">
           <Path d="M9 4.5L16.5 12L9 19.5" {...s} />
+        </Svg>
+      );
+    case 'search':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Circle cx={10.5} cy={10.5} r={6.5} stroke={color} strokeWidth={1.9} fill="none" />
+          <Line x1={15.3} y1={15.3} x2={20.5} y2={20.5} {...s} />
+        </Svg>
+      );
+    case 'close':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Line x1={6.5} y1={6.5} x2={17.5} y2={17.5} {...s} />
+          <Line x1={17.5} y1={6.5} x2={6.5} y2={17.5} {...s} />
+        </Svg>
+      );
+    case 'error':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.9} fill="none" />
+          <Line x1={12} y1={7.5} x2={12} y2={13} {...s} />
+          <Circle cx={12} cy={16.4} r={0.9} fill={color} stroke="none" />
         </Svg>
       );
     default:

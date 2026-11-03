@@ -59,7 +59,7 @@ import { useExperimental } from '../config/ExperimentalContext';
 import { manualUrlFor, garminManualUrlFor } from '../config/manuals';
 import { t, fmtDate as fmtDateShared } from '../i18n';
 import Icon from '../components/ui/Icon';
-import { ActionTile, Badge, Button, Chip, StatusLine } from '../components/ui/primitives';
+import { ActionTile, Badge, Button, StatusLine, StatusChip, StatusNote } from '../components/ui/primitives';
 // v3.0 UI port (2026-08-09, "go all the way to the new theming") - the whole screen (not
 // just the connected dashboard) is on the v3 palette now; tokens.ts/useTheme() aren't
 // imported here anymore at all.
@@ -1082,6 +1082,11 @@ export default function HomeScreen() {
   const statusPhase = lastActive === 'orbital' ? orbital.phase : sync.phase;
   const statusText = lastActive === 'orbital' ? orbitalStatusMessage(orbital) : syncStatusMessage(sync);
   const statusTone: 'muted' | 'alert' = statusPhase === 'error' ? 'alert' : 'muted';
+  // The last sync or GPS update as a result note (desktop picks #7); idle stays a plain line.
+  const statusNoteTone: 'success' | 'error' | 'working' | null = statusPhase === 'idle' ? null
+    : statusPhase === 'error' ? 'error'
+    : statusPhase === 'done' ? 'success'
+    : 'working';
 
   // ── Device area render (searching/connecting/timeout/error states) ───────
   // searching / timeout are now rendered INSIDE the unified card page below (desktop parity:
@@ -1328,7 +1333,7 @@ export default function HomeScreen() {
                     grow={false}
                   />
                 ))}
-                <Button label={mageneBusy === 'scan' ? 'Searching…' : t.homeBleConnectBtn} onPress={() => setPairMenuOpen(true)}
+                <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={() => setPairMenuOpen(true)}
                   disabled={mageneBusy === 'scan'} variant="text" grow={false} />
               </View>
             )}
@@ -1347,7 +1352,7 @@ export default function HomeScreen() {
               <Text style={[styles.deviceSub, v3MutedStyle]}>
                 {garminInfo.hasSdCard ? t.garminSdCardPresent : t.garminSdCardAbsent}
               </Text>
-              <Chip icon="check" label={t.homeDeviceConnectedStatus} />
+              <StatusChip label={t.homeDeviceConnectedStatus} tone="success" />
             </View>
             {/* Real, 2026-08-11 (André: "I added etrex manuals to the files, can you link
                 it to the supported devices?") - same mechanism as the Ambit manual link
@@ -1370,12 +1375,13 @@ export default function HomeScreen() {
           <Text style={[styles.deviceName, v3TextStyle]}>Bryton Aero 60</Text>
           <View style={styles.deviceMetaRow}>
             <Text style={[styles.deviceSub, v3MutedStyle]}>Connected over USB</Text>
-            <Chip icon="check" label={t.homeDeviceConnectedStatus} />
+            <StatusChip label={t.homeDeviceConnectedStatus} tone="success" />
           </View>
           <Text style={[styles.deviceSub, v3MutedStyle]}>GPS settings and Workouts are in the menu.</Text>
           {brytonSync && (
-            <StatusLine
-              tone={brytonSync.phase === 'error' ? 'alert' : 'muted'}
+            <StatusNote
+              tone={brytonSync.phase === 'error' ? 'error'
+                : brytonSync.phase === 'reading' || brytonSync.phase === 'writing' ? 'working' : 'success'}
               text={brytonSync.phase === 'error' ? (brytonSync.error ?? 'Sync failed')
                 : brytonSync.phase === 'reading' ? 'Reading rides…'
                 : brytonSync.phase === 'writing' ? `Importing ${brytonSync.current + 1}/${brytonSync.total}…`
@@ -1383,13 +1389,13 @@ export default function HomeScreen() {
                 : 'All rides are already in your library.'} />
           )}
           <View style={styles.heroButtons}>
-            <Button label={brytonSyncing ? 'Syncing…' : 'Sync rides'} icon="sync" onPress={syncBryton} disabled={brytonSyncing} grow={false} />
+            <Button label="Sync rides" busy={brytonSyncing} icon="sync" onPress={syncBryton} disabled={brytonSyncing} grow={false} />
           </View>
           {/* Bluetooth is a separate transport from the USB Bryton (André, 2026-09-24): you can
               still pair an Ambit watch over BLE while the head unit is plugged in. */}
           {(!bleConnected || !mageneOn) && (
             <View style={styles.heroButtons}>
-              <Button label={mageneBusy === 'scan' ? 'Searching…' : t.homeBleConnectBtn} onPress={() => setPairMenuOpen(true)}
+              <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={() => setPairMenuOpen(true)}
                 disabled={mageneBusy === 'scan'} variant="text" grow={false} />
             </View>
           )}
@@ -1416,19 +1422,17 @@ export default function HomeScreen() {
               : 'Bluetooth · wake it to connect'}
           </Text>
           {mageneSync && mageneBusy === 'rides' && (
-            <Text style={[styles.deviceSub, v3MutedStyle]}>
-              {mageneSync.phase === 'writing' && mageneSync.total > 0
+            <StatusNote tone="working" text={mageneSync.phase === 'writing' && mageneSync.total > 0
                 ? `Importing ${mageneSync.current}/${mageneSync.total}…`
-                : mageneSync.phase === 'reading' ? 'Reading rides…' : 'Connecting…'}
-            </Text>
+                : mageneSync.phase === 'reading' ? 'Reading rides…' : 'Connecting…'} />
           )}
-          {mageneMsg ? <StatusLine text={mageneMsg} tone={mageneSync?.phase === 'error' ? 'alert' : 'muted'} /> : null}
+          <StatusNote text={mageneMsg} tone={mageneSync?.phase === 'error' ? 'error' : 'success'} />
           <View style={styles.heroButtons}>
-            <Button label={mageneBusy === 'rides' ? 'Syncing…' : 'Sync rides'} icon="sync" onPress={syncMagene}
+            <Button label="Sync rides" busy={mageneBusy === 'rides'} icon="sync" onPress={syncMagene}
               disabled={!!mageneBusy} grow={false} />
-            <Button label={mageneBusy === 'status' ? 'Connecting…' : 'Connect'} onPress={() => refreshMagene(mageneOn)}
+            <Button label="Connect" busy={mageneBusy === 'status'} onPress={() => refreshMagene(mageneOn)}
               disabled={!!mageneBusy} variant="text" grow={false} />
-            <Button label="Forget" onPress={forgetMagene} disabled={!!mageneBusy} variant="text" grow={false} />
+            <Button label="Forget" danger onPress={forgetMagene} disabled={!!mageneBusy} variant="text" grow={false} />
           </View>
         </Card>
       )}
@@ -1499,13 +1503,13 @@ export default function HomeScreen() {
                 <Text style={[styles.deviceBatteryText, v3MutedStyle]}>{ambitInfo.battery}%</Text>
               </View>
             )}
-            <Chip icon="check" label={t.homeDeviceConnectedStatus} />
+            <StatusChip label={t.homeDeviceConnectedStatus} tone="success" />
             {/* Real, 2026-08-09 ("via usb should be auto detected... bluetooth yes it needs
                 a button") - desktop's own hero card never needed this (USB-only), but Android
                 genuinely has two transports now, so the connected card says which one is
                 live. bleConnected is the same ref this screen already uses to gate the USB
                 watchdog/sync-provider choice - not a new signal invented for this label. */}
-            <Chip icon={bleConnected ? 'link' : 'check'} label={t.homeConnVia(bleConnected ? t.homeConnViaBle : t.homeConnViaUsb)} />
+            <StatusChip label={t.homeConnVia(bleConnected ? t.homeConnViaBle : t.homeConnViaUsb)} tone="success" />
           </View>
           {/* Real, 2026-08-10 - was gated off for cable Kailash while that path was
               unconfirmed; a real cable capture (kailashsynctimefrom...) then showed it's
@@ -1753,7 +1757,9 @@ export default function HomeScreen() {
       ))}
 
       {/* ── Statut ── */}
-      {connected && <StatusLine text={statusText} tone={statusTone} />}
+      {connected && (statusNoteTone
+        ? <StatusNote text={statusText} tone={statusNoteTone} style={{ width: '100%', maxWidth: roomy ? 960 : CONTENT_MAX_WIDTH }} />
+        : <StatusLine text={statusText} tone={statusTone} />)}
 
     </ScrollView>
     </NavShell>
