@@ -42,6 +42,16 @@ jobs:
       - name: Install JavaScript dependencies
         working-directory: android
         run: npm ci
+      # src/config/version.ts is gitignored (each machine generates it), and LogService.ts
+      # imports it, so the tests need it too. Same as release.yml: the version from
+      # package.json plus the short commit SHA.
+      - name: Generate the version file
+        working-directory: android
+        run: |
+          V=$(node -p "require('./package.json').version")
+          mkdir -p src/config
+          printf "export const BUILD_SHA = '%s';\nexport const APP_VERSION = '%s';\n" \
+            "${GITHUB_SHA::7}" "$V" > src/config/version.ts
       - name: Run the app-logic checks (the same ones tools/check.sh runs before every commit)
         run: tools/check.sh android
       - name: Build the debug APK
