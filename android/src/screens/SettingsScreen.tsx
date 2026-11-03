@@ -29,7 +29,7 @@ import { isStrapHrvEnabled, setStrapHrvEnabled as persistStrapHrv } from '../ser
 import { useDemo } from '../config/DemoContext';
 import { DemoDevicePicker } from '../components/ui/DemoDevicePicker';
 import Icon, { IconName } from '../components/ui/Icon';
-import { CREDITS } from '../legal/credits';
+import { CREDITS_URL } from '../legal/credits';
 import {
   getRunalyzeApiKey, saveRunalyzeApiKey, removeRunalyzeApiKey,
 } from '../services/ApiRunalyze';
@@ -1404,21 +1404,13 @@ export default function SettingsScreen() {
             </View>
           )}
           <Text style={[styles.sectionDesc, { marginTop: 10 }]}>{t.aboutDisclaimer}</Text>
-
-          <Text style={styles.creditsHeading}>{t.aboutCreditsSection}</Text>
-          <Text style={styles.sectionDesc}>{t.aboutCreditsIntro}</Text>
-          {CREDITS.map(c => (
-            <TouchableOpacity
-              key={c.name}
-              style={styles.creditItem}
-              disabled={!c.url}
-              activeOpacity={0.6}
-              onPress={() => c.url && Linking.openURL(c.url)}
-            >
-              <Text style={[styles.creditName, !!c.url && styles.link]}>{c.name}</Text>
-              <Text style={styles.creditDesc}>{c.description}</Text>
-            </TouchableOpacity>
-          ))}
+          <Text style={styles.sectionDesc}>{t.aboutLicenses}</Text>
+          {/* The full credits list lives on GitHub, same page as the PC app (André, 2026-11-03). */}
+          <Text style={styles.sectionDesc}>{t.aboutBuiltOn}</Text>
+          <View style={{ flexDirection: 'row', marginTop: 4 }}>
+            <Button variant="outline" grow={false} label={t.aboutCreditsLink}
+              onPress={() => { Linking.openURL(CREDITS_URL).catch(() => {}); }} />
+          </View>
         </SettingsSection>
       </View>
 
@@ -1450,13 +1442,6 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   link: { color: t.text, fontWeight: '600' },
   row: { flexDirection: 'row', gap: 10, marginTop: 12 },
   cacheRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 10 },
-  creditsHeading: {
-    fontSize: 13, fontWeight: '700', color: t.text,
-    marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: t.mutedText + '33',
-  },
-  creditItem: { marginTop: 10 },
-  creditName: { fontSize: 13, fontWeight: '700', color: t.text },
-  creditDesc: { fontSize: 12, color: t.mutedText, lineHeight: 17, marginTop: 2 },
   rowsCard: { padding: 4 },
   themeRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   viewPrefBlock: { marginTop: 14 },

@@ -1718,8 +1718,8 @@ PageFlickable {
                         wrapMode: Text.WordWrap
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
-                        text: qsTr("Independent, unofficial software - not affiliated with, " +
-                                    "endorsed by, or supported by Suunto or Garmin. Suunto, " +
+                        text: qsTr("Independent, unofficial software: not affiliated with, " +
+                                    "endorsed by or supported by Suunto or Garmin. Suunto, " +
                                     "Ambit, Traverse, Kailash, Garmin and eTrex are trademarks of " +
                                     "their respective owners, used here only to describe " +
                                     "compatibility.")
@@ -1729,33 +1729,27 @@ PageFlickable {
                         wrapMode: Text.WordWrap
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
-                        // Matches LICENSE at the repo root and the Credits section of the README.
-                        text: qsTr("Licensed under the GNU GPLv3, the same license as openambit, " +
-                                    "whose libambit this project's protocol work is checked " +
-                                    "against throughout. The desktop app links Qt 6 under the " +
-                                    "LGPLv3; the Android app uses React Native (MIT).")
+                        // Matches LICENSE at the repo root and docs/reference/credits.md.
+                        text: qsTr("Licensed under the GNU GPLv3 and provided as is, without " +
+                                    "warranty. Built with Qt 6 (LGPLv3). Map data © OpenStreetMap " +
+                                    "contributors (ODbL), tiles by CyclOSM, OpenStreetMap France " +
+                                    "and IGN; weather by Open-Meteo (CC BY 4.0); icons by Google " +
+                                    "Material Symbols (Apache 2.0).")
                     }
+                    // The full credits list lives on GitHub; the tablet app opens the same page
+                    // (André, 2026-11-03).
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
                         color: Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
-                        text: qsTr("Map data © OpenStreetMap contributors, under the Open " +
-                                    "Database License (ODbL); tiles from CyclOSM / OpenStreetMap " +
-                                    "France and IGN Géoplateforme. Weather by Open-Meteo " +
-                                    "(CC BY 4.0). Icons: Google Material Symbols (Apache License " +
-                                    "2.0). GPS Track Pod support from iwanders/gps_track_pod (MIT).")
+                        text: qsTr("Built on work by openambit, opensportsync, marguslt and " +
+                                    "many others.")
                     }
-                    Text {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        color: Theme.mutedText
-                        font.pixelSize: Theme.fontSizeCaption
-                        text: qsTr("Built on real prior work: openambit, opensportsync, " +
-                                    "marguslt (firmware-download recipe, gists, openmoves), " +
-                                    "sebchastang (published Suunto App Zone interval-training " +
-                                    "scripts), the Suunto forum community, and wanarun.net. " +
-                                    "Full credits and licenses in the project README.")
+                    RoundedButton {
+                        text: qsTr("Credits and licenses")
+                        onClicked: Qt.openUrlExternally(
+                            "https://github.com/skinnie/sommet/blob/main/docs/reference/credits.md")
                     }
                 }
             }

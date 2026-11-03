@@ -7,6 +7,23 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-03: Shorter About section, credits on GitHub (0.2.59)
+
+The tablet's Settings → About listed all twenty credits in full plus a long legal paragraph,
+which was too much for a settings screen.
+
+- Both apps now end About the same way. A short note says Sommet is independent of Suunto and
+  Garmin, and one line gives the license and the map, weather and icon sources. Then "Built on
+  work by openambit, opensportsync, marguslt and many others" and a **Credits and licenses**
+  button.
+- The button opens the full list on GitHub (`docs/reference/credits.md`), which already holds
+  every name the tablet showed and more. The tablet's own copy of the list is gone, so the two
+  can't drift apart (`android/src/legal/credits.ts` keeps only the link).
+- On the PC, "Full credits and licenses in the project README" becomes that same button.
+  (`SettingsPage.qml`, `SettingsScreen.tsx`.)
+
+---
+
 ## 2026-11-03: Both apps say when a newer Sommet is out (0.2.58)
 
 Until now, the only way to hear about a new version was to look at the GitHub page.

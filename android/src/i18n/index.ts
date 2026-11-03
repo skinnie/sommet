@@ -594,20 +594,16 @@ const fr = {
   aboutSection: 'À propos',
   aboutVersion: (v: string) => `Sommet v${v}`,
   aboutDisclaimer:
-    "Sommet est un projet personnel, indépendant et open source. Il n'est ni affilié à, " +
-    "ni approuvé, ni sponsorisé par Suunto Oy ou Garmin Ltd. Suunto, Ambit, Traverse, " +
-    "Kailash, Garmin, eTrex, ainsi que tout autre nom de produit ou marque mentionné dans " +
-    "l'application, sont des marques déposées ou non déposées de leurs détenteurs " +
-    "respectifs (Suunto Oy et Garmin Ltd.) ; elles ne sont utilisées ici que pour décrire " +
-    "la compatibilité avec ces appareils. Tous droits réservés à leurs propriétaires " +
-    "respectifs. Fourni « tel quel », sans aucune garantie. Sous licence GNU GPLv3 ; " +
-    "développé avec React Native (MIT). Données cartographiques © contributeurs " +
-    "OpenStreetMap (ODbL) ; météo par Open-Meteo (CC BY 4.0) ; icônes Google Material " +
-    "Symbols (Apache 2.0).",
-  aboutCreditsSection: 'Remerciements',
-  aboutCreditsIntro:
-    "Ce projet s'appuie sur le travail réel d'autres personnes, sans qui la " +
-    "rétro-ingénierie des protocoles utilisés ici aurait pris bien plus de temps :",
+    "Logiciel indépendant et non officiel : ni affilié à, ni approuvé, ni soutenu par " +
+    "Suunto ou Garmin. Suunto, Ambit, Traverse, Kailash, Garmin et eTrex sont des marques " +
+    "de leurs détenteurs respectifs, utilisées ici uniquement pour décrire la compatibilité.",
+  aboutLicenses:
+    "Sous licence GNU GPLv3, fourni tel quel, sans garantie. Développé avec React Native " +
+    "(MIT). Données cartographiques © contributeurs OpenStreetMap (ODbL), fonds CyclOSM, " +
+    "OpenStreetMap France et IGN ; météo par Open-Meteo (CC BY 4.0) ; icônes Google " +
+    "Material Symbols (Apache 2.0).",
+  aboutBuiltOn: "S'appuie sur le travail d'openambit, opensportsync, marguslt et bien d'autres.",
+  aboutCreditsLink: 'Remerciements et licences',
 
   // Garmin — shared (v2.3 beta, updated v2.3.2)
   garminButton:      'GARMIN',
@@ -1521,19 +1517,16 @@ const en: typeof fr = {
   aboutSection: 'About',
   aboutVersion: (v: string) => `Sommet v${v}`,
   aboutDisclaimer:
-    "Sommet is an independent, open-source personal project. It is not affiliated " +
-    "with, endorsed by, or sponsored by Suunto Oy or Garmin Ltd. Suunto, Ambit, Traverse, " +
-    "Kailash, Garmin, eTrex, and any other product name or trademark referenced in this app " +
-    "are registered or unregistered trademarks of their respective owners (Suunto Oy and " +
-    "Garmin Ltd.), used here only to describe compatibility with those devices. All " +
-    "rights reserved to their respective owners. Provided as is, without warranty of any " +
-    "kind. Licensed under the GNU GPLv3; built with React Native (MIT). Map data © " +
-    "OpenStreetMap contributors (ODbL); weather by Open-Meteo (CC BY 4.0); icons by Google " +
+    "Independent, unofficial software: not affiliated with, endorsed by or supported by " +
+    "Suunto or Garmin. Suunto, Ambit, Traverse, Kailash, Garmin and eTrex are trademarks of " +
+    "their respective owners, used here only to describe compatibility.",
+  aboutLicenses:
+    "Licensed under the GNU GPLv3 and provided as is, without warranty. Built with React " +
+    "Native (MIT). Map data © OpenStreetMap contributors (ODbL), tiles by CyclOSM, " +
+    "OpenStreetMap France and IGN; weather by Open-Meteo (CC BY 4.0); icons by Google " +
     "Material Symbols (Apache 2.0).",
-  aboutCreditsSection: 'Credits',
-  aboutCreditsIntro:
-    "This project stands on real prior work by other people, without which the protocol " +
-    "reverse-engineering behind it would have taken far longer:",
+  aboutBuiltOn: 'Built on work by openambit, opensportsync, marguslt and many others.',
+  aboutCreditsLink: 'Credits and licenses',
 
   // Garmin — shared (v2.3 beta, updated v2.3.2)
   garminButton:      'GARMIN',
