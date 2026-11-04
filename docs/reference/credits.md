@@ -53,7 +53,7 @@ reverse-engineering here would have been possible, or would have taken far longe
   and wrapped by `tools/suunto_t6.py` - this project owns no T6 either, so the same
   real-hardware-development-is-the-verification reasoning as the X6HR applies.
 
-- **Ivor Wanders ([iwanders/gpspod](https://github.com/iwanders/gpspod))** - the
+- **Ivor Wanders ([iwanders/gps_track_pod](https://github.com/iwanders/gps_track_pod))** - the
   reverse-engineered Suunto GPS Track Pod USB protocol (MIT), vendored at `tools/vendor/gpspod/`
   and used by `tools/gps_track_pod.py` to read the pod tracks the T6/X6HR heart-rate logs are
   merged with into a mapped activity.
