@@ -75,6 +75,7 @@ PageFlickable {
         root.msg = ""
         root.api("GET", "/api/library", null, r => root.saved = r.ok ? r.routes : [])
         root.api("GET", "/api/bryton/tracks", null, r => root.bryton = r.ok ? r.routes : null)
+        root.api("GET", "/api/edge500/info", null, r => root.edge500Here = !!r.ok)
         if (root.watchHere && !RouteService.loading) RouteService.refresh()
         if (root.etrexHere) GarminService.refreshDeviceGpx()
         if (root.legacyWatch)
@@ -194,7 +195,7 @@ PageFlickable {
         nameFilters: [qsTr("GPX files (*.gpx)"), qsTr("All files (*)")]
         onAccepted: {
             RouteService.loadGpxFile(selectedFile)
-            root.brytonMsg = ""; root.mageneMsg = ""; root.pendingLibraryId = ""
+            root.brytonMsg = ""; root.mageneMsg = ""; root.edgeMsg = ""; root.pendingLibraryId = ""
             const gpx = LocalFileService.readText(selectedFile)
             if (!gpx || gpx.length === 0) return
             // The name the import card shows (the GPX's own, else the file's), not the file name.
@@ -218,6 +219,20 @@ PageFlickable {
             root.brytonMsg = r.ok ? qsTr("Sent to the Bryton — it shows up once you unplug it.")
                                   : (r.error || qsTr("Send to Bryton failed"))
             if (r.ok) root.refresh()
+        })
+    }
+    // A USB-drive Garmin Edge (Edge 500, 2026-11-05): routes go in as a TCX course.
+    property bool edge500Here: false
+    property string edgeMsg: ""
+    property bool edgeOk: false
+    property bool edgeSending: false
+    function sendPendingToEdge500() {
+        root.edgeMsg = qsTr("Sending to the Edge 500…"); root.edgeOk = false; root.edgeSending = true
+        root.api("POST", "/api/edge500/route", { name: root.pendingName(), gpx: RouteService.pendingRouteGpxText }, r => {
+            root.edgeSending = false
+            root.edgeOk = !!r.ok
+            root.edgeMsg = r.ok ? qsTr("Sent to the Edge 500 — unplug it, then find it under Training › Courses.")
+                                : (r.error || qsTr("Send to Edge 500 failed"))
         })
     }
     property string mageneMsg: ""
@@ -247,6 +262,7 @@ PageFlickable {
         HomeViewModel.routeWatches.forEach((w, i) => out.push({ key: "watch:" + i, label: w.label }))
         if (root.etrexHere && GarminService.hasSdCard) out.push({ key: "etrex", label: qsTr("eTrex (SD card)") })
         if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("Bryton") })
+        if (root.edge500Here) out.push({ key: "edge500", label: qsTr("Garmin Edge 500") })
         if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("Magene") })
         return out
     }
@@ -261,6 +277,7 @@ PageFlickable {
                                                                  RouteService.pendingRouteGpxText)
         else if (key === "bryton") root.sendPendingToBryton()
         else if (key === "magene") root.sendPendingToMagene()
+        else if (key === "edge500") root.sendPendingToEdge500()
     }
     ThemedMenu {
         id: sendMenu
@@ -621,6 +638,8 @@ PageFlickable {
                 // Results of a send / upload, under the buttons (desktop picks #7).
                 StatusNote { width: parent.width; text: root.brytonMsg
                              tone: root.brytonSending ? "working" : root.brytonOk ? "success" : "error" }
+                StatusNote { width: parent.width; text: root.edgeMsg
+                             tone: root.edgeSending ? "working" : root.edgeOk ? "success" : "error" }
                 StatusNote { width: parent.width; text: root.mageneMsg
                              tone: root.mageneSending ? "working" : root.mageneOk ? "success" : "error" }
                 StatusNote { width: parent.width; text: RouteService.uploadResultText

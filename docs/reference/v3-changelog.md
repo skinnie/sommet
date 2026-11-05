@@ -7,6 +7,33 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-05: Garmin Edge 500 on the PC (0.2.60)
+
+The Edge 500 (and the other Edges from that time) shows up as a plain USB drive, not like the
+newer Edges, so Sommet didn't see it.
+
+- **Rides.** Plug it in and it appears on Home as "Garmin Edge 500"; **Sync rides** imports
+  the new ones, like any other bike computer (same duplicate check, same intervals.icu upload).
+- **Profile.** GPS settings compares FTP, LTHR, max HR, weight, height, gender and age with
+  intervals.icu and writes the intervals.icu values. The heart rate and power zones move with
+  max HR and FTP. Unplug the Edge afterwards: it loads the new profile as it leaves USB mode.
+  Sommet keeps a copy of the old profile files first.
+- **Routes.** Send to → Garmin Edge 500 puts the route on the Edge as a course
+  (Training › Courses).
+- **Workouts.** The Training Program can create workouts for the Edge 500 and send them
+  (time, distance or lap steps; power, heart rate, speed or cadence targets; repeats stay
+  repeats). They appear under Training › Workouts.
+- **Data screens.** The Edge screens page reads and edits the Edge 500's pages (1 to 8 fields
+  each). Field names come later; for now fields show as numbers.
+- Connect IQ is hidden for the Edge 500, which doesn't have it.
+
+Everything is written to the Edge's own import folder (`Garmin/NewFiles`), never over its
+files. Checked on a real Edge 500 (firmware 3.30): ride import, profile, course and workout.
+(`tools/mtp_import.py`, `tools/edge500_profile.py`, `tools/edge500_course.py`,
+`tools/edge500_workout.py`, `tools/garmin_edge_screens.py`.)
+
+---
+
 ## 2026-11-03: Shorter About section, credits on GitHub (0.2.59)
 
 The tablet's Settings → About listed all twenty credits in full plus a long legal paragraph,

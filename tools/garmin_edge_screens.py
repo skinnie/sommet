@@ -34,6 +34,11 @@ import struct
 import sys
 
 SCREEN_MESG = 14
+# Edge 500 family (2009-2013 mass-storage Edges; read from a real Edge 500 fw 3.30, 2026-11-05):
+# mesg 14 has NO field 7. Its slots are field 5 = enum[8] (one byte per data field), field 4 =
+# u8[8] slot positions 1..8, field 3 = how many of the 8 slots the page shows, field 1 = enabled.
+# Field ids are the Edge 500's own (different numbering from the u16 ids of the newer Edges).
+FIELD_SLOTS_U8 = 5
 FIELD_LAYOUT = 3       # number of fields on the screen
 FIELD_SLOTS = 7        # u16[10] data-field type ids
 FIELD_ENABLED = 1
@@ -222,6 +227,11 @@ FIELD_NAMES = {
     523: "Step Time",
 }
 
+# Edge 500 data-field ids (u8, mesg 14 field 5) -> on-screen name. Filled from the Edge 500 fw 3.30
+# field table; an id missing here shows as "id:N" and is refused on write.
+EDGE500_FIELD_NAMES = {
+}
+
 FIT_CRC = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
            0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400]
 
@@ -271,7 +281,8 @@ def parse(path):
         rec = {'index': None, 'enabled': None, 'enabled_off': None, 'layout': None, 'layout_off': None,
                'slots': None, 'slots_off': None, 'e': e, 'stype': None, 'stype_off': None,
                'variant': None, 'variant_off': None,
-               'order': None, 'order_off': None, 'active': None, 'active_off': None}
+               'order': None, 'order_off': None, 'active': None, 'active_off': None,
+               'slot_w': 2, 'family': 'edge'}
         for (fnum, sz, bt) in fields:
             off = p
             t = BASE.get(bt, (None, 1))[0]
@@ -288,6 +299,11 @@ def parse(path):
                     k = sz // 2
                     rec['slots'] = list(struct.unpack_from(e + 'H' * k, b, off))
                     rec['slots_off'] = off
+                elif fnum == FIELD_SLOTS_U8 and bt in (0x00, 0x02) and sz > 1 and rec['slots'] is None:
+                    rec['slots'] = list(b[off:off + sz])
+                    rec['slots_off'] = off
+                    rec['slot_w'] = 1
+                    rec['family'] = 'edge500'
                 elif fnum == FIELD_STYPE and t:
                     # field 10 = screen-type marker. Data (custom-field) screens use small ordinals
                     # (0,1,2,3… = Screen 1,2,3,4); the special typed screens (Map/Elevation/ClimbPro/
@@ -309,10 +325,24 @@ def parse(path):
     return b, screens
 
 
-def name(fid):
-    if fid in (65535, 255):
+def names_for(family):
+    return EDGE500_FIELD_NAMES if family == 'edge500' else FIELD_NAMES
+
+
+def name(fid, family='edge'):
+    if fid in (65535, 255) and family != 'edge500':
         return "-"
-    return FIELD_NAMES.get(fid, "id:%d" % fid)
+    return names_for(family).get(fid, "id:%d" % fid)
+
+
+def shown_slots(s):
+    """The field ids a screen actually shows. Newer Edges blank unused slots (65535); the Edge 500
+    keeps all 8 bytes filled and shows the first `layout` of them."""
+    slots = s.get('slots') or []
+    if s.get('family') == 'edge500':
+        n = s.get('layout') if s.get('layout') not in (None, 255) else len(slots)
+        return slots[:max(0, min(n, len(slots)))]
+    return [f for f in slots if f not in (65535, 255)]
 
 
 SPORT_MESG = 12
@@ -352,9 +382,12 @@ def _norm(s):
 NAME_TO_ID = {}
 for _fid, _nm in FIELD_NAMES.items():
     NAME_TO_ID.setdefault(_norm(_nm), _fid)
+NAME_TO_ID_500 = {}
+for _fid, _nm in EDGE500_FIELD_NAMES.items():
+    NAME_TO_ID_500.setdefault(_norm(_nm), _fid)
 
 
-def resolve_field(token):
+def resolve_field(token, family='edge'):
     """A --fields token -> field id. Accepts a numeric id, or a field name (case/space/punctuation
     insensitive). 'none'/'-'/'empty' -> 65535 (blank slot)."""
     t = token.strip()
@@ -362,7 +395,7 @@ def resolve_field(token):
         return 65535
     if t.isdigit():
         return int(t)
-    fid = NAME_TO_ID.get(_norm(t))
+    fid = (NAME_TO_ID_500 if family == 'edge500' else NAME_TO_ID).get(_norm(t))
     if fid is None:
         raise SystemExit("unknown field %r - run with --catalog to see valid names/ids" % token)
     return fid
@@ -386,7 +419,7 @@ def do_list(path, as_json=False):
         for s in screens:
             if s.get('enabled') != 1:
                 continue
-            fields = [{"id": f, "name": name(f)} for f in (s['slots'] or []) if f not in (65535, 255)]
+            fields = [{"id": f, "name": name(f, s['family'])} for f in shown_slots(s)]
             out.append({"index": s['index'], "layout": s['layout'], "fields": fields})
         print(json.dumps({"screens": out}))
         return
@@ -395,10 +428,10 @@ def do_list(path, as_json=False):
     for s in screens:
         if s.get('enabled') != 1:
             continue
-        fields = [f for f in (s['slots'] or []) if f not in (65535, 255)]
+        fields = shown_slots(s)
         print("  screen %2d  layout=%s  fields(%d): %s"
               % (s['index'], s['layout'], len(fields),
-                 ", ".join("%s(%d)" % (name(f), f) for f in fields)))
+                 ", ".join("%s(%d)" % (name(f, s['family']), f) for f in fields)))
 
 
 def do_set(path, screen_idx, new_fields, layout, out, variant=None):
@@ -411,6 +444,14 @@ def do_set(path, screen_idx, new_fields, layout, out, variant=None):
     e = target['e']
     slots = list(target['slots'])
     n = len(slots)
+    if target.get('family') == 'edge500':
+        _set_u8(b, target, new_fields, layout)
+        crc = fit_crc(b[:len(b) - 2])
+        struct.pack_into('<H', b, len(b) - 2, crc)
+        with open(out, 'wb') as f:
+            f.write(b)
+        print("wrote %s (%d bytes, CRC fixed)" % (out, len(b)))
+        return
     if new_fields is not None:
         ids = [resolve_field(x) for x in new_fields.split(',')]
         ids = [i for i in ids if i != 65535] or [65535]  # drop trailing blanks; allow all-empty
@@ -440,6 +481,30 @@ def do_set(path, screen_idx, new_fields, layout, out, variant=None):
         f.write(b)
     print("wrote %s (%d bytes, CRC fixed). Copy into <Edge>/Garmin/NewFiles/ and reboot the Edge."
           % (out, len(b)))
+
+
+def _set_u8(b, target, new_fields, layout):
+    """Edge 500 page edit in place: the first k slots get the new ids, field 3 = k. Slots past k
+    keep their old bytes (the device never stores a blank slot; it just shows `layout` of them)."""
+    slots = list(target['slots'])
+    n = len(slots)
+    if new_fields is not None:
+        ids = [resolve_field(x, 'edge500') for x in new_fields.split(',')]
+        real = [i for i in ids if i != 65535]
+        if not 1 <= len(real) <= n:
+            sys.exit("an Edge 500 page shows 1..%d fields (got %d)" % (n, len(real)))
+        if any(i > 254 for i in real):
+            sys.exit("Edge 500 field ids are 0..254")
+        if EDGE500_FIELD_NAMES and any(i not in EDGE500_FIELD_NAMES for i in real):
+            sys.exit("unknown Edge 500 field id in %r" % real)
+        slots[:len(real)] = real
+        b[target['slots_off']:target['slots_off'] + n] = bytes(slots)
+        if layout is None:
+            layout = len(real)
+    if layout is not None:
+        if not 1 <= layout <= n:
+            sys.exit("layout must be 1..%d" % n)
+        b[target['layout_off']] = layout & 0xFF
 
 
 def do_add(path, new_fields, layout, out, variant=None):

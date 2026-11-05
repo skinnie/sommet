@@ -25,11 +25,14 @@ PageFlickable {
     readonly property bool isBrytonBle: root.kind === "brytonble"
     // The Wahoo ELEMNT over USB/adb (2026-10-02): data pages only for now.
     readonly property bool isWahoo: root.kind === "wahoo"
+    // A USB-drive Garmin Edge (Edge 500, 2026-11-05): profile only; its data screens are on the
+    // Edge screens page.
+    readonly property bool isEdge: root.kind === "edge"
     readonly property string brytonBleAddress: BikeDevices.brytonBle ? BikeDevices.brytonBle.address : ""
     readonly property string mageneAddress: BikeDevices.magene ? BikeDevices.magene.address : ""
     readonly property string deviceName: root.isMagene
         ? (BikeDevices.magene && BikeDevices.magene.name ? BikeDevices.magene.name : qsTr("Magene C406"))
-        : root.isWahoo ? qsTr("Wahoo ELEMNT") : qsTr("Bryton Aero 60")
+        : root.isWahoo ? qsTr("Wahoo ELEMNT") : root.isEdge ? qsTr("Garmin Edge 500") : qsTr("Bryton Aero 60")
 
     // Same store Home's one-time ProfileSyncPrompt answers into ("auto" / "manual").
     Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
@@ -107,6 +110,8 @@ PageFlickable {
                           ? qsTr("Kept in sync with intervals.icu automatically every time it's connected.")
                           : root.isWahoo
                             ? qsTr("FTP, max HR, weight and height — compare with intervals.icu and pick the right values. The ELEMNT's zones follow FTP and max HR.")
+                          : root.isEdge
+                            ? qsTr("FTP, LTHR, max HR, weight, height, gender and age — compare with intervals.icu and pick the right values. The Edge's zones follow max HR and FTP. Unplug the Edge afterwards: it loads the new profile when it leaves USB mode.")
                           : root.isBrytonBle
                             ? qsTr("FTP, LTHR, max HR, MAP, weight and height — compare with intervals.icu and pick the right values.")
                             : qsTr("FTP, LTHR, max HR, weight, height, gender and age — compare with intervals.icu and pick the right values.")
@@ -116,8 +121,9 @@ PageFlickable {
                     text: qsTr("Sync profile")
                     onClicked: {
                         profileDialog.apiBase = root.isMagene ? "magene" : root.isBrytonBle ? "brytonble"
-                                              : root.isWahoo ? "wahoo" : "bryton"
+                                              : root.isWahoo ? "wahoo" : root.isEdge ? "edge500" : "bryton"
                         profileDialog.deviceName = root.isMagene ? qsTr("Magene") : root.isWahoo ? qsTr("ELEMNT")
+                                                 : root.isEdge ? qsTr("Edge")
                                                  : qsTr("Bryton")
                         profileDialog.address = root.isMagene ? root.mageneAddress
                                               : root.isBrytonBle ? root.brytonBleAddress : ""
@@ -130,7 +136,7 @@ PageFlickable {
         // ---- Data screens (the Bryton's are its USB files - cable only for now) ----
         Card {
             width: parent.width
-            visible: !root.isBrytonBle
+            visible: !root.isBrytonBle && !root.isEdge
             Loader {
                 width: parent.width
                 sourceComponent: root.isMagene ? mageneScreens : root.isWahoo ? wahooScreens : brytonScreens

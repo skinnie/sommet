@@ -12,6 +12,9 @@ QtObject {
     id: bikes
     // The found C406: {kind: "c406", name, address, activityCount, files}, or null.
     property var magene: null
+    // The active Edge is a USB-drive one (Edge 500 & co., 2026-11-05), not an MTP Edge 1040: it has
+    // a GPS settings page (profile over Garmin/NewFiles) and no Connect IQ. Home sets this.
+    property bool edgeMass: false
 
     // --- Devices on Home (André, 2026-10-22): one switch per Bluetooth bike computer, in
     // Settings > Show in the sidebar > Devices. Off: no card on Home, not in the pairing list, no

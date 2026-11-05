@@ -4,7 +4,7 @@ it - rough direct-USB import, no settings, read-only. Two transports, one device
 
   * MTP (Garmin Edge, Hammerhead Karoo): gvfs via `gio` - auto-mounts, no root, no install
     (confirmed against a real Edge 1040 Solar, 2026-09-04).
-  * Mass storage (Bryton Aero 60 and its siblings): the unit shows up as a plain USB drive that
+  * Mass storage (Bryton Aero 60, older Garmin Edges such as the Edge 500): the unit shows up as a plain USB drive that
     udisks mounts under /media|/run/media (or /Volumes on macOS), so it's a normal filesystem
     copy - no gio needed (confirmed against a real Aero 60, 2026-09-24).
   * ADB (Wahoo ELEMNT / BOLT / ROAM): the units run Android, and ADB is the documented way in
@@ -98,7 +98,28 @@ def _activities_dir(mount_path, rel):
 # filesystem and we read it directly (no gio). A device is recognised by a signature that a
 # random USB stick can't fake, so a plugged thumb drive never gets mistaken for a bike computer.
 # (kind, source-tag, fingerprint(mount)->bool, activities_dir(mount)->path).
+def _garmin_mass_model(m):
+    """"Edge 500" etc. from a mass-storage Garmin's own Garmin/GarminDevice.xml, or "" when the
+    volume isn't a Garmin Edge. Older Edges (500/510/800/810, 2009-2013) are USB drives, not MTP;
+    the XML is the device's self-description, so a random stick can't match."""
+    xml = os.path.join(m, "Garmin", "GarminDevice.xml")
+    try:
+        with open(xml, "rb") as fh:
+            text = fh.read(4096).decode("utf-8", "replace")
+    except OSError:
+        return ""
+    hit = re.search(r"<Description>([^<]*)</Description>", text)
+    model = (hit.group(1).strip() if hit else "")
+    return model if model.lower().startswith("edge") else ""
+
+
 MASS_STORAGE_KINDS = [
+    # Garmin Edge 500 and the other mass-storage Edges (confirmed against a real Edge 500,
+    # fw 3.30, 2026-11-05): rides in Garmin/Activities/YYYY-MM-DD-HH-MM-SS.fit, same names and
+    # same "edge" source tag as the MTP Edges, so dedup, intervals upload and icons are shared.
+    ("edge", "edge",
+     lambda m: bool(_garmin_mass_model(m)),
+     lambda m: os.path.join(m, "Garmin", "Activities")),
     # Bryton: a "System/History" tree is the definitive marker; rides live at the volume root.
     ("bryton", "bryton",
      lambda m: (os.path.isdir(os.path.join(m, "System", "History"))
@@ -156,7 +177,8 @@ def _mass_storage_devices():
             devices.append({
                 "kind": kind,
                 "host": label,
-                "name": "Bryton Aero 60" if kind == "bryton" else label,
+                "name": ("Bryton Aero 60" if kind == "bryton"
+                         else "Garmin " + _garmin_mass_model(mount) if kind == "edge" else label),
                 "mount": mount,
                 "activitiesDir": adir,
                 "activityCount": len(fits),
@@ -336,7 +358,7 @@ def pull(dest, since=None, only=None):
                     if code != 0 or not os.path.isfile(out):
                         continue
                 elif dev.get("transport") == "mass":
-                    # A real local filesystem (Bryton) - a plain copy, no gvfs in the way.
+                    # A real local filesystem (Bryton, Edge 500) - a plain copy, no gvfs in the way.
                     shutil.copy2(src, out)
                 else:
                     # gio copy handles the gvfs backend cleanly; a plain shutil.copy also works

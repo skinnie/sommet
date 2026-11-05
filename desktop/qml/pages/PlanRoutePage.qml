@@ -257,6 +257,17 @@ Item {
     property bool brytonHere: false
     function probeBryton() {
         api("GET", "/api/bryton/info", null, function(status, res) { root.brytonHere = !!(res && res.ok) })
+        api("GET", "/api/edge500/info", null, function(status, res) { root.edge500Here = !!(res && res.ok) })
+    }
+    // A USB-drive Garmin Edge (Edge 500, 2026-11-05): the route goes in as a TCX course.
+    property bool edge500Here: false
+    function sendToEdge500() {
+        busy = true; statusMsg = qsTr("Sending to the Edge 500…")
+        api("POST", "/api/edge500/route", { name: cleanName(), gpx: plannedGpx }, function(status, res) {
+            busy = false
+            statusMsg = (res && res.ok) ? qsTr("Sent to the Edge 500 — unplug it, then find it under Training › Courses.")
+                                        : (res && res.error ? res.error : qsTr("Send to Edge 500 failed"))
+        })
     }
     // Wahoo ELEMNT (2026-10-03): on the cable it's imported right away; once Sommet has seen it,
     // it can also be sent over Bluetooth (the rider then presses SYNC on the ELEMNT's Routes screen).
@@ -710,6 +721,7 @@ Item {
             onObjectRemoved: (i, item) => sendMenu.removeItem(item)
         }
         ThemedMenuItem { text: qsTr("Bryton"); visible: root.brytonHere; onTriggered: root.sendToBryton() }
+        ThemedMenuItem { text: qsTr("Garmin Edge 500"); visible: root.edge500Here; onTriggered: root.sendToEdge500() }
         ThemedMenuItem { text: qsTr("Magene C406"); visible: root.mageneHere; onTriggered: root.sendToMagene() }
         ThemedMenuItem { text: qsTr("Wahoo ELEMNT"); visible: root.wahooUsb; onTriggered: root.sendToWahoo("usb") }
         ThemedMenuItem { text: qsTr("Wahoo ELEMNT (Bluetooth)"); visible: !root.wahooUsb && wahooSeen.seen && BikeDevices.wahooShown
@@ -725,7 +737,7 @@ Item {
                          visible: GarminService.connected && GarminService.hasSdCard
                          onTriggered: root.exportForEtrex("route", true) }
         ThemedMenuItem { text: qsTr("No device connected"); enabled: false
-                         visible: !root.watchCanTakeRoute && !root.brytonHere && !root.mageneHere
+                         visible: !root.watchCanTakeRoute && !root.brytonHere && !root.mageneHere && !root.edge500Here
                                   && !root.wahooUsb && !(wahooSeen.seen && BikeDevices.wahooShown)
                                   && !(GarminService.connected && GarminService.hasSdCard) }
     }

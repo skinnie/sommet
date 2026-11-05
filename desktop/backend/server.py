@@ -1108,7 +1108,8 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "magene_pages.py", "bryton_grid.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
                      "wahoo_settings.py", "wahoo_profile.py", "wahoo_routes.py",
-                     "wahoo_ble_files.py", "wahoo_workout.py", "wahoo_maps.py"}
+                     "wahoo_ble_files.py", "wahoo_workout.py", "wahoo_maps.py",
+                     "edge500_profile.py", "edge500_course.py", "edge500_workout.py"}
     lock = WATCH_LOCK if script not in NO_WATCH_LOCK else None
     # The Magene tools each open a BLE connection to the one C406; the server is threaded, so
     # the Home status read, the profile dialog and a route/workout send could otherwise race.
@@ -1519,6 +1520,9 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_tracks("list", {})
         elif self.path == "/api/bryton/info":
             self._handle_bryton_info()
+        elif self.path == "/api/edge500/info":
+            mount = self._edge_mass_mount()
+            self._send_json(200 if mount else 404, {"ok": bool(mount), "mount": mount})
         elif self.path == "/api/bryton/ee":
             self._handle_bryton_ee(False, {})
         elif self.path == "/api/magene/fields":
@@ -1809,6 +1813,12 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_maps_restore(body)
         elif self.path == "/api/wahoo/workouts/delete":
             self._handle_wahoo_workouts("delete", body)
+        elif self.path == "/api/edge500/route":
+            self._handle_edge500_route(body)
+        elif self.path == "/api/edge500/workout":
+            self._handle_edge500_workout(body)
+        elif self.path in ("/api/edge500/profile/compare", "/api/edge500/profile/apply"):
+            self._handle_edge500_profile(self.path.rsplit("/", 1)[1], body)
         elif self.path == "/api/bryton/profile/compare":
             self._handle_bryton_profile_compare(body)
         elif self.path == "/api/bryton/profile/apply":
@@ -2279,6 +2289,129 @@ class Handler(BaseHTTPRequestHandler):
             if dev.get("kind") == "bryton" and dev.get("mount"):
                 return dev["mount"]
         return None
+
+    def _edge_mass_mount(self):
+        """The mounted mass-storage Garmin Edge (Edge 500 & co.) right now, or None. Same discovery
+        as the device list (tools/mtp_import.py --list): kind 'edge' with transport 'mass'. MTP
+        Edges (1040 etc.) keep their profile in Garmin Connect and are not handled here."""
+        code, out, _err = run_tool("mtp_import.py", ["--list"])
+        try:
+            payload = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+        except (json.JSONDecodeError, IndexError):
+            return None
+        for dev in payload.get("devices", []) or []:
+            if dev.get("kind") == "edge" and dev.get("transport") == "mass" and dev.get("mount"):
+                return dev["mount"]
+        return None
+
+    _EDGE500_COMPARE_FIELDS = ("ftp", "lthr", "max_hr", "weight", "height", "gender", "age")
+
+    def _handle_edge500_profile(self, action, body):
+        """POST /api/edge500/profile/compare {athlete_id?, api_key?} -> {device, intervals, diff}.
+        POST /api/edge500/profile/apply {direction:'to_device', fields} -> patched copies of
+        Settings.fit / Sports/Cycling.fit dropped into Garmin/NewFiles (tools/edge500_profile.py);
+        the Edge reads them when it leaves USB mode. Devices never write to intervals.icu."""
+        body = body or {}
+        mount = self._edge_mass_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Garmin Edge 500 connected"})
+            return
+        if action == "compare":
+            code, out, err = run_tool("edge500_profile.py", ["read", mount])
+            if code != 0:
+                self._send_json(502, {"ok": False, "error": "could not read device profile", "stderr": err})
+                return
+            device = json.loads(out)
+            intervals = None
+            aid, akey = body.get("athlete_id"), body.get("api_key")
+            if aid and akey:
+                c2, o2, _e2 = run_tool("intervals_athlete.py", ["get", str(aid), str(akey)])
+                if c2 == 0:
+                    intervals = json.loads(o2)
+            diff = []
+            if intervals:
+                for f in self._EDGE500_COMPARE_FIELDS:
+                    dv, iv = device.get(f), intervals.get(f)
+                    if dv is None or iv is None:
+                        continue
+                    same = abs(dv - iv) < 0.5 if f == "weight" else dv == iv
+                    if not same:
+                        diff.append({"field": f, "device": dv, "intervals": iv})
+            self._send_json(200, {"ok": True, "mount": mount, "device": device,
+                                  "intervals": intervals, "diff": diff})
+            return
+        if body.get("direction") != "to_device":
+            self._send_json(400, {"ok": False, "error": "Sommet doesn't write device values to intervals.icu"})
+            return
+        fields = body.get("fields") or {}
+        args = ["write", mount]
+        for name in ("ftp", "lthr", "max_hr", "weight", "height", "gender", "age", "rest_hr"):
+            if fields.get(name) is not None:
+                args += [f"--{name.replace('_', '-')}", str(int(round(float(fields[name]))) if name != "weight"
+                                                             else fields[name])]
+        if len(args) == 2:
+            self._send_json(400, {"ok": False, "error": "no fields to apply"})
+            return
+        code, out, err = run_tool("edge500_profile.py", args)
+        if code != 0:
+            self._send_json(502, {"ok": False, "error": err.strip() or "device write failed"})
+            return
+        try:
+            res = json.loads(out.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            res = {}
+        self._send_json(200, {"ok": True, **res})
+
+    def _handle_edge500_route(self, body):
+        """POST /api/edge500/route {gpx, name?} -> a TCX course in the Edge 500's Garmin/NewFiles
+        (tools/edge500_course.py); the Edge turns it into a course when it leaves USB mode."""
+        body = body or {}
+        gpx = body.get("gpx")
+        if not gpx or "<gpx" not in gpx or ("<trkpt" not in gpx and "<rtept" not in gpx):
+            self._send_json(400, {"ok": False, "error": "a GPX with track/route points is required"})
+            return
+        mount = self._edge_mass_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Garmin Edge 500 connected"})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False, encoding="utf-8") as tf:
+            tf.write(gpx)
+            tmp = tf.name
+        try:
+            code, out, err = run_tool("edge500_course.py", ["send", tmp, mount, "--name", body.get("name") or "Route"])
+        finally:
+            os.unlink(tmp)
+        try:
+            res = json.loads(out.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            res = {"ok": False, "error": err.strip() or "course write failed"}
+        self._send_json(200 if res.get("ok") else 502, res)
+
+    def _handle_edge500_workout(self, body):
+        """POST /api/edge500/workout {workout, name?} -> a FIT workout (absolute watts/bpm/rpm, so
+        no threshold conversion) in the Edge 500's Garmin/NewFiles (tools/edge500_workout.py)."""
+        body = body or {}
+        workout = body.get("workout")
+        if not workout:
+            self._send_json(400, {"ok": False, "error": "no workout"})
+            return
+        mount = self._edge_mass_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Garmin Edge 500 connected"})
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
+            json.dump(workout, tf)
+            tmp = tf.name
+        try:
+            code, out, err = run_tool("edge500_workout.py",
+                                      ["send", tmp, mount, "--name", body.get("name") or workout.get("name") or "Workout"])
+        finally:
+            os.unlink(tmp)
+        try:
+            res = json.loads(out.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            res = {"ok": False, "error": err.strip() or "workout write failed"}
+        self._send_json(200 if res.get("ok") else 502, res)
 
     ROUTE_LIBRARY_DIR = str(BACKUP_DIR / "Routes")
 

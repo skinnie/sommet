@@ -183,7 +183,8 @@ Rectangle {
                          && ((HomeViewModel.anyDevice && !DeviceService.bikeActive
                               && !HomeViewModel.isGarmin && !HomeViewModel.isKailash)
                              || (DeviceService.bikeActive && (DeviceService.activeBikeKind === "bryton"
-                                                              || DeviceService.activeBikeKind === "c406")))
+                                                              || DeviceService.activeBikeKind === "c406"
+                                                              || (DeviceService.activeBikeKind === "edge" && BikeDevices.edgeMass))))
                 glyph: Icons.trainingProgram
                 label: qsTr("Training Program")
                 selected: root.currentPage === "trainingProgram"
@@ -249,7 +250,8 @@ Rectangle {
                 visible: DeviceService.bikeActive && (DeviceService.activeBikeKind === "bryton"
                                                       || DeviceService.activeBikeKind === "c406"
                                                       || DeviceService.activeBikeKind === "brytonble"
-                                                      || DeviceService.activeBikeKind === "wahoo")
+                                                      || DeviceService.activeBikeKind === "wahoo"
+                                                      || (DeviceService.activeBikeKind === "edge" && BikeDevices.edgeMass))
                 glyph: Icons.settings
                 label: qsTr("GPS settings")
                 selected: root.currentPage === "gpsSettings"
@@ -268,7 +270,7 @@ Rectangle {
             // Connect IQ app update check - Edge-only. Detection via Garmin's public store (no login).
             NavItem {
                 width: parent.width
-                visible: DeviceService.bikeActive && DeviceService.activeBikeKind === "edge"
+                visible: DeviceService.bikeActive && DeviceService.activeBikeKind === "edge" && !BikeDevices.edgeMass
                 glyph: Icons.apps
                 label: qsTr("Connect IQ")
                 selected: root.currentPage === "ciqUpdates"

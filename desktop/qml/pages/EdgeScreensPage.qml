@@ -134,7 +134,12 @@ Item {
     // The f8 arrangement values a given field count offers on the Edge 1040 (bigger screen than the 530
     // APE measured): counts 3-9 offer A(0)/B(1)/C(2); a single field stores f8=1; 2 and 10 store f8=0
     // (10 = ten equal fields, no variant).
+    // Edge 500 family (USB drive): a fixed set of pages, 1-8 fields each, no A/B/C arrangement and
+    // no "add screen" (its mesg 14 has no field 8/9/10/12) - 2026-11-05.
+    readonly property bool isEdge500: EdgeScreensService.screens.length > 0
+                                      && EdgeScreensService.screens[0].family === "edge500"
     function variantsForCount(c) {
+        if (root.isEdge500) return [0]
         if (c >= 3 && c <= 9) return [0, 1, 2]
         if (c === 1) return [1]
         return [0]
@@ -156,7 +161,7 @@ Item {
         for (let c = 1; c <= cap; ++c)
             for (const v of root.variantsForCount(c))
                 out.push({ count: c, variant: v,
-                           label: (c >= 3 && c <= 9) ? root._countLabel(c) + " · " + root.variantLabel(v)
+                           label: (c >= 3 && c <= 9 && !root.isEdge500) ? root._countLabel(c) + " · " + root.variantLabel(v)
                                                      : root._countLabel(c) })
         return out
     }
@@ -367,6 +372,7 @@ Item {
             // Add a new data screen (Garmin's "+ Add Data Screen"): a dashed row that opens the editor.
             Rectangle {
                 visible: EdgeScreensService.deviceConnected && EdgeScreensService.currentProfile.length > 0
+                         && !root.isEdge500
                 width: listCol.width; height: 52; radius: Theme.radiusSmall
                 color: addMouse.containsMouse ? Theme.card : "transparent"
                 border.width: 1; border.color: Theme.borderStrong
@@ -594,7 +600,7 @@ Item {
                         const c = editFlick.visibleCount
                         const base = root._countLabel(c)
                         // data screens: counts 3-9 have an A/B/C arrangement choice worth showing
-                        return (!root.isSpecial(root.editing) && c >= 3 && c <= 9)
+                        return (!root.isSpecial(root.editing) && !root.isEdge500 && c >= 3 && c <= 9)
                             ? base + " · " + root.variantLabel(root.activeVariant(root.editing)) : base
                     }
                     color: Theme.text; font.pixelSize: Theme.fontSizeBody

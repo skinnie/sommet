@@ -30,6 +30,8 @@ Item {
     // The Bryton takes the same planned workouts, converted to its own .fit (watts/bpm -> % of the
     // device's own FTP/Max HR/LTHR, done backend-side). Shown only when a Bryton is mounted.
     property bool brytonConnected: false
+    // A USB-drive Garmin Edge (Edge 500, 2026-11-05): FIT workouts via Garmin/NewFiles.
+    property bool edge500Connected: false
     property string brytonMsg: ""
     property bool brytonFailed: false
     property bool brytonSending: false
@@ -38,15 +40,17 @@ Item {
         var xhr = new XMLHttpRequest()
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
-            var found = false, wahoo = false
+            var found = false, wahoo = false, edge500 = false
             try {
                 var r = JSON.parse(xhr.responseText)
                 for (var i = 0; i < (r.devices || []).length; i++) {
                     if (r.devices[i].kind === "bryton") found = true
+                    if (r.devices[i].kind === "edge" && r.devices[i].transport === "mass") edge500 = true
                     if (r.devices[i].kind === "wahoo" && r.devices[i].transport === "adb") wahoo = true
                 }
             } catch (e) {}
             root.brytonConnected = found
+            root.edge500Connected = edge500
             root.wahooUsb = wahoo
             if (wahoo) {
                 // First time seen: its switch in Settings > Devices turns on (2026-10-22).
@@ -106,6 +110,7 @@ Item {
     readonly property var deviceLabels: ({ "suunto": qsTr("Suunto watch"),
                                            "bryton": qsTr("Bryton"),
                                            "magene": qsTr("Magene C406"),
+                                           "edge500": qsTr("Garmin Edge 500"),
                                            "wahoo": qsTr("Wahoo ELEMNT") })
 
     function sendDay(target, entry) {
@@ -147,6 +152,11 @@ Item {
         if (device === "wahoo")
             return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
                      targets: ["none", "power", "hr", "cadence"] }
+        // Edge 500 FIT workout: time/distance/open steps, absolute watts/bpm/speed/rpm ranges
+        // (tools/edge500_workout.py).
+        if (device === "edge500")
+            return { durations: ["time_min", "time_s", "distance_km", "distance_m", "lap"],
+                     targets: ["none", "power", "hr", "speed", "cadence"] }
         if (device === "bryton")
             return { durations: ["time_min", "time_s", "distance_km", "distance_m"],
                      targets: ["none", "power", "hr", "speed", "cadence"] }
@@ -173,6 +183,12 @@ Item {
             enabled: !root.sending
             text: qsTr("Send to Bryton")
             onTriggered: root.sendDay("bryton", dayMenu.entry)
+        }
+        ThemedMenuItem {
+            visible: dayMenu.entry !== null && root.edge500Connected
+            enabled: !root.sending
+            text: qsTr("Send to Garmin Edge 500")
+            onTriggered: root.sendDay("edge500", dayMenu.entry)
         }
         ThemedMenuItem {
             visible: dayMenu.entry !== null && root.mageneConnected
@@ -203,6 +219,11 @@ Item {
             onTriggered: editor.openFor(dayMenu.iso, "bryton")
         }
         ThemedMenuItem {
+            visible: dayMenu.entry === null && root.edge500Connected
+            text: qsTr("Create workout for Garmin Edge 500")
+            onTriggered: editor.openFor(dayMenu.iso, "edge500")
+        }
+        ThemedMenuItem {
             visible: dayMenu.entry === null && root.mageneConnected
             text: qsTr("Create workout for Magene C406")
             onTriggered: editor.openFor(dayMenu.iso, "magene")
@@ -214,7 +235,7 @@ Item {
         }
         ThemedMenuItem {
             visible: dayMenu.entry === null
-                     && !root.watchConnected && !root.brytonConnected && !root.mageneConnected
+                     && !root.watchConnected && !root.brytonConnected && !root.mageneConnected && !root.edge500Connected
                      && !root.wahooConnected
             text: qsTr("Create workout")
             onTriggered: editor.openFor(dayMenu.iso, "")
@@ -1627,6 +1648,7 @@ Item {
                     // program through "Sync to watch" below.
                     readonly property bool canSend:
                         (editor.device === "bryton" && root.brytonConnected)
+                        || (editor.device === "edge500" && root.edge500Connected)
                         || (editor.device === "magene" && root.mageneConnected)
                         || (editor.device === "wahoo" && root.wahooConnected)
                     visible: canSend

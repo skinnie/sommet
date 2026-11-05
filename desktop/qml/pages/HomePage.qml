@@ -509,7 +509,7 @@ PageFlickable {
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.send(JSON.stringify({ action: "hello", address: addr }));
     }
-    onActiveBikeChanged: { fetchBrytonInfo(); fetchBrytonEe(); root.brytonEeMsg = ""; fetchMageneStatus(); fetchBrytonBleStatus(); checkProfileSync(); }
+    onActiveBikeChanged: { BikeDevices.edgeMass = !!(root.activeBike && root.activeBike.kind === "edge" && root.activeBike.transport === "mass"); fetchBrytonInfo(); fetchBrytonEe(); root.brytonEeMsg = ""; fetchMageneStatus(); fetchBrytonBleStatus(); checkProfileSync(); }
 
     // --- Bike computer profile vs intervals.icu (André, 2026-09-25). The first time a Bryton or
     // Magene shows values that differ from intervals.icu, ask ONCE (ProfileSyncPrompt). "Yes" is
@@ -519,8 +519,8 @@ PageFlickable {
     Settings { id: profileSyncPrefs; category: "bikeProfileSync" }
     property int profileSyncTick: 0          // bumped when a mode changes, for the button binding
     property string profileCheckedFor: ""    // one check per connected device, not per 8 s poll
-    function profileApiBase(kind) { return kind === "c406" ? "magene" : kind === "brytonble" ? "brytonble" : "bryton" }
-    function profileDeviceName(kind) { return kind === "c406" ? qsTr("Magene") : qsTr("Bryton") }
+    function profileApiBase(kind) { return kind === "c406" ? "magene" : kind === "brytonble" ? "brytonble" : kind === "edge" ? "edge500" : "bryton" }
+    function profileDeviceName(kind) { return kind === "c406" ? qsTr("Magene") : kind === "edge" ? qsTr("Edge") : qsTr("Bryton") }
     function profileSyncMode(kind) {
         void root.profileSyncTick;
         return profileSyncPrefs.value(kind + "_mode", "");
@@ -531,7 +531,8 @@ PageFlickable {
     }
     function checkProfileSync() {
         const bike = root.activeBike;
-        if (!bike || (bike.kind !== "bryton" && bike.kind !== "c406" && bike.kind !== "brytonble")) {
+        if (!bike || (bike.kind !== "bryton" && bike.kind !== "c406" && bike.kind !== "brytonble"
+                      && !(bike.kind === "edge" && bike.transport === "mass"))) {
             root.profileCheckedFor = "";
             return;
         }
@@ -594,7 +595,8 @@ PageFlickable {
             root.bikeSyncOk = !!r.ok;
             if (r.ok && kind === "brytonble" && r.profile && root.brytonBleStatus)
                 root.brytonBleStatus = Object.assign({}, root.brytonBleStatus, { profile: r.profile });
-            root.bikeSyncMsg = r.ok ? qsTr("Profile updated from intervals.icu.")
+            root.bikeSyncMsg = r.ok ? (kind === "edge" ? qsTr("Profile ready. Unplug the Edge to load it.")
+                                                       : qsTr("Profile updated from intervals.icu."))
                                     : (r.error || qsTr("Profile update failed."));
         };
         const body = { direction: "to_device", fields: fields };
@@ -610,7 +612,7 @@ PageFlickable {
     function bikeDisplayName(bike) {
         if (!bike) return "";
         switch (bike.kind) {
-        case "edge":   return qsTr("Garmin Edge");
+        case "edge":   return bike.transport === "mass" && bike.name ? bike.name : qsTr("Garmin Edge");
         case "karoo":  return qsTr("Hammerhead Karoo");
         case "c406":   return qsTr("Magene C406 Pro");
         case "bryton": return qsTr("Bryton Aero 60");

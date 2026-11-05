@@ -41,11 +41,24 @@ def _gvfs_root():
     return "/run/user/%d/gvfs" % uid
 
 
+def _mass_edge():
+    """A USB-drive Edge (Edge 500 & co.): (None, "<mount>/Garmin") via mtp_import's discovery."""
+    try:
+        import mtp_import
+        for dev in mtp_import._mass_storage_devices():
+            if dev.get("kind") == "edge":
+                return None, os.path.join(dev["mount"], "Garmin")
+    except Exception:                      # noqa: BLE001 - no mass-storage Edge is not an error
+        pass
+    return None, None
+
+
 def find_edge():
-    """Return (gvfs_host_dir, garmin_dir) for a connected Edge, or (None, None)."""
+    """Return (gvfs_host_dir, garmin_dir) for a connected Edge, or (None, None). An MTP Edge has a
+    gvfs host dir; a USB-drive Edge (Edge 500) returns host None and its mounted Garmin folder."""
     root = _gvfs_root()
     if not os.path.isdir(root):
-        return None, None
+        return _mass_edge()
     for entry in os.listdir(root):
         if entry.startswith("mtp:") and "Garmin_Edge" in entry:
             host = os.path.join(root, entry)
@@ -57,7 +70,39 @@ def find_edge():
                         return host, g
             except OSError:
                 pass
-    return None, None
+    return _mass_edge()
+
+
+def _family(garmin_dir):
+    """'edge500' for a USB-drive Edge, 'edge' for the MTP ones (different field-id tables)."""
+    return "edge" if "/gvfs/" in garmin_dir else "edge500"
+
+
+def _write_newfile(g, fitname, src):
+    """Copy an edited profile into the Edge's Garmin/NewFiles. MTP -> gio copy; USB drive -> a
+    plain copy + fsync. Returns (ok, dest_or_error)."""
+    if "/gvfs/" in g:
+        dest = _mtp_uri(g, "NewFiles/" + fitname)
+        cp = subprocess.run(["gio", "copy", src, dest], capture_output=True, text=True)
+        return (cp.returncode == 0), (dest if cp.returncode == 0 else (cp.stderr or cp.stdout))
+    dest = os.path.join(g, "NewFiles", fitname)
+    try:
+        data = open(src, "rb").read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if open(dest, "rb").read() != data:
+            return False, "verify after write failed"
+    except OSError as e:
+        return False, str(e)
+    return True, dest
+
+
+def _apply_note(g, what):
+    if "/gvfs/" in g:
+        return "%s Reboot the Edge to apply (it imports NewFiles on power-up)." % what
+    return "%s Unplug the Edge to apply (it reads NewFiles when it leaves USB mode)." % what
 
 
 def _mtp_uri(garmin_dir, sub):
@@ -71,7 +116,9 @@ def _mtp_uri(garmin_dir, sub):
 
 
 def do_catalog():
-    fields = [{"id": fid, "name": ges.FIELD_NAMES[fid]} for fid in sorted(ges.FIELD_NAMES)]
+    _h, g = find_edge()
+    table = ges.names_for(_family(g)) if g else ges.FIELD_NAMES
+    fields = [{"id": fid, "name": table[fid]} for fid in sorted(table)]
     print(json.dumps({"ok": True, "fields": fields}))
 
 
@@ -167,12 +214,13 @@ def do_load(fitname):
                              "toggles": toggles_for(st),
                              "fields": sfields})
             continue
-        fields = [{"id": f, "name": ges.name(f)} for f in (s["slots"] or []) if f not in (65535, 255)]
+        fields = [{"id": f, "name": ges.name(f, s.get("family", "edge"))} for f in ges.shown_slots(s)]
         # capacity = physical field-7 slot count; the layout can be resized 1..capacity in place
         # (do_set writes a fixed-size u16[capacity], so it cannot grow beyond this).
         data.append({"index": s["index"], "stype": (st if st is not None else 0),
                      "layout": s["layout"], "capacity": len(s["slots"] or []),
                      "variant": (s.get("variant") if s.get("variant") not in (255, None) else 0),
+                     "family": s.get("family", "edge"),
                      "fields": fields})
     # Order data screens the way the device shows them (Screen 1,2,3…) and number them.
     data.sort(key=lambda d: d["stype"])
@@ -213,13 +261,12 @@ def do_save(fitname, screen, fields, variant=None, toggles=None):
             pass
     if not os.path.exists(out_fit):
         _fail("edit produced no file")
-    dest = _mtp_uri(g, "NewFiles/" + fitname)
-    cp = subprocess.run(["gio", "copy", out_fit, dest], capture_output=True, text=True)
+    ok, dest = _write_newfile(g, fitname, out_fit)
     os.unlink(out_fit)
-    if cp.returncode != 0:
-        _fail("write to device failed: %s" % (cp.stderr or cp.stdout))
+    if not ok:
+        _fail("write to device failed: %s" % dest)
     print(json.dumps({"ok": True, "written": dest,
-                      "note": "Reboot the Edge to apply (it imports NewFiles on power-up)."}))
+                      "note": _apply_note(g, "Saved.")}))
 
 
 def do_add(fitname, fields, variant=None):
@@ -243,13 +290,12 @@ def do_add(fitname, fields, variant=None):
             pass
     if not os.path.exists(out_fit):
         _fail("add produced no file")
-    dest = _mtp_uri(g, "NewFiles/" + fitname)
-    cp = subprocess.run(["gio", "copy", out_fit, dest], capture_output=True, text=True)
+    ok, dest = _write_newfile(g, fitname, out_fit)
     os.unlink(out_fit)
-    if cp.returncode != 0:
-        _fail("write to device failed: %s" % (cp.stderr or cp.stdout))
+    if not ok:
+        _fail("write to device failed: %s" % dest)
     print(json.dumps({"ok": True, "written": dest,
-                      "note": "Data screen added. Reboot the Edge to apply (it imports NewFiles on power-up)."}))
+                      "note": _apply_note(g, "Data screen added.")}))
 
 
 def do_set_toggle(fitname, field, value):
@@ -273,13 +319,12 @@ def do_set_toggle(fitname, field, value):
             pass
     if not os.path.exists(out_fit):
         _fail("toggle produced no file")
-    dest = _mtp_uri(g, "NewFiles/" + fitname)
-    cp = subprocess.run(["gio", "copy", out_fit, dest], capture_output=True, text=True)
+    ok, dest = _write_newfile(g, fitname, out_fit)
     os.unlink(out_fit)
-    if cp.returncode != 0:
-        _fail("write to device failed: %s" % (cp.stderr or cp.stdout))
+    if not ok:
+        _fail("write to device failed: %s" % dest)
     print(json.dumps({"ok": True, "written": dest,
-                      "note": "Setting changed. Reboot the Edge to apply (it imports NewFiles on power-up)."}))
+                      "note": _apply_note(g, "Setting changed.")}))
 
 
 def main():
