@@ -391,9 +391,13 @@ export default function WorkoutCalendarScreen() {
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
-      <Card style={{ width: '100%' }}>
-        <Text style={[s.desc, { color: theme.warning }]}>{t.workoutCalendarWarning}</Text>
-      </Card>
+      {/* The warning is about the Ambit3 path (community-site compile, past entries cleared on
+          sync). Bike computers get a plain FIT workout, checked on each device, so no warning. */}
+      {!isBike && (
+        <Card style={{ width: '100%' }}>
+          <Text style={[s.desc, { color: theme.warning }]}>{t.workoutCalendarWarning}</Text>
+        </Card>
+      )}
 
       {/* ── Import from intervals.icu ── */}
       <Card style={{ width: '100%' }}>
