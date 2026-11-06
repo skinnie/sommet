@@ -1,6 +1,6 @@
 // EXPERIMENTAL - App-Zone source generator for a structured interval workout. Exact port of
 // tools/workout.py's generate_source / expand_steps / build_compile_request. This ONLY
-// generates the source text; the user compiles it themselves on a third-party community site
+// generates the source text; the user compiles it themselves on the Ambit Apps site (Suunto forum)
 // in their own browser (link-out, no key, no API call - see IntervalsService.ts) and imports
 // the result. This generator is deterministic and proven to match the Python one byte-for-byte
 // (WorkoutSource.test.ts); the compile step and the on-watch result are outside our control.

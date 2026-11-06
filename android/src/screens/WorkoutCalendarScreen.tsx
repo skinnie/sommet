@@ -395,7 +395,7 @@ export default function WorkoutCalendarScreen() {
           sync). Bike computers get a plain FIT workout, checked on each device, so no warning. */}
       {!isBike && (
         <Card style={{ width: '100%' }}>
-          <Text style={[s.desc, { color: theme.warning }]}>{t.workoutCalendarWarning}</Text>
+          <Text style={s.desc}>{t.workoutCalendarWarning}</Text>
         </Card>
       )}
 

@@ -136,7 +136,7 @@ export default function IntervalsScreen() {
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
       <Card style={{ width: '100%' }}>
-        <Text style={[s.desc, { color: theme.warning }]}>{t.intervalsWarning}</Text>
+        <Text style={s.desc}>{t.intervalsWarning}</Text>
       </Card>
 
       {/* ── Interval Suunto App ── */}
@@ -203,7 +203,7 @@ export default function IntervalsScreen() {
         <View style={s.modalOverlay}>
           <View style={s.modalBox}>
             <Text style={s.title}>{t.intervalsAppSection}</Text>
-            <Text style={[s.desc, { color: theme.warning }]}>{t.intervalsWarning}</Text>
+            <Text style={s.desc}>{t.intervalsWarning}</Text>
 
             {(modesLoading || installBusy) && (
               <View style={s.rowCenter}><ActivityIndicator size="small" color={theme.primary} />

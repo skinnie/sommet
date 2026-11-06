@@ -843,8 +843,8 @@ const fr = {
   appZoneScreenLabel: (n: number) => `Écran ${n}`,
   // Intervals (2026-08-14)
   intervalsWarning:
-    '⚠️ Expérimental. La compilation utilise un compilateur communautaire tiers (pas Suunto). ' +
-    'L’installation sur la montre n’est pas confirmée sur du matériel. Faites une sauvegarde.',
+    'La séance se compile sur le site Ambit Apps publié sur le forum Suunto. Sommet sauvegarde ' +
+    'les apps de la montre avant chaque installation.',
   intervalsAppSection: 'Séance d’intervalles (Suunto App)',
   intervalsAppDesc: 'Construire → compiler (en ligne) → installer sur un écran.',
   intervalsWarmup: 'Échauffement (min)',
@@ -862,7 +862,7 @@ const fr = {
   intervalsSourceShownMsg: 'La source est affichée ci-dessous : sélectionnez-la et copiez-la. Sur le site du compilateur qui va s’ouvrir : collez-la à la place de l’exemple, touchez « Compile », copiez tout le cadre du bas, puis revenez et collez-le sous « Importer l’app compilée ».',
   compiledPasteLabel: 'Ou collez ici le résultat compilé (tout le cadre du bas du site)',
   compiledPasteBad: 'Ce n’est pas un résultat compilé. Sur le site, après « Compile », copiez tout le cadre du bas.',
-  intervalsCompilerNote: 'La compilation se fait sur un site communautaire tiers (ni Suunto, ni nous). Sommet génère seulement la source et ouvre le site ; vous compilez là-bas et importez le résultat.',
+  intervalsCompilerNote: 'La compilation se fait sur le site Ambit Apps publié sur le forum Suunto. Sommet génère la source et ouvre le site ; vous compilez là-bas et importez le résultat.',
   intervalsPlannedSection: 'Séance planifiée (natif)',
   intervalsPlannedDesc: 'Format non confirmé — peut ne pas apparaître sur la montre.',
   intervalsName: 'Nom',
@@ -875,10 +875,9 @@ const fr = {
   // menu WORKOUT, contournant la zone TrainingProgram native (inaccessible). Compilation
   // manuelle, comme Intervals - voir intervalsCompilerNote.
   workoutCalendarWarning:
-    '⚠️ Expérimental, montres Ambit3 uniquement. Chaque séance se compile sur le site ' +
-    'communautaire tiers (pas Suunto), comme les séances d’intervalles ci-dessus. À la ' +
-    'synchronisation, tout ce qui est daté avant aujourd’hui est effacé de la montre et ' +
-    'remplacé par ce qui vient ensuite.',
+    'Pour les montres Ambit3. Chaque séance se compile sur le site Ambit Apps publié sur le ' +
+    'forum Suunto. À la synchronisation, les séances datées que Sommet a mises sur la montre ' +
+    'sont retirées une fois leur jour passé, et les suivantes prennent leur place.',
   workoutCalendarDateLabel: 'Date',
   workoutCalendarModeLabel: 'Mode sportif',
   workoutCalendarImportTitle: 'Importer depuis intervals.icu',
@@ -1762,8 +1761,8 @@ const en: typeof fr = {
   appZoneScreenLabel: (n: number) => `Screen ${n}`,
   // Intervals (2026-08-14)
   intervalsWarning:
-    '⚠️ Experimental. Compiling uses a third-party community compiler (not Suunto). Installing ' +
-    'onto the watch is not hardware-confirmed. Take a backup first.',
+    'The workout compiles on the Ambit Apps site published on the Suunto forum. Sommet backs ' +
+    'up the watch\'s apps before every install.',
   intervalsAppSection: 'Interval workout (Suunto App)',
   intervalsAppDesc: 'Build → compile (online) → install onto a screen.',
   intervalsWarmup: 'Warm-up (min)',
@@ -1781,7 +1780,7 @@ const en: typeof fr = {
   intervalsSourceShownMsg: 'The source is shown below: select and copy it. On the compiler site that opens next: paste it in place of the sample, tap Compile, copy everything in the lower box, then come back and paste it under "Import compiled app".',
   compiledPasteLabel: "Or paste the compiled result here (everything in the site's lower box)",
   compiledPasteBad: "That isn't a compiled result. On the site, after Compile, copy everything in the lower box.",
-  intervalsCompilerNote: 'Compiling runs on a third-party community site (not Suunto, not us). Sommet only generates the source and opens the site; you compile there and import the result.',
+  intervalsCompilerNote: 'Compiling runs on the Ambit Apps site published on the Suunto forum. Sommet generates the source and opens the site; you compile there and import the result.',
   intervalsPlannedSection: 'Planned move (native)',
   intervalsPlannedDesc: 'Format unconfirmed - may not appear on the watch.',
   intervalsName: 'Name',
@@ -1794,9 +1793,9 @@ const en: typeof fr = {
   // WORKOUT menu, sidestepping the unreachable native TrainingProgram region. Manual compile,
   // same as Intervals above - see intervalsCompilerNote.
   workoutCalendarWarning:
-    '⚠️ Experimental, Ambit3 watches only. Each workout compiles on the same third-party ' +
-    'community site as Intervals above (not Suunto). On sync, anything dated before today ' +
-    'is erased from the watch and replaced with whatever comes next.',
+    'For Ambit3 watches. Each workout compiles on the Ambit Apps site published on the Suunto ' +
+    'forum. On sync, the dated workouts Sommet put on the watch are removed once their day has ' +
+    'passed, and the next ones take their place.',
   workoutCalendarDateLabel: 'Date',
   workoutCalendarModeLabel: 'Sport mode',
   workoutCalendarImportTitle: 'Import from intervals.icu',
