@@ -29,9 +29,9 @@ export default function AppsScreen({ navigation }: any) {
             menu, target band + step text, like the desktop's Workout Builder - is the Training
             Program's, so the card points there too. */}
         <Text style={s.desc}>
-          Ambit3 workouts and the Ambit 1/2 interval Suunto App, split by watch. The Suunto App is
-          compiled on the Ambit Apps site from the Suunto forum, imported here and installed on a
-          sport mode's data screen.
+          Native workouts (planned moves, and a link to the Training Program for guided ones), or a
+          workout as a Suunto App: compiled on the Ambit Apps site from the Suunto forum, imported
+          here and installed on a sport mode's data screen.
         </Text>
         <Button label="Open Workout Builder" onPress={() => navigation.navigate('Intervals')} />
         <Text style={[s.desc, { marginTop: 14 }]}>

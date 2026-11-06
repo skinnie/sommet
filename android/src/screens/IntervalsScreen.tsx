@@ -19,14 +19,14 @@ import { InstallState } from '../services/AppInstall';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 
-// Workout Builder (Intervals), split by watch (André, 2026-11-06):
-//   - Ambit3: its own (native) workouts. Guided WORKOUT-menu workouts live in the Training
-//     Program (linked here); the planned move ("Today" card, TrainingProgram region, proven on
-//     hardware 2026-09-03) is written from this screen. Traverse/Kailash have no such region and
-//     writePlannedMoves refuses them.
-//   - Ambit 1 and 2: no WORKOUT menu, so an interval Suunto App on a sport mode's data screen
-//     (build -> compile on the Ambit Apps site from the Suunto forum -> install). Ambit3 can use
-//     it too, for logic the native workout can't do.
+// Workout Builder (Intervals), Ambit3 only (HomeScreen hides Apps for Traverse, Kailash and
+// Ambit 1/2 - those have no App Zone workouts in Sommet; Ambit 1/2's old Movescount apps aren't
+// implemented, see commit 0312881). Two ways, native first (André, 2026-11-06):
+//   - Native workouts: guided WORKOUT-menu workouts live in the Training Program (linked here);
+//     the planned move ("Today" card, TrainingProgram region, proven on hardware 2026-09-03) is
+//     written from this screen.
+//   - Workout as a Suunto App on a sport mode's data screen, for logic the native workout can't
+//     do (build -> compile on the Ambit Apps site from the Suunto forum -> install).
 export default function IntervalsScreen() {
   const navigation = useNavigation<any>();
   const theme = useV3Theme();
@@ -139,7 +139,7 @@ export default function IntervalsScreen() {
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
-      {/* ── Ambit3: native workouts ── */}
+      {/* ── Native workouts ── */}
       <Card style={{ width: '100%' }}>
         <Text style={s.title}>{t.intervalsAmbit3Section}</Text>
         <Text style={s.desc}>{t.intervalsAmbit3Desc}</Text>
@@ -167,7 +167,7 @@ export default function IntervalsScreen() {
         </TouchableOpacity>
       </Card>
 
-      {/* ── Ambit 1 and 2 (and Ambit3 for complex logic): interval Suunto App ── */}
+      {/* ── Workout as a Suunto App ── */}
       <Card style={{ width: '100%' }}>
         <Text style={s.title}>{t.intervalsAppSection}</Text>
         <Text style={s.desc}>{t.intervalsAppDesc}</Text>
