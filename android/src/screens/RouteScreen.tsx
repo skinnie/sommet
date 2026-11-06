@@ -23,6 +23,7 @@ import { detectBryton } from '../services/BrytonUsb';
 import { sendRouteToBryton } from '../services/BrytonTrack';
 import { getKnownMagene, type KnownMagene } from '../services/MageneStore';
 import { sendRoute as sendRouteToMagene } from '../services/MageneRoute';
+import { connectedEdge, sendEdgeCourse } from '../services/Edge500Usb';
 
 // The imported route as a minimal GPX, for the bike-computer encoders (MageneRoute/BrytonTrack
 // both take GPX text, like their desktop tools).
@@ -119,6 +120,8 @@ export default function RouteScreen() {
   }, [params.send]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Bike computers around (desktop RoutesPage parity: "Send to Bryton" / "Send to Magene").
   const [brytonPlugged, setBrytonPlugged] = useState(false);
+  // A Garmin Edge 500 opened by Home (USB drive): routes go in as a TCX course (2026-11-05).
+  const [edge500Here, setEdge500Here] = useState(false);
   const [knownMagene, setMagene] = useState<KnownMagene | null>(null);
   // Only while its switch is on (Settings > Show in the sidebar > Devices, 2026-10-22).
   const { features: expFeatures } = useExperimental();
@@ -128,13 +131,17 @@ export default function RouteScreen() {
   useFocusEffect(useCallback(() => {
     detectBryton().then(d => setBrytonPlugged(d.plugged && d.granted)).catch(() => {});
     getKnownMagene().then(setMagene).catch(() => {});
+    setEdge500Here(!!connectedEdge());
   }, []));
-  async function sendToBike(target: 'bryton' | 'magene') {
+  async function sendToBike(target: 'bryton' | 'magene' | 'edge500') {
     if (!pending || bikeBusy) return;
     setBikeBusy(target); setBikeMsg('');
     try {
       const gpx = pendingToGpx(pending);
-      if (target === 'bryton') {
+      if (target === 'edge500') {
+        await sendEdgeCourse(gpx, pending.name);
+        setBikeMsg('Sent to the Edge 500 ✓ — unplug it, then find it under Training › Courses.');
+      } else if (target === 'bryton') {
         const r = await sendRouteToBryton(gpx, pending.name);
         setBikeMsg(`“${r.name}” installed on the Bryton ✓ — Follow Track after unplugging.`);
       } else {
@@ -367,10 +374,12 @@ export default function RouteScreen() {
                 onPress={() => openInPlanner(pending.name, pending.points.map(p => ({ lat: p.lat, lon: p.lon, ele: p.alt })))} />
               <Button label={t.routeDiscardBtn} variant="text" grow={false} disabled={sendBusy} onPress={() => setPending(null)} />
             </View>
-            {(brytonPlugged || magene) && (
+            {(brytonPlugged || magene || edge500Here) && (
               <View style={styles.row}>
                 {brytonPlugged && <Button label="Send to Bryton" variant="text" grow={false} busy={bikeBusy === 'bryton'}
                   disabled={!!bikeBusy} onPress={() => sendToBike('bryton')} />}
+                {edge500Here && <Button label="Send to Garmin Edge 500" variant="text" grow={false} busy={bikeBusy === 'edge500'}
+                  disabled={!!bikeBusy} onPress={() => sendToBike('edge500')} />}
                 {magene && <Button label="Send to Magene" variant="text" grow={false} busy={bikeBusy === 'magene'}
                   disabled={!!bikeBusy} onPress={() => sendToBike('magene')} />}
               </View>

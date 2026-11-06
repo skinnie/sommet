@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-06: Garmin Edge 500 on Android, data screen names (0.2.60)
+
+- **Android.** Plug the Edge 500 into the tablet and it shows on Home as "Garmin Edge 500", with
+  the same rides, profile, routes and workouts as on the PC. The first time, Android asks you to
+  pick the drive: choose the GARMIN drive (or its Garmin folder) and tap Use this folder. Android
+  remembers it. Checked on a real Edge 500: rides imported, profile read, a workout sent.
+- **Data screens (PC).** The Edge 500's fields now show by name (Speed, Dist. - Lap, Speed - Avg. and so on)
+  instead of numbers. The HR Graph field only goes in the slots where the Edge can draw it.
+
+---
+
 ## 2026-11-05: Garmin Edge 500 on the PC (0.2.60)
 
 The Edge 500 (and the other Edges from that time) shows up as a plain USB drive, not like the

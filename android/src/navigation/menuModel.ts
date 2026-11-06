@@ -101,6 +101,7 @@ const ROUTE_TO_NAV: Record<string, string[]> = {
   Gear: ['gear'],
   Bryton: ['brytonProfile'],
   Magene: ['magene'],
+  Edge500: ['edge500Profile'],
   Coach: ['coach'],
   RacePlan: ['racePlan'],
   Ember: ['ember'],

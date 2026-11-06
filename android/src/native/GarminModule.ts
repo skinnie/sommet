@@ -25,6 +25,17 @@ export interface GarminVolumeInfo {
   firmwareVersion: string | null; // e.g. "5.01" — already formatted, see GarminModule.kt
   partNumber: string | null;
   activityPath: string | null; // resolved from GarminDevice.xml, e.g. "Garmin/GPX/Current"
+  // Edge 500 & co. (2026-11-05): the FIT_TYPE_4 ride folder ("Garmin/Activities"); null on an eTrex.
+  // Optional so an older native build (without these fields) still type-checks at the call sites.
+  fitActivityPath?: string | null;
+  isEdge?: boolean;             // GarminDevice.xml's Description starts with "Edge"
+}
+
+/** The volume of a mass-storage Garmin Edge (Edge 500 & co.), or null when it's an eTrex.
+ *  Same rule as the desktop's tools/mtp_import.py: the model text starts with "Edge". */
+export function edgeVolume(info: GarminConnectResult | null | undefined): GarminVolumeInfo | null {
+  return info?.volumes.find(v => v.hasGarminDeviceXml
+    && (v.isEdge ?? /^edge/i.test((v.model ?? '').trim()))) ?? null;
 }
 
 export interface GarminConnectResult {
@@ -89,6 +100,25 @@ export function readGpxDirFile(volumeIndex: number, fileName: string): Promise<s
  */
 export function writeGpxToSdCard(volumeIndex: number, fileName: string, gpxContent: string): Promise<boolean> {
   return NativeGarmin.writeGpxToSdCard(volumeIndex, fileName, gpxContent);
+}
+
+/** File names (not folders) directly inside `path`, relative to the volume root. */
+export function listDir(volumeIndex: number, path: string): Promise<string[]> {
+  return NativeGarmin.listDir(volumeIndex, path);
+}
+
+/** One file's bytes (base64), `path` relative to the volume root. */
+export function readFile(volumeIndex: number, path: string): Promise<string> {
+  return NativeGarmin.readFile(volumeIndex, path);
+}
+
+/**
+ * Writes one file (base64) into an Edge's Garmin/NewFiles, which the Edge reads when it leaves
+ * USB mode, then reads it back to check. SAFETY: the native side refuses any other path, and any
+ * volume that isn't an Edge (the eTrex keeps its SD-card-only rule, writeGpxToSdCard()).
+ */
+export function writeFile(volumeIndex: number, path: string, base64: string): Promise<boolean> {
+  return NativeGarmin.writeFile(volumeIndex, path, base64);
 }
 
 export function disconnect(): Promise<boolean> {

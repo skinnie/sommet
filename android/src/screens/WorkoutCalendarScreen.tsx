@@ -19,6 +19,7 @@ import { readWatchMaxRestHr } from '../services/AmbitSettingsService';
 import { fetchIntervalsWorkouts } from '../services/IntervalsWorkouts';
 import { connectBryton, sendSchemaWorkout } from '../services/BrytonUsb';
 import { sendWorkout as sendMageneWorkout } from '../services/MageneWorkout';
+import { sendEdgeWorkout } from '../services/Edge500Usb';
 import { ActionMenu } from '../components/ui/ActionMenu';
 import { loadPlan, savePlan } from '../services/WorkoutPlanStore';
 import { pushEntry, deleteEvent, newUid } from '../services/IntervalsEvents';
@@ -54,11 +55,12 @@ export default function WorkoutCalendarScreen() {
   const theme = useV3Theme();
   const s = styles(theme);
   const route = useRoute<any>();
-  const params: { watch?: boolean; bryton?: boolean; magene?: string | null } = route.params ?? { watch: true };
+  const params: { watch?: boolean; bryton?: boolean; magene?: string | null; edge500?: boolean } = route.params ?? { watch: true };
   const available: PlanDevice[] = [
     ...(params.watch ? ['suunto' as const] : []),
     ...(params.bryton ? ['bryton' as const] : []),
     ...(params.magene ? ['magene' as const] : []),
+    ...(params.edge500 ? ['edge500' as const] : []),
   ];
   const [device, setDevice] = useState<PlanDevice>(available[0] ?? '');
   const [rows, setRows] = useState<StepRow[]>(defaultSteps());
@@ -66,7 +68,7 @@ export default function WorkoutCalendarScreen() {
   const [menuIndex, setMenuIndex] = useState<number | null>(null);
   const [sendMsg, setSendMsg] = useState('');
   const [sending, setSending] = useState(false);
-  const isBike = device === 'bryton' || device === 'magene';
+  const isBike = device === 'bryton' || device === 'magene' || device === 'edge500';
 
   const [date, setDate] = useState(todayIso());
   const [modes, setModes] = useState<ExerciseMode[] | null>(null);
@@ -156,8 +158,10 @@ export default function WorkoutCalendarScreen() {
   }
 
   // Send one plan entry (or all of them) to a bike computer - the long-press menu's "Send to …".
-  async function sendEntry(target: 'bryton' | 'magene', e: PlanEntry): Promise<boolean> {
+  async function sendEntry(target: 'bryton' | 'magene' | 'edge500', e: PlanEntry): Promise<boolean> {
     if (!e.workout) return false;
+    // Garmin Edge 500: a FIT workout into Garmin/NewFiles (absolute targets, no conversion).
+    if (target === 'edge500') { await sendEdgeWorkout(e.workout, e.workoutName); return true; }
     if (target === 'bryton') {
       await connectBryton();
       await sendSchemaWorkout({ name: e.workoutName, ...(e.workout as any) });
@@ -167,14 +171,14 @@ export default function WorkoutCalendarScreen() {
     if (!r.ok) throw new Error(r.error || 'send failed');
     return true;
   }
-  async function sendOne(target: 'bryton' | 'magene', e: PlanEntry) {
+  async function sendOne(target: 'bryton' | 'magene' | 'edge500', e: PlanEntry) {
     setSending(true); setSendMsg(`Sending “${e.workoutName}” to ${DEVICE_LABELS[target]}…`);
     try { await sendEntry(target, e); setSendMsg(`Sent “${e.workoutName}” to ${DEVICE_LABELS[target]} ✓`); }
     catch (err: any) { setSendMsg(`${DEVICE_LABELS[target]}: ${String(err?.message ?? err)}`); }
     finally { setSending(false); }
   }
   async function sendAllToMagene() {
-    const list = plan.filter(e => e.workout && e.device !== 'bryton' && e.date >= todayIso());
+    const list = plan.filter(e => e.workout && e.device !== 'bryton' && e.device !== 'edge500' && e.date >= todayIso());
     if (!list.length) { setSendMsg('No upcoming workouts in the plan for the Magene.'); return; }
     // The C406 keeps the workouts it's sent; send the upcoming ones, oldest first.
     setSending(true);
@@ -195,7 +199,7 @@ export default function WorkoutCalendarScreen() {
     setPlan(p => (editIndex != null ? p.map((e, i) => (i === editIndex ? entry : e)) : [...p, entry]));
     setEditIndex(null);
     mirror(entry);
-    if (sendNow && isBike) sendOne(device as 'bryton' | 'magene', entry);
+    if (sendNow && isBike) sendOne(device as 'bryton' | 'magene' | 'edge500', entry);
   }
 
   function editEntry(i: number) {
@@ -209,7 +213,7 @@ export default function WorkoutCalendarScreen() {
     const pool = e.poolLength && e.poolLength > 0 ? e.poolLength : poolLength;
     if (entryMode) setMode(entryMode);
     setPoolLength(pool);
-    if (e.workout) setRows(e.workout.steps.map(st => fromSchema(st, e.device === 'bryton' || e.device === 'magene' ? '' : swimOf(entryMode || null), pool)));
+    if (e.workout) setRows(e.workout.steps.map(st => fromSchema(st, e.device === 'bryton' || e.device === 'magene' || e.device === 'edge500' ? '' : swimOf(entryMode || null), pool)));
   }
 
   const editorOk = rows.length > 0 && repeatsBalanced(rows) && fitsDevice(rows, device, swim);
@@ -374,7 +378,7 @@ export default function WorkoutCalendarScreen() {
     setSyncResult(null);
     // Only the watch's entries: bike-computer ones are sent from their own menu.
     // Each in the watch sport mode matching its sport (desktop modeForSport), else its own mode.
-    const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene')
+    const watchPlan = plan.filter(e => e.device !== 'bryton' && e.device !== 'magene' && e.device !== 'edge500')
       .map(e => ({ ...e, mode: (e.modePicked && e.mode) || (e.sport && modeForSport(e.sport)) || e.mode || mode || '' }));
     const noMode = watchPlan.filter(e => !e.mode);
     if (noMode.length) {
@@ -460,7 +464,7 @@ export default function WorkoutCalendarScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={[s.btn, s.primaryBtn, { flex: 1 }, (!editorOk || sending) && { opacity: 0.5 }]}
               disabled={!editorOk || sending} onPress={() => addBikeEntry(true)}>
-              <Text style={s.primaryBtnText}>{`Save & send to ${DEVICE_LABELS[device as 'bryton' | 'magene']}`}</Text>
+              <Text style={s.primaryBtnText}>{`Save & send to ${DEVICE_LABELS[device as 'bryton' | 'magene' | 'edge500']}`}</Text>
             </TouchableOpacity>
           </Row>
         )}
@@ -512,8 +516,8 @@ export default function WorkoutCalendarScreen() {
           .sort((a, b) => a.e.date.localeCompare(b.e.date))
           .map(({ e, i }) => {
             const isPast = e.date < todayIso();
-            const bike = e.device === 'bryton' || e.device === 'magene';
-            const sub = bike ? DEVICE_LABELS[e.device as 'bryton' | 'magene']
+            const bike = e.device === 'bryton' || e.device === 'magene' || e.device === 'edge500';
+            const sub = bike ? DEVICE_LABELS[e.device as 'bryton' | 'magene' | 'edge500']
               : e.sport && !/run/i.test(e.sport) ? `${e.sport} · from intervals.icu`
               : `${e.mode}${!e.compiled ? ` - ${compileTarget === i ? t.workoutCalendarCompilingRow : t.workoutCalendarPending}` : ''}`;
             return (
@@ -589,8 +593,9 @@ export default function WorkoutCalendarScreen() {
             { label: 'Edit', onPress: () => editEntry(i), visible: !!e.workout },
             { label: 'Send to Bryton', onPress: () => sendOne('bryton', e), visible: !!(params.bryton && e.workout), disabled: sending },
             { label: 'Send to Magene C406', onPress: () => sendOne('magene', e), visible: !!(params.magene && e.workout), disabled: sending },
+            { label: 'Send to Garmin Edge 500', onPress: () => sendOne('edge500', e), visible: !!(params.edge500 && e.workout), disabled: sending },
             { label: t.intervalsGenerateBtn, onPress: () => handleCompileEntry(i),
-              visible: !!(params.watch && e.workout && !e.compiled && e.device !== 'bryton' && e.device !== 'magene') },
+              visible: !!(params.watch && e.workout && !e.compiled && e.device !== 'bryton' && e.device !== 'magene' && e.device !== 'edge500') },
             { label: 'Remove workout', onPress: () => removeFromPlan(i), tone: 'alert' as const },
           ];
         })()}

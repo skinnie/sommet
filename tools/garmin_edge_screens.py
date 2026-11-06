@@ -227,9 +227,93 @@ FIELD_NAMES = {
     523: "Step Time",
 }
 
-# Edge 500 data-field ids (u8, mesg 14 field 5) -> on-screen name. Filled from the Edge 500 fw 3.30
-# field table; an id missing here shows as "id:N" and is refused on write.
+# Edge 500 data-field ids (u8, mesg 14 field 5) -> on-screen name, read from the Edge 500 fw 3.30
+# field table (82 entries, paired with the firmware's English long-name strings; pairing inferred
+# from the table layout and checked against a real Edge's pages, 2026-11-05). An id missing here
+# is refused on write. Heart Rate Graph (23) only fits the first three slots of small layouts.
 EDGE500_FIELD_NAMES = {
+    0: 'Calories',
+    1: 'Calories - Fat',
+    2: 'Course Pt. Dist.',
+    3: 'Cadence',
+    4: 'Cadence - Avg.',
+    5: 'Cadence - Lap',
+    6: 'Distance',
+    7: 'Dist. - Lap',
+    8: 'Dist. - Nautical',
+    9: 'Elevation',
+    10: 'GPS Accuracy',
+    11: 'Grade',
+    12: 'Heading',
+    13: 'Heart Rate',
+    14: 'HR - Avg.',
+    15: 'HR - Lap',
+    16: 'HR - %Max.',
+    17: 'HR - Avg. %Max.',
+    18: 'HR - Lap %Max.',
+    19: 'HR - %HRR',
+    20: 'HR - Avg. %HRR',
+    21: 'HR - Lap %HRR',
+    22: 'HR Zone',
+    23: 'HR Graph',
+    24: 'Laps',
+    27: 'Dist. to Dest.',
+    28: 'Time to Dest.',
+    29: 'Dist. to Next',
+    30: 'Time to Next',
+    36: 'Power',
+    37: 'Power - Avg.',
+    38: 'Power - kJ',
+    39: 'Power - Lap',
+    40: 'Power - Max.',
+    41: 'Power - Max. Lap',
+    42: 'Power - %FTP',
+    43: 'Power Zone',
+    48: 'Speed',
+    49: 'Speed - Avg.',
+    50: 'Speed - Lap',
+    51: 'Speed - Nautical',
+    55: 'Time - Elapsed',
+    56: 'Time',
+    57: 'Time - Avg. Lap',
+    58: 'Time - Lap',
+    59: 'Time of Day',
+    60: 'Total Ascent',
+    61: 'Total Descent',
+    62: 'Distance Ahead',
+    63: 'Time Ahead',
+    64: 'Calories to Go',
+    65: 'Dist. to Go',
+    66: 'HR to Go',
+    67: 'Reps to Go',
+    68: 'Time to Go',
+    77: 'Vertical Speed',
+    78: 'Temperature',
+    79: 'Power -  3s Avg.',
+    80: 'Power - 30s Avg.',
+    81: 'Power - NP',
+    82: 'Power - TSS',
+    83: 'Power - IF',
+    88: 'VS - 30s Avg.',
+    89: 'Speed Zone',
+    91: 'Speed - Max.',
+    98: 'Power - W/kg',
+    100: 'Power - Last Lap',
+    146: 'Power - 10s Avg.',
+    147: 'Power - NP Lap',
+    148: 'Power - NP Last',
+    149: 'Balance',
+    150: 'Bal. - Avg.',
+    151: 'Bal. - Lap',
+    154: 'D-Vector State',
+    155: 'D-V Status',
+    156: 'D-Debug State',
+    157: 'D-Lap/Error',
+    159: 'Bal. -  3s Avg.',
+    160: 'Bal. - 10s Avg.',
+    161: 'Bal. - 30s Avg.',
+    166: 'D-V Status 2',
+    167: 'D-V Status 3',
 }
 
 FIT_CRC = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
@@ -497,6 +581,12 @@ def _set_u8(b, target, new_fields, layout):
             sys.exit("Edge 500 field ids are 0..254")
         if EDGE500_FIELD_NAMES and any(i not in EDGE500_FIELD_NAMES for i in real):
             sys.exit("unknown Edge 500 field id in %r" % real)
+        # fw 3.30 rule: HR Graph (23) only in slot 0 (1-7 fields), slot 1 (1,2,3,4,6) or slot 2 (1-3);
+        # anywhere else the Edge turns it into Heart Rate, so refuse it rather than write a surprise.
+        ok_23 = {0: set(range(1, 8)), 1: {1, 2, 3, 4, 6}, 2: {1, 2, 3}}
+        for pos, fid in enumerate(real):
+            if fid == 23 and len(real) not in ok_23.get(pos, set()):
+                sys.exit("Heart Rate Graph can't go in field %d of a %d-field page" % (pos + 1, len(real)))
         slots[:len(real)] = real
         b[target['slots_off']:target['slots_off'] + n] = bytes(slots)
         if layout is None:

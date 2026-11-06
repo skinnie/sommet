@@ -34,6 +34,7 @@ import IntervalsScreen from './src/screens/IntervalsScreen';
 import WorkoutCalendarScreen from './src/screens/WorkoutCalendarScreen';
 import BrytonScreen from './src/screens/BrytonScreen';
 import MageneScreen from './src/screens/MageneScreen';
+import Edge500Screen from './src/screens/Edge500Screen';
 import GearScreen from './src/screens/GearScreen';
 // Weight/Health - desktop parity (2026-08-26). Both read intervals.icu's wellness feed via
 // src/services/WellnessService.ts; see that file for what Android can and cannot reach.
@@ -56,6 +57,7 @@ export type RootStackParamList = {
   Home: undefined;
   Bryton: undefined;
   Magene: undefined;
+  Edge500: undefined;
   LogList: undefined;
   Map: { activity: ActivityRecord };
   // section: open Settings on one section, e.g. 'connections' (Settings split, 2026-10-21).
@@ -362,6 +364,11 @@ function AppNav() {
             name="Magene"
             component={MageneScreen}
             options={{ title: 'Magene C406' }}
+          />
+          <Stack.Screen
+            name="Edge500"
+            component={Edge500Screen}
+            options={{ title: 'Garmin Edge 500 settings' }}
           />
           <Stack.Screen
             name="Gear"

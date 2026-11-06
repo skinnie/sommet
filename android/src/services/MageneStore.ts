@@ -17,10 +17,12 @@ export async function setKnownMagene(m: KnownMagene | null): Promise<void> {
   try { m ? await AsyncStorage.setItem(KEY, JSON.stringify(m)) : await AsyncStorage.removeItem(KEY); } catch { /* ignore */ }
 }
 // Per device kind (the desktop keeps one per kind too, Sommet.conf [bikeProfileSync]).
-const syncKey = (kind: 'magene' | 'bryton') => (kind === 'magene' ? SYNC_KEY : 'brytonProfileSync');
-export async function getProfileSyncMode(kind: 'magene' | 'bryton' = 'magene'): Promise<'auto' | 'manual' | ''> {
+// 'edge500' = the mass-storage Garmin Edge (2026-11-05; desktop keeps it under "edge").
+export type ProfileSyncKind = 'magene' | 'bryton' | 'edge500';
+const syncKey = (kind: ProfileSyncKind) => (kind === 'magene' ? SYNC_KEY : kind === 'edge500' ? 'edge500ProfileSync' : 'brytonProfileSync');
+export async function getProfileSyncMode(kind: ProfileSyncKind = 'magene'): Promise<'auto' | 'manual' | ''> {
   try { return ((await AsyncStorage.getItem(syncKey(kind))) as any) || ''; } catch { return ''; }
 }
-export async function setProfileSyncMode(mode: 'auto' | 'manual', kind: 'magene' | 'bryton' = 'magene'): Promise<void> {
+export async function setProfileSyncMode(mode: 'auto' | 'manual', kind: ProfileSyncKind = 'magene'): Promise<void> {
   try { await AsyncStorage.setItem(syncKey(kind), mode); } catch { /* ignore */ }
 }

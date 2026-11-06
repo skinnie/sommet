@@ -45,6 +45,10 @@ import { getKnownMagene, setKnownMagene, getProfileSyncMode, setProfileSyncMode,
 import { diffProfile, fmtProfile, PROFILE_LABELS } from '../services/MageneProfileSync';
 import { getAthleteThresholds } from '../services/ApiIntervalsIcu';
 import { syncGarminActivities, GarminActivitySyncState } from '../services/GarminActivityService';
+import {
+  setConnectedGarmin, edgeDisplayName, syncEdgeRides, readEdgeProfile, writeEdgeProfile, edgeProfileForDiff, EDGE_FIELD,
+  type EdgeRideSync,
+} from '../services/Edge500Usb';
 import { kailashDeviceProvider } from '../services/devices/KailashDeviceProvider';
 import { ambitBleDeviceProvider } from '../services/devices/AmbitBleDeviceProvider';
 import { decodeDeviceHistory, KailashHistory } from '../services/KailashHistoryReader';
@@ -274,7 +278,7 @@ export default function HomeScreen() {
   // One-time "sync this bike computer's profile from intervals.icu?" (desktop ProfileSyncPrompt):
   // asked the first time a device shows values that differ; 'auto' re-syncs silently on every later
   // connect, 'manual' never asks again (the device's own screen keeps the manual sync).
-  const askProfileSync = useCallback(async (kind: 'magene' | 'bryton', name: string,
+  const askProfileSync = useCallback(async (kind: 'magene' | 'bryton' | 'edge500', name: string,
       diff: ReturnType<typeof diffProfile>, apply: () => Promise<void>) => {
     if (!diff.length) return;
     const mode = await getProfileSyncMode(kind);
@@ -323,6 +327,37 @@ export default function HomeScreen() {
     await syncBrytonRides(setBrytonSync);
     getAllActivities().then(setActivities).catch(() => {});
   }, []);
+
+  // Garmin Edge 500 (2026-11-05, desktop parity): a USB drive with the Garmin vendor id, so it
+  // comes in through the Garmin connect below like the eTrex; GarminDevice.xml says it's an Edge
+  // (Garmin.edgeVolume). Its card has Sync rides like every bike computer, and the profile is
+  // compared with intervals.icu once on connect (the same one-time question as the Bryton).
+  const [edgeSync, setEdgeSync] = useState<EdgeRideSync | null>(null);
+  const [edgeMsg, setEdgeMsg] = useState('');
+  const edgeSyncing = !!edgeSync && (edgeSync.phase === 'reading' || edgeSync.phase === 'writing');
+  const syncEdge = useCallback(async () => {
+    await syncEdgeRides(setEdgeSync);
+    getAllActivities().then(setActivities).catch(() => {});
+  }, []);
+  const checkEdgeProfile = useCallback(async () => {
+    try {
+      const icu = await getAthleteThresholds().catch(() => null);
+      if (!icu) return;
+      const diff = diffProfile(edgeProfileForDiff(await readEdgeProfile()) as any, icu);
+      await askProfileSync('edge500', 'Edge', diff, async () => {
+        const changes: any = {};
+        for (const d of diff) changes[EDGE_FIELD[d.field]] = d.intervals;
+        await writeEdgeProfile(changes);
+        setEdgeMsg('Profile ready. Unplug the Edge to load it.');
+      });
+    } catch { /* not readable right now - GPS settings still has the manual sync */ }
+  }, [askProfileSync]);
+  const checkEdgeProfileRef = useRef(checkEdgeProfile);
+  checkEdgeProfileRef.current = checkEdgeProfile;
+  // Routes / Workout Calendar / GPS settings reach the Edge through Edge500Usb; it is only there
+  // while the Garmin is connected.
+  useEffect(() => { setConnectedGarmin(phase === 'connected' && deviceType === 'garmin' ? garminInfo : null); },
+    [phase, deviceType, garminInfo]);
 
   // Magene C406 (2026-09-25, desktop parity) — Bluetooth-only, so it isn't part of the single USB
   // hero: it gets its own card once found (Pair via Bluetooth -> Magene C406 scans; the address is remembered and the
@@ -543,8 +578,11 @@ export default function HomeScreen() {
     try {
       const result = await Garmin.connect();
       setGarminInfo(result);
+      setConnectedGarmin(result);
       setPhase('connected');
-      handleGarminSyncRef.current(result); // mirror Ambit's auto-sync-on-connect behavior
+      // An Edge 500 syncs its rides from its card (like the Bryton); it gets the profile check.
+      if (Garmin.edgeVolume(result)) { setEdgeSync(null); setEdgeMsg(''); checkEdgeProfileRef.current(); }
+      else handleGarminSyncRef.current(result); // mirror Ambit's auto-sync-on-connect behavior
     } catch (e: any) {
       setConnectError(`${e?.code ?? ''} ${e?.message ?? t.unknownError}`.trim());
       setPhase('connect-error');
@@ -1099,6 +1137,8 @@ export default function HomeScreen() {
   // page below, never a separate full-screen splash. `connected` gates the parts that
   // genuinely need a live watch.
   const connected = phase === 'connected';
+  // The connected Garmin is an Edge 500 (USB drive), not an eTrex.
+  const edgeVol = connected && deviceType === 'garmin' ? Garmin.edgeVolume(garminInfo) : null;
   const connectingMsg = deviceType === 'garmin' && waitingSeconds !== null
     ? t.garminWaitingForMount(waitingSeconds)
     : deviceType === 'ambit' ? (bleAttempt ? t.homeConnectingBle : t.homeConnectingAmbit) : t.connecting;
@@ -1115,7 +1155,7 @@ export default function HomeScreen() {
   const showWatchCalendar = !!(expFeatures.workoutCalendar && connected && deviceType === 'ambit'
     && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo));
   // Which devices the Workout Calendar may create for / send to (its long-press menu).
-  const calendarDevices = { watch: showWatchCalendar, bryton: deviceType === 'bryton', magene: mageneOn?.address ?? null };
+  const calendarDevices = { watch: showWatchCalendar, bryton: deviceType === 'bryton', magene: mageneOn?.address ?? null, edge500: !!edgeVol };
   const navItems: NavShellItem[] = [
     { id: 'home', label: t.homeNavHome, icon: 'mountain', onPress: () => {} },
     { id: 'activities', label: t.viewActivities, icon: 'list', onPress: () => navigation.navigate('LogList'), group: 'training' },
@@ -1130,7 +1170,7 @@ export default function HomeScreen() {
     // Routes is always there (André, 2026-09-25): it's where any device gets a route (watch, Bryton,
     // Magene) and a GPX can be imported with nothing connected. eTrex keeps its own routes screen;
     // the watch parts of Route only show with a route-capable watch. POIs stay watch-only.
-    ...(connected && deviceType === 'garmin'
+    ...(connected && deviceType === 'garmin' && !edgeVol
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
           { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => garminInfo && navigation.navigate('GarminPoi', { info: garminInfo }), group: 'watch' as const },
@@ -1138,7 +1178,7 @@ export default function HomeScreen() {
       : [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const,
             onPress: () => navigation.navigate('Route', { watch: connected && deviceType === 'ambit' && !isKailash(ambitInfo), pins: connected && deviceType === 'ambit' && ['Emu', 'Finch', 'Ibisbill', 'Kaka', 'Jabiru', 'Loon', 'Bluebird', 'Duck', 'Colibri', 'Greentit'].includes(ambitInfo?.model ?? ''), legacy: connected && deviceType === 'ambit' && isAmbit12(ambitInfo) }), group: 'watch' as const },
-          ...(connected && !isKailash(ambitInfo)
+          ...(connected && !edgeVol && !isKailash(ambitInfo)
             ? [{ id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const }]
             : []),
         ]),
@@ -1187,13 +1227,17 @@ export default function HomeScreen() {
     ...(deviceType === 'bryton'
       ? [{ id: 'brytonProfile', label: 'GPS settings', icon: 'settings' as const, onPress: () => navigation.navigate('Bryton'), group: 'watch' as const }]
       : []),
+    // Garmin Edge 500: its GPS settings (profile vs intervals.icu), like the Bryton's.
+    ...(edgeVol
+      ? [{ id: 'edge500Profile', label: 'GPS settings', icon: 'settings' as const, onPress: () => navigation.navigate('Edge500'), group: 'watch' as const }]
+      : []),
     ...(mageneOn
       ? [{ id: 'magene', label: deviceType === 'bryton' ? 'Magene settings' : 'GPS settings', icon: 'settings' as const, onPress: () => navigation.navigate('Magene'), group: 'watch' as const }]
       : []),
     // Bike computers plan workouts in the same Workout Calendar as the watch (desktop parity:
     // one Training Program screen for every device, long-press a plan row to send). Shown here
     // only when the experimental watch entry above isn't already there.
-    ...((deviceType === 'bryton' || mageneOn) && !showWatchCalendar
+    ...((deviceType === 'bryton' || mageneOn || edgeVol) && !showWatchCalendar
       ? [{ id: 'bikeWorkouts', label: t.experimentalWorkoutCalendar, icon: 'chart' as const, onPress: () => navigation.navigate('WorkoutCalendar', calendarDevices), group: 'watch' as const }]
       : []),
     // Weight/Health (2026-08-26, desktop parity): both read intervals.icu's wellness feed, so
@@ -1220,7 +1264,7 @@ export default function HomeScreen() {
   // be similar"). Items not listed keep their relative place, just before Settings.
   const NAV_ORDER = ['home', 'activities', 'pois', 'routes', 'racePlan', 'health', 'ember', 'weight',
     'coach', 'workoutCalendar', 'bikeWorkouts', 'gear', 'calendar', 'totals', 'apps', 'copyToWatch',
-    'watchSettings', 'brytonProfile', 'magene', 'firmware', 'sportModes', 'smartSensor', 'trackPod', 'settings'];
+    'watchSettings', 'brytonProfile', 'edge500Profile', 'magene', 'firmware', 'sportModes', 'smartSensor', 'trackPod', 'settings'];
   const rank = (id: string) => { const i = NAV_ORDER.indexOf(id); return i < 0 ? NAV_ORDER.length - 1.5 : i; };
   navItems.sort((a, b) => rank(a.id) - rank(b.id));
 
@@ -1275,7 +1319,7 @@ export default function HomeScreen() {
           watch glyph at the same nominal size - a further 10% bump, on top of the same
           portrait/landscape scaling above, Garmin-only. */}
       <Icon
-        name={deviceType === 'bryton' ? 'bryton' : deviceType === 'garmin' ? 'etrex' : 'watch'}
+        name={deviceType === 'bryton' ? 'bryton' : deviceType === 'garmin' ? (edgeVol ? 'edge' : 'etrex') : 'watch'}
         size={Math.round((winWidth < winHeight ? 48 : 40) * (deviceType === 'garmin' || deviceType === 'bryton' ? 1.1 : 1))}
         color={connected || deviceType === 'bryton' ? theme.text : theme.mutedText}
       />
@@ -1347,7 +1391,7 @@ export default function HomeScreen() {
           </Card>
         );
       })()}
-      {deviceType === 'garmin' && garminInfo && (() => {
+      {deviceType === 'garmin' && garminInfo && !edgeVol && (() => {
         const vol = garminInfo.volumes.find(v => v.hasGarminDeviceXml) ?? garminInfo.volumes[0];
         return (
           <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
@@ -1377,6 +1421,32 @@ export default function HomeScreen() {
           </Card>
         );
       })()}
+      {edgeVol && (
+        <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
+          <Text style={[styles.deviceName, v3TextStyle]}>{edgeDisplayName(edgeVol)}</Text>
+          {!!edgeVol.firmwareVersion && (
+            <Text style={[styles.deviceSub, v3MutedStyle]}>{t.garminFirmwareLabel} {edgeVol.firmwareVersion}</Text>
+          )}
+          <View style={styles.deviceMetaRow}>
+            <Text style={[styles.deviceSub, v3MutedStyle]}>Connected over USB</Text>
+            <StatusChip label={t.homeDeviceConnectedStatus} tone="success" />
+          </View>
+          <Text style={[styles.deviceSub, v3MutedStyle]}>GPS settings and Workouts are in the menu.</Text>
+          {edgeSync && (
+            <StatusNote
+              tone={edgeSync.phase === 'error' ? 'error' : edgeSyncing ? 'working' : 'success'}
+              text={edgeSync.phase === 'error' ? (edgeSync.error ?? 'Sync failed')
+                : edgeSync.phase === 'reading' ? 'Reading rides…'
+                : edgeSync.phase === 'writing' ? `Importing ${edgeSync.current + 1}/${edgeSync.total}…`
+                : edgeSync.newCount > 0 ? `${edgeSync.newCount} new ride${edgeSync.newCount === 1 ? '' : 's'} — open Activities to see ${edgeSync.newCount === 1 ? 'it' : 'them'}.`
+                : 'All rides are already in your library.'} />
+          )}
+          <StatusNote text={edgeMsg} tone="success" />
+          <View style={styles.heroButtons}>
+            <Button label="Sync rides" busy={edgeSyncing} icon="sync" onPress={syncEdge} disabled={edgeSyncing} grow={false} />
+          </View>
+        </Card>
+      )}
       {deviceType === 'bryton' && (
         <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
           <Text style={[styles.deviceName, v3TextStyle]}>Bryton Aero 60</Text>
@@ -1720,7 +1790,7 @@ export default function HomeScreen() {
       {/* ── Actions : uniquement les actions réelles (sync/GPS) - Routes/POIs/Backup/
           Sport Modes/Settings sont maintenant des destinations du NavShell ci-dessus,
           pas des actions sur cette carte (v3.0 UI port, 2026-08-09). ── */}
-      {connected && (deviceType === 'garmin' ? (
+      {connected && !edgeVol && (deviceType === 'garmin' ? (
         <View style={[styles.actionsRow, roomy && styles.actionsRowRoomy]}>
           <ActionTile
             icon="sync"

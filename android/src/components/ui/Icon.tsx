@@ -8,7 +8,7 @@ export type IconName =
   | 'sync' | 'satellite' | 'route' | 'poi' | 'backup' | 'settings'
   | 'list' | 'link' | 'map' | 'chart' | 'apps' | 'activity' | 'key' | 'person'
   | 'delete' | 'check' | 'info' | 'battery' | 'warning' | 'mountain'
-  | 'watch' | 'etrex' | 'bryton' | 'magene' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
+  | 'watch' | 'etrex' | 'bryton' | 'magene' | 'edge' | 'sun' | 'moon' | 'auto' | 'chevronLeft' | 'chevronRight'
   | 'cycling' | 'running' | 'walking'
   | 'play' | 'pause' | 'skipBack' | 'skipForward'
   | 'download' | 'upload' | 'calendar' | 'bluetooth'
@@ -386,6 +386,20 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
           <Line x1={19} y1={7.5} x2={20.3} y2={7.5} {...s} />
           <Line x1={19} y1={11.5} x2={20.3} y2={11.5} {...s} />
           <Circle cx={12} cy={19} r={1.4} stroke={color} strokeWidth={1.5} fill="none" />
+        </Svg>
+      );
+    case 'edge':
+      // Garmin Edge (desktop EdgeIcon.qml, André's reference photo 2026-09-04): portrait body, a
+      // screen with even margins in the upper part, three front keys on the chin, and the
+      // quarter-turn out-front mount tab underneath. Same proportions, on the 24-unit grid.
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={4.6} y={1.2} width={14.8} height={19.6} rx={2.7} stroke={color} strokeWidth={1.9} fill="none" />
+          <Rect x={6.9} y={4} width={10.2} height={10.6} rx={0.8} stroke={color} strokeWidth={1.5} fill="none" />
+          <Line x1={8.3} y1={17.6} x2={9.1} y2={17.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={11.6} y1={17.6} x2={12.4} y2={17.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Line x1={14.9} y1={17.6} x2={15.7} y2={17.6} stroke={color} strokeWidth={1.4} strokeLinecap="round" />
+          <Rect x={9.3} y={21} width={5.4} height={2.2} rx={0.9} stroke={color} strokeWidth={1.2} fill="none" />
         </Svg>
       );
     case 'magene':

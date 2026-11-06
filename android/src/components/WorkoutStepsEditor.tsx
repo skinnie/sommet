@@ -17,9 +17,9 @@ export const swimKind = (activityId?: number): string => SW.swimKind(activityId)
 export const fitRows = (rows: StepRow[], device: PlanDevice, swim: string, pool: number): StepRow[] =>
   rows.map(r => SW.fitRow(r, capsFor(device, swim), pool));
 
-export type PlanDevice = 'suunto' | 'bryton' | 'magene' | '';
+export type PlanDevice = 'suunto' | 'bryton' | 'magene' | 'edge500' | '';
 export const DEVICE_LABELS: Record<Exclude<PlanDevice, ''>, string> = {
-  suunto: 'Suunto watch', bryton: 'Bryton', magene: 'Magene C406',
+  suunto: 'Suunto watch', bryton: 'Bryton', magene: 'Magene C406', edge500: 'Garmin Edge 500',
 };
 
 // Same table as the desktop: Magene = time + power/cadence (magene_workout.py); Bryton =
@@ -29,6 +29,9 @@ export function capsFor(device: PlanDevice, swim = ''): { durations: string[]; t
   // button or pool lengths (shared/swim_workout.js).
   if ((device === '' || device === 'suunto') && SW.swimCaps(swim)) return SW.swimCaps(swim);
   if (device === 'magene') return { durations: ['time_min', 'time_s'], targets: ['none', 'power', 'cadence'] };
+  // Edge 500 FIT workout: time/distance/open (lap) steps, absolute watts/bpm/speed/rpm ranges
+  // (tools/edge500_workout.py, desktop TrainingProgramPage capsFor "edge500").
+  if (device === 'edge500') return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m', 'lap'], targets: ['none', 'power', 'hr', 'speed', 'cadence'] };
   if (device === 'bryton') return { durations: ['time_min', 'time_s', 'distance_km', 'distance_m'], targets: ['none', 'power', 'hr', 'speed', 'cadence'] };
   // Suunto = native guided workout: its compiler rejects ascent steps and vertical-speed targets
   // (2026-09-26) - app workouts (Intervals screen) still have them.

@@ -1,5 +1,6 @@
 package com.ambitsyncmodern.garmin
 
+import android.app.Activity
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -7,7 +8,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Build
+import android.os.storage.StorageManager
+import android.os.storage.StorageVolume
+import androidx.documentfile.provider.DocumentFile
 import com.facebook.react.bridge.*
 import me.jahnen.libaums.core.UsbMassStorageDevice
 import me.jahnen.libaums.core.fs.UsbFile
@@ -37,6 +42,18 @@ import java.util.concurrent.Executors
 private const val GARMIN_VID = 2334 // 0x091E, confirmed on real hardware — see device_filter.xml
 private const val ACTION_GARMIN_USB_PERMISSION = "com.ambitsyncmodern.GARMIN_USB_PERMISSION"
 
+// Edge 500 on the tablet (2026-11-06): Android mounts the Edge's drive itself (vold: "public:8,0
+// ... fsLabel=GARMIN", the "Garmin USB drive" notification), and the drive is a FAT16 volume with
+// no partition table, which libaums can't open ("Found partition table MasterBootRecordCreator",
+// then no volume). Same situation as the Bryton (BrytonUsbModule.kt), same fix: the user grants the
+// GARMIN drive once through the Storage Access Framework and we read/write it with DocumentFile.
+// Used only when Android has a mounted GARMIN volume AND its GarminDevice.xml says Edge, so the
+// eTrex (never auto-mounted, libaums) is untouched.
+private const val SAF_PREFS = "garmin_saf"
+private const val SAF_KEY_TREE = "treeUri"
+private const val REQUEST_GARMIN_TREE = 0xE500
+private const val SAF_VOLUME_INDEX = 100
+
 data class GarminVolumeInfo(
     val volumeIndex: Int,
     val hasGarminDeviceXml: Boolean,
@@ -44,10 +61,18 @@ data class GarminVolumeInfo(
     val firmwareVersion: String?,
     val partNumber: String?,
     val activityPath: String?, // resolved from GarminDevice.xml's GPSData/OutputFromUnit entry
+    // Edge 500 & co. (2026-11-05): FIT rides, from the FIT_TYPE_4 OutputFromUnit entry
+    // ("Garmin/Activities"). The eTrex has no FIT_TYPE_4, so this stays null there.
+    val fitActivityPath: String?,
+    // A mass-storage Garmin Edge (Edge 500/510/800/810): GarminDevice.xml's Description starts
+    // with "Edge" - same rule as the desktop's tools/mtp_import.py _garmin_mass_model().
+    val isEdge: Boolean,
 )
 
 class GarminModule(private val reactContext: ReactApplicationContext) :
-    ReactContextBaseJavaModule(reactContext) {
+    ReactContextBaseJavaModule(reactContext), ActivityEventListener {
+
+    init { reactContext.addActivityEventListener(this) }
 
     private val executor = Executors.newSingleThreadExecutor()
     private var pendingConnectPromise: Promise? = null
@@ -86,6 +111,7 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
     // each one's GarminDevice.xml if present.
     @ReactMethod
     fun connect(promise: Promise) {
+        if (garminStorageVolume() != null) { connectSaf(promise); return }
         val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
         val garmin: UsbDevice? = usbManager.deviceList.values.find { it.vendorId == GARMIN_VID }
         if (garmin == null) {
@@ -196,6 +222,8 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
                             firmwareVersion = parsed?.firmwareVersion,
                             partNumber = parsed?.partNumber,
                             activityPath = parsed?.activityPath,
+                            fitActivityPath = parsed?.fitActivityPath,
+                            isEdge = parsed?.model?.trim()?.startsWith("edge", ignoreCase = true) == true,
                         )
                     )
                     volumeIndex++
@@ -235,12 +263,173 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
             m.putString("firmwareVersion", info.firmwareVersion)
             m.putString("partNumber", info.partNumber)
             m.putString("activityPath", info.activityPath)
+            m.putString("fitActivityPath", info.fitActivityPath)
+            m.putBoolean("isEdge", info.isEdge)
             volumesArray.pushMap(m)
         }
         result.putArray("volumes", volumesArray)
         val hasSdCard = infos.any { !it.hasGarminDeviceXml } && infos.any { it.hasGarminDeviceXml }
         result.putBoolean("hasSdCard", hasSdCard)
         return result
+    }
+
+    // ─── SAF path (Edge drives Android mounts itself) ───────────────────────
+    private var safRoot: DocumentFile? = null
+    // The grant can be the drive itself or its Garmin folder (both are natural picks in the
+    // picker, 2026-11-06); with the folder, paths "Garmin/..." are resolved from the grant.
+    private var safRootIsGarminDir = false
+
+    private fun isGarminDir(root: DocumentFile): Boolean = safChild(root, "GarminDevice.xml") != null
+    private var pendingSafPromise: Promise? = null
+
+    /** The mounted GARMIN drive Android owns, or null. */
+    private fun garminStorageVolume(): StorageVolume? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return try {
+            val sm = reactContext.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+            sm.storageVolumes.firstOrNull {
+                !it.isPrimary && it.state == android.os.Environment.MEDIA_MOUNTED
+                    && it.getDescription(reactContext)?.contains("GARMIN", true) == true
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun savedSafRoot(): DocumentFile? {
+        val s = reactContext.getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE).getString(SAF_KEY_TREE, null)
+            ?: return null
+        val uri = Uri.parse(s)
+        val held = reactContext.contentResolver.persistedUriPermissions.any {
+            it.uri == uri && it.isReadPermission && it.isWritePermission
+        }
+        return if (held) DocumentFile.fromTreeUri(reactContext, uri) else null
+    }
+
+    private fun safChild(dir: DocumentFile, name: String): DocumentFile? =
+        dir.listFiles().firstOrNull { it.name?.equals(name, ignoreCase = true) == true }
+
+    private fun safResolve(path: String): DocumentFile? {
+        var cur: DocumentFile = safRoot ?: return null
+        var segs = path.split("/").filter { it.isNotEmpty() }
+        if (safRootIsGarminDir) {
+            if (segs.isEmpty() || !segs[0].equals("Garmin", ignoreCase = true)) return null
+            segs = segs.drop(1)
+        }
+        for (seg in segs) {
+            if (seg == "." || seg == "..") return null
+            cur = safChild(cur, seg) ?: return null
+        }
+        return cur
+    }
+
+    private fun safReadBytes(f: DocumentFile): ByteArray =
+        reactContext.contentResolver.openInputStream(f.uri)?.use { ins ->
+            val out = ByteArrayOutputStream(); val buf = ByteArray(8192)
+            while (true) { val n = ins.read(buf); if (n < 0) break; out.write(buf, 0, n) }
+            out.toByteArray()
+        } ?: throw IllegalStateException("could not open ${f.name}")
+
+    /** The Edge's volume info from a granted drive root, or null if it isn't an Edge. */
+    private fun safEdgeInfo(root: DocumentFile): GarminVolumeInfo? {
+        val xml = safChild(root, "GarminDevice.xml")
+            ?: safChild(root, "Garmin")?.let { safChild(it, "GarminDevice.xml") } ?: return null
+        val parsed = parseGarminDeviceXml(safReadBytes(xml)) ?: return null
+        if (parsed.model?.trim()?.startsWith("edge", ignoreCase = true) != true) return null
+        return GarminVolumeInfo(SAF_VOLUME_INDEX, true, parsed.model, parsed.firmwareVersion, parsed.partNumber,
+            parsed.activityPath, parsed.fitActivityPath, true)
+    }
+
+    private fun useSaf(root: DocumentFile, info: GarminVolumeInfo, promise: Promise) {
+        safRoot = root
+        safRootIsGarminDir = isGarminDir(root)
+        volumeInfos = listOf(info)
+        mainResolve(promise, buildScanResult(volumeInfos))
+    }
+
+    private fun connectSaf(promise: Promise) {
+        executor.execute {
+            closeAllDevices()
+            try {
+                val root = savedSafRoot()
+                val info = root?.let { safEdgeInfo(it) }
+                if (root != null && info != null) { useSaf(root, info, promise); return@execute }
+            } catch (_: Exception) {}
+            UiThreadUtil.runOnUiThread { launchSafPicker(promise) }
+        }
+    }
+
+    private fun launchSafPicker(promise: Promise) {
+        val activity = reactContext.currentActivity
+        if (activity == null) { promise.reject("NO_ACTIVITY", "App not in foreground"); return }
+        if (pendingSafPromise != null) { promise.reject("BUSY", "A connect is already in progress"); return }
+        var intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            garminStorageVolume()?.let { v -> try { intent = v.createOpenDocumentTreeIntent() } catch (_: Exception) {} }
+        }
+        pendingSafPromise = promise
+        try {
+            activity.startActivityForResult(intent, REQUEST_GARMIN_TREE)
+        } catch (e: Exception) {
+            pendingSafPromise = null
+            promise.reject("PICK_FAILED", e.message ?: "Could not open the folder picker")
+        }
+    }
+
+    override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != REQUEST_GARMIN_TREE) return
+        val promise = pendingSafPromise ?: return
+        pendingSafPromise = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) { promise.reject("CANCELLED", "No drive selected"); return }
+        executor.execute {
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                reactContext.contentResolver.takePersistableUriPermission(uri, flags)
+                reactContext.getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(SAF_KEY_TREE, uri.toString()).apply()
+                val root = DocumentFile.fromTreeUri(reactContext, uri)
+                val info = root?.let { safEdgeInfo(it) }
+                if (root == null || info == null) {
+                    mainReject(promise, "NOT_EDGE", "That isn't the Edge (no GarminDevice.xml for an Edge there). Pick the GARMIN drive or its Garmin folder.")
+                    return@execute
+                }
+                useSaf(root, info, promise)
+            } catch (e: Exception) {
+                mainReject(promise, "GRANT_FAILED", e.message ?: "Could not use the selected drive")
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {}
+
+    private fun safList(path: String, promise: Promise) {
+        val dir = safResolve(path)
+        if (dir == null || !dir.isDirectory) { mainReject(promise, "GARMIN_PATH_NOT_FOUND", "$path not found on this volume"); return }
+        val names = Arguments.createArray()
+        for (f in dir.listFiles()) if (!f.isDirectory) f.name?.let { names.pushString(it) }
+        mainResolve(promise, names)
+    }
+
+    private fun safRead(path: String, promise: Promise) {
+        val f = safResolve(path)
+        if (f == null || f.isDirectory) { mainReject(promise, "GARMIN_FILE_NOT_FOUND", "$path not found"); return }
+        mainResolve(promise, android.util.Base64.encodeToString(safReadBytes(f), android.util.Base64.NO_WRAP))
+    }
+
+    /** Same rule as the libaums writeFile(): one file straight inside the Edge's Garmin/NewFiles. */
+    private fun safWrite(name: String, bytes: ByteArray, path: String, promise: Promise) {
+        val dir = safResolve("Garmin/NewFiles")
+        if (dir == null || !dir.isDirectory) { mainReject(promise, "GARMIN_PATH_NOT_FOUND", "Garmin/NewFiles missing - is this an Edge 500 drive?"); return }
+        safChild(dir, name)?.let { try { it.delete() } catch (_: Exception) {} }
+        val target = dir.createFile("application/octet-stream", name)
+            ?: throw IllegalStateException("could not create $name")
+        if (target.name != name) {           // the provider renamed it ("x (1).fit") - don't leave a stray file
+            try { target.delete() } catch (_: Exception) {}
+            mainReject(promise, "GARMIN_WRITE_FAILED", "the drive renamed $name to ${target.name}"); return
+        }
+        reactContext.contentResolver.openOutputStream(target.uri, "wt")?.use { it.write(bytes) }
+            ?: throw IllegalStateException("could not open $name for writing")
+        if (!safReadBytes(target).contentEquals(bytes)) { mainReject(promise, "GARMIN_VERIFY_FAILED", "verify after write failed for $path"); return }
+        mainResolve(promise, true)
     }
 
     // ─── listActivityFiles() ─────────────────────────────────────────────────
@@ -379,6 +568,98 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // ─── listDir() / readFile() / writeFile() — Edge 500 & co. (2026-11-05) ────────
+    // Generic file access relative to a volume's root, for the mass-storage Edges: rides in
+    // Garmin/Activities, the profile in Garmin/Settings + Garmin/Sports, and everything Sommet
+    // sends (profile copies, TCX courses, FIT workouts) dropped into Garmin/NewFiles, which the
+    // Edge reads when it leaves USB mode (desktop tools/edge500_*.py, checked on a real Edge 500).
+    // Bytes travel as base64; the FIT/TCX logic is in the TS services (Edge500*.ts).
+    //
+    // SAFETY: writeFile() only ever writes ONE file straight inside Garmin/NewFiles of a volume
+    // whose GarminDevice.xml says it is an Edge. It never writes over the Edge's own files, and the
+    // eTrex rule (never write to internal memory, writeGpxToSdCard()) stays untouched.
+
+    /** File names (not folders) directly inside `path`. */
+    @ReactMethod
+    fun listDir(volumeIndex: Int, path: String, promise: Promise) {
+        executor.execute {
+            try {
+                if (volumeIndex == SAF_VOLUME_INDEX) { safList(path, promise); return@execute }
+                val dir = resolvePath(volumeIndex, path)
+                if (dir == null || !dir.isDirectory) {
+                    mainReject(promise, "GARMIN_PATH_NOT_FOUND", "$path not found on this volume")
+                    return@execute
+                }
+                val names = Arguments.createArray()
+                for (f in dir.listFiles()) if (!f.isDirectory) names.pushString(f.name)
+                mainResolve(promise, names)
+            } catch (e: Exception) {
+                mainReject(promise, "GARMIN_LIST_FAILED", e.message ?: "Unknown error listing $path")
+            }
+        }
+    }
+
+    /** One file's bytes, base64. */
+    @ReactMethod
+    fun readFile(volumeIndex: Int, path: String, promise: Promise) {
+        executor.execute {
+            try {
+                if (volumeIndex == SAF_VOLUME_INDEX) { safRead(path, promise); return@execute }
+                val file = resolvePath(volumeIndex, path)
+                if (file == null || file.isDirectory) {
+                    mainReject(promise, "GARMIN_FILE_NOT_FOUND", "$path not found")
+                    return@execute
+                }
+                mainResolve(promise, android.util.Base64.encodeToString(readUsbFileFully(file), android.util.Base64.NO_WRAP))
+            } catch (e: Exception) {
+                mainReject(promise, "GARMIN_READ_FAILED", e.message ?: "Unknown error reading $path")
+            }
+        }
+    }
+
+    /** Writes `base64` to Garmin/NewFiles/<name> on an Edge volume, then reads it back to check. */
+    @ReactMethod
+    fun writeFile(volumeIndex: Int, path: String, base64: String, promise: Promise) {
+        executor.execute {
+            try {
+                val info = volumeInfos.find { it.volumeIndex == volumeIndex }
+                if (info == null) {
+                    mainReject(promise, "GARMIN_VOLUME_NOT_FOUND", "Unknown volume")
+                    return@execute
+                }
+                val segments = path.split("/").filter { it.isNotEmpty() }
+                if (!info.isEdge || segments.size != 3 || !segments[0].equals("Garmin", ignoreCase = true)
+                    || !segments[1].equals("NewFiles", ignoreCase = true)
+                    || segments[2] == "." || segments[2] == ".." || segments[2].contains('\\')) {
+                    mainReject(promise, "GARMIN_REFUSED_WRITE",
+                        "Refusing to write $path - only a file in an Edge's Garmin/NewFiles is allowed")
+                    return@execute
+                }
+                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                if (volumeIndex == SAF_VOLUME_INDEX) { safWrite(segments[2], bytes, path, promise); return@execute }
+                val dir = resolvePath(volumeIndex, "Garmin/NewFiles")
+                if (dir == null || !dir.isDirectory) {
+                    mainReject(promise, "GARMIN_PATH_NOT_FOUND", "Garmin/NewFiles missing - is this an Edge 500 drive?")
+                    return@execute
+                }
+                // Re-create rather than overwrite, so a shorter file can't keep a stale tail.
+                findChildCaseInsensitive(dir, segments[2])?.let { try { it.delete() } catch (_: Exception) {} }
+                val target = dir.createFile(segments[2])
+                val os = UsbFileOutputStream(target)
+                os.write(bytes)
+                os.close()
+                val back = findChildCaseInsensitive(dir, segments[2])?.let { readUsbFileFully(it) }
+                if (back == null || !back.contentEquals(bytes)) {
+                    mainReject(promise, "GARMIN_VERIFY_FAILED", "verify after write failed for $path")
+                    return@execute
+                }
+                mainResolve(promise, true)
+            } catch (e: Exception) {
+                mainReject(promise, "GARMIN_WRITE_FAILED", e.message ?: "Unknown error writing $path")
+            }
+        }
+    }
+
     @ReactMethod
     fun disconnect(promise: Promise) {
         executor.execute {
@@ -397,6 +678,18 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
         val root = device.partitions[partitionOffset].fileSystem.rootDirectory
         var current: UsbFile = root
         for (segment in path.split("/").filter { it.isNotEmpty() }) {
+            current = findChildCaseInsensitive(current, segment) ?: return null
+        }
+        return current
+    }
+
+    /** A file or folder by its path from the volume root (case-insensitive), or null. */
+    private fun resolvePath(volumeIndex: Int, path: String): UsbFile? {
+        val (device, partitionOffset) = deviceAndPartitionForVolumeIndex(volumeIndex)
+        if (device == null) return null
+        var current: UsbFile = device.partitions[partitionOffset].fileSystem.rootDirectory
+        for (segment in path.split("/").filter { it.isNotEmpty() }) {
+            if (segment == "." || segment == "..") return null
             current = findChildCaseInsensitive(current, segment) ?: return null
         }
         return current
@@ -427,6 +720,7 @@ class GarminModule(private val reactContext: ReactApplicationContext) :
         closeDevicesList(openDevices)
         openDevices = emptyList()
         volumeInfos = emptyList()
+        safRoot = null
     }
 
     private fun closeDevicesList(devices: List<UsbMassStorageDevice>) {
@@ -473,6 +767,7 @@ private data class ParsedGarminDevice(
     val firmwareVersion: String?,
     val partNumber: String?,
     val activityPath: String?,
+    val fitActivityPath: String?,
 )
 
 /**
@@ -493,6 +788,7 @@ private fun parseGarminDeviceXml(bytes: ByteArray): ParsedGarminDevice? {
         var softwareVersion: String? = null
         var partNumber: String? = null
         var activityPath: String? = null
+        var fitActivityPath: String? = null
 
         var inModel = false
         var inGpsDataType = false
@@ -527,6 +823,11 @@ private fun parseGarminDeviceXml(bytes: ByteArray): ParsedGarminDevice? {
                             if (inGpsDataType && currentTransferDirection == "OutputFromUnit" && currentPath != null) {
                                 activityPath = currentPath
                             }
+                            // Edge 500 & co.: recorded rides are FIT_TYPE_4 ("Garmin/Activities").
+                            if (currentDataTypeName == "FIT_TYPE_4" && currentTransferDirection == "OutputFromUnit"
+                                && currentPath != null && fitActivityPath == null) {
+                                fitActivityPath = currentPath
+                            }
                             inFile = false
                         }
                         "DataType" -> inGpsDataType = false
@@ -541,6 +842,7 @@ private fun parseGarminDeviceXml(bytes: ByteArray): ParsedGarminDevice? {
             firmwareVersion = softwareVersion?.let { formatSoftwareVersion(it) },
             partNumber = partNumber,
             activityPath = activityPath,
+            fitActivityPath = fitActivityPath,
         )
     } catch (e: Exception) {
         null
