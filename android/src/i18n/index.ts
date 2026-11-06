@@ -845,8 +845,16 @@ const fr = {
   intervalsWarning:
     'La séance se compile sur le site Ambit Apps publié sur le forum Suunto. Sommet sauvegarde ' +
     'les apps de la montre avant chaque installation.',
-  intervalsAppSection: 'Séance d’intervalles (Suunto App)',
-  intervalsAppDesc: 'Construire → compiler (en ligne) → installer sur un écran.',
+  intervalsAmbit3Section: 'Ambit3 : séances natives',
+  intervalsAmbit3Desc:
+    'L’Ambit3 a ses propres séances. Pour une séance guidée dans le menu WORKOUT (zone cible et ' +
+    'texte de l’étape), planifiez-la sur un jour dans le programme d’entraînement.',
+  intervalsOpenTrainingProgram: 'Ouvrir le programme d’entraînement',
+  intervalsAppSection: 'Ambit 1 et 2 : Suunto App',
+  intervalsAppDesc:
+    'Les Ambit 1 et 2 n’ont pas de menu WORKOUT : la séance tourne comme une Suunto App sur un ' +
+    'écran de données d’un mode sport. L’Ambit3 peut aussi l’utiliser, pour une logique que la ' +
+    'séance native ne permet pas. Construire → compiler (en ligne) → installer sur un écran.',
   intervalsWarmup: 'Échauffement (min)',
   intervalsReps: 'Répétitions',
   intervalsWork: 'Effort (min)',
@@ -863,8 +871,8 @@ const fr = {
   compiledPasteLabel: 'Ou collez ici le résultat compilé (tout le cadre du bas du site)',
   compiledPasteBad: 'Ce n’est pas un résultat compilé. Sur le site, après « Compile », copiez tout le cadre du bas.',
   intervalsCompilerNote: 'La compilation se fait sur le site Ambit Apps publié sur le forum Suunto. Sommet génère la source et ouvre le site ; vous compilez là-bas et importez le résultat.',
-  intervalsPlannedSection: 'Séance planifiée (natif)',
-  intervalsPlannedDesc: 'Format non confirmé — peut ne pas apparaître sur la montre.',
+  intervalsPlannedSection: 'Séance planifiée',
+  intervalsPlannedDesc: 'Un objectif daté (durée et intensité) sur la carte « Aujourd’hui » de la montre : TIME, puis Next.',
   intervalsName: 'Nom',
   intervalsDuration: 'Durée (min)',
   intervalsIntensity: 'Intensité (1-5)',
@@ -1763,8 +1771,16 @@ const en: typeof fr = {
   intervalsWarning:
     'The workout compiles on the Ambit Apps site published on the Suunto forum. Sommet backs ' +
     'up the watch\'s apps before every install.',
-  intervalsAppSection: 'Interval workout (Suunto App)',
-  intervalsAppDesc: 'Build → compile (online) → install onto a screen.',
+  intervalsAmbit3Section: 'Ambit3: native workouts',
+  intervalsAmbit3Desc:
+    'Ambit3 watches have their own workouts. For a guided workout in the WORKOUT menu (target ' +
+    'band and step text), plan it on a day in the Training Program.',
+  intervalsOpenTrainingProgram: 'Open Training Program',
+  intervalsAppSection: 'Ambit 1 and 2: Suunto App',
+  intervalsAppDesc:
+    'Ambit 1 and 2 have no WORKOUT menu, so the workout runs as a Suunto App on a sport mode\'s ' +
+    'data screen. Ambit3 can use it too, for logic the native workout can\'t do. ' +
+    'Build → compile (online) → install onto a screen.',
   intervalsWarmup: 'Warm-up (min)',
   intervalsReps: 'Repeats',
   intervalsWork: 'Work (min)',
@@ -1781,8 +1797,8 @@ const en: typeof fr = {
   compiledPasteLabel: "Or paste the compiled result here (everything in the site's lower box)",
   compiledPasteBad: "That isn't a compiled result. On the site, after Compile, copy everything in the lower box.",
   intervalsCompilerNote: 'Compiling runs on the Ambit Apps site published on the Suunto forum. Sommet generates the source and opens the site; you compile there and import the result.',
-  intervalsPlannedSection: 'Planned move (native)',
-  intervalsPlannedDesc: 'Format unconfirmed - may not appear on the watch.',
+  intervalsPlannedSection: 'Planned move',
+  intervalsPlannedDesc: 'A dated target (duration and intensity) on the watch\'s Today card: TIME, then Next.',
   intervalsName: 'Name',
   intervalsDuration: 'Duration (min)',
   intervalsIntensity: 'Intensity (1-5)',

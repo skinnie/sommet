@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Modal,
   Linking,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Card } from '../components/ui/Card';
 import Icon from '../components/ui/Icon';
 import { useV3Theme } from '../theme/v3';
@@ -18,13 +19,16 @@ import { InstallState } from '../services/AppInstall';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 
-// Intervals - experimental, gated behind the Experimental flag. André's choice (2026-08-14):
-// BOTH an interval Suunto App (build -> third-party compiler -> App-Zone install) and a native
-// planned move (TrainingProgram). Both carry a clear "unproven" warning - the compiler isn't
-// ours and the install-compiled-app path has a known unresolved on-hardware "app error"; the
-// planned-move format may be inert. What's proven is that every byte we generate matches the
-// Python tools (WorkoutSource/AppsCodec/AppInstall/TrainingProgramCodec tests).
+// Workout Builder (Intervals), split by watch (André, 2026-11-06):
+//   - Ambit3: its own (native) workouts. Guided WORKOUT-menu workouts live in the Training
+//     Program (linked here); the planned move ("Today" card, TrainingProgram region, proven on
+//     hardware 2026-09-03) is written from this screen. Traverse/Kailash have no such region and
+//     writePlannedMoves refuses them.
+//   - Ambit 1 and 2: no WORKOUT menu, so an interval Suunto App on a sport mode's data screen
+//     (build -> compile on the Ambit Apps site from the Suunto forum -> install). Ambit3 can use
+//     it too, for logic the native workout can't do.
 export default function IntervalsScreen() {
+  const navigation = useNavigation<any>();
   const theme = useV3Theme();
   const s = styles(theme);
 
@@ -135,11 +139,35 @@ export default function IntervalsScreen() {
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.content}>
+      {/* ── Ambit3: native workouts ── */}
       <Card style={{ width: '100%' }}>
-        <Text style={s.desc}>{t.intervalsWarning}</Text>
+        <Text style={s.title}>{t.intervalsAmbit3Section}</Text>
+        <Text style={s.desc}>{t.intervalsAmbit3Desc}</Text>
+        <TouchableOpacity style={s.btn} onPress={() => navigation.navigate('WorkoutCalendar', { watch: true })}>
+          <Text style={s.btnText}>{t.intervalsOpenTrainingProgram}</Text>
+        </TouchableOpacity>
+        <Text style={s.stepLabel}>{t.intervalsPlannedSection}</Text>
+        <Text style={s.desc}>{t.intervalsPlannedDesc}</Text>
+        <Field label={t.intervalsName} value={pmName} onChangeText={setPmName} s={s} theme={theme} />
+        <Row>
+          <Field label={t.intervalsDuration} value={pmDuration} onChangeText={setPmDuration} numeric s={s} theme={theme} />
+          <Field label={t.intervalsIntensity} value={pmIntensity} onChangeText={setPmIntensity} numeric s={s} theme={theme} />
+        </Row>
+        <View style={s.chipRow}>
+          {[{ id: 3, name: 'Running' }, { id: 4, name: 'Cycling' }, { id: 12, name: 'Walking' }].map(a => (
+            <TouchableOpacity key={a.id} style={[s.chip, pmActivity === a.id && s.chipActive]} onPress={() => setPmActivity(a.id)}>
+              <Text style={[s.chipText, pmActivity === a.id && s.chipTextActive]}>{a.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {pmBusy && <View style={s.rowCenter}><ActivityIndicator size="small" color={theme.primary} /><Text style={[s.desc, { marginLeft: 8 }]}>{t.intervalsWriting}</Text></View>}
+        {pmState?.phase === 'error' && <Text style={[s.desc, { color: theme.error }]}>{pmState.error}</Text>}
+        <TouchableOpacity style={[s.btn, pmBusy && { opacity: 0.5 }]} disabled={pmBusy} onPress={writePlanned}>
+          <Text style={s.btnText}>{t.intervalsWriteBtn}</Text>
+        </TouchableOpacity>
       </Card>
 
-      {/* ── Interval Suunto App ── */}
+      {/* ── Ambit 1 and 2 (and Ambit3 for complex logic): interval Suunto App ── */}
       <Card style={{ width: '100%' }}>
         <Text style={s.title}>{t.intervalsAppSection}</Text>
         <Text style={s.desc}>{t.intervalsAppDesc}</Text>
@@ -173,29 +201,6 @@ export default function IntervalsScreen() {
           <Text style={s.btnText}>{t.intervalsImportBtn}</Text>
         </TouchableOpacity>
         <CompiledPasteBox fallbackName={appName.trim() || 'Intervals'} onCompiled={c => { acceptCompiled(c); }} />
-      </Card>
-
-      {/* ── Native planned move ── */}
-      <Card style={{ width: '100%' }}>
-        <Text style={s.title}>{t.intervalsPlannedSection}</Text>
-        <Text style={[s.desc, { color: theme.warning }]}>{t.intervalsPlannedDesc}</Text>
-        <Field label={t.intervalsName} value={pmName} onChangeText={setPmName} s={s} theme={theme} />
-        <Row>
-          <Field label={t.intervalsDuration} value={pmDuration} onChangeText={setPmDuration} numeric s={s} theme={theme} />
-          <Field label={t.intervalsIntensity} value={pmIntensity} onChangeText={setPmIntensity} numeric s={s} theme={theme} />
-        </Row>
-        <View style={s.chipRow}>
-          {[{ id: 3, name: 'Running' }, { id: 4, name: 'Cycling' }, { id: 12, name: 'Walking' }].map(a => (
-            <TouchableOpacity key={a.id} style={[s.chip, pmActivity === a.id && s.chipActive]} onPress={() => setPmActivity(a.id)}>
-              <Text style={[s.chipText, pmActivity === a.id && s.chipTextActive]}>{a.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {pmBusy && <View style={s.rowCenter}><ActivityIndicator size="small" color={theme.primary} /><Text style={[s.desc, { marginLeft: 8 }]}>{t.intervalsWriting}</Text></View>}
-        {pmState?.phase === 'error' && <Text style={[s.desc, { color: theme.error }]}>{pmState.error}</Text>}
-        <TouchableOpacity style={[s.btn, pmBusy && { opacity: 0.5 }]} disabled={pmBusy} onPress={writePlanned}>
-          <Text style={s.btnText}>{t.intervalsWriteBtn}</Text>
-        </TouchableOpacity>
       </Card>
 
       {/* ── Install picker (compile+install) ── */}
