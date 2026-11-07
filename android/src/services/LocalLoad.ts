@@ -8,6 +8,8 @@
 // OpenAthlete's training-load.service.ts applies (formula only; their code is AGPL, not copied).
 // Pure functions, no I/O, so the maths is unit-tested (__tests__/LocalLoad.test.ts).
 
+import { sameMove, SameMoveRow } from './SameMove';
+
 export interface HrProfile { maxHr: number; restHr: number; male: boolean }
 
 export interface LocalMove {
@@ -15,6 +17,9 @@ export interface LocalMove {
   durationS: number;
   avgHr?: number;       // 0/undefined = no HR recorded
   name?: string;        // sport / activity name ("Cycling", "Walking", ...) - picks the rate below
+  distanceM?: number;   // for the same-move check (SameMove.ts)
+  watch?: boolean;      // read straight off a watch, and which one
+  device?: string;
 }
 
 // Calibrated so the local estimate reads on intervals.icu's scale (André, 2026-09-28: the local
@@ -63,21 +68,20 @@ function ymdLocal(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-interface Scored { startMs: number; durationS: number; load: number; hr: boolean }
+interface Scored { startMs: number; durationS: number; load: number; hr: boolean; distanceM?: number; watch?: boolean; device?: string }
 
-/** One move, several rows: the watch's own copy (UTC) beside its intervals.icu import (local
- *  time), or two identical imports. Same move = durations within 1% (5 s floor) and starts a
- *  whole number of hours apart (±3 min, up to 14 h). Keeps the richer load (HR wins). */
+/** One move, several rows: the watch's own copy beside its intervals.icu import, or two
+ *  imports of one ride. The shared rule (SameMove.ts, startMs = true UTC instant). Keeps the
+ *  richer load (HR wins). */
 export function dedupeMoves<T extends Scored>(moves: T[]): T[] {
   const sorted = [...moves].sort((a, b) => a.startMs - b.startMs);
+  const row = (m: T): SameMoveRow => ({ start: m.startMs / 1000, durationS: m.durationS, distanceM: m.distanceM ?? 0, watch: m.watch, device: m.device });
   const kept: T[] = [];
   for (const m of sorted) {
     let dup = false;
-    for (let k = kept.length - 1; k >= 0 && m.startMs - kept[k].startMs <= (14 * 3600 + 180) * 1000; k--) {
+    for (let k = kept.length - 1; k >= 0 && m.startMs - kept[k].startMs <= (14 * 3600 + 5) * 1000; k--) {
       const o = kept[k];
-      const dt = (m.startMs - o.startMs) / 1000;
-      const offHour = dt - Math.round(dt / 3600) * 3600;
-      if (Math.abs(m.durationS - o.durationS) <= Math.max(5, 0.01 * o.durationS) && Math.abs(offHour) <= 180) {
+      if (sameMove(row(m), row(o))) {
         if ((m.hr && !o.hr) || (m.hr === o.hr && m.load > o.load)) kept[k] = m;
         dup = true;
         break;
@@ -99,7 +103,7 @@ export function computeLocalSeries(moves: LocalMove[], profile: HrProfile | null
     const trimp = profile && m.avgHr && m.avgHr > 0 ? banisterTrimp(minutes, m.avgHr, profile) : 0;
     // With HR: TRIMP on intervals' scale; without: the sport's typical load per hour.
     const load = trimp > 0 ? TRIMP_TO_LOAD * trimp : (m.durationS / 3600) * loadPerHour(m.name);
-    scored.push({ startMs: m.startMs, durationS: m.durationS, load, hr: trimp > 0 });
+    scored.push({ startMs: m.startMs, durationS: m.durationS, load, hr: trimp > 0, distanceM: m.distanceM, watch: m.watch, device: m.device });
   }
   const kept = dedupeMoves(scored);
 

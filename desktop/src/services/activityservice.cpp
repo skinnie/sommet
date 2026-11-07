@@ -28,6 +28,8 @@
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
+#include "samemove.h"
+
 // Junk/test entry: under two minutes AND under 100 m. One rule for every source (André,
 // 2026-08-24: "it was tests for our app"; 2026-10-04: watch moves too - the list still showed
 // 0-1 minute runs with no distance, read off the watch while testing). Android's twin is
@@ -728,6 +730,11 @@ void ActivityService::openDatabase()
     // be silently dropped when the re-key rebuilds the table (the bug that made a fresh DB pull 0).
     // No-op ("duplicate column") once present. Rows predating it read as 0 and push once (harmless).
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN updated_at INTEGER"));
+    // The move's start as a true UTC instant (epoch s), for rows whose start_time is a local time
+    // without a zone (intervals.icu's start_date_local). The duplicate check (samemove.h) compares
+    // starts in UTC only, so a copy never depends on this computer's time zone. NULL = start_time
+    // already carries its zone (watch, FIT, Suunto). Same rule as updated_at: after the re-key.
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN start_utc INTEGER"));
     // Testing mode's sample moves used to arrive with no device, so the (idx, device) key never
     // matched and each demo sync added them again (3 moves x 14 on André's cache, 2026-09-27),
     // and their tracks never loaded. Only that reply is device-less: keep one copy, tag it "demo".
@@ -889,7 +896,7 @@ bool ActivityService::dbLoadAll()
     QSqlQuery q(QStringLiteral(
         "SELECT idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
-        "gpx_text, fit_base64, rule_outputs_json, source, device "
+        "gpx_text, fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0) "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -937,6 +944,7 @@ bool ActivityService::dbLoadAll()
         parsed[QStringLiteral("source")] = q.value(12).toString().isEmpty()
             ? QStringLiteral("watch") : q.value(12).toString();
         parsed[QStringLiteral("device")] = q.value(13).toString();
+        parsed[QStringLiteral("startUtc")] = q.value(14).toLongLong();   // 0 = start_time has its zone
         // Logged Suunto App outputs (ruleoutput1..5) - {slot: {label, times, values}} - handed
         // to QML as `ruleOutputs` for the per-app graph. Absent on moves recorded without app
         // logging (older caches too, where the column is NULL): left unset.
@@ -1346,45 +1354,55 @@ void ActivityService::dedupeActivities()
         const QDateTime dt = QDateTime::fromString(s, Qt::ISODate);
         return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
     };
-    const qint64 kWindowSecs = 180;   // cross-source start times rarely differ by more than this
+    // The match itself is the shared rule in samemove.h (also used by the imports and the phone).
+    auto rowOf = [&](const QVariantMap &a) -> SameMoveRow {
+        SameMoveRow r;
+        const qint64 utc = a.value(QStringLiteral("startUtc")).toLongLong();
+        r.start = utc > 0 ? utc : startEpoch(a);
+        r.durationS = a.value(QStringLiteral("durationSeconds")).toInt();
+        r.distanceM = a.value(QStringLiteral("distanceMeters")).toDouble();
+        r.watch = isWatch(a);
+        r.device = a.value(QStringLiteral("device")).toString().toStdString();
+        return r;
+    };
+    const qint64 kReachSecs = 14 * 3600 + 5;   // widest start gap sameMove() accepts
 
-    struct Meta { qint64 epoch; bool watch; QString device; int dur; };
-    QVariantList kept;
-    QList<Meta> meta;
-    for (const QVariant &v : std::as_const(m_activities)) {
-        const QVariantMap a = v.toMap();
-        const qint64 e = startEpoch(a);
-        const bool w = isWatch(a);
-        const QString dev = a.value(QStringLiteral("device")).toString();
-        const int dur = a.value(QStringLiteral("durationSeconds")).toInt();
-        if (e < 0) {                       // no usable start time -> can't match, always keep
-            kept.append(v);
-            meta.append({-1, w, dev, dur});
-            continue;
-        }
+    // Sorted by start so each move is only compared with the few kept ones near it. Rows are
+    // tracked by their position in m_activities, so the list keeps its order afterwards.
+    QList<QPair<SameMoveRow, int>> rows;
+    rows.reserve(m_activities.size());
+    for (int i = 0; i < m_activities.size(); ++i)
+        rows.append({rowOf(m_activities.at(i).toMap()), i});
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const auto &x, const auto &y) { return x.first.start < y.first.start; });
+
+    QList<int> keptPos;
+    QList<SameMoveRow> meta;
+    auto sourceAt = [&](int pos) {
+        return m_activities.at(pos).toMap().value(QStringLiteral("source")).toString();
+    };
+    for (const auto &[row, pos] : std::as_const(rows)) {
         int match = -1;
-        for (int j = 0; j < kept.size(); ++j) {
-            if (meta[j].epoch < 0 || qAbs(e - meta[j].epoch) > kWindowSecs)
-                continue;
-            if (w && meta[j].watch && dev != meta[j].device)
-                continue;                  // two different watches, same time = separate rides
-            if (dur > 0 && meta[j].dur > 0) {
-                const double r = double(dur) / double(meta[j].dur);
-                if (r > 1.5 || r < 0.66)
-                    continue;              // durations too different = different rides
+        if (row.start >= 0) {
+            for (int j = meta.size() - 1; j >= 0; --j) {
+                if (meta[j].start < 0) continue;
+                if (row.start - meta[j].start > kReachSecs) break;
+                if (sameMove(row, meta[j])) { match = j; break; }
             }
-            match = j;
-            break;
         }
         if (match < 0) {
-            kept.append(v);
-            meta.append({e, w, dev, dur});
-        } else if (priority(a.value(QStringLiteral("source")).toString())
-                   > priority(kept.at(match).toMap().value(QStringLiteral("source")).toString())) {
-            kept[match] = v;               // a higher-priority source for the same ride wins
-            meta[match] = {e, w, dev, dur};
+            keptPos.append(pos);
+            meta.append(row);
+        } else if (priority(sourceAt(pos)) > priority(sourceAt(keptPos[match]))) {
+            keptPos[match] = pos;          // a higher-priority source for the same move wins
+            meta[match] = row;
         }
     }
+    std::sort(keptPos.begin(), keptPos.end());
+    QVariantList kept;
+    kept.reserve(keptPos.size());
+    for (int pos : std::as_const(keptPos))
+        kept.append(m_activities.at(pos));
     m_activities = kept;
 }
 
@@ -1653,10 +1671,11 @@ void ActivityService::importFromIntervals(int oldestDays)
     // (oldestDays<=0) uses a far-past oldest; otherwise the last N days. newest is today.
     QUrlQuery query;
     const QDate today = QDate::currentDate();
-    // Once after the 2026-10-04 update the whole history is asked for, whatever window the
-    // caller wanted: that is the pass that removes old activities deleted on intervals.icu and
-    // renames rows stored under a raw sport type. Marked done when the reply has been applied.
-    const bool fullPass = !settings.value(QStringLiteral("connections/intervals_icu/fullPass2")).toBool();
+    // Once after an update that needs it, the whole history is asked for, whatever window the
+    // caller wanted: 2026-10-04 to remove old activities deleted on intervals.icu and rename rows
+    // stored under a raw sport type; 2026-11-07 (fullPass3) to give every row its UTC start
+    // (start_utc). Marked done when the reply has been applied.
+    const bool fullPass = !settings.value(QStringLiteral("connections/intervals_icu/fullPass3")).toBool();
     if (fullPass)
         oldestDays = 0;
     const QDate oldest = oldestDays > 0 ? today.addDays(-oldestDays) : QDate(2005, 1, 1);
@@ -1688,7 +1707,7 @@ void ActivityService::importFromIntervals(int oldestDays)
         }
         importActivitiesInto(doc.array());
         if (fullPass)
-            QSettings().setValue(QStringLiteral("connections/intervals_icu/fullPass2"), true);
+            QSettings().setValue(QStringLiteral("connections/intervals_icu/fullPass3"), true);
     });
 }
 
@@ -1763,15 +1782,25 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     // raw sport name, an activity deleted remotely - touch exactly the rows that need it, by
     // primary key. (A first version ran one UPDATE per activity filtered on external_id: no
     // index, 4,700 scans of a 240 MB table on the UI thread - the app froze for minutes.)
-    struct Held { int idx; QString device; QString name; QString start; };
+    struct Held { int idx; QString device; QString name; QString start; bool hasUtc; };
     QHash<QString, Held> existing;
     QSqlQuery ex(m_db);
-    if (ex.exec(QStringLiteral("SELECT external_id, idx, device, name, start_time FROM activities "
+    if (ex.exec(QStringLiteral("SELECT external_id, idx, device, name, start_time, start_utc IS NOT NULL "
+                               "FROM activities "
                                "WHERE source = 'intervals' AND COALESCE(external_id,'') <> ''")))
         while (ex.next())
             existing.insert(ex.value(0).toString(),
                             {ex.value(1).toInt(), ex.value(2).toString(), ex.value(3).toString(),
-                             ex.value(4).toString()});
+                             ex.value(4).toString(), ex.value(5).toBool()});
+    // intervals.icu's start_date is the true UTC start (start_date_local is what the list shows).
+    auto utcOf = [](const QJsonObject &o) -> QVariant {
+        const QString iso = o.value(QStringLiteral("start_date")).toString();
+        static const QRegularExpression zoned(QStringLiteral("(Z|[+-]\\d\\d:?\\d\\d)$"));
+        if (!zoned.match(iso).hasMatch())
+            return QVariant();                        // no zone: not a UTC instant, leave unknown
+        const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+        return dt.isValid() ? QVariant(dt.toSecsSinceEpoch()) : QVariant();
+    };
 
     // New rows use negative idx, below the lowest existing imported idx, so (idx, device) never
     // collides with an intervals row already stored.
@@ -1812,6 +1841,21 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
                 fix.addBindValue(proper); fix.addBindValue(h.idx); fix.addBindValue(h.device);
                 fix.exec();
             }
+            // Rows imported before start_utc existed get their UTC start (the one-time full
+            // pass below asks for the whole history so every row is reached once).
+            if (h.idx != INT_MIN && !h.hasUtc) {
+                const QVariant utc = utcOf(o);
+                if (utc.isValid()) {
+                    QSqlQuery fix(m_db);
+                    // updated_at moves too, so the shared database passes the UTC start on to
+                    // devices that only pull from it (once per row).
+                    fix.prepare(QStringLiteral("UPDATE activities SET start_utc = ?, updated_at = ? "
+                                               "WHERE idx = ? AND device = ?"));
+                    fix.addBindValue(utc); fix.addBindValue(QDateTime::currentMSecsSinceEpoch());
+                    fix.addBindValue(h.idx); fix.addBindValue(h.device);
+                    fix.exec();
+                }
+            }
             continue;
         }
         // Store the mapped SPORT as the name so the badge shows the right icon and it reads
@@ -1841,8 +1885,8 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.prepare(QStringLiteral(
             "INSERT INTO activities "
             "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-            " start_time, source, external_id, device) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'intervals', ?, ?)"));
+            " start_time, source, external_id, device, start_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'intervals', ?, ?, ?)"));
         ins.addBindValue(idx--);
         ins.addBindValue(name);
         ins.addBindValue(duration);
@@ -1852,9 +1896,10 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(start);
         ins.addBindValue(extId);
         ins.addBindValue(device);
+        ins.addBindValue(utcOf(o));
         ins.exec();
         if (!extId.isEmpty())
-            existing.insert(extId, {INT_MIN, QString(), QString(), QString()});   // new this run
+            existing.insert(extId, {INT_MIN, QString(), QString(), QString(), true});   // new this run
         ++count;
     }
     // An activity deleted on intervals.icu goes here too. The import has only ADDED since
@@ -2223,35 +2268,33 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         const QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
         return dt.isValid() ? dt.toSecsSinceEpoch() : -1;
     };
-    struct Existing { qint64 epoch; int dur; };
-    QList<Existing> existing;
+    // Same rule as the list (samemove.h): a true UTC start within 3 min, then distance (or
+    // duration) agreeing. Starts without a zone use start_utc (intervals.icu rows).
+    QList<SameMoveRow> existing;
     {
-        QSqlQuery q(QStringLiteral("SELECT start_time, duration_s FROM activities"), m_db);
-        while (q.next())
-            existing.append({epochOf(q.value(0).toString()), q.value(1).toInt()});
-    }
-    // A ride counts as already-present if an existing activity starts at the same instant
-    // (within 5 min - no duration check, since elapsed vs moving time differ across sources),
-    // OR at a whole-hour offset of 1-2 h with a comparable duration. That hour offset is real:
-    // some intervals.icu rides in André's own library were stored with a 1-hour timezone/DST
-    // discrepancy vs the device's UTC, so an exact-instant match alone missed ~9 of 50 known
-    // duplicates (verified 2026-09-04). The hour-offset arm is kept tight (±2 min + duration
-    // like) so it can't swallow a genuinely different ride.
-    auto durLike = [](int a, int b) -> bool {
-        if (a <= 0 || b <= 0) return true;
-        const double r = double(a) / double(b);
-        return r >= 0.5 && r <= 2.0;
-    };
-    auto alreadyHave = [&](qint64 epoch, int dur) -> bool {
-        if (epoch < 0) return false;                 // no start time -> can't match, treat as new
-        for (const Existing &e : existing) {
-            if (e.epoch < 0) continue;
-            const qint64 dd = qAbs(epoch - e.epoch);
-            if (dd <= 300)
-                return true;                         // same instant (±5 min)
-            if ((qAbs(dd - 3600) <= 120 || qAbs(dd - 7200) <= 120) && durLike(dur, e.dur))
-                return true;                         // whole-hour tz/DST storage offset
+        QSqlQuery q(QStringLiteral(
+            "SELECT start_time, duration_s, distance_m, COALESCE(source,''), device, "
+            "COALESCE(start_utc, 0) FROM activities"), m_db);
+        while (q.next()) {
+            SameMoveRow r;
+            const qint64 utc = q.value(5).toLongLong();
+            r.start = utc > 0 ? utc : epochOf(q.value(0).toString());
+            r.durationS = q.value(1).toInt();
+            r.distanceM = q.value(2).toDouble();
+            const QString src = q.value(3).toString();
+            r.watch = src.isEmpty() || src == QStringLiteral("watch");
+            r.device = q.value(4).toString().toStdString();
+            existing.append(r);
         }
+    }
+    auto alreadyHave = [&](qint64 epoch, int dur, double dist) -> bool {
+        SameMoveRow in;
+        in.start = epoch;
+        in.durationS = dur;
+        in.distanceM = dist;
+        for (const SameMoveRow &e : std::as_const(existing))
+            if (sameMove(in, e))
+                return true;
         return false;
     };
 
@@ -2265,7 +2308,7 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         if (isJunkActivity(duration, distance))   // skip junk/aborted, same rule as other imports
             continue;
         const qint64 epoch = epochOf(o.value(QStringLiteral("startTime")).toString());
-        if (alreadyHave(epoch, duration)) {      // already in the library from some source
+        if (alreadyHave(epoch, duration, distance)) {   // already in the library from some source
             ++skipped;
             continue;
         }
@@ -2304,7 +2347,11 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(extId);
         ins.addBindValue(source);            // device = the source tag (edge/karoo/c406)
         ins.exec();
-        existing.append({epoch, duration});  // so two incoming copies of one ride also de-dup
+        {   // so two incoming copies of one ride also de-dup
+            SameMoveRow r;
+            r.start = epoch; r.durationS = duration; r.distanceM = distance;
+            existing.append(r);
+        }
         ++count;
     }
     m_db.commit();
@@ -2935,6 +2982,9 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         ? QVariant() : rec.value(QStringLiteral("external_id")).toString();
     const QVariant ruleJson = rec.value(QStringLiteral("rule_outputs_json")).toString().isEmpty()
         ? QVariant() : rec.value(QStringLiteral("rule_outputs_json")).toString();
+    // UTC start for rows whose start_time has no zone (see samemove.h); absent = unknown.
+    const qint64 utcIn = rec.value(QStringLiteral("start_utc")).toInteger();
+    const QVariant remoteUtc = utcIn > 0 ? QVariant(utcIn) : QVariant();
 
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
@@ -2949,7 +2999,8 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         QSqlQuery up(m_db);
         up.prepare(QStringLiteral(
             "UPDATE activities SET name=?, duration_s=?, distance_m=?, ascent_m=?, energy_kcal=?, "
-            "sport_type_raw=?, source=?, external_id=?, rule_outputs_json=?, updated_at=? WHERE idx=?"));
+            "sport_type_raw=?, source=?, external_id=?, rule_outputs_json=?, updated_at=?, "
+            "start_utc=COALESCE(?, start_utc) WHERE idx=?"));
         up.addBindValue(rec.value(QStringLiteral("name")).toString());
         up.addBindValue(rec.value(QStringLiteral("duration_s")).toInteger());
         up.addBindValue(rec.value(QStringLiteral("distance_m")).toDouble());
@@ -2960,6 +3011,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.addBindValue(extId);
         up.addBindValue(ruleJson);
         up.addBindValue(remoteUpdated);
+        up.addBindValue(remoteUtc);
         up.addBindValue(existingIdx);
         up.exec();
     } else {
@@ -2981,7 +3033,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
             "INSERT OR REPLACE INTO activities "
             "(idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
             " start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source, external_id, "
-            " updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+            " updated_at, start_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
         up.addBindValue(useIdx);
         up.addBindValue(device);
         up.addBindValue(rec.value(QStringLiteral("name")).toString());
@@ -2998,6 +3050,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.addBindValue(src.isEmpty() ? QVariant() : src);
         up.addBindValue(extId);
         up.addBindValue(remoteUpdated);
+        up.addBindValue(remoteUtc);
         up.exec();
     }
 
@@ -3073,7 +3126,8 @@ void ActivityService::sommetPushAll()
     m_sommetPushQueue.clear();
     QSqlQuery q(QStringLiteral(
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-        "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text FROM activities"),
+        "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text, "
+        "COALESCE(start_utc, 0) FROM activities"),
         m_db);
     while (q.next()) {
         const QString device = q.value(1).toString();
@@ -3101,6 +3155,8 @@ void ActivityService::sommetPushAll()
         if (!q.value(11).toString().isEmpty())
             rec.insert(QStringLiteral("rule_outputs_json"), q.value(11).toString());
         rec.insert(QStringLiteral("updated_at"), QJsonValue(q.value(12).toLongLong()));
+        if (q.value(14).toLongLong() > 0)
+            rec.insert(QStringLiteral("start_utc"), QJsonValue(q.value(14).toLongLong()));
         const QString gpx = q.value(13).toString();
         rec.insert(QStringLiteral("has_track"), !gpx.isEmpty());
         rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));

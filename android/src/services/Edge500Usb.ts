@@ -129,10 +129,10 @@ export async function syncEdgeRides(onState: (s: EdgeRideSync) => void): Promise
         const id = edgeActivityId(todo[i]);
         const start = ride.startTime ? Date.parse(ride.startTime) / 1000 : NaN;
         const junk = ride.durationSeconds < 60 && ride.distanceMeters < 100;   // desktop rule
-        if (!junk && !(isFinite(start) && dedup.hasRide(start, ride.durationSeconds))
+        if (!junk && !(isFinite(start) && dedup.hasRide(start, ride.durationSeconds, ride.distanceMeters))
             && (await writeGpxFile(id, rideToGpx(ride, creator)))) {
           await writeFitFile(id, b64);
-          if (isFinite(start)) dedup.add(id, start, ride.durationSeconds);
+          if (isFinite(start)) dedup.add(id, start, ride.durationSeconds, ride.distanceMeters);
           newCount++;
         }
         dedup.markSeen(id);

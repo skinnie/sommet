@@ -2,7 +2,7 @@
 // the table doesn't have (an existing one made SQLite log an error on every start).
 const mockSql: string[] = [];
 const mockColumns: Record<string, string[]> = {
-  activities: ['id', 'activity_type', 'device', 'updated_at'],        // energy_kcal missing
+  activities: ['id', 'activity_type', 'device', 'updated_at', 'start_utc'],   // energy_kcal missing
   gear: ['id', 'starting_distance_m', 'starting_time_s', 'baseline_at'],
   gear_reminder: ['id', 'distance_m', 'time_s', 'days', 'activities', 'percent_used', 'snoozed_until',
                   'remote_id', 'starting_distance_m', 'starting_time_s', 'starting_activities', 'last_reset'],

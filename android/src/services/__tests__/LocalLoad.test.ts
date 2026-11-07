@@ -17,12 +17,18 @@ describe('banisterTrimp', () => {
 });
 
 describe('dedupeMoves', () => {
-  it('merges the watch copy (UTC) with its intervals.icu import (local, +2 h) - real 2026-08-31 pair', () => {
+  it('merges the watch copy with its intervals.icu import (both as UTC instants) - real 2026-08-31 pair', () => {
+    // The import's local 21:29:40 (France, +2 h) is start_date 19:29:40Z - CoachService reads it via start_utc.
     const watch = { startMs: Date.parse('2026-08-31T19:29:42Z'), durationS: 1922, load: 60, hr: true };
-    const icu = { startMs: Date.parse('2026-08-31T21:29:40Z'), durationS: 1921, load: 32, hr: false };
+    const icu = { startMs: Date.parse('2026-08-31T19:29:40Z'), durationS: 1921, load: 32, hr: false };
     const out = dedupeMoves([icu, watch]);
     expect(out).toHaveLength(1);
     expect(out[0]).toBe(watch);   // HR load wins
+  });
+  it('never merges by guessing a time zone: 2 h apart but 40 s off the hour stays two moves', () => {
+    const a = { startMs: Date.parse('2026-08-31T19:29:42Z'), durationS: 1922, load: 60, hr: true };
+    const b = { startMs: Date.parse('2026-08-31T21:29:02Z'), durationS: 1921, load: 32, hr: false };
+    expect(dedupeMoves([a, b])).toHaveLength(2);
   });
   it('keeps two different moves of the same length on the same day', () => {
     const a = { startMs: Date.parse('2026-09-07T07:02:29Z'), durationS: 1343, load: 22, hr: false };

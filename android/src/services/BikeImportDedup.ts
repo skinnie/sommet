@@ -1,27 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAllActivities, getDeletedIds } from '../database/db';
 import { activityExists } from './GpxService';
+import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 
 // "Already have this ride?" for bike-computer imports (Magene over BLE, Bryton over USB) - the
 // exact rule of the desktop's ActivityService::importBikeActivitiesInto, so the two apps agree:
 //   * same id already in the library, a GPX file waiting to be listed, or DELETED by the user
 //     (deleted_activities) -> never re-import (a deleted ride used to come back on the next Sync);
-//   * an activity from ANY source (intervals.icu import, the watch, another device) starting
-//     within 5 min -> it's the same ride;
-//   * or a whole 1-2 h offset (+-2 min) with a comparable duration - intervals.icu sometimes
-//     stores rides with a timezone/DST hour shift (verified on the desktop, 2026-09-04).
+//   * the same ride from ANY source (intervals.icu import, the watch, another device): the shared
+//     rule in SameMove.ts (UTC starts within 3 min, then distance or duration agreeing);
 //   * every ride handled once (imported, duplicate or junk) is remembered in a "seen" list - the
 //     desktop's bike_seen table - so a Sync never downloads or re-reads it again.
 // Rides are checked by id and start BEFORE the slow download when the start is known up front
 // (the Magene's ride id is its start time), and again with the duration once decoded.
 
-interface Known { epoch: number; dur: number }
 export const SEEN_KEY = 'bikeImportSeen.v1';
 
-const durLike = (a: number, b: number) => a <= 0 || b <= 0 || (a / b >= 0.5 && a / b <= 2);
 
 export class BikeImportDedup {
-  private known: Known[] = [];
+  private known: SameMoveRow[] = [];
   private ids = new Set<string>();
   private deleted = new Set<string>();
   private seen = new Set<string>();
@@ -31,8 +28,8 @@ export class BikeImportDedup {
     const [acts, del] = await Promise.all([getAllActivities(), getDeletedIds()]);
     for (const a of acts) {
       d.ids.add(a.id);
-      const t = Date.parse(a.date);
-      if (!isNaN(t)) d.known.push({ epoch: t / 1000, dur: a.duration_s || 0 });
+      const t = startUtcOf(a);
+      if (!isNaN(t)) d.known.push({ start: t, durationS: a.duration_s || 0, distanceM: a.distance_m || 0, watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '' });
     }
     del.forEach(id => d.deleted.add(id));
     try { (JSON.parse((await AsyncStorage.getItem(SEEN_KEY)) || '[]') as string[]).forEach(id => d.seen.add(id)); } catch { /* none */ }
@@ -50,19 +47,16 @@ export class BikeImportDedup {
     try { await AsyncStorage.setItem(SEEN_KEY, JSON.stringify([...this.seen])); } catch { /* best effort */ }
   }
 
-  /** Same ride from any source (start epoch seconds; duration unknown before the download). */
-  hasRide(epoch: number, dur: number | null): boolean {
-    for (const e of this.known) {
-      const dd = Math.abs(epoch - e.epoch);
-      if (dd <= 300) return true;
-      if (dur != null && (Math.abs(dd - 3600) <= 120 || Math.abs(dd - 7200) <= 120) && durLike(dur, e.dur)) return true;
-    }
-    return false;
+  /** Same ride from any source (start epoch seconds UTC; duration/distance unknown before the
+   *  download: then only the start is compared). */
+  hasRide(epoch: number, dur: number | null, dist = 0): boolean {
+    const me: SameMoveRow = { start: epoch, durationS: dur ?? 0, distanceM: dist };
+    return this.known.some(k => sameMove(me, k));
   }
 
   /** Remember a ride imported during this sync. */
-  add(id: string, epoch: number, dur: number) {
+  add(id: string, epoch: number, dur: number, dist = 0) {
     this.ids.add(id);
-    this.known.push({ epoch, dur });
+    this.known.push({ start: epoch, durationS: dur, distanceM: dist });
   }
 }

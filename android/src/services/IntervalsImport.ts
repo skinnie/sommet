@@ -7,6 +7,7 @@ import {
 } from '../database/db';
 import { sportNameForIntervalsType, isJunkActivity } from './SportNames';
 import { importFromIntervals as importGearFromIntervals } from './GearMirrorService';
+import { sameMove, startUtcOf, utcSeconds, SameMoveRow } from './SameMove';
 
 // Import activities FROM intervals.icu INTO the app's local DB (André, 2026-08-18: "I would
 // prefer to have all activities living on my app"). Pull-only. Brings in EVERY activity as a
@@ -20,7 +21,6 @@ import { importFromIntervals as importGearFromIntervals } from './GearMirrorServ
 // no-op, and an intervals activity that actually ORIGINATED from the watch (same day + type +
 // distance) is skipped so it never double-counts a move already synced off the watch.
 const API_BASE = 'https://intervals.icu/api/v1';
-const DUP_WINDOW_MS = 180000;   // desktop kWindowSecs
 
 export interface ImportResult {
   imported: number;
@@ -66,7 +66,10 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
   // Oldest upload first, so of two copies of one ride the first uploaded is the one kept.
   const idNum = (a: any) => Number(String(a?.id ?? '').replace(/\D/g, '')) || 0;
   acts.sort((x: any, y: any) => idNum(x) - idNum(y));
-  const keptIcu: { ms: number; dur: number }[] = [];
+  const keptIcu: SameMoveRow[] = [];
+  const watchRows: SameMoveRow[] = watchActs.map(e => ({
+    start: startUtcOf(e), durationS: e.duration_s, distanceM: e.distance_m, watch: !e.device, device: e.device ?? '',
+  }));
 
   let imported = 0;
   let skipped = 0;
@@ -79,26 +82,17 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     const date = String(a.start_date_local || a.start_date || '').slice(0, 19);
     const distance_m = Math.round(Number(a.icu_distance ?? a.distance ?? 0)) || 0;
     const duration_s = Math.round(Number(a.moving_time ?? a.elapsed_time ?? 0)) || 0;
-    // Is this the same move as one already kept? The desktop's rule (dedupeActivities): starts
-    // within three minutes and durations within 0.66-1.5x of each other - whatever the sport,
-    // since a move retyped on intervals.icu ("Walking" -> "Hiking") is still the same move.
-    //   * against moves this device read off a watch (plus the older same day/type/distance test);
+    // Is this the same move as one already kept? The shared rule (SameMove.ts, the desktop's
+    // samemove.h): true UTC starts within three minutes (intervals.icu's start_date, never this
+    // phone's time zone), then distance - or duration - agreeing, whatever the sport (a move
+    // retyped on intervals.icu, "Walking" -> "Hiking", is still the same move). Checked
+    //   * against moves this device read off a watch;
     //   * against another intervals.icu copy already taken in this run - one ride uploaded twice
     //     (André, 2026-10-04: the 300 km of 04/04/2026 was there from the Edge 1040 and again as
-    //     "Tacx Training", "likely an export from rungap ... maybe a duplicate"). The copy with the
-    //     lower intervals.icu id - the first one uploaded - is the one kept.
-    const day = date.slice(0, 10);
-    const startMs = Date.parse(date);
-    const sameMove = (otherMs: number, otherDur: number) => {
-      if (!isFinite(startMs) || !isFinite(otherMs) || Math.abs(otherMs - startMs) > DUP_WINDOW_MS) return false;
-      if (duration_s > 0 && otherDur > 0) { const r = duration_s / otherDur; if (r > 1.5 || r < 0.66) return false; }
-      return true;
-    };
-    const dupOfWatch = watchActs.some(e => {
-      if (e.date.slice(0, 10) !== day) return false;
-      if (e.activity_type === type && Math.abs(e.distance_m - distance_m) <= Math.max(50, distance_m * 0.01)) return true;
-      return sameMove(Date.parse(e.date.slice(0, 19)), e.duration_s);
-    }) || keptIcu.some(k => sameMove(k.ms, k.dur));
+    //     "Tacx Training"). The copy with the lower intervals.icu id - the first uploaded - stays.
+    const startUtc = utcSeconds(a.start_date);
+    const self: SameMoveRow = { start: isNaN(startUtc) ? startUtcOf({ date }) : startUtc, durationS: duration_s, distanceM: distance_m };
+    const dupOfWatch = watchRows.some(w => sameMove(self, w)) || keptIcu.some(k => sameMove(self, k));
     if (knownIds.has(icuId)) {
       // An earlier import kept the intervals.icu copy of a move this device read off the watch
       // itself (the type differed, so the old same-type test missed it): drop the copy.
@@ -107,17 +101,19 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       // sport.
       const have = icuById.get(icuId);
       if (have) {
-        const fix: { activity_type?: string; energy_kcal?: number } = {};
+        const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number } = {};
         if (energy_kcal > 0 && !have.energy_kcal) fix.energy_kcal = energy_kcal;
+        // Rows imported before 2026-11-07 get their UTC start (the daily full import reaches all).
+        if (!have.start_utc && !isNaN(startUtc)) fix.start_utc = startUtc;
         // The sport follows intervals.icu: one changed there (2026-10-05: 23 handheld tracks
         // retyped from Run to Hike still read "Running" here), or a name from the old private
         // table. Nothing in the app edits the sport of an imported activity, so there is no
         // local choice to overwrite.
         if (rawType && have.activity_type !== type) fix.activity_type = type;
-        if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
+        if (fix.activity_type !== undefined || fix.energy_kcal !== undefined || fix.start_utc !== undefined)
           await updateImportedActivity(icuId, fix);
       }
-      if (isFinite(startMs) && !isJunkActivity(duration_s, distance_m)) keptIcu.push({ ms: startMs, dur: duration_s });
+      if (self.start >= 0 && !isJunkActivity(duration_s, distance_m)) keptIcu.push(self);
       skipped++; continue;
     }
 
@@ -125,7 +121,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
     if (isJunkActivity(duration_s, distance_m)) { skipped++; continue; }
 
     if (dupOfWatch) { skipped++; continue; }
-    if (isFinite(startMs)) keptIcu.push({ ms: startMs, dur: duration_s });
+    if (self.start >= 0) keptIcu.push(self);
 
     // Which device recorded it (2026-08-26, desktop parity). intervals.icu gives a real name
     // for nearly every activity; fall back to a friendly form of the upload source when the
@@ -143,6 +139,7 @@ export async function importActivitiesFromIntervals(afterDate?: string): Promise
       activity_type: type,
       device,
       energy_kcal,
+      start_utc: isNaN(startUtc) ? 0 : startUtc,
     };
     await markActivitySynced(record);
     knownIds.add(icuId);

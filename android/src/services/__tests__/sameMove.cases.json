@@ -1,0 +1,383 @@
+{
+ "about": "One rule for 'is this the same move?', shared by the desktop (samemove.h), the phone (SameMove.ts) and tools/same_move.py. start = UTC epoch seconds. Cases are from Andr\u00e9's real library unless obvious.",
+ "cases": [
+  {
+   "name": "watch and its intervals.icu copy (start_date, UTC): same pool swim",
+   "a": {
+    "start": 1793262055,
+    "durationS": 2653,
+    "distanceM": 1325,
+    "watch": true,
+    "device": "PEAK"
+   },
+   "b": {
+    "start": 1793262055,
+    "durationS": 2648,
+    "distanceM": 1325,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "same start, same distance, durations far apart (pauses counted on one side): same move",
+   "a": {
+    "start": 1793279948,
+    "durationS": 6154,
+    "distanceM": 1978,
+    "watch": true,
+    "device": "PEAK"
+   },
+   "b": {
+    "start": 1793279948,
+    "durationS": 2665,
+    "distanceM": 1978,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "Fenix and Edge on one ride, 27 s apart, distances 0.6% apart: same ride",
+   "a": {
+    "start": 1617378575,
+    "durationS": 6977,
+    "distanceM": 37079,
+    "watch": false,
+    "device": "GARMIN FENIX6S"
+   },
+   "b": {
+    "start": 1617378602,
+    "durationS": 6984,
+    "distanceM": 36863,
+    "watch": false,
+    "device": "GARMIN EDGE_530"
+   },
+   "same": true
+  },
+  {
+   "name": "indoor session: one copy has distance, the other none, same start: same",
+   "a": {
+    "start": 1705952302,
+    "durationS": 1899,
+    "distanceM": 14308,
+    "watch": false,
+    "device": "SYSTM"
+   },
+   "b": {
+    "start": 1705952348,
+    "durationS": 1884,
+    "distanceM": 0,
+    "watch": false,
+    "device": "GARMIN EDGE_1040"
+   },
+   "same": true
+  },
+  {
+   "name": "watch read straight off twice (same device): same",
+   "a": {
+    "start": 1789887600,
+    "durationS": 3600,
+    "distanceM": 30000,
+    "watch": true,
+    "device": "PEAK"
+   },
+   "b": {
+    "start": 1789887630,
+    "durationS": 3600,
+    "distanceM": 30000,
+    "watch": true,
+    "device": "PEAK"
+   },
+   "same": true
+  },
+  {
+   "name": "same start, nothing else known: same",
+   "a": {
+    "start": 1780297200,
+    "durationS": 0,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780297320,
+    "durationS": 0,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "commute out and back 10 h apart, same distance: different rides",
+   "a": {
+    "start": 1579594167,
+    "durationS": 1425,
+    "distanceM": 5680,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1579630300,
+    "durationS": 2031,
+    "distanceM": 5681,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "exactly 1 h apart (to the second), same distance: same move, a clock in the wrong zone",
+   "a": {
+    "start": 1793606400,
+    "durationS": 1800,
+    "distanceM": 5000,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1793610000,
+    "durationS": 1800,
+    "distanceM": 5000,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "two different watches on the same ride: two recordings, both kept",
+   "a": {
+    "start": 1789887600,
+    "durationS": 3600,
+    "distanceM": 30000,
+    "watch": true,
+    "device": "PEAK"
+   },
+   "b": {
+    "start": 1789887610,
+    "durationS": 3590,
+    "distanceM": 30010,
+    "watch": true,
+    "device": "SPORT"
+   },
+   "same": false
+  },
+  {
+   "name": "same start, distances 10% apart: different",
+   "a": {
+    "start": 1780297200,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780297260,
+    "durationS": 3500,
+    "distanceM": 36000,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "same start, no distance, durations 2x apart: different",
+   "a": {
+    "start": 1780297200,
+    "durationS": 3600,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780297230,
+    "durationS": 1700,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "4 min apart: different",
+   "a": {
+    "start": 1780297200,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780297441,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "no start time: never matched",
+   "a": {
+    "start": -1,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780297200,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "pool swim without GPS: watch clock labelled UTC, Suunto copy exactly 2 h earlier: same",
+   "a": {
+    "start": 1791102684,
+    "durationS": 2527,
+    "distanceM": 1000,
+    "watch": true,
+    "device": "SPORT"
+   },
+   "b": {
+    "start": 1791095484,
+    "durationS": 2304,
+    "distanceM": 1000,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "Tacx re-upload exactly 1 h later, same distance: same",
+   "a": {
+    "start": 1771786052,
+    "durationS": 1506,
+    "distanceM": 4246,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1771789652,
+    "durationS": 1505,
+    "distanceM": 4246,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "1 h apart but 39 s off the hour: different (real separate rides)",
+   "a": {
+    "start": 1649143888,
+    "durationS": 1120,
+    "distanceM": 5750,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1649147449,
+    "durationS": 1087,
+    "distanceM": 5702,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "known limit: two moves exactly 10 h apart to the second with the same distance count as one (never seen in 4,717 real moves)",
+   "a": {
+    "start": 1789462036,
+    "durationS": 550,
+    "distanceM": 2710,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1789498036,
+    "durationS": 542,
+    "distanceM": 2735,
+    "watch": false,
+    "device": ""
+   },
+   "same": true
+  },
+  {
+   "name": "exact 1 h shift, one side has distance, the other none: different",
+   "a": {
+    "start": 1415722731,
+    "durationS": 624,
+    "distanceM": 1087,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1415726331,
+    "durationS": 590,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "exact 1 h shift, no distance, durations 10% apart: different",
+   "a": {
+    "start": 1447096162,
+    "durationS": 2890,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1447099762,
+    "durationS": 3210,
+    "distanceM": 0,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "15 h apart to the second: different",
+   "a": {
+    "start": 1780290000,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "b": {
+    "start": 1780344000,
+    "durationS": 3600,
+    "distanceM": 40000,
+    "watch": false,
+    "device": ""
+   },
+   "same": false
+  },
+  {
+   "name": "same watch move read on the PC (serial) and on the phone (no device name): same",
+   "a": {
+    "start": 1793100448,
+    "durationS": 1504,
+    "distanceM": 3477,
+    "watch": true,
+    "device": "8A153C5111000900"
+   },
+   "b": {
+    "start": 1793100448,
+    "durationS": 1504,
+    "distanceM": 3477,
+    "watch": true,
+    "device": ""
+   },
+   "same": true
+  }
+ ]
+}

@@ -3,6 +3,7 @@ import RNFS from 'react-native-fs';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { getAllActivities } from '../database/db';
 import { computeLocalSeries, HrProfile, LocalMove } from './LocalLoad';
+import { startUtcOf } from './SameMove';
 import systmSample from '../data/systm-sample.json';
 
 // Coach readiness — the Android counterpart of desktop/src/services/coachservice.cpp
@@ -237,7 +238,7 @@ async function loadCoachDataLocal(): Promise<CoachData> {
   const moves: LocalMove[] = [];
   const recentDone = new Set<string>();
   for (const a of await getAllActivities()) {
-    const startMs = Date.parse(a.date);
+    const startMs = startUtcOf(a) * 1000;   // true UTC instant (SameMove.ts), for the same-move check
     if (!Number.isFinite(startMs)) continue;
     let avgHr = 0;
     // The GPX header carries the watch's <avg_hr>; only worth reading for recent moves, and only
@@ -248,7 +249,8 @@ async function loadCoachDataLocal(): Promise<CoachData> {
         avgHr = m ? Number(m[1]) : 0;
       } catch { /* file gone - duration it is */ }
     }
-    moves.push({ startMs, durationS: a.duration_s, avgHr, name: a.activity_type });
+    moves.push({ startMs, durationS: a.duration_s, avgHr, name: a.activity_type, distanceM: a.distance_m,
+                 watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '' });
     if (startMs >= doneSince && a.activity_type) recentDone.add(normalizeName(a.activity_type));
   }
   if (moves.length === 0) return { readiness: null, chart: [], picks: [] };

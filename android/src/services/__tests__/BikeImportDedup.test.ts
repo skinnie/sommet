@@ -7,15 +7,17 @@ import { BikeImportDedup } from '../BikeImportDedup';
 describe('bike ride dedup', () => {
   const d = new BikeImportDedup();
   d.add('x', 1_000_000, 3600);            // an existing 1 h ride
-  it('same start within 5 min = same ride', () => {
-    expect(d.hasRide(1_000_000 + 290, null)).toBe(true);
-    expect(d.hasRide(1_000_000 + 310, null)).toBe(false);
+  it('same UTC start within 3 min = same ride (before the download, start only)', () => {
+    expect(d.hasRide(1_000_000 + 170, null)).toBe(true);
+    expect(d.hasRide(1_000_000 + 190, null)).toBe(false);
   });
-  it('whole-hour offset only with a comparable duration', () => {
-    expect(d.hasRide(1_000_000 + 3600 + 60, 3500)).toBe(true);
-    expect(d.hasRide(1_000_000 + 7200 - 100, 4000)).toBe(true);
-    expect(d.hasRide(1_000_000 + 3600, 600)).toBe(false);     // 10 min vs 1 h: different ride
-    expect(d.hasRide(1_000_000 + 3600, null)).toBe(false);    // duration unknown: not assumed
+  it('after the download, distance or duration must agree too (SameMove.ts)', () => {
+    const e = new BikeImportDedup();
+    e.add('y', 2_000_000, 3600, 30_000);
+    expect(e.hasRide(2_000_000 + 60, 2400, 30_200)).toBe(true);    // pauses differ, distance agrees
+    expect(e.hasRide(2_000_000 + 60, 3600, 20_000)).toBe(false);   // a different ride
+    expect(e.hasRide(2_000_000 + 3600, 3600, 30_000)).toBe(true);  // exactly 1 h: a clock in the wrong zone
+    expect(e.hasRide(2_000_000 + 3630, 3600, 30_000)).toBe(false); // 1 h and 30 s: a different ride
   });
   it('seen / deleted ids are never re-imported', async () => {
     d.markSeen('c406_1');

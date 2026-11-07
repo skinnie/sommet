@@ -5,6 +5,7 @@ import {
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
 import { readGpxFile, writeGpxFile } from './GpxService';
+import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
 // (sync-server/sync.php), so the same history appears on desktop (Linux/Mac/Windows) and phone.
@@ -123,6 +124,13 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
     await addSommetTombstone(uid);
     await deleteActivitiesByUid(uid);
   }
+  // The same move from another source (a watch move here, its intervals.icu or Suunto copy from
+  // another device) is not added twice: the shared rule, SameMove.ts. The desktop keeps every
+  // copy and shows one; this app keeps one.
+  const localRows: SameMoveRow[] = (await getAllActivities()).map(a => ({
+    start: startUtcOf(a), durationS: a.duration_s, distanceM: a.distance_m,
+    watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '',
+  }));
   for (const rec of (remote.records ?? [])) {
     const device = String(rec.device ?? '');
     const start = String(rec.start_time ?? '');
@@ -133,20 +141,32 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
     const existing = await getActivityByUid(uid);
     const sport = canonicalSportName(String(rec.activity_type || rec.name || ''));
     const energy = Math.round(Number(rec.energy_kcal || 0)) || 0;
+    const startUtc = Math.round(Number(rec.start_utc || 0)) || 0;   // UTC start, see SameMove.ts
     // Junk/test entries (under a minute AND under 100 m) are not kept - same rule as the
     // desktop's import; they reach the shared store from a watch read on the desktop.
     if (isJunkActivity(Number(rec.duration_s || 0), Number(rec.distance_m || 0))) continue;
     if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path) { // ours is newer & has track
       // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
-      const fix: { activity_type?: string; energy_kcal?: number } = {};
+      const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number } = {};
       if (energy > 0 && !existing.energy_kcal) fix.energy_kcal = energy;
+      if (startUtc > 0 && !existing.start_utc) fix.start_utc = startUtc;
       if (sport && existing.activity_type !== sport
           && canonicalSportName(existing.activity_type) === sport) fix.activity_type = sport;
-      if (fix.activity_type !== undefined || fix.energy_kcal !== undefined)
+      if (fix.activity_type !== undefined || fix.energy_kcal !== undefined || fix.start_utc !== undefined)
         await updateImportedActivity(existing.id, fix);
       continue;
     }
 
+    if (!existing) {
+      const src = String(rec.source || '');
+      const me: SameMoveRow = {
+        start: startUtc > 0 ? startUtc : startUtcOf({ date: start }),
+        durationS: Number(rec.duration_s || 0), distanceM: Number(rec.distance_m || 0),
+        watch: src === '' || src === 'watch', device,
+      };
+      if (localRows.some(r => sameMove(me, r))) continue;   // already here from another source
+      localRows.push(me);
+    }
     const id = idFromDate(start, uid);
     let gpxPath = existing?.gpx_path ?? '';
     if (rec.has_track && !gpxPath) {
@@ -165,6 +185,7 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
       device,
       energy_kcal: energy,
       updated_at: remoteUpdated || Date.now(),
+      start_utc: startUtc || existing?.start_utc || 0,
     });
     pulled++;
   }
@@ -198,6 +219,7 @@ export async function runSommetSync(): Promise<SommetSyncResult> {
       has_track: !!gpx,
       track_fmt: 'gpx',
       updated_at: a.updated_at || a.synced_at,
+      ...(a.start_utc ? { start_utc: a.start_utc } : {}),
     });
     if (gpx && !pushed.has(uid)) blobsToPush.push({ uid, gpx });
   }

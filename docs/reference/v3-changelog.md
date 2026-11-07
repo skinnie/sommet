@@ -15,6 +15,15 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   remembers it. Checked on a real Edge 500: rides imported, profile read, a workout sent.
 - **Data screens (PC).** The Edge 500's fields now show by name (Speed, Dist. - Lap, Speed - Avg. and so on)
   instead of numbers. The HR Graph field only goes in the slots where the Edge can draw it.
+- **No more doubled moves.** The same move often reaches Sommet more than once: from the watch,
+  and again through the Suunto app, Garmin Connect or intervals.icu. Sommet now recognises it as
+  one move on the PC and the phone alike, whatever services you use: same start (in UTC, so the
+  time zone of the computer or phone doesn't matter), then the same distance, or duration when
+  there is no distance. A copy whose clock was stored in the wrong time zone (a pool swim without
+  GPS) still matches when it is exactly whole hours away. Two different watches on the same ride
+  stay two recordings. On the PC, every move from your own watch that was shown twice beside its
+  intervals.icu copy is now shown once. The first intervals.icu sync after updating reads your
+  whole history once, to note each activity's UTC start.
 - **Own server sync.** A new device now receives your whole activity history from your server.
   Before, the server only passed on activities that had been edited, so a fresh tablet or Mac got
   almost nothing. Update `sync-server/sync.php` on your server to get this.
