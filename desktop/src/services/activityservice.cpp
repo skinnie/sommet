@@ -2143,10 +2143,11 @@ void ActivityService::importFromBikeComputers()
                                      .toString(tr("Import from the bike computer failed.")));
                 return;
             }
-            importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+            const bool stored = importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
             // Mark every file now on the device(s) as handled - duplicates included, so they are
-            // never pulled/decoded again on the next sync (the FreeFileSync-style history).
-            if (m_db.isOpen()) {
+            // never pulled/decoded again on the next sync (the FreeFileSync-style history). Not
+            // when a ride failed to save: then the next sync tries again.
+            if (stored && m_db.isOpen()) {
                 m_db.transaction();
                 QSqlQuery ins(m_db);
                 ins.prepare(QStringLiteral("INSERT OR IGNORE INTO bike_seen (key) VALUES (?)"));
@@ -2235,10 +2236,11 @@ void ActivityService::importFromBleBike(const QString &tag, const QString &endpo
                                  .toString(tr("Import from the %1 failed.").arg(deviceName)));
             return;
         }
-        importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
+        const bool stored = importBikeActivitiesInto(o.value(QStringLiteral("activities")).toArray());
         // Mark every file now on the device as handled - duplicates included, so they're never
         // pulled/decoded again on the next sync (the FreeFileSync-style history, shared with MTP).
-        if (m_db.isOpen()) {
+        // Not when a ride failed to save: then the next sync tries again.
+        if (stored && m_db.isOpen()) {
             m_db.transaction();
             QSqlQuery ins(m_db);
             ins.prepare(QStringLiteral("INSERT OR IGNORE INTO bike_seen (key) VALUES (?)"));
@@ -2251,11 +2253,11 @@ void ActivityService::importFromBleBike(const QString &tag, const QString &endpo
     });
 }
 
-void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
+bool ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
 {
     if (!m_db.isOpen()) {
         emit importError(tr("Local activity store isn't open."));
-        return;
+        return false;
     }
     // Only import rides we DON'T already have (André, 2026-09-04: "only allow to sync non-
     // duplicates... huge chance some rides are already in our library"). Load the start time +
@@ -2298,9 +2300,19 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         return false;
     };
 
+    // Its own negative range, clear of intervals and garmin(-1e6) imports, continuing BELOW the
+    // lowest bike row already stored. A fixed start (-2000000) re-used the same numbers on every
+    // sync, so (idx, device) clashed with the previous sync's rides and the INSERT failed
+    // silently (André's Edge, 2026-11-07).
+    int idx = -2000000;
+    {
+        QSqlQuery mn(m_db);
+        if (mn.exec(QStringLiteral("SELECT MIN(idx) FROM activities WHERE idx <= -2000000"))
+                && mn.next() && !mn.value(0).isNull())
+            idx = std::min(idx, mn.value(0).toInt() - 1);
+    }
     m_db.transaction();
-    int idx = -2000000;   // its own negative range, clear of intervals and garmin(-1e6) imports
-    int count = 0, skipped = 0;
+    int count = 0, skipped = 0, failed = 0;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const int duration = o.value(QStringLiteral("durationSeconds")).toInt();
@@ -2346,7 +2358,13 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(source);
         ins.addBindValue(extId);
         ins.addBindValue(source);            // device = the source tag (edge/karoo/c406)
-        ins.exec();
+        if (!ins.exec()) {
+            qWarning("[bike-import] could not store ride %s: %s",
+                     qPrintable(o.value(QStringLiteral("startTime")).toString()),
+                     qPrintable(ins.lastError().text()));
+            ++failed;
+            continue;
+        }
         {   // so two incoming copies of one ride also de-dup
             SameMoveRow r;
             r.start = epoch; r.durationS = duration; r.distanceM = distance;
@@ -2357,7 +2375,11 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
     m_db.commit();
     dbLoadAll();
     emit activitiesChanged();
-    emit bikeImportFinished(count, skipped);
+    if (failed > 0)
+        emit bikeImportError(tr("%n ride(s) couldn't be saved. They stay on the device for the next sync.",
+                                nullptr, failed));
+    else
+        emit bikeImportFinished(count, skipped);
 
     // Push the new rides to intervals.icu when the export scope is "everything" (bike computers
     // aren't the "suunto" watch scope). exportToIntervals() only uploads rows with a FIT that
@@ -2365,6 +2387,7 @@ void ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
     // configured (André, 2026-09-24: bike rides should reach intervals like watch moves do).
     if (count > 0 && intervalsExportScope() == QStringLiteral("all"))
         exportToIntervals();
+    return failed == 0;
 }
 
 void ActivityService::exportToIntervals()

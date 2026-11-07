@@ -322,7 +322,7 @@ private:
     void dedupeActivities();
     void importActivitiesInto(const QJsonArray &activities);
     void importGarminActivitiesInto(const QJsonArray &activities);
-    void importBikeActivitiesInto(const QJsonArray &activities);
+    bool importBikeActivitiesInto(const QJsonArray &activities);   // false = a ride failed to save
     void uploadOneToIntervals(int idx, const QByteArray &fit,
                               const QString &athlete, const QString &key);
     // Generic single-file uploader used by the per-activity export (FIT or GPX). idx<0 means

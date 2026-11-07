@@ -24,6 +24,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   stay two recordings. On the PC, every move from your own watch that was shown twice beside its
   intervals.icu copy is now shown once. The first intervals.icu sync after updating reads your
   whole history once, to note each activity's UTC start.
+- **Bike computer rides no longer go missing (PC).** From the second sync on, a new ride from an
+  Edge, Karoo or Magene could fail to save without a word, and was then never offered again. Each
+  sync now carries on numbering after the rides already stored. If a ride ever fails to save,
+  Sommet says so and keeps it on the device for the next sync.
 - **Own server sync.** A new device now receives your whole activity history from your server.
   Before, the server only passed on activities that had been edited, so a fresh tablet or Mac got
   almost nothing. Update `sync-server/sync.php` on your server to get this.
