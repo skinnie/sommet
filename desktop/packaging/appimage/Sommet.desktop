@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sommet
+GenericName=Suunto & Garmin watch sync
+Comment=Sync and manage Suunto Ambit/Traverse/Kailash and Garmin eTrex devices
+Exec=Sommet
+Icon=sommet
+Categories=Utility;
+Terminal=false

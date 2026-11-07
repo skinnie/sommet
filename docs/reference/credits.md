@@ -233,3 +233,23 @@ work; this project is not affiliated with or endorsed by Suunto Oy.
 
 - **Sun SS, Chumlea WC, Heymsfield SB, et al.**, *Am J Clin Nutr* 2003;77:331-340 - the published
   bioimpedance equations behind the estimated body fat and water (`tools/body_composition.py`).
+
+## Desktop packaging tools
+
+Used only at release/build time to wrap the app into downloadable files; none of their source is
+vendored into Sommet.
+
+- **[linuxdeploy](https://github.com/linuxdeploy/linuxdeploy)** and
+  **[linuxdeploy-plugin-qt](https://github.com/linuxdeploy/linuxdeploy-plugin-qt)** (MIT) - assemble
+  the Linux AppImage and bundle the Qt runtime into it (`desktop/packaging/appimage/`,
+  `.github/workflows/desktop-release.yml`).
+- **[AppImageKit / appimagetool](https://github.com/AppImage/AppImageKit)** and
+  **[AppImageUpdate](https://github.com/AppImage/AppImageUpdate)** (MIT) - the AppImage format and
+  its delta (zsync) updater `appimageupdatetool`.
+- **[PyInstaller](https://github.com/pyinstaller/pyinstaller)** (GPL-2.0-or-later with a runtime
+  exception that permits distributing the frozen output under any licence) - freezes the Python
+  watch backend into the single `ambit-backend` executable bundled in every desktop download
+  (`tools/packaging/ambit_backend.spec`).
+- **[hidapi](https://github.com/libusb/hidapi)** (GPL-3.0-or-later / BSD-3-Clause, dual) - the USB
+  HID library the frozen backend's `hid` binding loads to reach the watch; shipped unmodified as a
+  shared library inside the Windows/macOS/Linux downloads.

@@ -1,5 +1,6 @@
 # Builds the DESKTOP app (the Qt/QML one) into finished, downloadable files for
-# ordinary users: a Windows .zip (with a double-click .exe inside) and a macOS .dmg.
+# ordinary users: a Windows .zip (with a double-click .exe inside), a macOS .dmg, and a
+# Linux AppImage (one file to download and run - no Qt install, no Python).
 #
 # You never run this yourself. GitHub lends us a real Windows PC and a real Mac in the
 # cloud; this recipe tells each of them to build the app and wrap it up. The results end
@@ -12,9 +13,9 @@
 #   bottom of that run's page as "Artifacts" you can download.
 #
 # HOW A REAL RELEASE HAPPENS:
-#   Pushing a version tag (e.g. v0.2.0) runs this automatically AND attaches the Windows and
-#   Mac downloads to the published Release. (The separate release.yml already does this for
-#   the Android APK; this file adds desktop to the same Release.)
+#   Pushing a version tag (e.g. v0.2.0) runs this automatically AND attaches the Windows, Mac
+#   and Linux downloads to the published Release. (The separate release.yml already does this
+#   for the Android APK; this file adds desktop to the same Release.)
 #
 # The behind-the-scenes "engine" that talks to the watch (the Python helper, server.py) is
 # frozen with PyInstaller into a single "ambit-backend" executable and bundled INSIDE the
@@ -293,3 +294,125 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Sommet-macos.dmg
+
+  # ---- Linux: produce a single-file AppImage (Sommet + backend, no toolchain needed) --------
+  # Why this job exists: Linux had no release at all, so the only way to run on Linux was to
+  # build from source (Qt 6.5+, which Mint's apt can't provide - it tops out at 6.4.2) AND start
+  # the Python backend by hand. Miss that second step and the app boots with every backend-fed
+  # page - Settings included - blank. This AppImage carries Qt and the frozen backend inside it,
+  # so an ordinary user downloads one file and runs it. See desktop/packaging/appimage/README.md.
+  #
+  # Two old-hardware rules (both easy to get wrong - see that README):
+  #   * glibc: an AppImage links the BUILD host's glibc, so build-old / run-everywhere. The
+  #     ubuntu-22.04 runner (glibc 2.35) runs on Mint 22.x and anything newer. For pre-2022
+  #     distros, run these steps inside `container: ubuntu:20.04` (glibc 2.31) instead.
+  #   * CPU: the reference box is an Intel Q9550 (Core 2 Quad) - x86-64-v1 only, no SSE4.2/AVX.
+  #     -march=x86-64 -mtune=generic keeps our own compile off AVX so it doesn't SIGILL there.
+  #     (aqt's Qt is already generic x86-64; the old SIMD-using MapLibre dep is gone.)
+  linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt 6.8: the highest an old box runs comfortably, well above the app's 6.5 floor. Newer
+      # works too; 6.8 is the pinned bundle target. No qtmultimedia module: the AppImage builds
+      # with -DSOMMET_WEBCAM_SCAN=OFF (barcode-scanning food packs is marginal on old hardware,
+      # and dropping it frees the build from Qt Multimedia + ZXing's C++20 requirement).
+      - name: Install Qt 6.8 (aqt)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+
+      # CMakeLists needs CMake >= 3.21; ubuntu-22.04 ships 3.22, but pin a known-good one.
+      - name: Build deps (CMake, hidapi/libusb for ambit_legacy_cli, FUSE for AppImages)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config libusb-1.0-0-dev libhidapi-dev libhidapi-hidraw0 \
+            libfuse2 libxcb-cursor0
+
+      - name: Build the app (Release, baseline CPU)
+        env:
+          CFLAGS: "-march=x86-64 -mtune=generic"
+          CXXFLAGS: "-march=x86-64 -mtune=generic"
+        run: |
+          cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release -DSOMMET_WEBCAM_SCAN=OFF
+          cmake --build desktop/build --parallel
+          test -x desktop/build/Sommet
+
+      # Ambit1/2 (routes, POIs, settings) go through the compiled ambit_legacy_cli; without it
+      # those endpoints return "ambit_legacy_cli is not built" (issue #15). Build it so the
+      # PyInstaller spec can bundle it into the frozen backend, same as the macOS job.
+      - name: Build ambit_legacy_cli (Ambit1/2 support)
+        run: |
+          ./tools/vendor/ambit_legacy_cli/build.sh
+          test -x tools/vendor/ambit_legacy_cli/ambit_legacy_cli
+
+      # Freeze the Python watch helper into a single `ambit-backend` (no Python on the user's PC).
+      # Built on this same old base so the frozen binary's glibc matches the AppImage's.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Freeze the watch helper (PyInstaller)
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller bleak hid
+          pyinstaller tools/packaging/ambit_backend.spec --distpath dist/backend --workpath build/pyi
+          test -x dist/backend/ambit-backend
+
+      - name: Assemble the AppDir
+        run: |
+          APPDIR=dist/appimage/AppDir
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin/backend" "$APPDIR/usr/lib" \
+                   "$APPDIR/usr/share/applications" \
+                   "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp desktop/build/Sommet                      "$APPDIR/usr/bin/Sommet"
+          cp dist/backend/ambit-backend                "$APPDIR/usr/bin/backend/ambit-backend"
+          chmod +x "$APPDIR/usr/bin/backend/ambit-backend"
+          cp desktop/packaging/appimage/Sommet.desktop "$APPDIR/usr/share/applications/sommet.desktop"
+          cp desktop/packaging/icon.png                "$APPDIR/usr/share/icons/hicolor/256x256/apps/sommet.png"
+          # The frozen `hid` dlopens libhidapi by name (ctypes, not linked), so linuxdeploy won't
+          # pull it in. Drop it in usr/lib, which the AppImage's AppRun adds to LD_LIBRARY_PATH;
+          # the child backend inherits that env and finds it (Linux analogue of the macOS DYLD step).
+          for so in /usr/lib/x86_64-linux-gnu/libhidapi-hidraw.so* /usr/lib/x86_64-linux-gnu/libhidapi-libusb.so*; do
+            [ -e "$so" ] && cp -L "$so" "$APPDIR/usr/lib/" || true
+          done
+
+      - name: Build the AppImage (with delta-update info)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          curl -sSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          mkdir -p dist
+          export QML_SOURCES_PATHS="$GITHUB_WORKSPACE/desktop/qml"
+          # Delta updates: the AppImage carries this so `appimageupdatetool` fetches only changed
+          # bytes from the GitHub release. Produces Sommet-linux-x86_64.AppImage(.zsync).
+          export UPDATE_INFORMATION="gh-releases-zsync|skinnie|sommet|latest|Sommet-linux-x86_64.AppImage.zsync"
+          export OUTPUT="Sommet-linux-x86_64.AppImage"
+          ./linuxdeploy --appdir dist/appimage/AppDir \
+            --plugin qt \
+            --desktop-file dist/appimage/AppDir/usr/share/applications/sommet.desktop \
+            --icon-file dist/appimage/AppDir/usr/share/icons/hicolor/256x256/apps/sommet.png \
+            --output appimage
+          mv Sommet-linux-x86_64.AppImage dist/
+          mv Sommet-linux-x86_64.AppImage.zsync dist/ 2>/dev/null || true
+
+      - name: Keep the download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sommet-linux
+          path: |
+            dist/Sommet-linux-x86_64.AppImage
+            dist/Sommet-linux-x86_64.AppImage.zsync
+
+      - name: Attach to the Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Sommet-linux-x86_64.AppImage
+            dist/Sommet-linux-x86_64.AppImage.zsync

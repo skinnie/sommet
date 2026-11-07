@@ -12,8 +12,8 @@ class QNetworkReply;
 // "Is there a newer Sommet?" (André, 2026-11-03, 🟣124 = tell you and take you there).
 // Asks GitHub's public releases API for the latest release once a day (and when the Settings
 // button is pressed), compares its tag with this build's version, and offers the download made
-// for this computer: the .dmg on a Mac, the .zip on Windows, the release page elsewhere (Linux
-// runs from source). The app installs nothing itself; the browser downloads the file. Only the
+// for this computer: the .dmg on a Mac, the .zip on Windows, the AppImage on Linux (release
+// page elsewhere). The app installs nothing itself; the browser downloads the file. Only the
 // request reaches GitHub: no identifier, no usage data. The Android twin is
 // android/src/services/AppUpdate.ts.
 class UpdateService : public QObject

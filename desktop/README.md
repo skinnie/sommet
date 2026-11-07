@@ -19,9 +19,20 @@ skipped anywhere for convenience: seven C++ `Services` (`DeviceService`, `Weathe
 `ActivityService`, `RouteService`, `PoiService`, `BackupService`, all `QML_SINGLETON`),
 paired `ViewModels` in QML for real presentation logic, `Card`/`Icon`/`MapView` as the shared
 building blocks every page uses. Icons are a real, properly-licensed Material Symbols Rounded
-font, subsetted to ~9 KB (see `assets/fonts/NOTICE.md`). Maps are real MapLibre Qt bindings
-over OpenStreetMap raster tiles, correctly attributed (see "Maps" below - **the one piece
-that needs a separate native library installed first**, not just Qt6).
+font, subsetted to ~9 KB (see `assets/fonts/NOTICE.md`). Maps are drawn by a **plain direct XYZ
+tile renderer** over OpenStreetMap, correctly attributed — Qt-only, with **no MapLibre and no
+Qt Location/Positioning dependency** (the earlier note below about MapLibre-from-source is
+historical: both GeoServices backends were tried and abandoned on 2026-08-07, see
+`desktop/CMakeLists.txt` and `../V3_CHANGELOG.md`). So from source the only prerequisite is
+**Qt 6.5+** (Mint's `apt` tops out at 6.4.2, so use `aqtinstall`) plus the backend running.
+
+## Running it
+
+**Most Linux users should not build from source — download the AppImage** (one file, bundles Qt
+and the Python backend, runs on old distros and old CPUs like the Core 2 Quad Q9550). See
+`packaging/appimage/README.md`. Building from source is a developer convenience: run
+`../run-desktop.sh`, which starts the Python backend *and* the app — a bare `Sommet` binary with
+no backend boots with Settings and every backend-fed page **blank** (see `src/services/backendprocess.cpp`).
 
 **What's genuinely live** (calls the real backend/Open-Meteo, not mock data): connection
 status, weather (current + 3-day forecast, hides itself with no error on failure), Activities

@@ -45,6 +45,22 @@ Within the features we have:
 - Suunto T6 support: integration of Suunto T6 support (experimental - no device to test)
 
 
+## Install (Linux desktop)
+
+Download the **AppImage** from the [Releases](https://github.com/skinnie/sommet/releases) page,
+make it executable and run it — one file, no Qt install, no Python, nothing to set up:
+
+```
+chmod +x Sommet-linux-x86_64.AppImage
+./Sommet-linux-x86_64.AppImage
+```
+
+It is built to run on **older distros and older CPUs** (tested target: Linux Mint 22.x on an Intel
+Core 2 Quad Q9550), because an old watch often means an old computer. If your machine has no
+libfuse2, run it with `./Sommet-linux-x86_64.AppImage --appimage-extract-and-run`. Updates are
+delta downloads via `appimageupdatetool`, and the app tells you when a new version is out. Building
+from source is only for developers — see `desktop/README.md` and `desktop/packaging/appimage/README.md`.
+
 ## Screenshots
 
 The desktop app (Linux):

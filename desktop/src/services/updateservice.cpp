@@ -26,6 +26,10 @@ constexpr int kMaxHighlights = 8;
 const char kAssetName[] = "Sommet-macos.dmg";
 #elif defined(Q_OS_WIN)
 const char kAssetName[] = "Sommet-windows.zip";
+#elif defined(Q_OS_LINUX)
+// The AppImage the desktop-release.yml `linux` job attaches. With this, Linux now offers a
+// direct download (the single-file AppImage) instead of only opening the release page.
+const char kAssetName[] = "Sommet-linux-x86_64.AppImage";
 #else
 const char kAssetName[] = "";
 #endif
