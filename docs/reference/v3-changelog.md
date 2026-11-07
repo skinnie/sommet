@@ -7,6 +7,18 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-07: Settings page no longer blank on the AppImage's Qt (0.2.62)
+
+Found on the P5Q once the window finally opened (0.2.61): the nav rail rendered but the **Settings
+page was white**. `SettingsSection.qml` assigned `Accessible.expanded`, an a11y attached property
+that exists in a newer Qt (the dev box builds from source on Qt 6.12, where it is fine) but **not in
+the Qt 6.8.3 the AppImage is built with**. Assigning a non-existent property makes the whole
+component fail to load at runtime, so every `SettingsSection` - the entire Settings page - rendered
+blank. `qmlcachegen` does not catch it (attached-property resolution is deferred to runtime) and CI
+never opens the GUI, so it shipped silently in 0.2.60/0.2.61. Dropped the one line; `expandable`
+stays, so the row is still announced as an expandable control. This is the real cause of the
+"booted but Settings blank" symptom on the AppImage.
+
 ## 2026-11-07: Linux AppImage actually reads a watch on a clean machine (0.2.61)
 
 Verified end to end on André's P5Q (Core 2 Quad Q9550, no AVX, Mint 22) over Tailscale. The
