@@ -391,6 +391,12 @@ jobs:
           curl -sSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy linuxdeploy-plugin-qt
           mkdir -p dist
+          # linuxdeploy-plugin-qt deploys ALL Qt sqldrivers; the Mimer driver links libmimerapi.so
+          # (a proprietary lib not on the runner), which aborts the plugin (exit 1). The app uses
+          # only SQLite, so drop the drivers we neither use nor ship, before packaging.
+          QTSQL="${QT_ROOT_DIR:-$RUNNER_WORKSPACE/Qt/6.8.3/gcc_64}/plugins/sqldrivers"
+          rm -f "$QTSQL"/libqsqlmimer.so "$QTSQL"/libqsqlmysql.so \
+                "$QTSQL"/libqsqlpsql.so "$QTSQL"/libqsqlodbc.so || true
           export QML_SOURCES_PATHS="$GITHUB_WORKSPACE/desktop/qml"
           # Delta updates: the AppImage carries this so `appimageupdatetool` fetches only changed
           # bytes from the GitHub release. Produces Sommet-linux-x86_64.AppImage(.zsync).
