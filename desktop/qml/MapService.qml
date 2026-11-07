@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import Qt.labs.settings
+import QtCore
 
 // AMBITAPP_SPEC.md, "Maps": "Create a MapService abstraction... The UI must never care
 // where tiles come from." MapView.qml (components/) is the only thing that reads this - a

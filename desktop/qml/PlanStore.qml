@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import Qt.labs.settings
+import QtCore
 import AmbitApp
 
 // Persists the Plan page's loaded route + weather across navigation. The nav shell loads pages

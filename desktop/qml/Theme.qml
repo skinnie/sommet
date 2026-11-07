@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import Qt.labs.settings
+import QtCore
 
 // Every color used anywhere in the app comes from here - AMBITAPP_SPEC.md's own rule
 // ("Never hardcode colors... Future themes should require zero UI changes"). The "future

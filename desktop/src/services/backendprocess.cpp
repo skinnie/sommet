@@ -6,6 +6,7 @@
 #include <QHostAddress>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QStringList>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -70,6 +71,28 @@ void launchHelper(QObject *parent, const QString &path, int attempt)
     const QString existing = env.value(QStringLiteral("DYLD_LIBRARY_PATH"));
     env.insert(QStringLiteral("DYLD_LIBRARY_PATH"),
                existing.isEmpty() ? helperDir : helperDir + QLatin1Char(':') + existing);
+    proc->setProcessEnvironment(env);
+#elif defined(Q_OS_LINUX)
+    // The same problem as macOS, different variable and path. The frozen helper's `hid` binding
+    // loads libhidapi by bare name (ctypes). Inside the AppImage the Qt app finds its own
+    // libraries through the rpath baked into the Sommet binary, but a *child* process inherits no
+    // rpath, and the AppImage's AppRun is a bare symlink to Sommet (no wrapper exporting
+    // LD_LIBRARY_PATH). linuxdeploy drops libhidapi in the AppDir's usr/lib - i.e. ../lib from the
+    // Sommet executable (applicationDirPath() is usr/bin) - so without help the helper aborts its
+    // import with "Unable to load ... libhidapi-hidraw.so" and no watch is ever enumerated.
+    // Point the child at the bundled usr/lib (and the helper's own dir, belt and braces).
+    // Confirmed on the P5Q (no-AVX Core 2 Quad Q9550, Mint 22) over Tailscale 2026-11-07: with
+    // usr/lib on LD_LIBRARY_PATH, /api/devices returns {"ok": true}; without it, the ImportError.
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString helperDir = QFileInfo(path).absolutePath();
+    const QString bundleLib =
+        QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/../lib"));
+    const QString existing = env.value(QStringLiteral("LD_LIBRARY_PATH"));
+    QStringList parts{helperDir, bundleLib};
+    if (!existing.isEmpty()) {
+        parts << existing;
+    }
+    env.insert(QStringLiteral("LD_LIBRARY_PATH"), parts.join(QLatin1Char(':')));
     proc->setProcessEnvironment(env);
 #endif
 

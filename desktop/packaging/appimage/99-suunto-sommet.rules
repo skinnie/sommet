@@ -1,0 +1,25 @@
+# Suunto Ambit / Traverse / Kailash USB access for Sommet.
+#
+# The AppImage bundles everything it needs, but it cannot grant itself access to
+# the USB device node - that is the kernel's job, via udev. Without this rule the
+# watch's device nodes are root-only and the backend fails to open the watch with
+# "Permission denied" even though it enumerates fine.
+#
+# Suunto's USB vendor id is 1493. Two nodes matter:
+#   - the raw USB device (/dev/bus/usb/.../...)
+#   - the /dev/hidrawN node, because hidapi uses its hidraw backend on Linux and
+#     opens the watch through that node.
+#
+# TAG+="uaccess" asks systemd-logind to hand the *currently active local session*
+# an ACL on the device - the secure, per-user way (no world-writable node). MODE
+# is a fallback for seats without logind uaccess.
+#
+# Based on openambit's libambit.rules (GPLv3) - see docs/reference/credits.md.
+#
+# Install:
+#   sudo cp 99-suunto-sommet.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   then unplug and replug the watch.
+
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="1493", MODE="0660", TAG+="uaccess"
+ACTION=="add|change", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1493", MODE="0660", TAG+="uaccess"
