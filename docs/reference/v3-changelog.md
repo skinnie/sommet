@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-07: Settings page blank - the actual fix (0.2.63)
+
+0.2.62 removed `Accessible.expanded` but the page was still blank: `Accessible.expandable` on the
+line above is **also** absent from Qt 6.8.3. QML stops at the first invalid attached property, so
+removing one just exposed the next. Checked against the AppImage's own bundled QtQuick
+`plugins.qmltypes`: 6.8.3's Accessible attached type has `checkable/checked/selected/focusable/...`
+but neither `expandable` nor `expanded` (both are newer-Qt additions, present on the dev box's Qt
+6.12 where it builds from source). Removed both. Settings renders. (0.2.62's release was cancelled
+mid-build and superseded by this.)
+
 ## 2026-11-07: Settings page no longer blank on the AppImage's Qt (0.2.62)
 
 Found on the P5Q once the window finally opened (0.2.61): the nav rail rendered but the **Settings

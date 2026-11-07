@@ -68,13 +68,15 @@ Column {
         Accessible.role: Accessible.Button
         Accessible.name: root.title
         Accessible.description: root.summary
-        Accessible.expandable: true
-        // Note: no `Accessible.expanded` - that attached property does not exist on this Qt
-        // (QQuickAccessibleAttached), and assigning it makes the whole SettingsSection component
-        // fail to load at runtime, which renders the entire Settings page blank. qmlcachegen does
-        // not catch it (attached-property resolution is deferred to runtime, and CI never opens the
-        // GUI), so it shipped silently in 0.2.60/0.2.61. `expandable` above is enough to mark the
-        // row as an expandable control; the open/closed state is conveyed visually by the chevron.
+        // Note: neither `Accessible.expandable` nor `Accessible.expanded` is set. Both a11y
+        // attached properties exist on newer Qt (the dev box builds from source on Qt 6.12) but
+        // NOT on the Qt 6.8.3 the AppImage ships - verified against the bundled QtQuick
+        // plugins.qmltypes, whose Accessible type has checkable/checked/selected/... and neither
+        // of these. Assigning a non-existent attached property makes the whole SettingsSection
+        // component fail to load at runtime, blanking the entire Settings page. qmlcachegen defers
+        // attached-property resolution to runtime and CI never opens the GUI, so it shipped
+        // silently in 0.2.60/0.2.61, and 0.2.62 still had `expandable`. The row stays a button via
+        // Accessible.role/name; the open/closed state shows through the chevron.
         Accessible.onPressAction: root.toggleRequested()
 
         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
