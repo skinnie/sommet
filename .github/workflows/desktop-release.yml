@@ -339,7 +339,10 @@ jobs:
           CXXFLAGS: "-march=x86-64 -mtune=generic"
         run: |
           cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release -DSOMMET_WEBCAM_SCAN=OFF
-          cmake --build desktop/build --parallel
+          # Cap parallelism: several QML-generated TUs (notably mocs_compilation.cpp) are large,
+          # and a full -j spiked RAM past the runner's limit so the compile was killed (exit 143
+          # on the first run). Two jobs keeps peak memory in bounds and still builds in minutes.
+          cmake --build desktop/build --parallel 2
           test -x desktop/build/Sommet
 
       # Ambit1/2 (routes, POIs, settings) go through the compiled ambit_legacy_cli; without it
