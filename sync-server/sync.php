@@ -156,7 +156,14 @@ if ($method === 'POST') {
         foreach ($records as $r) {
             $uid = isset($r['uid']) ? (string)$r['uid'] : '';
             if ($uid === '') continue;
-            $ua = isset($r['updated_at']) ? (int)$r['updated_at'] : $now;
+            $ua = isset($r['updated_at']) ? (int)$r['updated_at'] : 0;
+            // updated_at 0 = never edited on the device. A record we already hold stays as it is;
+            // a new one gets the server's clock, so devices pulling with a since-cursor receive it
+            // (stored as 0 it would never pass the `> since` filter and stay invisible).
+            if ($ua <= 0) {
+                if (isset($data['records'][$uid])) continue;
+                $ua = $now;
+            }
             // last-writer-wins: keep ours if it is newer; a tombstone of the same uid also blocks.
             if (isset($data['records'][$uid]) && (int)$data['records'][$uid]['updated_at'] > $ua) continue;
             if (isset($data['deleted'][$uid]) && (int)$data['deleted'][$uid] >= $ua) continue;

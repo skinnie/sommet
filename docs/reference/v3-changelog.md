@@ -15,6 +15,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   remembers it. Checked on a real Edge 500: rides imported, profile read, a workout sent.
 - **Data screens (PC).** The Edge 500's fields now show by name (Speed, Dist. - Lap, Speed - Avg. and so on)
   instead of numbers. The HR Graph field only goes in the slots where the Edge can draw it.
+- **Own server sync.** A new device now receives your whole activity history from your server.
+  Before, the server only passed on activities that had been edited, so a fresh tablet or Mac got
+  almost nothing. Update `sync-server/sync.php` on your server to get this.
 
 ---
 

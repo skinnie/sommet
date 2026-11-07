@@ -83,9 +83,15 @@ class Store:
                 uid = str(r.get("uid") or "")
                 if not uid:
                     continue
-                ua = int(r.get("updated_at") or now)
+                ua = int(r.get("updated_at") or 0)
                 cur = db.execute("SELECT updated_at FROM records WHERE collection=? AND uid=?",
                                  (collection, uid)).fetchone()
+                if ua <= 0:
+                    # never edited on the device: keep the copy we hold; a new one gets our clock
+                    # so since-cursor pulls see it (same rule as sync.php)
+                    if cur is not None:
+                        continue
+                    ua = now
                 if cur is not None and int(cur[0]) > ua:
                     continue  # we hold a newer copy
                 meta = {k: v for k, v in r.items() if k not in ("uid", "updated_at")}
