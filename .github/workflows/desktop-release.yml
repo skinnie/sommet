@@ -331,7 +331,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config libusb-1.0-0-dev libhidapi-dev libhidapi-hidraw0 \
-            libfuse2 libxcb-cursor0
+            libfuse2 libxcb-cursor0 imagemagick
 
       - name: Build the app (Release, baseline CPU)
         env:
@@ -376,7 +376,10 @@ jobs:
           cp dist/backend/ambit-backend                "$APPDIR/usr/bin/backend/ambit-backend"
           chmod +x "$APPDIR/usr/bin/backend/ambit-backend"
           cp desktop/packaging/appimage/Sommet.desktop "$APPDIR/usr/share/applications/sommet.desktop"
-          cp desktop/packaging/icon.png                "$APPDIR/usr/share/icons/hicolor/256x256/apps/sommet.png"
+          # packaging/icon.png is 1024x1024; linuxdeploy rejects an icon whose real size doesn't
+          # match its hicolor dir (and 1024 isn't a valid hicolor size). Resize to 256x256.
+          convert desktop/packaging/icon.png -resize 256x256 \
+            "$APPDIR/usr/share/icons/hicolor/256x256/apps/sommet.png"
           # The frozen `hid` dlopens libhidapi by name (ctypes, not linked), so linuxdeploy won't
           # pull it in. Drop it in usr/lib, which the AppImage's AppRun adds to LD_LIBRARY_PATH;
           # the child backend inherits that env and finds it (Linux analogue of the macOS DYLD step).
