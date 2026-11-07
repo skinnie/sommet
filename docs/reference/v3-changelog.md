@@ -7,6 +7,29 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-07: Linux AppImage actually reads a watch on a clean machine (0.2.61)
+
+Verified end to end on André's P5Q (Core 2 Quad Q9550, no AVX, Mint 22) over Tailscale. The
+0.2.60 AppImage had three independent defects that together meant a fresh Linux box could not use
+it at all; the CPU, glibc and FUSE were never the problem.
+
+- **The window would not open.** Some QML imported `Qt.labs.settings` while the rest imported
+  `QtCore`, both for the `Settings` type. With both modules bundled, the two `Settings`
+  registrations clash and QML refuses to load (`Cannot assign object of type Settings to property
+  of type QQmlSettings*`), so `QQmlApplicationEngine` bailed before any window appeared. Every QML
+  file now uses `QtCore`.
+- **The watch was seen but never opened.** The bundled backend could not load `libhidapi`: the Qt
+  binary finds its own libraries via rpath, but a child process inherits none, and the AppImage's
+  `AppRun` is a bare symlink with no `LD_LIBRARY_PATH`. The app now points the backend child at the
+  bundled `usr/lib`, the Linux twin of the macOS `DYLD_LIBRARY_PATH` fix already in place.
+- **Permission denied on the device node.** Linux needs a udev rule to let a normal user open the
+  watch. Ship `desktop/packaging/appimage/99-suunto-sommet.rules` (`MODE="0666"`, as openambit
+  does, plus a `uaccess` tag) for the whole Suunto family. The AppImage cannot install it itself,
+  so it is documented for the user.
+
+With the fix: the window opens, Settings populate, and a real read off the Ambit3 Peak returns
+firmware, battery and the full settings set.
+
 ## 2026-11-07: Linux desktop as a one-file AppImage (0.2.60)
 
 - **Linux.** The desktop app now ships as a single **AppImage** — download one file, make it

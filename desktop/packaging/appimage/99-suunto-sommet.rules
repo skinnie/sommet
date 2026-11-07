@@ -10,9 +10,13 @@
 #   - the /dev/hidrawN node, because hidapi uses its hidraw backend on Linux and
 #     opens the watch through that node.
 #
-# TAG+="uaccess" asks systemd-logind to hand the *currently active local session*
-# an ACL on the device - the secure, per-user way (no world-writable node). MODE
-# is a fallback for seats without logind uaccess.
+# MODE="0666" makes the node readable/writable by any local user. This is what
+# openambit's own rule does, and it is the reliable choice: TAG+="uaccess" (the
+# nicer per-user ACL route) depends on systemd-logind tying your graphical
+# session to the device's seat, which does not hold on every setup - seen on the
+# P5Q (Mint 22, 2026-11-07): the uaccess tag was set but logind added no ACL, so
+# a plain user still got "Permission denied". We keep the uaccess tag as well (it
+# does no harm where it works), but 0666 is what actually guarantees access.
 #
 # Based on openambit's libambit.rules (GPLv3) - see docs/reference/credits.md.
 #
@@ -21,5 +25,5 @@
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #   then unplug and replug the watch.
 
-ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="1493", MODE="0660", TAG+="uaccess"
-ACTION=="add|change", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1493", MODE="0660", TAG+="uaccess"
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="1493", MODE="0666", TAG+="uaccess"
+ACTION=="add|change", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1493", MODE="0666", TAG+="uaccess"
