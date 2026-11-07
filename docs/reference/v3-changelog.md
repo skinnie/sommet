@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-07: Linux desktop as a one-file AppImage (0.2.60)
+
+- **Linux.** The desktop app now ships as a single **AppImage** — download one file, make it
+  executable, run it. No Qt install, no Python, nothing to set up, because Qt and the watch backend
+  are bundled inside. Built to run on **older distros and older CPUs** (built on an old base for a
+  low glibc floor, compiled at the x86-64 baseline so it runs on a Core 2 Quad). Fixes the old
+  trap where building from source and launching the bare binary left Settings (and every
+  backend-fed page) blank because the backend was never started. Updates are delta downloads, and
+  the in-app "newer version" notice now offers Linux a direct download. Building from source stays
+  a developer path (Qt 6.5+, maps are a Qt-only tile renderer — no MapLibre).
+
 ## 2026-11-06: Garmin Edge 500 on Android, data screen names (0.2.60)
 
 - **Android.** Plug the Edge 500 into the tablet and it shows on Home as "Garmin Edge 500", with
