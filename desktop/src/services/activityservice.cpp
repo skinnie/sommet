@@ -1923,10 +1923,22 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         if (!gone.isEmpty() && gone.size() * 2 <= inWindow) {
             QSqlQuery del(m_db);
             del.prepare(QStringLiteral("DELETE FROM activities WHERE idx = ? AND device = ? AND source = 'intervals'"));
+            // Also tombstone it for Sommet Sync, like a delete in the app: otherwise the NAS kept
+            // the row, every other device kept it, and this one pulled it back on a full pull and
+            // pruned it again (2026-11-08: 81 eTrex rides deleted on intervals.icu lived on in the
+            // NAS and on the P5Q). The next sommet push sends every tombstone in the set.
+            QSqlQuery tomb(m_db);
+            tomb.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)"));
             for (const Held &h : std::as_const(gone)) {
                 del.bindValue(0, h.idx);
                 del.bindValue(1, h.device);
                 del.exec();
+                if (!h.device.isEmpty() && !h.start.isEmpty()) {
+                    const QString uid = sommetUid(h.device, h.start);
+                    m_sommetTombstones.insert(uid);
+                    tomb.bindValue(0, uid);
+                    tomb.exec();
+                }
             }
         }
     }

@@ -26,6 +26,11 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
    pulls on that; `updated_at` still decides which edit wins. `test_sommet_sync_late_upload.py`
    fails on the old server and passes on the new. Tested on the NAS's own PHP 8.3, deployed.
    Server-side only; existing clients need one full re-pull to collect what they missed.
+   **Also:** an activity deleted on intervals.icu was removed locally by the import but never
+   tombstoned for Sommet Sync, so the NAS and every other device kept it (and a full pull brought
+   it back, only to be pruned again): 85 such rides, mostly old eTrex logs, lived on in the NAS and
+   on the P5Q. The import's pruning now tombstones like a delete in the app. The 85 were removed
+   from the NAS (matched by intervals.icu activity id).
 3. **Bryton Aero 60 backups**: screens over the cable (back up + restore `Grid.ini`), paired sensors
    over Bluetooth (a record with re-pair steps — the Aero 60 pairs sensors by scanning, it has no
    "write this id" command). Sensor commands read off a capture of Bryton Active, verified live.
