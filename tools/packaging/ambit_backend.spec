@@ -80,6 +80,26 @@ for _p in glob.glob(str(REPO / "tools" / "*.py")):
     if Path(_p).name not in EXCLUDE_TOOLS:
         hiddenimports.append(Path(_p).stem)
 
+# Third-party packages the tools import lazily, inside functions (backend-requirements.txt).
+# Analysis follows those imports only if the package is installed at freeze time; name them
+# explicitly too, and fail the build if one is missing rather than shipping a backend that dies
+# on first use ("No module named 'garminconnect'" on the Garmin login, P5Q AppImage 2026-11-08).
+from PyInstaller.utils.hooks import (collect_submodules as _collect_submodules,  # noqa: E402
+                                     collect_data_files as _cdf, collect_dynamic_libs as _cdl)
+
+for _pkg in ("garminconnect", "curl_cffi", "ua_generator", "serial", "numpy"):
+    try:
+        __import__(_pkg)
+    except ImportError as _e:
+        raise SystemExit(f"ambit_backend.spec: {_pkg} is not installed - "
+                         "pip install -r tools/packaging/backend-requirements.txt") from _e
+hiddenimports += _collect_submodules("garminconnect") + _collect_submodules("curl_cffi")
+# garminconnect 0.3 talks to Garmin through curl_cffi (native libcurl-impersonate) and picks a
+# browser user-agent from ua_generator's data files: ship both.
+datas += _cdf("ua_generator") + _cdf("curl_cffi")
+_curl_cffi_libs = _cdl("curl_cffi")   # added to `binaries` once it exists (below)
+hiddenimports += ["serial", "serial.tools.list_ports", "numpy"]
+
 # The USB tools (list_watches.py, write_nav.py, ...) do `import hid`, and the `hid` PyPI
 # package loads the native hidapi shared library lazily via ctypes at runtime. PyInstaller
 # cannot see that lazy load, so on Windows hidapi.dll is otherwise NEVER bundled - `import hid`
@@ -90,7 +110,7 @@ for _p in glob.glob(str(REPO / "tools" / "*.py")):
 # wheel" note was WRONG: the `hid` wheel is a pure ctypes binding and bundles NO libhidapi.dylib,
 # so PyInstaller ships none and /api/devices dies with "Unable to load ... libhidapi.dylib" -> the
 # watch is invisible on the .dmg (real bug, first Mac hardware test 2026-08-27, Apple Silicon).
-binaries = []
+binaries = list(_curl_cffi_libs)
 _hidapi_dll = os.environ.get("HIDAPI_DLL")
 if _hidapi_dll and Path(_hidapi_dll).is_file():
     binaries.append((_hidapi_dll, "."))

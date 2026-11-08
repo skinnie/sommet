@@ -7,6 +7,31 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-08: Garmin login in the release builds, NAS sync losing late uploads, Bryton backups (0.2.65)
+
+1. **Garmin Connect login failed on every release build** ("No module named 'garminconnect'", seen
+   on the P5Q AppImage). The frozen backend only contains packages installed when CI freezes it,
+   and CI installed just `pyinstaller bleak hid`. Tools that import lazily (inside a function)
+   build fine and then die on first use. Same hole for the **Suunto T6/X6HR** cable (`pyserial`)
+   and **sleep stages** (`numpy`). Now one `tools/packaging/backend-requirements.txt` feeds all
+   three jobs; the spec refuses to build if any of those packages is missing, and every job runs
+   `check_frozen_imports.py` inside the frozen binary after freezing. garminconnect 0.3 no longer
+   uses garth: it needs `curl_cffi` (native) + `ua-generator` data, both collected. Verified with
+   a local freeze: the probe imports all of them. The backend grows to ~74 MB.
+2. **Sommet Sync (NAS) silently skipped uploads that arrived late.** Pulls filtered on the
+   record's own `updated_at` (set by the device that wrote it), so a move read off a watch on one
+   device and uploaded later was older than every other device's cursor and never delivered —
+   ~35 watch moves and 81 eTrex rides were on the NAS but not on the ThinkPad. `sync.php` (and its
+   Python twin) now stamp the server's receive time (`srv`) on every accepted write and filter
+   pulls on that; `updated_at` still decides which edit wins. `test_sommet_sync_late_upload.py`
+   fails on the old server and passes on the new. Tested on the NAS's own PHP 8.3, deployed.
+   Server-side only; existing clients need one full re-pull to collect what they missed.
+3. **Bryton Aero 60 backups**: screens over the cable (back up + restore `Grid.ini`), paired sensors
+   over Bluetooth (a record with re-pair steps — the Aero 60 pairs sensors by scanning, it has no
+   "write this id" command). Sensor commands read off a capture of Bryton Active, verified live.
+
+---
+
 ## 2026-11-08: Desktop UI zoom + two Gear/Garmin fixes (0.2.64)
 
 Three issues André hit using the app on his ThinkPad X230 (1366×768), driven/verified over

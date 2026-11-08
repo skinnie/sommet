@@ -46,6 +46,11 @@ class Store:
             " deleted INTEGER NOT NULL DEFAULT 0, json TEXT NOT NULL DEFAULT '',"
             " PRIMARY KEY (collection, uid))")
         db.execute("CREATE INDEX IF NOT EXISTS idx_records_since ON records(collection, updated_at)")
+        # srv = when THIS server received the row; pulls filter on it, not on the device's
+        # updated_at (same fix as sync.php, 2026-11-08: a record uploaded late with an old
+        # updated_at was skipped forever by every device whose cursor was already past it).
+        if "srv" not in [r[1] for r in db.execute("PRAGMA table_info(records)")]:
+            db.execute("ALTER TABLE records ADD COLUMN srv INTEGER NOT NULL DEFAULT 0")
         db.commit()
         db.close()
 
@@ -58,8 +63,9 @@ class Store:
     def get(self, collection, since):
         db = self._db()
         rows = db.execute(
-            "SELECT uid, updated_at, deleted, json FROM records WHERE collection=? AND updated_at>?",
-            (collection, since)).fetchall()
+            "SELECT uid, updated_at, deleted, json FROM records WHERE collection=? "
+            "AND (? <= 0 OR (CASE WHEN srv > 0 THEN srv ELSE updated_at END) >= ?)",
+            (collection, since, since)).fetchall()
         db.close()
         records, deleted = [], []
         for uid, ua, dele, js in rows:
@@ -96,10 +102,10 @@ class Store:
                     continue  # we hold a newer copy
                 meta = {k: v for k, v in r.items() if k not in ("uid", "updated_at")}
                 db.execute(
-                    "INSERT INTO records (collection, uid, updated_at, deleted, json) VALUES (?,?,?,?,?) "
+                    "INSERT INTO records (collection, uid, updated_at, deleted, json, srv) VALUES (?,?,?,?,?,?) "
                     "ON CONFLICT(collection, uid) DO UPDATE SET updated_at=excluded.updated_at, "
-                    "deleted=excluded.deleted, json=excluded.json",
-                    (collection, uid, ua, 0, json.dumps(meta)))
+                    "deleted=excluded.deleted, json=excluded.json, srv=excluded.srv",
+                    (collection, uid, ua, 0, json.dumps(meta), now))
                 applied += 1
             for uid in tombs:
                 uid = str(uid)
@@ -109,10 +115,10 @@ class Store:
                                  (collection, uid)).fetchone()
                 ua = max(int(cur[0]), now) if cur is not None else now
                 db.execute(
-                    "INSERT INTO records (collection, uid, updated_at, deleted, json) VALUES (?,?,?,?,?) "
+                    "INSERT INTO records (collection, uid, updated_at, deleted, json, srv) VALUES (?,?,?,?,?,?) "
                     "ON CONFLICT(collection, uid) DO UPDATE SET updated_at=excluded.updated_at, "
-                    "deleted=excluded.deleted, json=excluded.json",
-                    (collection, uid, ua, 1, ""))
+                    "deleted=excluded.deleted, json=excluded.json, srv=excluded.srv",
+                    (collection, uid, ua, 1, "", now))
                 applied += 1
             db.commit()
         finally:

@@ -142,8 +142,9 @@ jobs:
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller bleak hid
+          pip install -r tools/packaging/backend-requirements.txt
           pyinstaller tools/packaging/ambit_backend.spec --distpath dist/backend --workpath build/pyi
+          dist/backend/ambit-backend.exe --tool tools/packaging/check_frozen_imports.py   # fail if a lazily-imported package wasn't bundled
 
       # windeployqt copies the Qt DLLs and QML plugins the app needs into a self-contained
       # folder next to the .exe, so it runs on a PC that has never had Qt installed. --qmldir
@@ -225,8 +226,9 @@ jobs:
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller bleak hid
+          pip install -r tools/packaging/backend-requirements.txt
           pyinstaller tools/packaging/ambit_backend.spec --distpath dist/backend --workpath build/pyi
+          dist/backend/ambit-backend --tool tools/packaging/check_frozen_imports.py   # fail if a lazily-imported package wasn't bundled
 
       # macdeployqt copies the Qt frameworks and QML plugins into the .app so it runs on a Mac
       # that has never had Qt installed. Then drop the frozen helper into
@@ -361,8 +363,9 @@ jobs:
       - name: Freeze the watch helper (PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller bleak hid
+          pip install -r tools/packaging/backend-requirements.txt
           pyinstaller tools/packaging/ambit_backend.spec --distpath dist/backend --workpath build/pyi
+          dist/backend/ambit-backend --tool tools/packaging/check_frozen_imports.py   # fail if a lazily-imported package wasn't bundled
           test -x dist/backend/ambit-backend
 
       - name: Assemble the AppDir

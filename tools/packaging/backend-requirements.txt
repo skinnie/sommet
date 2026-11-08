@@ -1,0 +1,11 @@
+# Python packages the frozen backend (ambit-backend, PyInstaller) must contain.
+# Installed by every desktop release job before freezing (.github/workflows/desktop-release.yml).
+# PyInstaller only bundles what is INSTALLED at freeze time: a tool that imports a package lazily
+# (inside a function) still "works" in CI and then fails on the user's machine. That shipped
+# "No module named 'garminconnect'" on the Garmin login (André's P5Q AppImage, 2026-11-08).
+pyinstaller
+bleak          # Bluetooth (watches, bike computers, scales)
+hid            # USB watches (needs the native hidapi library, see the spec)
+garminconnect>=0.3.11,<0.4  # Garmin Connect login/sync/weight (garmin_sync.py, garmin_weight.py); 0.3 uses curl_cffi, not garth
+pyserial       # Suunto T6 / X6HR serial cable (tools/suunto_t6.py, suunto_x6hr.py)
+numpy          # sleep stages on the Health page (tools/sleep_stage.py)

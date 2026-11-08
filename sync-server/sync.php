@@ -128,8 +128,15 @@ if ($method === 'GET') {
     $out = ['records' => [], 'deleted' => [], 'now' => $now];
     with_collection($DATA_DIR, $c, function ($data) use (&$out, $since) {
         foreach ($data['records'] as $uid => $rec) {
-            $ua = isset($rec['updated_at']) ? (int)$rec['updated_at'] : 0;
-            if ($ua > $since) {
+            // Filter on when the SERVER received the record (`srv`), not the device's own
+            // `updated_at`: a record another device uploads late carries an old updated_at, and
+            // filtering on that made every device whose cursor was already past it skip it forever
+            // (2026-11-08: ~35 watch moves and 81 eTrex rides on the NAS never reached the ThinkPad).
+            // `>=` so a write landing in the same millisecond as a pull is not lost (re-sending one
+            // is harmless: the client upserts). Records stored before this fix have no `srv`.
+            $srv = isset($rec['srv']) ? (int)$rec['srv'] : (isset($rec['updated_at']) ? (int)$rec['updated_at'] : 0);
+            if ($since <= 0 || $srv >= $since) {
+                unset($rec['srv']);
                 $rec['uid'] = $uid;
                 $out['records'][] = $rec;
             }
@@ -168,8 +175,9 @@ if ($method === 'POST') {
             if (isset($data['records'][$uid]) && (int)$data['records'][$uid]['updated_at'] > $ua) continue;
             if (isset($data['deleted'][$uid]) && (int)$data['deleted'][$uid] >= $ua) continue;
             $rec = $r;
-            unset($rec['uid']);
+            unset($rec['uid'], $rec['srv']);
             $rec['updated_at'] = $ua;
+            $rec['srv'] = $now;          // server receive time: what pulls filter on (see GET)
             $data['records'][$uid] = $rec;
             $n++;
         }
