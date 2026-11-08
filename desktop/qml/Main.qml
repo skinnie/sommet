@@ -30,6 +30,25 @@ ApplicationWindow {
     // phones, a docked collapse on tablets). Expanded by default - there's room on the desktop.
     property bool navExpanded: true
 
+    // UI zoom (André, 2026-11-07, X230 720p screen: wanted a Chrome-style "Ctrl+scroll to zoom
+    // out" so more fits without scrolling). Theme.uiScale re-lays-out the whole UI crisply; these
+    // bind the usual Chrome keys. Ctrl+= and Ctrl++ both zoom in (= is the unshifted + key), and
+    // the keypad variants are covered too.
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++", "Ctrl+Plus"]; onActivated: Theme.zoomIn() }
+    Shortcut { sequences: ["Ctrl+-", "Ctrl+Minus"]; onActivated: Theme.zoomOut() }
+    Shortcut { sequences: ["Ctrl+0"]; onActivated: Theme.zoomReset() }
+    // Ctrl+mouse-wheel zoom. acceptedModifiers means it only fires with Ctrl held, so normal
+    // wheel scrolling in lists/pages is untouched; it sits under the content so page handlers win
+    // when Ctrl isn't down.
+    WheelHandler {
+        acceptedModifiers: Qt.ControlModifier
+        onWheel: function (event) {
+            if (event.angleDelta.y > 0) Theme.zoomIn()
+            else if (event.angleDelta.y < 0) Theme.zoomOut()
+            event.accepted = true
+        }
+    }
+
     readonly property var pageSources: ({
         home: "pages/HomePage.qml",
         activities: "pages/ActivitiesPage.qml",

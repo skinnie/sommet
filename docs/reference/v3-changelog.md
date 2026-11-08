@@ -7,6 +7,34 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-08: Desktop UI zoom + two Gear/Garmin fixes (0.2.64)
+
+Three issues André hit using the app on his ThinkPad X230 (1366×768), driven/verified over
+Tailscale SSH:
+
+1. **Upload said the wrong destination.** The Upload tab's "Export to Garmin" button worked, but
+   the success note always read *"Uploaded to intervals.icu."* — both buttons share one
+   `onExportFinished` handler (`ActivityDetail.qml`) that hardcoded the intervals wording. It now
+   reads `_uploadTarget` and says **"Uploaded to Garmin Connect."** / **"…to intervals.icu."**
+   (and the failure line names the destination too).
+2. **Long bike names were clipped in the gear pickers.** The per-sport "Default gear" dropdown
+   (`GearPage.qml`) is only ~200 px wide, and the shared `RoundedComboBox` pinned its popup to the
+   box width, so long names elided in the list as well as the closed box. The popup now **grows to
+   fit the widest item**, capped to the window and shifted left if it would spill off the right
+   edge. The closed box still elides; the open list shows the full name. Helps every combo in the
+   app.
+3. **Everything felt too big on a 720p screen; wanted a Chrome-style zoom-out.** Added a real UI
+   zoom: `Theme.uiScale` now multiplies every font/spacing/radius token, so the whole interface
+   **re-lays-out crisply** (not a blurry pixel-scale). Bound to **Ctrl+-/Ctrl+=/Ctrl+0** and
+   **Ctrl+mouse-wheel**, plus a **Display zoom** control in Settings → Appearance (−  %  +  Reset).
+   Persisted per-install, clamped 70–140 %. Verified on the X230 at 80 % (screenshot): the Home
+   page that overflowed at 100 % fits with room to spare, text stays sharp.
+
+Checked: `tools/check.sh` green; incremental build clean (Qt 6.12 from source on the X230); zoom
+verified on-screen. The Garmin-label and gear-dropdown fixes compiled (qmlcachegen validates the
+QML) but were not exercised by a live upload / opening the dropdown on-screen. Android parity for
+the zoom control is not yet done (desktop-only so far).
+
 ## 2026-11-07: Settings page blank - the actual fix (0.2.63)
 
 0.2.62 removed `Accessible.expanded` but the page was still blank: `Accessible.expandable` on the

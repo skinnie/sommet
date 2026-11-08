@@ -418,6 +418,33 @@ PageFlickable {
                 // The map/list view choice moved out of Settings and onto each list page
                 // itself (Activities/Routes/POIs), André 2026-08-16 - a per-page toggle now,
                 // still persisted via Theme.activitiesView/routesView/poisView.
+
+                // UI zoom (André, 2026-11-07, on the X230's 720p screen — wanted to shrink the UI
+                // so more fits without scrolling). Mirrors Ctrl+-/Ctrl+=/Ctrl+0 and Ctrl+wheel.
+                Item { width: 1; height: Theme.spacingSmall }
+                Text {
+                    text: qsTr("Display zoom")
+                    font.bold: true; font.pixelSize: Theme.fontSizeBody; color: Theme.text
+                }
+                Text {
+                    text: qsTr("Shrink or enlarge the whole interface. Also Ctrl+- / Ctrl+= / Ctrl+0, or Ctrl+mouse wheel.")
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                }
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton { text: "−"; enabled: Theme.uiScale > Theme.uiScaleMin; onClicked: Theme.zoomOut() }
+                    Text {
+                        text: Math.round(Theme.uiScale * 100) + "%"
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                        width: 56; horizontalAlignment: Text.AlignHCenter
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    RoundedButton { text: "+"; enabled: Theme.uiScale < Theme.uiScaleMax; onClicked: Theme.zoomIn() }
+                    RoundedButton { text: qsTr("Reset"); enabled: Theme.uiScale !== 1.0; onClicked: Theme.zoomReset() }
+                }
             }
         }
 

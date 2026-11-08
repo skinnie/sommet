@@ -74,6 +74,12 @@ QtObject {
         // (kcalConsumed / hydrationVolume / macros + the FastingTime & Coffees custom fields)
         // via tools/ember_to_intervals.py, reusing the intervals connection Sommet already has.
         property bool emberSyncIntervals: false
+        // UI zoom (André, 2026-11-07, on the X230's 1366×768 screen: "time in heart zones is cut,
+        // I need to scroll… almost wants me to control+scroll to zoom out like in Chrome"). A
+        // density multiplier applied to every font/spacing/radius token below, so the whole UI
+        // re-lays-out crisply (not a blurry pixel-scale). Ctrl+-/Ctrl+=/Ctrl+0 and Ctrl+wheel set
+        // it; persisted per-install. 1.0 = the original design size.
+        property real uiScale: 1.0
     }
 
     // "map" (cards with a track thumbnail, the original) or "list" (rows, no maps).
@@ -87,6 +93,16 @@ QtObject {
     property alias emberUnlocked: settingsId.emberUnlocked
     property alias emberInstallUrl: settingsId.emberInstallUrl
     property alias emberSyncIntervals: settingsId.emberSyncIntervals
+    property alias uiScale: settingsId.uiScale
+
+    // UI zoom controls (bound to Ctrl+-/Ctrl+=/Ctrl+0 and Ctrl+wheel in Main.qml). Clamped so the
+    // layout never collapses or blows up; 5 % steps. reset() returns to the design size.
+    readonly property real uiScaleMin: 0.70
+    readonly property real uiScaleMax: 1.40
+    function _clampScale(s) { return Math.max(uiScaleMin, Math.min(uiScaleMax, Math.round(s * 100) / 100)) }
+    function zoomIn() { uiScale = _clampScale(uiScale + 0.05) }
+    function zoomOut() { uiScale = _clampScale(uiScale - 0.05) }
+    function zoomReset() { uiScale = 1.0 }
 
     // Convenience: the column keys as a real array, and a setter that writes them back as CSV.
     function activityColumnList() {
@@ -222,11 +238,13 @@ QtObject {
     // cards / subtle shadows / large whitespace" (Design Language) needs consistent numbers
     // somewhere, and hardcoding 8/12/16 separately in every component is the same mistake
     // as hardcoding colors.
-    readonly property int radiusSmall: 8
-    readonly property int radiusCard: 16
-    readonly property int spacingSmall: 8
-    readonly property int spacingMedium: 16
-    readonly property int spacingLarge: 24
+    // Every token below is multiplied by uiScale so the whole UI zooms as one (see uiScale). The
+    // raw design numbers are kept in _base* and rounded after scaling to stay on pixel grid.
+    readonly property int radiusSmall: Math.round(8 * uiScale)
+    readonly property int radiusCard: Math.round(16 * uiScale)
+    readonly property int spacingSmall: Math.round(8 * uiScale)
+    readonly property int spacingMedium: Math.round(16 * uiScale)
+    readonly property int spacingLarge: Math.round(24 * uiScale)
 
     // Real, 2026-08-09 ("Introdup proper type scale and migrate pages onto it") - font
     // sizes were hardcoded ad hoc across every page (a real grep found 10 distinct raw
@@ -235,14 +253,14 @@ QtObject {
     // exactly (not a new visual hierarchy) - this pass is about giving every page a shared
     // name to bind to instead of a bare number, not re-designing type sizes blind without a
     // way to see the result rendered.
-    readonly property int fontSizeTiny: 10        // MapView's zoom-control glyphs
-    readonly property int fontSizeCaption: 11     // timestamps, secondary annotations
-    readonly property int fontSizeLabel: 12       // the most common size - stat labels, body
-    readonly property int fontSizeBody: 13        // primary readable body text
-    readonly property int fontSizeBodyLarge: 14   // card titles, emphasized body text
-    readonly property int fontSizeSubtitle: 15
-    readonly property int fontSizeHeading: 16     // section headings
-    readonly property int fontSizeTitle: 18
-    readonly property int fontSizeLargeTitle: 20
-    readonly property int fontSizeDisplay: 24     // hero numbers (e.g. Home's battery %)
+    readonly property int fontSizeTiny: Math.round(10 * uiScale)        // MapView's zoom-control glyphs
+    readonly property int fontSizeCaption: Math.round(11 * uiScale)     // timestamps, secondary annotations
+    readonly property int fontSizeLabel: Math.round(12 * uiScale)       // the most common size - stat labels, body
+    readonly property int fontSizeBody: Math.round(13 * uiScale)        // primary readable body text
+    readonly property int fontSizeBodyLarge: Math.round(14 * uiScale)   // card titles, emphasized body text
+    readonly property int fontSizeSubtitle: Math.round(15 * uiScale)
+    readonly property int fontSizeHeading: Math.round(16 * uiScale)     // section headings
+    readonly property int fontSizeTitle: Math.round(18 * uiScale)
+    readonly property int fontSizeLargeTitle: Math.round(20 * uiScale)
+    readonly property int fontSizeDisplay: Math.round(24 * uiScale)     // hero numbers (e.g. Home's battery %)
 }

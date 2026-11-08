@@ -65,7 +65,9 @@ Item {
         function onExportFinished(uploaded, failed) {
             root.uploading = false
             root.uploadOk = failed === 0
-            root.uploadStatus = failed > 0 ? qsTr("Upload failed.") : qsTr("Uploaded to intervals.icu.")
+            var dest = root._uploadTarget === "garmin" ? qsTr("Garmin Connect") : qsTr("intervals.icu")
+            root.uploadStatus = failed > 0 ? qsTr("Upload to %1 failed.").arg(dest)
+                                           : qsTr("Uploaded to %1.").arg(dest)
         }
         function onExportError(message) { root.uploading = false; root.uploadOk = false; root.uploadStatus = message }
         function onIntervalsFitReady(idx, device, fitBase64, error) {

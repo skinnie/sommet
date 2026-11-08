@@ -76,6 +76,12 @@ ComboBox {
     // flips above the box when there isn't enough room below - so a dropdown near the bottom of
     // a dialog/screen opens upward instead of spilling off. Anything that still doesn't fit
     // scrolls inside.
+    // Measures item labels so the popup can grow to fit the longest one (2026-11-07, André on the
+    // X230 Gear page: the per-sport pickers are only ~200 px wide, so long bike names were elided
+    // in the closed box AND in the open list — "I can't see the names of the bikes"). The closed
+    // box still elides; the dropdown widens to show the full name, capped to the window.
+    TextMetrics { id: _itemMetrics; font: control.font }
+
     popup: Popup {
         id: pop
         // Computed fresh each time it opens (onAboutToShow) rather than via bindings: mapToItem
@@ -83,8 +89,23 @@ ComboBox {
         // came out wrong (the popup stayed downward even with no room). Read live geometry here.
         property bool openUp: false
         property real popH: 84
+        // Popup width (>= control.width, fits the widest item) and a left shift so a grown popup
+        // never spills off the right window edge.
+        property real popW: control.width
+        property real popX: 0
         onAboutToShow: {
             var itemH = 34, gap = 4, margin = 8;
+            // Widen to the longest label (text + paddings + scroll room), never past the window.
+            var widest = control.width;
+            for (var k = 0; k < control.count; k++) {
+                _itemMetrics.text = control.textAt(k);
+                widest = Math.max(widest, _itemMetrics.advanceWidth + 34);
+            }
+            var winW = control.Window ? control.Window.width : Screen.width;
+            popW = Math.min(widest, winW - 2 * margin);
+            var ctlLeft = control.mapToItem(null, 0, 0).x;
+            var overflowRight = (ctlLeft + popW) - (winW - margin);
+            popX = overflowRight > 0 ? -Math.min(overflowRight, ctlLeft - margin) : 0;
             // Size to the whole list (no fixed cap) so short lists show every item instead of
             // scrolling (André); room (below) still caps it so it never leaves the window.
             var wanted = control.count * itemH + 8;
@@ -106,7 +127,8 @@ ComboBox {
             popH = Math.max(itemH + 8, Math.min(wanted, room));
         }
 
-        width: control.width
+        width: popW
+        x: popX
         padding: 4
         height: popH
         y: openUp ? -(popH + 4) : (control.height + 4)
