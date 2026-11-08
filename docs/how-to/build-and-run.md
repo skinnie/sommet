@@ -20,3 +20,15 @@ pip install -r docs-requirements.txt
 mkdocs serve   # local preview at http://127.0.0.1:8000
 mkdocs build --strict   # verifies nav/links, fails on any warning
 ```
+
+## Before announcing a Linux release: smoke test on old hardware
+
+A build that passes can still fail on a user's machine (a library missing from the package, or one
+that needs a newer CPU). Run the packaged app on the oldest machine you have:
+
+    SMOKE_BACKEND=<path to dist/ambit-backend> tools/release_smoke.sh <ssh-host>   # before tagging
+    tools/release_smoke.sh <ssh-host> 0.2.66                                       # after publishing
+
+It downloads the AppImage on that machine, runs its backend on a spare port with a throwaway home
+folder (the user's Sommet and data are not touched), and calls each feature once. Announce the
+release only when it prints "passed".
