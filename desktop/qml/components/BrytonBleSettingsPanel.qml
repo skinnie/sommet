@@ -195,5 +195,13 @@ Column {
                 onClicked: root.edited = Object.assign({}, root.original)
             }
         }
+
+        // Back up the paired sensors (Bluetooth). Screens are backed up over the cable.
+        BrytonBackupSection {
+            width: parent.width
+            mode: "sensors"
+            address: root.address
+            visible: root.address.length > 0
+        }
     }
 }

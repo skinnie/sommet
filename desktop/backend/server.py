@@ -2503,7 +2503,15 @@ class Handler(BaseHTTPRequestHandler):
             # Sensors live on the device, not the USB drive: read them over Bluetooth when the
             # caller knows the Bryton's address. Best-effort — a BLE failure doesn't block the
             # screens backup, it's reported as sensorsError.
-            address = (body or {}).get("address") or ""
+            # only: "screens" = cable only (ignore Bluetooth), "sensors" = Bluetooth only (ignore the
+            # USB drive). André, 2026-11-08: "for screens use cable, for sensors use bluetooth".
+            only = (body or {}).get("only") or ""
+            address = "" if only == "screens" else ((body or {}).get("address") or "")
+            if only == "sensors":
+                if not address:
+                    self._send_json(400, {"ok": False, "error": "sensors backup needs the Bryton's Bluetooth address"})
+                    return
+                mount = None
             sensors_file, sensors_error = None, None
             if address:
                 fd, sensors_file = tempfile.mkstemp(prefix="bryton-sensors-", suffix=".json")
