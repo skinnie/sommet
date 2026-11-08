@@ -8,4 +8,6 @@ bleak          # Bluetooth (watches, bike computers, scales)
 hid            # USB watches (needs the native hidapi library, see the spec)
 garminconnect>=0.3.11,<0.4  # Garmin Connect login/sync/weight (garmin_sync.py, garmin_weight.py); 0.3 uses curl_cffi, not garth
 pyserial       # Suunto T6 / X6HR serial cable (tools/suunto_t6.py, suunto_x6hr.py)
-numpy          # sleep stages on the Health page (tools/sleep_stage.py)
+numpy<2.4     # sleep stages (tools/sleep_stage.py). <2.4: NumPy 2.4+ wheels need x86-64-v2 (SSE4.2/POPCNT) and
+               # refuse to load on older CPUs (Core 2 Quad Q9550: "built with baseline X86_V2"), which the
+               # Linux AppImage supports (-march=x86-64). 2.3.5 verified on the P5Q, 2026-11-08.
