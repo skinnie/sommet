@@ -1371,7 +1371,7 @@ PageFlickable {
                     }
                     Text {
                         visible: databaseSection.syncOn
-                        text: qsTr("Every activity's original file is also copied to your server, so you keep it even if you leave intervals.icu or Garmin. \"Only on the server\" keeps the last 30 days here and fetches older ones from the server when you open them.")
+                        text: qsTr("Your activities' original files are saved on your server. Choose if this computer keeps a copy too. Without one, older activities load from the server when you open them.")
                         color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         width: parent.width; wrapMode: Text.WordWrap
                     }
@@ -1380,7 +1380,7 @@ PageFlickable {
                         visible: databaseSection.syncOn
                         width: 260
                         readonly property var _keys: ["device", "nas"]
-                        model: [qsTr("On this device and the server"), qsTr("Only on the server")]
+                        model: [qsTr("Keep a copy here too"), qsTr("Server only")]
                         currentIndex: Math.max(0, _keys.indexOf(ActivityService.originalsLocation()))
                         onActivated: (i) => ActivityService.setOriginalsLocation(_keys[i])
                     }
