@@ -1361,6 +1361,30 @@ PageFlickable {
                         }
                     }
 
+                    // Original files (André 2026-11-08): the FIT behind each activity's charts. With a
+                    // NAS the user can keep them only there, so a small disk stays small.
+                    Text {
+                        visible: databaseSection.syncOn
+                        text: qsTr("Original files")
+                        color: Theme.text; font.pixelSize: Theme.fontSizeLabel; font.bold: true
+                        topPadding: Theme.spacingMedium
+                    }
+                    Text {
+                        visible: databaseSection.syncOn
+                        text: qsTr("Every activity's original file is also copied to your server, so you keep it even if you leave intervals.icu or Garmin. \"Only on the server\" keeps the last 30 days here and fetches older ones from the server when you open them.")
+                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        width: parent.width; wrapMode: Text.WordWrap
+                    }
+                    RoundedComboBox {
+                        id: originalsCombo
+                        visible: databaseSection.syncOn
+                        width: 260
+                        readonly property var _keys: ["device", "nas"]
+                        model: [qsTr("On this device and the server"), qsTr("Only on the server")]
+                        currentIndex: Math.max(0, _keys.indexOf(ActivityService.originalsLocation()))
+                        onActivated: (i) => ActivityService.setOriginalsLocation(_keys[i])
+                    }
+
                     // Results as notes (desktop picks #7).
                     StatusNote {
                         id: sommetSyncStatus

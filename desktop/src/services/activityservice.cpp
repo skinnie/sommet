@@ -756,6 +756,10 @@ void ActivityService::openDatabase()
     // here, same protection as the start|name tombstones.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_deleted (uid TEXT PRIMARY KEY)"));
+    // Original FITs the NAS has confirmed (Sommet Sync uid). Only these may be dropped locally in
+    // "nas" originals mode; a row not in here keeps its FIT until the NAS has it.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_fit_pushed (uid TEXT PRIMARY KEY)"));
 
     // One-time migration to serial-based watch identity (2026-09-04): watch activities used to
     // be tagged by product-id hex ("0x1b"); they are now tagged by the watch's USB serial so two
@@ -1076,7 +1080,7 @@ QString ActivityService::trackGpx(int idx, const QString &device, const QString 
 
 void ActivityService::fetchIntervalsFit(int idx, const QString &device)
 {
-    fetchIntervalsFitThen(idx, device, [this, idx, device](const QString &fit, const QString &err) {
+    fetchFitThen(idx, device, [this, idx, device](const QString &fit, const QString &err) {
         emit intervalsFitReady(idx, device, fit, err);
     });
 }
@@ -1116,27 +1120,101 @@ void ActivityService::fetchIntervalsFitThen(int idx, const QString &device,
             done(QString(), err.isEmpty() ? backendErrorText(reply) : err);
             return;
         }
-        // Keep it, so the next export (and an intervals-off day) doesn't need the network.
-        if (m_db.isOpen()) {
-            QSqlQuery u(m_db);
-            u.prepare(QStringLiteral(
-                "UPDATE activities SET fit_base64 = ? WHERE idx = ? AND COALESCE(device, '') = ?"));
-            u.addBindValue(fit);
-            u.addBindValue(idx);
-            u.addBindValue(device);
-            u.exec();
-        }
-        for (int i = 0; i < m_activities.size(); ++i) {
-            QVariantMap a = m_activities.at(i).toMap();
-            if (a.value(QStringLiteral("index")).toInt() == idx
-                    && a.value(QStringLiteral("device")).toString() == device) {
-                a[QStringLiteral("fitBase64")] = fit;
-                m_activities[i] = a;
-                break;
-            }
-        }
+        // Keep it, so the next export (and an intervals-off day) doesn't need the network. The
+        // next Sommet Sync copies it to the NAS too, so the user owns it once it was opened.
+        storeFitLocally(idx, device, fit);
         done(fit, QString());
     });
+}
+
+void ActivityService::storeFitLocally(int idx, const QString &device, const QString &fit)
+{
+    if (m_db.isOpen()) {
+        QSqlQuery u(m_db);
+        u.prepare(QStringLiteral(
+            "UPDATE activities SET fit_base64 = ? WHERE idx = ? AND COALESCE(device, '') = ?"));
+        u.addBindValue(fit);
+        u.addBindValue(idx);
+        u.addBindValue(device);
+        u.exec();
+    }
+    for (int i = 0; i < m_activities.size(); ++i) {
+        QVariantMap a = m_activities.at(i).toMap();
+        if (a.value(QStringLiteral("index")).toInt() == idx
+                && a.value(QStringLiteral("device")).toString() == device) {
+            a[QStringLiteral("fitBase64")] = fit;
+            m_activities[i] = a;
+            break;
+        }
+    }
+}
+
+void ActivityService::fetchFitThen(int idx, const QString &device,
+                                   std::function<void(const QString &, const QString &)> done)
+{
+    QString fit, start, source;
+    if (m_db.isOpen()) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT fit_base64, start_time, COALESCE(source, '') FROM activities "
+                                 "WHERE idx = ? AND COALESCE(device, '') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (q.exec() && q.next()) {
+            fit = q.value(0).toString();
+            start = q.value(1).toString();
+            source = q.value(2).toString();
+        }
+    }
+    if (!fit.isEmpty()) {
+        QTimer::singleShot(0, this, [done, fit]() { done(fit, QString()); });
+        return;
+    }
+    auto fallback = [this, idx, device, source, done]() {
+        if (source == QStringLiteral("intervals"))
+            fetchIntervalsFitThen(idx, device, done);
+        else
+            done(QString(), tr("This activity has no recorded data to chart."));
+    };
+    if (!sommetSyncConfigured() || start.isEmpty()) {
+        QTimer::singleShot(0, this, fallback);
+        return;
+    }
+    // The user's own copy on the NAS comes before any third party.
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), sommetUid(device, start));
+    qq.addQueryItem(QStringLiteral("fmt"), QStringLiteral("fit"));
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    req.setTransferTimeout(60000);
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device, done, fallback]() {
+        reply->deleteLater();
+        const QByteArray raw = reply->error() == QNetworkReply::NoError ? reply->readAll() : QByteArray();
+        if (raw.isEmpty()) {
+            fallback();
+            return;
+        }
+        const QString fit = QString::fromLatin1(raw.toBase64());
+        storeFitLocally(idx, device, fit);   // a cache in "nas" mode: trimmed again when old
+        done(fit, QString());
+    });
+}
+
+QString ActivityService::originalsLocation() const
+{
+    const QString v = QSettings().value(QStringLiteral("storage/originals")).toString();
+    return v == QStringLiteral("nas") ? v : QStringLiteral("device");
+}
+
+void ActivityService::setOriginalsLocation(const QString &where)
+{
+    QSettings().setValue(QStringLiteral("storage/originals"),
+                         where == QStringLiteral("nas") ? QStringLiteral("nas") : QStringLiteral("device"));
 }
 
 void ActivityService::requestStreams(int idx, const QString &device)
@@ -1174,8 +1252,8 @@ void ActivityService::requestStreams(int idx, const QString &device)
         decodeStreams(idx, device, fit);
         return;
     }
-    if (source == QStringLiteral("intervals")) {
-        fetchIntervalsFitThen(idx, device, [this, idx, device](const QString &f, const QString &err) {
+    if (source == QStringLiteral("intervals") || sommetSyncConfigured()) {
+        fetchFitThen(idx, device, [this, idx, device](const QString &f, const QString &err) {
             if (f.isEmpty())
                 emit streamsReady(idx, device, QVariantMap(), err);
             else
@@ -1920,7 +1998,15 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         }
         qInfo().noquote() << "[intervals] import:" << fetched.size() << "listed," << count << "new,"
                           << gone.size() << "no longer there, of" << inWindow << "held";
-        if (!gone.isEmpty() && gone.size() * 2 <= inWindow) {
+        // Hard cap too: since 0.2.65 a prune also deletes on the NAS and every synced device, so a
+        // mass delete on intervals.icu (or an emptied account) must not wipe the user's own copy.
+        // A normal week deletes a handful; more than kMaxPrune at once is skipped and logged.
+        constexpr int kMaxPrune = 20;
+        if (gone.size() > kMaxPrune)
+            qWarning().noquote() << "[intervals] import:" << gone.size()
+                                 << "activities are gone from intervals.icu - more than" << kMaxPrune
+                                 << "at once, so nothing was deleted here. Delete them in Sommet if intended.";
+        if (!gone.isEmpty() && gone.size() <= kMaxPrune && gone.size() * 2 <= inWindow) {
             QSqlQuery del(m_db);
             del.prepare(QStringLiteral("DELETE FROM activities WHERE idx = ? AND device = ? AND source = 'intervals'"));
             // Also tombstone it for Sommet Sync, like a delete in the app: otherwise the NAS kept
@@ -3159,10 +3245,17 @@ void ActivityService::sommetPushAll()
 
     QJsonArray records;
     m_sommetPushQueue.clear();
+    m_sommetFitPushQueue.clear();
+    QSet<QString> fitPushed;
+    {
+        QSqlQuery fp(QStringLiteral("SELECT uid FROM sommet_fit_pushed"), m_db);
+        while (fp.next())
+            fitPushed.insert(fp.value(0).toString());
+    }
     QSqlQuery q(QStringLiteral(
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text, "
-        "COALESCE(start_utc, 0) FROM activities"),
+        "COALESCE(start_utc, 0), (fit_base64 IS NOT NULL AND fit_base64 <> '') FROM activities"),
         m_db);
     while (q.next()) {
         const QString device = q.value(1).toString();
@@ -3198,6 +3291,8 @@ void ActivityService::sommetPushAll()
         records.append(rec);
         if (!gpx.isEmpty() && !pushedSet.contains(uid))
             m_sommetPushQueue.append(uid);
+        if (q.value(15).toBool() && !fitPushed.contains(uid))
+            m_sommetFitPushQueue.append(uid);
     }
     m_sommetPushed = records.size();
 
@@ -3224,8 +3319,7 @@ void ActivityService::sommetPushAll()
 void ActivityService::sommetPushNextBlob()
 {
     if (m_sommetPushQueue.isEmpty()) {
-        m_sommetBusy = false;
-        emit sommetSyncFinished(m_sommetPulled, m_sommetPushed);
+        sommetPushNextFit();
         return;
     }
     const QString uid = m_sommetPushQueue.takeFirst();
@@ -3273,4 +3367,84 @@ void ActivityService::sommetPushNextBlob()
         }
         sommetPushNextBlob();
     });
+}
+
+// Original FITs to the NAS, one per request (raw bytes, fmt=fit). A uid is recorded in
+// sommet_fit_pushed only when the server answered {ok:true}, i.e. after it renamed the file in.
+void ActivityService::sommetPushNextFit()
+{
+    if (m_sommetFitPushQueue.isEmpty()) {
+        trimLocalOriginals();
+        m_sommetBusy = false;
+        emit sommetSyncFinished(m_sommetPulled, m_sommetPushed);
+        return;
+    }
+    const QString uid = m_sommetFitPushQueue.takeFirst();
+    const int bar = uid.indexOf(QLatin1Char('|'));
+    QByteArray fit;
+    if (bar > 0) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral(
+            "SELECT fit_base64 FROM activities WHERE device=? AND substr(start_time,1,16)=?"));
+        q.addBindValue(uid.left(bar));
+        q.addBindValue(uid.mid(bar + 1));
+        if (q.exec() && q.next())
+            fit = QByteArray::fromBase64(q.value(0).toString().toLatin1());
+    }
+    if (fit.isEmpty()) {
+        sommetPushNextFit();
+        return;
+    }
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), uid);
+    qq.addQueryItem(QStringLiteral("fmt"), QStringLiteral("fit"));
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
+    QNetworkReply *reply = m_network.post(req, fit);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, uid]() {
+        reply->deleteLater();
+        const bool ok = reply->error() == QNetworkReply::NoError
+            && QJsonDocument::fromJson(reply->readAll()).object().value(QStringLiteral("ok")).toBool();
+        if (ok) {
+            QSqlQuery ins(m_db);
+            ins.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_fit_pushed (uid) VALUES (?)"));
+            ins.addBindValue(uid);
+            ins.exec();
+        } else {
+            qWarning().noquote() << "[sommet] FIT push failed for one activity:" << reply->errorString();
+        }
+        sommetPushNextFit();
+    });
+}
+
+void ActivityService::trimLocalOriginals()
+{
+    if (originalsLocation() != QStringLiteral("nas") || !m_db.isOpen())
+        return;
+    // Recent moves keep their FIT here: the exports to intervals.icu / Garmin read it locally.
+    const QString cutoff = QDateTime::currentDateTime().addDays(-30).toString(Qt::ISODate).left(16);
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "UPDATE activities SET fit_base64 = NULL "
+        "WHERE fit_base64 IS NOT NULL AND fit_base64 <> '' AND substr(start_time,1,16) < ? "
+        "AND (COALESCE(device,'') || '|' || substr(start_time,1,16)) IN (SELECT uid FROM sommet_fit_pushed)"));
+    q.addBindValue(cutoff);
+    if (q.exec() && q.numRowsAffected() > 0) {
+        qInfo().noquote() << "[sommet] originals: dropped" << q.numRowsAffected()
+                          << "local FITs the NAS holds";
+        for (int i = 0; i < m_activities.size(); ++i) {
+            QVariantMap a = m_activities.at(i).toMap();
+            if (a.value(QStringLiteral("fitBase64")).toString().isEmpty()
+                    || a.value(QStringLiteral("startTime")).toString().left(16) >= cutoff)
+                continue;
+            a.remove(QStringLiteral("fitBase64"));
+            m_activities[i] = a;
+        }
+    }
 }

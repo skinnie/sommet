@@ -217,6 +217,13 @@ public:
     Q_INVOKABLE void sommetSyncTest(const QString &url, const QString &token);
     // Pull-then-push. Safe no-op when unconfigured. Runs after a watch read and on demand.
     Q_INVOKABLE void sommetSyncNow();
+    // Where activity original files (FITs) live (André, 2026-11-08: "full data on the NAS, the
+    // database has the necessary"). "device" (default): kept in the local database, and also
+    // copied to the NAS when Sommet Sync is set up. "nas": copied to the NAS; once the NAS has
+    // confirmed a file, the local copy is dropped for activities older than 30 days, and fetched
+    // back from the NAS when the activity is opened. Needs Sommet Sync for "nas".
+    Q_INVOKABLE QString originalsLocation() const;
+    Q_INVOKABLE void setOriginalsLocation(const QString &where);
 
 signals:
     void loadingChanged();
@@ -265,6 +272,10 @@ private:
     // Shared by Export (fetchIntervalsFit) and the charts (requestStreams).
     void fetchIntervalsFitThen(int idx, const QString &device,
                                std::function<void(const QString &, const QString &)> done);
+    // Any activity's FIT: the local copy, else the NAS (Sommet Sync), else intervals.icu.
+    void fetchFitThen(int idx, const QString &device,
+                      std::function<void(const QString &, const QString &)> done);
+    void storeFitLocally(int idx, const QString &device, const QString &fit);
     void decodeStreams(int idx, const QString &device, const QString &fitBase64);
     QVariantMap m_viewConfig;
     QVariantList m_zoneGroups;
@@ -361,11 +372,14 @@ private:
     void sommetPushAll();              // step 2: POST all local rows + tombstones (LWW on server)
     void sommetFetchNextBlob();        // drains m_sommetBlobQueue one GPX at a time
     void sommetPushNextBlob();         // drains m_sommetPushQueue one GPX at a time
+    void sommetPushNextFit();          // then m_sommetFitPushQueue, one original FIT at a time
+    void trimLocalOriginals();         // "nas" mode: drop local FITs the NAS holds (>30 days old)
     // Upsert one pulled wire-record into activities.db (LWW by updated_at; reuses an existing row's
     // idx, else allocates a fresh negative idx for a foreign row). Returns true if it changed the DB.
     bool sommetUpsertRecord(const QJsonObject &rec);
     QStringList m_sommetBlobQueue;     // uids of just-pulled rows whose GPX still needs fetching
     QStringList m_sommetPushQueue;     // uids of local rows whose GPX still needs pushing
+    QStringList m_sommetFitPushQueue;  // uids of local rows whose FIT the NAS doesn't have yet
     bool m_sommetBusy = false;
     int m_sommetPulled = 0;
     int m_sommetPushed = 0;
