@@ -1105,7 +1105,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
                      "bryton_profile.py", "bryton_from_intervals.py", "bryton_workout.py",
                      "bryton_info.py", "bryton_track.py", "bryton_ee.py", "intervals_athlete.py",
                      "magene_device.py", "magene_route.py", "magene_workout.py",
-                     "magene_pages.py", "bryton_grid.py", "intervals_events.py",
+                     "magene_pages.py", "bryton_grid.py", "bryton_backup.py", "intervals_events.py",
                      "route_library.py", "bryton_tracks.py", "wahoo_pages.py",
                      "wahoo_settings.py", "wahoo_profile.py", "wahoo_routes.py",
                      "wahoo_ble_files.py", "wahoo_workout.py", "wahoo_maps.py",
@@ -1500,6 +1500,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_mtp_import()
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(None)
+        elif self.path == "/api/bryton/backups":
+            self._handle_bryton_backup("list", None)
         elif self.path == "/api/wahoo/pages" or self.path.startswith("/api/wahoo/pages?"):
             self._handle_wahoo_pages(None)
         elif self.path == "/api/wahoo/settings" or self.path.startswith("/api/wahoo/settings?"):
@@ -1817,6 +1819,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_edge500_route(body)
         elif self.path == "/api/edge500/workout":
             self._handle_edge500_workout(body)
+        elif self.path == "/api/bryton/backup":
+            self._handle_bryton_backup("create", body)
+        elif self.path == "/api/bryton/restore":
+            self._handle_bryton_backup("restore", body)
         elif self.path in ("/api/edge500/profile/compare", "/api/edge500/profile/apply"):
             self._handle_edge500_profile(self.path.rsplit("/", 1)[1], body)
         elif self.path == "/api/bryton/profile/compare":
@@ -2479,6 +2485,32 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_grid.py failed"}
         payload["groups"] = cat.get("groups", [])
         payload["gridTable"] = cat.get("gridTable", {})
+        self._send_json(200 if payload.get("ok") else 502, payload)
+
+    def _handle_bryton_backup(self, action, body):
+        """Back up / restore the Bryton's configuration (currently its data screens, System/Grid.ini).
+        GET  /api/bryton/backups          -> {ok, backups:[manifest...]}  (no device needed to list)
+        POST /api/bryton/backup           -> create a backup of the plugged device
+        POST /api/bryton/restore {path}   -> restore the given backup folder onto the plugged device
+        tools/bryton_backup.py. Sensors (BLE) are a separate step that adds to the same backup."""
+        if action == "list":
+            code, out, err = run_tool("bryton_backup.py", ["list"])
+            payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "list failed"}
+            self._send_json(200 if payload.get("ok") else 502, payload)
+            return
+        mount = self._bryton_mount()
+        if not mount:
+            self._send_json(404, {"ok": False, "error": "no Bryton connected"})
+            return
+        if action == "create":
+            code, out, err = run_tool("bryton_backup.py", ["backup", mount])
+        else:  # restore
+            backup_dir = (body or {}).get("path") or ""
+            if not backup_dir:
+                self._send_json(400, {"ok": False, "error": "restore needs a backup 'path'"})
+                return
+            code, out, err = run_tool("bryton_backup.py", ["restore", mount, backup_dir])
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_backup.py failed"}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
     WAHOO_PAGES_LOCK = threading.Lock()
