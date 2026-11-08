@@ -261,6 +261,52 @@ async def read_all(link):
     return out
 
 
+# Paired sensors (2026-11-08, read off a btsnoop capture of Bryton Active on André's Aero 60 with a
+# Polar H10 paired over ANT+, then checked against NewSettingUtil.returnSensorList/returnSensorStatus
+# version-0 branch). Same setting characteristic as everything above:
+#   [43, 2]              -> [43, 1, sensorNum, flag*sensorNum, sum]   which sensor types exist
+#   [44, 2, bike, slot]  -> [44, 1, bike, slot, hw, status, id..., sum]
+#      hw 0 = ANT+ (id = little-endian u16 at bytes 6-7), 1 = BLE (id = MAC as ASCII, ':' every 2)
+#      An empty slot answers hw 0, status 0, id 0.
+# Slots per bike, in the app's own order (SettingBikePeripheralsActivity): HR, Speed, Cadence,
+# Speed/CAD, Power. The Aero 60 has two bikes (index 0 and 1).
+CMD_SENSOR_LIST, CMD_SENSOR_STATUS = 43, 44
+SENSOR_SLOTS = ["heartRate", "speed", "cadence", "speedCadence", "power"]
+BIKES = (0, 1)
+
+
+def _decode_sensor(r):
+    bike, slot, hw, status = r[2], r[3], r[4], r[5]
+    if hw == 0:
+        sid = str(r[6] | (r[7] << 8)) if len(r) >= 9 else ""
+        paired = sid not in ("", "0")
+    elif hw == 1:
+        chars = "".join(chr(b) for b in r[6:-1] if b)
+        sid = ":".join(chars[i:i + 2] for i in range(0, len(chars), 2)).upper()
+        paired = bool(sid)
+    else:
+        sid, paired = "", False
+    return {"bike": bike, "slot": slot,
+            "type": SENSOR_SLOTS[slot] if slot < len(SENSOR_SLOTS) else f"slot{slot}",
+            "hw": {0: "ant", 1: "ble"}.get(hw, hw), "status": status, "id": sid, "paired": paired}
+
+
+async def read_sensors(link):
+    """Every bike's sensor slots, read-only. Returns {sensorTypes, sensors:[…all slots…]}."""
+    out = {"sensorTypes": None, "sensors": []}
+    lst = await link.get(CMD_SENSOR_LIST)
+    if lst and len(lst) >= 4:
+        n = lst[2]
+        out["sensorTypes"] = {"count": n, "flags": list(lst[3:3 + n])}
+    for bike in BIKES:
+        for slot in range(len(SENSOR_SLOTS)):
+            r = await link.get(CMD_SENSOR_STATUS, bike, slot)
+            if not r or len(r) < 8 or r[2] != bike or r[3] != slot:
+                raise RuntimeError(f"no sensor answer for bike {bike + 1} slot {slot}")
+            out["sensors"].append(_decode_sensor(r))
+    return out
+
+
 # Device settings the app writes as a plain [cmd, 1, value] on the Aero 60 (version-0 encodings;
 # NewSettingUtil.setBacklight/setGps/setAutoPause/setKeyTone/setSound/setUnit), with the values the
 # app's own menus allow (BackLightMenuUtil default menu, GpsMenuUtil default menu).
@@ -375,6 +421,13 @@ async def run(args):
             except Exception as exc:  # noqa: BLE001 - the card still works without the ride list
                 out["ridesError"] = str(exc)
             return out
+        if args.action == "sensors":
+            out = {"ok": True, "address": args.address, **(await read_sensors(link))}
+            if args.out:
+                with open(args.out, "w") as fh:
+                    json.dump(out, fh, indent=2)
+                out["savedTo"] = args.out
+            return out
         if args.action == "set-settings":
             written = await set_settings(link, changes)
             after = await read_all(link)
@@ -393,8 +446,10 @@ async def run(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("action", choices=["scan", "hello", "set-profile", "set-settings", "rides", "pull"])
+    ap.add_argument("action", choices=["scan", "hello", "sensors", "set-profile", "set-settings",
+                                       "rides", "pull"])
     ap.add_argument("--dest")
+    ap.add_argument("--out", help="sensors: also write the result JSON here (e.g. a backup folder)")
     ap.add_argument("--only-stdin", action="store_true")
     ap.add_argument("--address")
     ap.add_argument("--timeout", type=float, default=8.0)

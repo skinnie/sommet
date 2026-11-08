@@ -11,7 +11,7 @@ Column {
     id: root
     spacing: Theme.spacingMedium
 
-    Component.onCompleted: root.load()
+    Component.onCompleted: { root.load(); root.loadBackups() }
 
     property bool loading: true
     property bool saving: false
@@ -24,6 +24,64 @@ Column {
     property var nameById: ({})
     property var gridTable: ({})
     readonly property bool changed: JSON.stringify(root.pages) !== root.original
+
+    // --- Back up / restore the screens (André, 2026-11-08). Saves System/Grid.ini so the screen
+    // setup survives a reset; restore puts a saved one back (the device keeps a Grid.ini.bak too).
+    // Sensors are backed up separately (BLE), so this is deliberately labelled "screens". ---
+    property bool backupBusy: false
+    property string backupMsg: ""
+    property var backups: []
+
+    function apiTo(path, method, body, done) {
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            let r = {}
+            try { r = JSON.parse(xhr.responseText) } catch (e) { r = { ok: false } }
+            done(r)
+        }
+        xhr.open(method, "http://127.0.0.1:8766" + path)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(body ? JSON.stringify(body) : null)
+    }
+
+    function loadBackups() {
+        root.apiTo("/api/bryton/backups", "GET", null, function (r) {
+            root.backups = (r && r.ok && r.backups) ? r.backups : []
+        })
+    }
+
+    // The Bryton's Bluetooth address, if it was ever paired in Sommet: sensors are read over BLE.
+    readonly property string bleAddress: BikeDevices.brytonMemoryObj ? BikeDevices.brytonMemoryObj.address : ""
+
+    function sensorText(list) {
+        const names = { heartRate: qsTr("HR"), speed: qsTr("Speed"), cadence: qsTr("Cadence"),
+                        speedCadence: qsTr("Speed/CAD"), power: qsTr("Power") }
+        return (list || []).map(s => (names[s.type] || s.type) + " " + (s.hw === "ant" ? "ANT+" : "BLE")
+                                    + " " + s.id + (s.bike > 1 ? qsTr(" (bike %1)").arg(s.bike) : "")).join(", ")
+    }
+
+    function backupNow() {
+        root.backupBusy = true; root.backupMsg = ""
+        root.apiTo("/api/bryton/backup", "POST", { address: root.bleAddress }, function (r) {
+            root.backupBusy = false
+            if (!r.ok) { root.backupMsg = r.error || qsTr("Backup failed."); return }
+            const s = (r.manifest && r.manifest.sensors) || null
+            root.backupMsg = s !== null
+                ? qsTr("Backed up ✓ — screens + sensors (%1)").arg(s.length ? root.sensorText(s) : qsTr("none paired"))
+                : qsTr("Screens backed up ✓") + (r.sensorsError ? qsTr(" — sensors skipped: %1").arg(r.sensorsError) : "")
+            root.loadBackups()
+        })
+    }
+
+    function restoreBackup(path) {
+        root.backupBusy = true; root.backupMsg = ""
+        root.apiTo("/api/bryton/restore", "POST", { path: path }, function (r) {
+            root.backupBusy = false
+            root.backupMsg = r.ok ? qsTr("Screens restored ✓ — unplug the Bryton to see them.")
+                                  : (r.error || qsTr("Restore failed."))
+        })
+    }
 
     function api(method, body, done) {
         const xhr = new XMLHttpRequest()
@@ -241,5 +299,97 @@ Column {
             visible: root.error.length > 0
             text: qsTr("Retry")
             onClicked: root.load()
+        }
+
+        // --- Back up & restore the data screens ---
+        Rectangle {
+            width: parent.width
+            height: 1
+            color: Theme.border
+            visible: !root.loading && root.error.length === 0
+        }
+        Column {
+            width: parent.width
+            spacing: Theme.spacingSmall
+            visible: !root.loading && root.error.length === 0
+
+            Text {
+                text: qsTr("Back up & restore")
+                color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+            }
+            Text {
+                width: parent.width; wrapMode: Text.WordWrap
+                text: root.bleAddress.length > 0
+                      ? qsTr("Saves your data screens, and your paired sensors (read over Bluetooth), so you can " +
+                             "put them back after a reset. Restore puts the screens back; the sensor list is kept " +
+                             "as a record to re-pair from.")
+                      : qsTr("Saves your data screens so you can put them back after a reset. Pair the Bryton " +
+                             "over Bluetooth in Sommet to include its paired sensors too.")
+                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+            }
+
+            Row {
+                spacing: Theme.spacingSmall
+                RoundedButton {
+                    text: qsTr("Back up screens now")
+                    busy: root.backupBusy
+                    enabled: !root.backupBusy
+                    onClicked: root.backupNow()
+                }
+            }
+
+            StatusNote {
+                width: parent.width
+                tone: root.backupMsg.indexOf("✓") >= 0 ? "success" : "error"
+                text: root.backupMsg
+            }
+
+            Text {
+                visible: root.backups.length === 0
+                text: qsTr("No screen backups yet.")
+                color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+            }
+
+            Repeater {
+                model: root.backups
+                delegate: Rectangle {
+                    required property var modelData
+                    width: parent.width
+                    height: backupRow.implicitHeight + Theme.spacingSmall * 2
+                    radius: Theme.radiusSmall
+                    color: Theme.cardNested
+                    border.width: 1; border.color: Theme.border
+                    Row {
+                        id: backupRow
+                        anchors.fill: parent
+                        anchors.margins: Theme.spacingSmall
+                        spacing: Theme.spacingSmall
+                        Column {
+                            width: parent.width - restoreBtn.width - Theme.spacingSmall
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                text: (modelData.created || "").replace("T", "  ").split("+")[0]
+                                color: Theme.text; font.pixelSize: Theme.fontSizeCaption
+                            }
+                            Text {
+                                width: parent.width; wrapMode: Text.WordWrap
+                                text: [ (modelData.screenCount ? qsTr("%1 screens").arg(modelData.screenCount) : ""),
+                                        (modelData.sensors !== undefined
+                                            ? qsTr("sensors: %1").arg(modelData.sensors.length ? root.sensorText(modelData.sensors) : qsTr("none paired"))
+                                            : "") ].filter(t => t.length).join(" · ")
+                                color: Theme.mutedText; font.pixelSize: Theme.fontSizeTiny
+                            }
+                        }
+                        RoundedButton {
+                            id: restoreBtn
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Restore")
+                            visible: (modelData.screenCount || 0) > 0   // sensors-only backups are a record
+                            enabled: !root.backupBusy
+                            onClicked: root.restoreBackup(modelData.path)
+                        }
+                    }
+                }
+            }
         }
 }

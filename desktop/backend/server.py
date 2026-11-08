@@ -2499,17 +2499,45 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200 if payload.get("ok") else 502, payload)
             return
         mount = self._bryton_mount()
+        if action == "create":
+            # Sensors live on the device, not the USB drive: read them over Bluetooth when the
+            # caller knows the Bryton's address. Best-effort — a BLE failure doesn't block the
+            # screens backup, it's reported as sensorsError.
+            address = (body or {}).get("address") or ""
+            sensors_file, sensors_error = None, None
+            if address:
+                fd, sensors_file = tempfile.mkstemp(prefix="bryton-sensors-", suffix=".json")
+                os.close(fd)
+                c, o, e = run_tool("bryton_ble.py", ["sensors", "--address", address, "--out", sensors_file])
+                res = self._parse_last_json_line(o) or {}
+                if not res.get("ok"):
+                    sensors_error = res.get("error") or e.strip() or "couldn't read the sensors over Bluetooth"
+                    os.unlink(sensors_file); sensors_file = None
+            if mount:
+                args = ["backup", mount] + (["--sensors", sensors_file] if sensors_file else [])
+            elif sensors_file:
+                args = ["backup-ble", "--address", address, "--sensors", sensors_file]
+            else:
+                if sensors_file: os.unlink(sensors_file)
+                self._send_json(404, {"ok": False, "error": sensors_error or "no Bryton connected"})
+                return
+            code, out, err = run_tool("bryton_backup.py", args)
+            if sensors_file:
+                os.unlink(sensors_file)
+            payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_backup.py failed"}
+            if sensors_error:
+                payload["sensorsError"] = sensors_error
+            self._send_json(200 if payload.get("ok") else 502, payload)
+            return
+        # restore (screens): needs the Bryton plugged in over USB
         if not mount:
             self._send_json(404, {"ok": False, "error": "no Bryton connected"})
             return
-        if action == "create":
-            code, out, err = run_tool("bryton_backup.py", ["backup", mount])
-        else:  # restore
-            backup_dir = (body or {}).get("path") or ""
-            if not backup_dir:
-                self._send_json(400, {"ok": False, "error": "restore needs a backup 'path'"})
-                return
-            code, out, err = run_tool("bryton_backup.py", ["restore", mount, backup_dir])
+        backup_dir = (body or {}).get("path") or ""
+        if not backup_dir:
+            self._send_json(400, {"ok": False, "error": "restore needs a backup 'path'"})
+            return
+        code, out, err = run_tool("bryton_backup.py", ["restore", mount, backup_dir])
         payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip() or "bryton_backup.py failed"}
         self._send_json(200 if payload.get("ok") else 502, payload)
 
