@@ -51,7 +51,7 @@ def main():
     ap.add_argument("--download", metavar="FILE", help="also download the firmware to FILE")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON object instead of human-readable lines - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     args = ap.parse_args()
 
     current_fw = serial = None

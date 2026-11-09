@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Calendar - real request, 2026-08-11 (André, with a reference screenshot: a month grid
 // where each day carries a coloured dot for the activity recorded that day, sized by how

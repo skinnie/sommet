@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Plan a ride/hike with weather. You bring a GPX (drawn in any online planner, Basecamp,
 // Komoot, RideWithGPS...), and Sommet paints it by climb steepness and, once you set a start

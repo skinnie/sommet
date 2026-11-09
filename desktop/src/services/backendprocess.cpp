@@ -23,19 +23,19 @@ bool g_appQuitting = false;
 
 // Where the cloud release build drops the frozen helper, relative to the app executable.
 // Each platform's packaging step (see .github/workflows/desktop-release.yml) puts it here:
-//   Windows:  <appdir>\backend\ambit-backend.exe
-//   Linux:    <appdir>/backend/ambit-backend
-//   macOS:    Sommet.app/Contents/Resources/backend/ambit-backend
+//   Windows:  <appdir>\backend\sommet-backend.exe
+//   Linux:    <appdir>/backend/sommet-backend
+//   macOS:    Sommet.app/Contents/Resources/backend/sommet-backend
 //             (applicationDirPath() is Contents/MacOS, so the helper is one dir up in Resources)
 QString bundledBackendPath()
 {
     const QDir appDir(QCoreApplication::applicationDirPath());
 #if defined(Q_OS_MACOS)
-    return appDir.absoluteFilePath(QStringLiteral("../Resources/backend/ambit-backend"));
+    return appDir.absoluteFilePath(QStringLiteral("../Resources/backend/sommet-backend"));
 #elif defined(Q_OS_WIN)
-    return appDir.absoluteFilePath(QStringLiteral("backend/ambit-backend.exe"));
+    return appDir.absoluteFilePath(QStringLiteral("backend/sommet-backend.exe"));
 #else
-    return appDir.absoluteFilePath(QStringLiteral("backend/ambit-backend"));
+    return appDir.absoluteFilePath(QStringLiteral("backend/sommet-backend"));
 #endif
 }
 

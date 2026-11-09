@@ -23,8 +23,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const STYLE_KEY = 'ambitapp:menuStyle';
-const FAV_KEY = 'ambitapp:menuFavourites';
+const STYLE_KEY = 'sommet:menuStyle';
+const FAV_KEY = 'sommet:menuFavourites';
 
 interface MenuValue {
   style: MenuStyle;

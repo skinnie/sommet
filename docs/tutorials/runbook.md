@@ -31,35 +31,35 @@ reversible.
 
 ```
 cd ~
-git clone https://github.com/vincentchalamon/ambit-app.git
-cd ambit-app
+git clone https://github.com/skinnie/sommet.git
+cd sommet
 ```
 
 If you have an SSH key set up on GitHub you can use
-`git clone git@github.com:vincentchalamon/ambit-app.git` instead. The HTTPS address above
+`git clone git@github.com:skinnie/sommet.git` instead. The HTTPS address above
 needs nothing set up, so prefer it.
 
 Later, to get the latest version, just:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 git pull
 ```
 
 ### 0.2 Get the data files
 
 The repository deliberately contains no captures and no Suunto files. Ask Vincent for the
-`assets/` folder and unpack it so that it sits **inside** `~/ambit-app`, like this:
+`assets/` folder and unpack it so that it sits **inside** `~/sommet`, like this:
 
 ```
-~/ambit-app/assets/ambit3 pcap/route12km        <- and the 8 other captures
-~/ambit-app/assets/descr+XXXXXXXX+2.4.17        <- the SuuntoLink schema file
+~/sommet/assets/ambit3 pcap/route12km        <- and the 8 other captures
+~/sommet/assets/descr+XXXXXXXX+2.4.17        <- the SuuntoLink schema file
 ```
 
 Check it landed in the right place:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 ls assets/ambit3\ pcap/ | head
 ls assets/descr+*
 ```
@@ -102,7 +102,7 @@ Python and its own packages, which cannot affect the rest of the machine.
 Create one inside the repository and install into it:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 python3 -m venv venv
 source venv/bin/activate
 pip install hid
@@ -122,8 +122,8 @@ sudo apt install -y python3-venv
 Then delete the half-made folder and try again:
 
 ```
-rm -rf ~/ambit-app/venv
-cd ~/ambit-app
+rm -rf ~/sommet/venv
+cd ~/sommet
 python3 -m venv venv
 source venv/bin/activate
 pip install hid
@@ -134,7 +134,7 @@ window you activated it in, and nothing else. **Every time you open a new termin
 running any command from this runbook:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 source venv/bin/activate
 ```
 
@@ -151,7 +151,7 @@ imported as `hid` and their APIs differ; the tool used to require one of them an
 the other. It now accepts either. Update and the error goes away:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 git pull
 ```
 
@@ -160,7 +160,7 @@ If it persists after a `git pull`, send us the output of `python3 -c "import hid
 ### 0.4 Check everything works
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 make -C csrc
 python3 tools/selftest.py
 ```
@@ -190,7 +190,7 @@ press a button on the watch.
 Then the real test, which is the tool itself:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 ./tools/write_nav.py settings --redact
 ```
 
@@ -202,7 +202,7 @@ date. Every failure the tool expects is reported as one readable sentence, never
 traceback. Update and try again:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 git pull
 ./tools/write_nav.py settings --redact
 ```
@@ -278,7 +278,7 @@ put them back later.
 You can also see what the old capture thought was on the watch, which may jog your memory:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 ./tools/decode_route.py "assets/ambit3 pcap/ambit3full" | head -40
 ```
 
@@ -349,7 +349,7 @@ Task 4 replaced the whole database, so your own routes went. The backup you took
 back, headers and all:
 
 ```
-cd ~/ambit-app
+cd ~/sommet
 ./tools/write_nav.py nav --save after-task4      # keep the route-write result first
 ./tools/write_nav.py restore before-task4        # rehearsal
 ./tools/write_nav.py restore before-task4 --write

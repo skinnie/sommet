@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Ember - the concept-mockup dashboard, made real (André, 2026-08-25: shared the original
 // "Ember in Sommet" mockup - "this was your mockup mate" - as the target). Compact stat-tile

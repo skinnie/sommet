@@ -1,11 +1,11 @@
 # PyInstaller spec that freezes the desktop watch helper (desktop/backend/server.py) into a
-# single self-contained executable named "ambit-backend" - no Python needed on the user's
+# single self-contained executable named "sommet-backend" - no Python needed on the user's
 # machine. The C++ app starts it automatically (see desktop/src/services/backendprocess.cpp);
 # the cloud release workflow (.github/workflows/desktop-release.yml) builds it per-OS and
 # drops it inside the .app / .zip.
 #
-# Build it:  pyinstaller tools/packaging/ambit_backend.spec --distpath dist/backend
-# Result:    dist/backend/ambit-backend        (ambit-backend.exe on Windows)
+# Build it:  pyinstaller tools/packaging/sommet_backend.spec --distpath dist/backend
+# Result:    dist/backend/sommet-backend        (sommet-backend.exe on Windows)
 #
 # NOTE: this is a first cut for a build we cannot test locally on macOS/Windows; expect the
 # cloud build to surface missing hidden imports / native libs (the `hid` hidapi backend in
@@ -91,7 +91,7 @@ for _pkg in ("garminconnect", "curl_cffi", "ua_generator", "serial", "numpy"):
     try:
         __import__(_pkg)
     except ImportError as _e:
-        raise SystemExit(f"ambit_backend.spec: {_pkg} is not installed - "
+        raise SystemExit(f"sommet_backend.spec: {_pkg} is not installed - "
                          "pip install -r tools/packaging/backend-requirements.txt") from _e
 hiddenimports += _collect_submodules("garminconnect") + _collect_submodules("curl_cffi")
 # garminconnect 0.3 talks to Garmin through curl_cffi (native libcurl-impersonate) and picks a
@@ -172,7 +172,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="ambit-backend",
+    name="sommet-backend",
     debug=False,
     strip=False,
     upx=False,

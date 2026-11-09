@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Weight page (André, 2026-08-24). Body-weight history, sourced from intervals.icu today and
 // swappable to a Garmin Index Scale 2 feed later (WeightService.source). Read-only. The chart

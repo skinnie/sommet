@@ -55,7 +55,7 @@ void BackupService::createBackup(const QUrl &destFolder)
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/backup")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     // A chosen folder (e.g. a cloud-sync folder) writes the backup straight there; empty means
-    // the default ~/AmbitAppBackups. The folder-save doesn't refresh the local list afterwards
+    // the default ~/SommetBackups. The folder-save doesn't refresh the local list afterwards
     // (the files live elsewhere), so remember which case this was.
     const bool toFolder = destFolder.isValid() && !destFolder.isEmpty();
     QJsonObject body;

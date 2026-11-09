@@ -1,7 +1,7 @@
 import QtQuick
 import QtCore
 import QtMultimedia
-import AmbitApp
+import SommetUi
 
 // Live webcam preview that reads a food's barcode for Ember's meal search (André, 2026-09-27:
 // "everybody has a webcam. go"; issue #20). BarcodeScanner (C++, ZXing-C++) decodes the frames;

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Suunto Smart Sensor - its own sidebar page (moved out of Settings 2026-08-14, André:
 // "Create a card/menu for it, after firmware"). The HR belt is a separate BLE peripheral,

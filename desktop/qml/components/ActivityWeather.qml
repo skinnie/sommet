@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // The weather a move was done in - one line under the activity map (André, 2026-09-27, "2 super
 // nice"). Open-Meteo history for the hours the move spans, at its first GPS point, plus how much

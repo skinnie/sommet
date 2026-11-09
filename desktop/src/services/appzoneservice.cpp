@@ -6,8 +6,8 @@
 #include <QProcess>
 
 // Baked in at configure time (CMakeLists.txt), same reasoning as IntervalsService.
-#ifndef AMBITAPP_REPO_ROOT
-#define AMBITAPP_REPO_ROOT ""
+#ifndef SOMMET_REPO_ROOT
+#define SOMMET_REPO_ROOT ""
 #endif
 
 namespace {
@@ -21,11 +21,11 @@ QString bundledBackendPath()
 {
     const QDir appDir(QCoreApplication::applicationDirPath());
 #if defined(Q_OS_MACOS)
-    return appDir.absoluteFilePath(QStringLiteral("../Resources/backend/ambit-backend"));
+    return appDir.absoluteFilePath(QStringLiteral("../Resources/backend/sommet-backend"));
 #elif defined(Q_OS_WIN)
-    return appDir.absoluteFilePath(QStringLiteral("backend/ambit-backend.exe"));
+    return appDir.absoluteFilePath(QStringLiteral("backend/sommet-backend.exe"));
 #else
-    return appDir.absoluteFilePath(QStringLiteral("backend/ambit-backend"));
+    return appDir.absoluteFilePath(QStringLiteral("backend/sommet-backend"));
 #endif
 }
 
@@ -45,7 +45,7 @@ QString AppZoneService::launch()
     }
 
     // Source checkout: run tools/apps_gui.py with the system Python.
-    const QString repoRoot = QDir(QStringLiteral(AMBITAPP_REPO_ROOT)).absolutePath();
+    const QString repoRoot = QDir(QStringLiteral(SOMMET_REPO_ROOT)).absolutePath();
     const QString fallbackScript = repoRoot + QStringLiteral("/tools/apps_gui.py");
 
 #if defined(Q_OS_WIN)

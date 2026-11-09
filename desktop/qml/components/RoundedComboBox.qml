@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
-import AmbitApp
+import SommetUi
 
 // A ComboBox with the app's rounded-corner look (André: "no square boxes! square with rounded
 // corners"). The default QQC2 ComboBox draws a square, platform-styled control AND a square

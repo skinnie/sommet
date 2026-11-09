@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Suunto T6 - EXPERIMENTAL, built blind (André, 2026-08-14: "implement Suunto t6 ... only as
 // experimental"). A different, older Suunto product from the Ambit3/Traverse/Kailash watches

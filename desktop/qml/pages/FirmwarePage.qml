@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Firmware page - the GUI over the standalone flasher (tools/firmware_write.py) and its
 // download step (firmware_check.py), see FIRMWARE_FLASHER_DESIGN.md. Suunto-only. Talks to

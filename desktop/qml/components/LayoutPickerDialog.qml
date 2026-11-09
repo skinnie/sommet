@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Pick a display's layout by looking at it - André's own suggestion, 2026-08-11, following
 // SuuntoLink: "you click the display to select if 3 data fields, 2 data fields, 1 data field,

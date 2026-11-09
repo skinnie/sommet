@@ -15,7 +15,7 @@ import { appendLegacyRoutes, legacyRouteWaypoints, parseRoutes, routeDistanceM, 
 //
 // Restore writes via the native writeLegacyRegion (0x0b16 chunks + 0x0b18 COMMIT tail). The route
 // region's commit tail `extra` is the constant 0xFFFFFA1A - proven content-independent across two
-// captures with different watches/routes (see [[ambit_app_legacy_write_commit_tail]]).
+// captures with different watches/routes (see [[sommet_legacy_write_commit_tail]]).
 
 const ROUTE_REGION = 0x041eb0;
 const HEAD_MAGIC = 0x3008;       // openambit "unknown1, always 12296"

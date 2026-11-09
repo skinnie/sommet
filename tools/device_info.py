@@ -70,7 +70,7 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON object instead of human-readable lines - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     args = ap.parse_args()
 
     link = Link(dry_run=False, verbose=args.verbose and not args.json)

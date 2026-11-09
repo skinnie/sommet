@@ -1,14 +1,14 @@
 import { base64ToBytes } from './Base64';
 
 // Decodes the raw Waypoints/Routes flash regions read off the watch, using
-// the exact byte layouts from ambit-app/tools/ambit_format.py (struct.Struct
+// the exact byte layouts from sommet/tools/ambit_format.py (struct.Struct
 // definitions, cross-checked against device_driver_ambit3_navigation.c's own
 // forward math for the relative-coordinate projection this inverts).
 //
 // Scope note: this does NOT attempt to associate a route with "its"
 // waypoints via the RouteIndexEntry.waypoint_start/count fields — per
 // tools/README.md those are in a different order than the route descriptors
-// once there's more than one route, and even ambit-app's own reference
+// once there's more than one route, and even sommet's own reference
 // decoder (show_navigation in write_nav.py) doesn't resolve that
 // association programmatically; it just prints each waypoint's own
 // route_name string. Routes and waypoints are exported as independent GPX

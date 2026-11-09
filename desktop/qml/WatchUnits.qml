@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // The watch's own unit choices, applied to everything the app displays - real request,
 // 2026-08-11 (André): "read the units system from the watch and make the app match it".

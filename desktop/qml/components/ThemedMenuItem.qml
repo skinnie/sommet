@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // A MenuItem styled to the app's rounded-card language, for ThemedMenu. Theme.text labels
 // (RoundedComboBox learned the hard way that the Basic style pulls an OS-palette grey), a

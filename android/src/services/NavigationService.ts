@@ -252,7 +252,7 @@ export async function removeRouteFromWatch(name: string): Promise<void> {
 // via AsyncStorage (not SQLite - this is one JSON blob, the watch's own last-known full
 // snapshot, not query-able rows) so it survives app restarts, not just navigation. Any real
 // write (uploadRoute, above) clears it immediately, same as before.
-const NAV_CACHE_KEY = 'ambitapp:cachedNavigation';
+const NAV_CACHE_KEY = 'sommet:cachedNavigation';
 
 /** The locally persisted copy of the watch's Routes/Waypoints, if any - for an instant
  * "On the watch" list before (or entirely without) a real watch round trip. */

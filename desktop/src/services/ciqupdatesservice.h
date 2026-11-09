@@ -4,7 +4,7 @@
 // updates, with NO Garmin login. It is a thin C++ front to tools/ciq_updates.py, which reads the
 // device's own Garmin/GarminDevice.xml manifest and queries Garmin's PUBLIC store metadata API
 // (unauthenticated). This only DETECTS updates (installed version < latest); downloading the new
-// .prg is behind Garmin auth and is not implemented. Registered into QML as the AmbitApp singleton
+// .prg is behind Garmin auth and is not implemented. Registered into QML as the SommetUi singleton
 // CiqUpdatesService (QML_ELEMENT/QML_SINGLETON). The check runs asynchronously (one network call
 // per app) so the UI stays responsive.
 

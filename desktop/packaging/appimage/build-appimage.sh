@@ -19,7 +19,7 @@ REPO="$PWD"
 ARCH="x86_64"
 APPDIR="$REPO/dist/appimage/AppDir"
 TOOLS="$REPO/dist/appimage/tools"
-VERSION="$(sed -n 's/^project(AmbitApp VERSION \([0-9.]*\).*/\1/p' desktop/CMakeLists.txt)"
+VERSION="$(sed -n 's/^project(Sommet VERSION \([0-9.]*\).*/\1/p' desktop/CMakeLists.txt)"
 
 # Baseline CPU flags so the result runs on an Intel Q9550 (x86-64-v1: no SSE4.2/POPCNT/AVX).
 export CFLAGS="${CFLAGS:-} -march=x86-64 -mtune=generic"
@@ -32,7 +32,7 @@ cmake --build desktop/build --parallel
 echo "== 2/5  Freeze the Python backend (PyInstaller) =="
 python3 -m pip install --upgrade pip
 python3 -m pip install pyinstaller bleak hid
-pyinstaller tools/packaging/ambit_backend.spec \
+pyinstaller tools/packaging/sommet_backend.spec \
     --distpath dist/backend --workpath build/pyi
 
 echo "== 3/5  Lay out the AppDir =="
@@ -41,8 +41,8 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/bin/backend" "$APPDIR/usr/lib" \
          "$APPDIR/usr/share/applications" \
          "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp desktop/build/Sommet                         "$APPDIR/usr/bin/Sommet"
-cp dist/backend/ambit-backend                   "$APPDIR/usr/bin/backend/ambit-backend"
-chmod +x "$APPDIR/usr/bin/backend/ambit-backend"
+cp dist/backend/sommet-backend                   "$APPDIR/usr/bin/backend/sommet-backend"
+chmod +x "$APPDIR/usr/bin/backend/sommet-backend"
 cp desktop/packaging/appimage/Sommet.desktop    "$APPDIR/usr/share/applications/sommet.desktop"
 cp desktop/packaging/icon.png                   "$APPDIR/usr/share/icons/hicolor/256x256/apps/sommet.png"
 # The frozen `hid` loads libhidapi by name via ctypes (not linked), so linuxdeploy won't pull it

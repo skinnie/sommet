@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
-// AMBITAPP_SPEC.md, "Navigation": one flat, ordered list of destinations, each item's `visible`
+// docs/reference/sommet-spec.md, "Navigation": one flat, ordered list of destinations, each item's `visible`
 // gated by device/flags; selection by string id (never index), so items appearing/disappearing
 // never shift another item's identity.
 //

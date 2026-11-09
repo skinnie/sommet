@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Step 4: real device-hero layout. Step 5 adds real weather. Last Activity made real
 // 2026-08-07 once ActivityService actually worked - see its own card comment below.
@@ -770,7 +770,7 @@ PageFlickable {
     // city by coordinates"). SettingsWriteService.settings is a flat list of every curated
     // setting for whichever device is connected - picks out home_latitude/home_longitude
     // specifically (see AmbitSettingsReader.ts's own field comment / the
-    // ambit_app_kailash_home_location_field memory for why those two exist at all) and
+    // sommet_kailash_home_location_field memory for why those two exist at all) and
     // hands them to KailashService.refreshHomeLocation() for the actual reverse-geocode.
     Connections {
         target: SettingsWriteService
@@ -2270,7 +2270,7 @@ PageFlickable {
                 // Home location - real, 2026-08-09 ("I believe you put a POI icon for home,
                 // name home and identify the city by coordinates"). Same real HomeLocation
                 // setting SettingsPage.qml's own coord editor reads/writes (entry 0x36,
-                // ambit_app_kailash_home_location_field memory) - genuinely different data
+                // sommet_kailash_home_location_field memory) - genuinely different data
                 // from "last known location" above (that's the watch's own last GPS fix,
                 // this is the fixed reference point used for furthestFromHome).
                 Row {

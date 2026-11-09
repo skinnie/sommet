@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Bluetooth scale: set-up and manage (ticket weight-sources/03). The scale is an Etekcity FIT 8S,
 // which only broadcasts its reading while someone stands on it - no pairing, no app, no account.

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real, 2026-08-08 ("This weekend we will full debug the two watches and built the apps" -
 // full-throttle continuation of the same session's CustomModes work). No longer a future
@@ -9,7 +9,7 @@ import AmbitApp
 // session (custom_modes_andre.md) - CustomModesService wraps the same backend endpoints
 // already live-verified over real HTTP. Still gated behind FeatureFlags.sportModes (see
 // this file's own git history) so the flag flip stays the single point of "is this ready
-// to ship," matching AMBITAPP_SPEC.md's own "no redesign required later" design.
+// to ship," matching docs/reference/sommet-spec.md's own "no redesign required later" design.
 //
 // Real, 2026-08-09 ("Full SuuntoLink-style redesign"): restructured from a single
 // expand-in-place card list into a real List<->Detail flow (same pattern

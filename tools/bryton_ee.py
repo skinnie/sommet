@@ -18,7 +18,7 @@ is never later than the end the file itself covers, and both old files are saved
 
 Safety: nothing is written unless the device already holds an AssitOff.alp of this same kind - a
 missing file or anything else is left alone, with the reason. The old files go to
-~/AmbitAppBackups/bryton-ee/<time>/, the new ones are written next to them and renamed into
+~/SommetBackups/bryton-ee/<time>/, the new ones are written next to them and renamed into
 place, then read back and compared.
 
     ./tools/bryton_ee.py status --mount M        what the device holds, and until when
@@ -43,7 +43,7 @@ URL = "https://alp.u-blox.com/current_14d.alp"
 DAYS = 14                                       # what Bryton's tool asks for (current_%1d, 14)
 DEVICE_FILE = pathlib.Path("System") / "AssitOff.alp"
 DATE_FILE = pathlib.Path("System") / "date.txt"
-BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "bryton-ee"
+BACKUP_DIR = pathlib.Path.home() / "SommetBackups" / "bryton-ee"
 ALP_MAGIC = 0x015062B5
 HEADER = 0x54
 GPS_EPOCH = datetime.datetime(1980, 1, 6, tzinfo=datetime.timezone.utc)

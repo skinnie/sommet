@@ -1,4 +1,4 @@
-"""Run INSIDE the frozen backend after PyInstaller: `ambit-backend --tool check_frozen_imports.py`.
+"""Run INSIDE the frozen backend after PyInstaller: `sommet-backend --tool check_frozen_imports.py`.
 
 Imports every third-party package the tools load lazily (backend-requirements.txt), so a release
 can't ship a backend that only fails when the user first touches the feature (Garmin login said

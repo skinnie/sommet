@@ -301,7 +301,7 @@ def split_into_activities(points, sessions):
 
 def to_gpx(points):
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<gpx version="1.1" creator="ambit-app kailash_tracklog.py">',
+             '<gpx version="1.1" creator="Sommet kailash_tracklog.py">',
              "  <trk><name>Kailash TrackLog</name><trkseg>"]
     for p in points:
         t = f"{p['year']:04d}-{p['month']:02d}-{p['day']:02d}T{p['hour']:02d}:{p['minute']:02d}:00Z"
@@ -322,7 +322,7 @@ def main():
                      help="write every real-looking point as one GPX track file")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON activity object instead of human-readable lines - "
-                          "for ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "for desktop/backend/server.py, not meant for a person to read")
     args = ap.parse_args()
 
     sessions = None

@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Workout Calendar - still remembered.
 export type ExpFeature = 'intervals' | 'appZone' | 'smartSensor' | 'coach' | 'workoutCalendar' | 'magene';
 export const EXP_FEATURES: ExpFeature[] = ['intervals', 'appZone', 'smartSensor', 'coach', 'workoutCalendar', 'magene'];
-const storageKey = (f: ExpFeature) => `ambitapp:experimental:${f}`;
+const storageKey = (f: ExpFeature) => `sommet:experimental:${f}`;
 
 type FeatureFlags = Record<ExpFeature, boolean>;
 const ALL_OFF: FeatureFlags = { intervals: false, appZone: false, smartSensor: false, coach: false, workoutCalendar: false, magene: false };
@@ -56,9 +56,9 @@ export function ExperimentalProvider({ children }: { children: React.ReactNode }
       }
       // One-time migration from the old single master toggle: if it was on, enable all three.
       try {
-        if ((await AsyncStorage.getItem('ambitapp:experimental')) === '1') {
+        if ((await AsyncStorage.getItem('sommet:experimental')) === '1') {
           for (const f of EXP_FEATURES) loaded[f] = true;
-          await AsyncStorage.removeItem('ambitapp:experimental');
+          await AsyncStorage.removeItem('sommet:experimental');
           for (const f of EXP_FEATURES) await AsyncStorage.setItem(storageKey(f), '1');
         }
       } catch { /* ignore */ }

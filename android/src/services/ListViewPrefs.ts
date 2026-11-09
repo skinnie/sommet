@@ -16,9 +16,9 @@ export type ViewMode = 'map' | 'list';
 export type ListSurface = 'activities' | 'routes' | 'pois';
 
 const VIEW_KEY: Record<ListSurface, string> = {
-  activities: 'ambitapp:view:activities',
-  routes: 'ambitapp:view:routes',
-  pois: 'ambitapp:view:pois',
+  activities: 'sommet:view:activities',
+  routes: 'sommet:view:routes',
+  pois: 'sommet:view:pois',
 };
 
 /** Persisted view mode for a surface. Default "map" (matches desktop's `activitiesView`
@@ -42,7 +42,7 @@ export async function setViewMode(surface: ListSurface, mode: ViewMode): Promise
 // ─── Configurable Activities columns ──────────────────────────────────────────
 // The ordered metric keys shown as columns in the Activities list (ActivityMetrics). Persisted
 // as CSV, default matches the original fixed columns.
-const COLUMNS_KEY = 'ambitapp:activityColumns';
+const COLUMNS_KEY = 'sommet:activityColumns';
 const DEFAULT_COLUMNS = ['distance', 'duration', 'ascent', 'calories'];
 
 export async function getActivityColumns(): Promise<string[]> {

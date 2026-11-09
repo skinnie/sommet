@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
-import AmbitApp
+import SommetUi
 
 // Step 10. Real backup/restore, built on write_nav.py's own `nav --save` / `restore
 // PREFIX --write` - "the backup that milestone 4 asked for and never had" (that file's own
@@ -718,7 +718,7 @@ PageFlickable {
 
                 // Real request 2026-08-08: "rename to Create backup now, to match Suunto
                 // Backup and restore" - still opens the folder-choose dialog first (a real
-                // difference from Suunto's own fixed ~/AmbitAppBackups location), just
+                // difference from Suunto's own fixed ~/SommetBackups location), just
                 // worded the same way.
                 RoundedButton {
                     text: qsTr("Create backup now")

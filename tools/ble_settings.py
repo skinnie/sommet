@@ -12,7 +12,7 @@ USB `product_id` this project doesn't have over BLE (no USB descriptor to read i
 `product_id_from_model()` below closes that the same way Android's own
 `AmbitBleModule.guessProductId()` already does - dispatch on the handshake's own `model`
 string rather than a USB PID, confirmed for Kailash specifically
-(`ambit_app_kailash_ble_time_sync` memory: "device_info.model=='Hoopoe'", not the guessed
+(`sommet_kailash_ble_time_sync` memory: "device_info.model=='Hoopoe'", not the guessed
 0x1c bucket every other BLE product_id fallback used before that fix).
 """
 

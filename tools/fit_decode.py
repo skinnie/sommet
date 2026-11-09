@@ -244,7 +244,7 @@ def to_gpx(path, name=None):
     # shape (a second parse of a ride file is cheap and keeps decode()'s contract simple).
     pts = _points(path)
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<gpx version="1.1" creator="ambit-app fit_decode.py" '
+             '<gpx version="1.1" creator="Sommet fit_decode.py" '
              'xmlns="http://www.topografix.com/GPX/1/1">', '<trk>',
              f'<name>{name or summary["sport"]}</name>', '<trkseg>']
     for p in pts:

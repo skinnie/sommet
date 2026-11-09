@@ -5,7 +5,7 @@ in as we go, per the project's usual practice of documenting before implementing
 
 ## App architecture: multi-device support (André, 2026-08-07)
 
-AmbitApp's existing feature set is built entirely around the Ambit3's internal flash memory
+Sommet's existing feature set is built entirely around the Ambit3's internal flash memory
 (routes/POIs/orbital data all live in specific flash regions, read/written via the NSP
 protocol). Adding Garmin support does **not** mean extending that model — Garmin devices work
 completely differently (plain files on a FAT filesystem), so Garmin needs its own,

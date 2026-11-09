@@ -13,12 +13,12 @@
 // libambit; this only decides support. BLE marking is unverified (the Suunto app never wrote
 // this flag - it uses EventBoard events) and rides the same path by analogy.
 //
-// See the ambit-app activity-sync-no-delete finding and tools/ble_schema.py.
+// See the sommet activity-sync-no-delete finding and tools/ble_schema.py.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AmbitUsbModule from '../native/AmbitUsbModule';
 
-export const MARK_SYNCED_STORAGE_KEY = 'ambitapp:markSynced';
+export const MARK_SYNCED_STORAGE_KEY = 'sommet:markSynced';
 
 /** Whether the user has opted into the synced write-back. Default false. */
 export async function isMarkSyncedEnabled(): Promise<boolean> {

@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One switch for two or three choices (André, 2026-11-02, desktop picks #14): a track, and the
 // chosen part as a card with bold text. Click, or Tab to it and use the arrow keys. It doesn't

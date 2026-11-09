@@ -1,5 +1,5 @@
 This is a reverse engineering project mainly focusing on the Suunto Ambit 3 watch and its variations.
-A lot of work has been done, so please check ambit-app .md files 
+A lot of work has been done, so please check sommet .md files 
 
 Operation wise it is very similar to it's predecessors Suunto Ambit 2 and Ambit 1.
 Here is the codenames for the watches of that era
@@ -98,6 +98,6 @@ https://github.com/marguslt/openmoves
 
 
 Giving all this, whatever functions/features can be related/ported to the ambit 1,2 or traverse family let me know, so in the future we can contribute to opensportsync and openambit.
-Ambit-app has as first and main aim the bluetooth syncronization of an offline gpx to the watch, but if possible could evolve to support other features by bluetooth. 
+Sommet has as first and main aim the bluetooth syncronization of an offline gpx to the watch, but if possible could evolve to support other features by bluetooth. 
 
 

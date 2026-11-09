@@ -1,7 +1,7 @@
-site_name: ambit-app
+site_name: sommet
 site_description: Suunto Ambit3/Traverse BLE reverse-engineering — GPX routes without Movescount
-repo_url: https://github.com/skinnie/ambit-app
-repo_name: skinnie/ambit-app
+repo_url: https://github.com/skinnie/sommet
+repo_name: skinnie/sommet
 edit_uri: edit/main/docs/
 
 docs_dir: docs
@@ -60,7 +60,7 @@ nav:
       - Supported devices: reference/supported-devices.md
       - Compatibility matrix: reference/compatibility.md
       - Tools format spec: reference/tools-format-spec.md
-      - App spec: reference/ambitapp-spec.md
+      - App spec: reference/sommet-spec.md
       - Changelog (desktop v3): reference/v3-changelog.md
       - Changelog (Android): reference/android-changelog.md
       - Credits: reference/credits.md

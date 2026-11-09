@@ -6,7 +6,7 @@
 #include <QUrl>
 #include <QVariantList>
 
-// Step 10. AMBITAPP_SPEC.md: "Backup & Restore. Initially support Routes, POIs." The real
+// Step 10. docs/reference/sommet-spec.md: "Backup & Restore. Initially support Routes, POIs." The real
 // mechanism is write_nav.py's own `nav --save PREFIX` / `restore PREFIX --write` - documented
 // there as "the backup that milestone 4 asked for and never had," already hardware-tested.
 // This Service is a thin client over backend/server.py's /api/backup(s)/restore, which just
@@ -56,7 +56,7 @@ public:
     bool firmwareActionOk() const { return m_firmwareActionOk; }
 
     Q_INVOKABLE void refresh();
-    // destFolder empty -> default ~/AmbitAppBackups; otherwise the backup is written straight
+    // destFolder empty -> default ~/SommetBackups; otherwise the backup is written straight
     // into that folder (e.g. a cloud-sync folder), André 2026-08-16.
     Q_INVOKABLE void createBackup(const QUrl &destFolder = QUrl());
     // confirm=false rehearses (real dry-run through write_nav.py restore, nothing written).

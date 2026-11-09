@@ -92,7 +92,7 @@ def default_descriptor(serial=None, fw=None):
 CMD_DESCRIPTOR_READ = 0x1104
 _CMD_DEVICE_INFO = 0x0000
 _MAX_CHUNKS = 400          # 26 on an Ambit3, 21 on a Traverse; a bound, not an expectation
-CACHE_DIR = pathlib.Path.home() / "AmbitAppBackups" / "schema"
+CACHE_DIR = pathlib.Path.home() / "SommetBackups" / "schema"
 
 
 def is_complete(blob):

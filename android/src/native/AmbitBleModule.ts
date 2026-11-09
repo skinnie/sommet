@@ -12,7 +12,7 @@ if (!NativeAmbitBle) {
 }
 
 /**
- * EXPERIMENTAL — BLE connect for AmbitApp, v0.3.0. Ambit3/Traverse series,
+ * EXPERIMENTAL — BLE connect for Sommet, v0.3.0. Ambit3/Traverse series,
  * plus the Kailash (added 2026-08-09 — driven internally as an Ambit3 Peak,
  * see AmbitBleModule.kt's COMPATIBLE_NAME_PREFIXES and KAILASH-BLE-FINDINGS.md
  * Finding 8; the Kailash has no Routes/POI feature at all though, see

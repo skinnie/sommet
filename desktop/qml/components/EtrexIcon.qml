@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A real silhouette of a Garmin eTrex 10 handheld GPS unit, redrawn 2026-08-08 against a
 // real reference photo (etrex10.jpg) rather than guessed from memory like the first pass -

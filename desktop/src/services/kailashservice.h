@@ -64,7 +64,7 @@ class KailashService : public QObject
 
     // Real, 2026-08-09 ("I believe you put a POI icon for home, name home and identify the
     // city by coordinates") - the watch's real HomeLocation setting (sml.DeviceSettings.
-    // HomeLocation, see ambit_app_kailash_home_location_field memory) already gets read
+    // HomeLocation, see sommet_kailash_home_location_field memory) already gets read
     // into SettingsWriteService.settings; QML passes those two coordinates in here rather
     // than this class re-fetching settings itself (it has nothing to do with settings
     // otherwise). Reverse-geocoded via the same real Nominatim call WeatherService's own

@@ -1,6 +1,6 @@
 import QtQuick
 
-import AmbitApp
+import SommetUi
 
 // The coloured circular badge Sport Modes shows for each mode, with a per-activity symbol.
 //

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // One-time "sync this bike computer's profile from intervals.icu?" question (André, 2026-09-25).
 // Shown the first time a Bryton / Magene is found with values that differ from intervals.icu.

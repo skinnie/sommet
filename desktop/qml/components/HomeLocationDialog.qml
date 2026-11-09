@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Pick the Kailash's home location by pointing at it - real request, 2026-08-11 (André):
 // "Kailash: remove the home latitude/longitude, call it: home coordinates, open a map (on

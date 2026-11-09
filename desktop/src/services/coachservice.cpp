@@ -43,7 +43,7 @@ CoachService::CoachService(QObject *parent) : QObject(parent)
     // Bundled catalogue, read once via Qt's compiled-in resource system (see CMakeLists.txt
     // RESOURCES) - not a filesystem path, so it works the same in a packaged build as it
     // does here.
-    QFile f(QStringLiteral(":/qt/qml/AmbitApp/assets/coach/systm-sample.json"));
+    QFile f(QStringLiteral(":/qt/qml/SommetUi/assets/coach/systm-sample.json"));
     if (f.open(QIODevice::ReadOnly)) {
         const auto doc = QJsonDocument::fromJson(f.readAll());
         for (const auto &v : doc.array()) {

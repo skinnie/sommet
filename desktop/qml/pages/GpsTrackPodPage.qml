@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // GPS Track Pod - EXPERIMENTAL, built blind (André, 2026-08-12: "just blind, as
 // experimental"). A different, older Suunto product from everything else this app talks to:

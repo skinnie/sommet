@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real request 2026-08-09 ("can you just used rounded squares on sport modes buttons and
 // settings buttons/sliders?"). Plain QtQuick.Controls Button renders with the platform

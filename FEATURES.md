@@ -91,7 +91,7 @@ Kailash — plus Garmin eTrex 10/20/30 handheld GPS units.
 
 ### 💾 Backup
 - Make a **safe backup** of your watch's routes and POIs to a folder, and restore them later.
-- Backups are saved on your computer, by default in a **`AmbitAppBackups` folder in your home
+- Backups are saved on your computer, by default in a **`SommetBackups` folder in your home
   folder**, each one stamped with the date and time. When you back up, the app lets you **choose
   the folder** — point it at a Dropbox / OneDrive / Google Drive folder and your backups get
   copied to the cloud for free, with no login needed.

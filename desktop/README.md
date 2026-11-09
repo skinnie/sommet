@@ -1,12 +1,12 @@
-# AmbitApp V2
+# Sommet (desktop)
 
-The real, polished Qt 6 / QML desktop app described in `../AMBITAPP_SPEC.md`. Started
+The real, polished Qt 6 / QML desktop app described in `../docs/reference/sommet-spec.md`. Started
 2026-08-06 - see that file for the full spec (mission, principles, design language, the
 full implementation step list this README tracks).
 
 ## Status
 
-**All 11 implementation steps from AMBITAPP_SPEC.md are built, and it now compiles for
+**All 11 implementation steps from docs/reference/sommet-spec.md are built, and it now compiles for
 real.** Written 2026-08-06/07 with no Qt6 dev headers available to verify it; **built
 successfully for the first time on 2026-08-07** on André's real Linux Mint machine (Qt
 6.12.0 via `aqtinstall`, `maplibre-native-qt` built from source) - see "Cannot be built in
@@ -61,7 +61,7 @@ against a real connected watch**, not just written and hoped for like most of th
   instead of pretending to work.
 - Activity detail's Charts/Laps/Export/Upload/Notes tabs, Connections (Intervals.icu/
   Runalyze/Strava), and offline MBTiles maps - each explicitly needs its own real piece of
-  work (a charting library choice, real OAuth, etc.) that AMBITAPP_SPEC.md itself mostly
+  work (a charting library choice, real OAuth, etc.) that docs/reference/sommet-spec.md itself mostly
   marks as "Future" anyway.
 
 ## Cannot be built in the sandbox this was originally written in
@@ -76,16 +76,16 @@ exact package list and environment setup.
 ```
 cmake -S . -B build
 cmake --build build
-./build/ambitapp     # or build/ambitapp.exe on Windows, build/AmbitApp.app on macOS
+./build/sommet     # or build/sommet.exe on Windows, build/Sommet.app on macOS
 ```
 
 **The one real bug that first build found, now fixed:** `qt_add_qml_module`'s
-auto-generated type-registration file (`ambitapp_qmltyperegistrations.cpp`) looks up every
+auto-generated type-registration file (`sommet_app_qmltyperegistrations.cpp`) looks up every
 `QML_ELEMENT`-tagged header by bare filename (`__has_include(<deviceservice.h>)`), not by
 its real path under `src/services/` - without that directory on the include path, every one
 of those checks silently fails, the `#include` gets skipped, and every service class fails
 with "was not declared in this scope." Fixed with an explicit
-`target_include_directories(ambitapp PRIVATE src/services)` in `CMakeLists.txt`. Worth
+`target_include_directories(sommet_app PRIVATE src/services)` in `CMakeLists.txt`. Worth
 knowing if a future subdirectory of C++ `QML_ELEMENT` classes gets added and hits the same
 thing.
 
@@ -95,7 +95,7 @@ page was a storm of `Unable to assign [undefined]` - every QML singleton (`Theme
 undefined. Cause: `set_source_files_properties(... QT_QML_SINGLETON_TYPE true)` was called
 *after* `qt_add_qml_module()` - too late, since that macro reads the property while
 generating `qmldir`. Every one of those 9 files got registered as a plain type instead of
-`singleton NAME ...`, confirmed directly in the generated `build/AmbitApp/qmldir`. Fixed by
+`singleton NAME ...`, confirmed directly in the generated `build/SommetUi/qmldir`. Fixed by
 moving the whole `set_source_files_properties` block above `qt_add_qml_module()` in
 `CMakeLists.txt`. Rebuilt: zero QML warnings, confirmed both in `qmldir` and the running
 app's own (now empty) log.
@@ -142,7 +142,7 @@ about AGPS writing itself, which is real and proven.
 
 ## Maps - built, but needs a real extra dependency first
 
-AMBITAPP_SPEC.md asks for MapLibre specifically, not Qt's own built-in "osm" map plugin, so
+docs/reference/sommet-spec.md asks for MapLibre specifically, not Qt's own built-in "osm" map plugin, so
 this needs [maplibre-native-qt](https://github.com/maplibre/maplibre-native-qt) - the real,
 official, actively-maintained MapLibre Qt bindings (confirmed current, last updated the same
 week this was written). **This is a separate native library, not part of Qt6 itself** - build
@@ -166,7 +166,7 @@ will get past `find_package(QMapLibre ...)`.
 
 ## Architecture decision: the backend stays Python
 
-`AMBITAPP_SPEC.md`'s own architecture diagram is:
+`docs/reference/sommet-spec.md`'s own architecture diagram is:
 
 ```
 QML -> ViewModels -> Services -> Current Backend -> libambit

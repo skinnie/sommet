@@ -1,7 +1,7 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
-// AMBITAPP_SPEC.md, "Activities": "Think Apple Photos. Large cards. Small map preview.
+// docs/reference/sommet-spec.md, "Activities": "Think Apple Photos. Large cards. Small map preview.
 // Sport icon. Distance. Duration. Elevation." One card per recorded move.
 Card {
     id: root
@@ -30,7 +30,7 @@ Card {
     Component.onCompleted: _resolveTrack()
     readonly property var _center: ActivityViewModel.trackCenter(_resolvedTrack)
 
-    // Real, 2026-08-09 ("general desktop polish pass") - a real, unmet AMBITAPP_SPEC.md
+    // Real, 2026-08-09 ("general desktop polish pass") - a real, unmet docs/reference/sommet-spec.md
     // requirement ("Subtle animations"): this card had zero feedback that it was even
     // clickable beyond the cursor shape. A small press-scale is a common, well-understood
     // tactile cue, low-risk to add since it's a pure transform, not a layout change.

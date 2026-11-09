@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtCore
-import AmbitApp
+import SommetUi
 
 // GPS settings - the selected bike computer's own settings page, the bike-computer twin of Watch
 // settings (André, 2026-09-25: "when it is detected and selected, put that in a gps settings, like

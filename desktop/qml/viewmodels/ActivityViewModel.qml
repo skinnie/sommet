@@ -1,11 +1,11 @@
 pragma Singleton
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Presentation logic for ActivityService's raw parsed fields - formatting, and picking a
 // map preview center from a track. No sport-specific icon function here: ActivityService's
 // own header comment explains why (sportTypeRaw is a real but never-decoded byte in this
-// project's own tooling) - AmbitApp.Icons.activities is used for every entry instead of
+// project's own tooling) - SommetUi.Icons.activities is used for every entry instead of
 // guessing a mapping that was never verified.
 QtObject {
     function formatDuration(totalSeconds) {

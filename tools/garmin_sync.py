@@ -19,7 +19,7 @@ import json
 import pathlib
 import sys
 
-DEFAULT_TOKENS = pathlib.Path.home() / "AmbitAppBackups" / "garmin_tokens"
+DEFAULT_TOKENS = pathlib.Path.home() / "SommetBackups" / "garmin_tokens"
 
 
 def _login(email, password, mfa, tokens_dir):

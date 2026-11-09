@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // the previous (OS-driven) behavior unchanged.
 
 export type ThemeMode = 'light' | 'dark' | 'system';
-const STORAGE_KEY = 'ambitapp:themeMode';
+const STORAGE_KEY = 'sommet:themeMode';
 
 interface ThemeModeContextValue {
   mode: ThemeMode;

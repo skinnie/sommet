@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 import QtCore
-import AmbitApp
+import SommetUi
 
 // The training plan's home outside the Training Program page: the saved draft, the sport ->
 // watch-mode matching, and the AUTOMATIC sync when a watch is plugged in.

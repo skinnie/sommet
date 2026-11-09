@@ -7,8 +7,8 @@ specifically the "here's what actually goes wrong on a real Mac and how to get p
 ## Building and installing
 
 ```
-rm -rf "/Users/andre/Desktop/ambitapp/tools/packaging/.build-venv"
-cd "/Users/andre/Desktop/ambitapp"
+rm -rf "/Users/andre/Desktop/sommet/tools/packaging/.build-venv"
+cd "/Users/andre/Desktop/sommet"
 ./tools/packaging/build_mac.sh
 ```
 
@@ -24,7 +24,7 @@ cd "/Users/andre/Desktop/ambitapp"
   it via a normal file copy), run `chmod +x tools/packaging/build_mac.sh` first - pasted/
   downloaded files lose the executable bit.
 - Use **absolute paths** for any manual cleanup command (`rm -rf "/Users/andre/Desktop/
-  ambitapp/tools/packaging/.build-venv"`, not a relative one). Relative paths depend on
+  sommet/tools/packaging/.build-venv"`, not a relative one). Relative paths depend on
   which folder Terminal is currently in, and typing the wrong one silently does nothing
   (`rm -rf` on a nonexistent path is not an error) rather than failing loudly - this caused
   real, repeated confusion (looked like the fix wasn't working, when really the delete

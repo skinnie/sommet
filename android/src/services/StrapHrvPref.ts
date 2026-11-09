@@ -10,7 +10,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const STRAP_HRV_STORAGE_KEY = 'ambitapp:strapHrvEnabled';
+export const STRAP_HRV_STORAGE_KEY = 'sommet:strapHrvEnabled';
 
 /** Whether the user has enabled strap morning-HRV. Default false. */
 export async function isStrapHrvEnabled(): Promise<boolean> {

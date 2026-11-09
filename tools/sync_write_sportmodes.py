@@ -15,7 +15,7 @@ tool:
   3. DRY-RUN BY DEFAULT; --write emits. --json prints one machine-readable result line.
 
     ./tools/sync_write_sportmodes.py --apps A.bin --custom-modes C.bin \
-        --backup-dir ~/AmbitAppBackups --write --json
+        --backup-dir ~/SommetBackups --write --json
 """
 import argparse
 import json
@@ -37,7 +37,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--apps", required=True, help="source watch's Apps region .bin")
     ap.add_argument("--custom-modes", required=True, help="source watch's CustomModes .bin")
-    ap.add_argument("--backup-dir", default=str(Path.home() / "AmbitAppBackups"))
+    ap.add_argument("--backup-dir", default=str(Path.home() / "SommetBackups"))
     ap.add_argument("--write", action="store_true", help="actually emit; else dry-run")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()

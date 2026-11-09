@@ -534,7 +534,7 @@ def route_to_gpx(flash, index):
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<gpx version="1.1" creator="ambit-app write_nav.py"'
+        '<gpx version="1.1" creator="Sommet write_nav.py"'
         ' xmlns="http://www.topografix.com/GPX/1/1">',
         # Real bug, found live 2026-08-11 building existing_routes_as_gpx(): this
         # function's own output couldn't round-trip back through read_gpx() (used by
@@ -1231,12 +1231,12 @@ def set_poi_records(link, records):
         raise RuntimeError(f"the watch did not keep the {len(records)} POIs written back")
 
 
-DEFAULT_BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups"   # server.py's BACKUP_DIR
+DEFAULT_BACKUP_DIR = pathlib.Path.home() / "SommetBackups"   # server.py's BACKUP_DIR
 
 
 def pre_write_backup_path(prefix, link=None, kind="custom_modes", ext="bin"):
     """Where a tool saves what it is about to overwrite on the watch:
-    ~/AmbitAppBackups/<kind>/<prefix>_<serial>_<time>.<ext>, the folder is created. Never next
+    ~/SommetBackups/<kind>/<prefix>_<serial>_<time>.<ext>, the folder is created. Never next
     to the code: in the packaged app that folder is temporary or read-only, and a relative path
     lands wherever the app was started from (desktop audit 2026-10-29). The serial is the
     watch that opened, else AMBIT_SERIAL (the backend pins every call to one watch)."""
@@ -1331,7 +1331,7 @@ def run_delpoi(args):
     else:
         print("dry-run mode: not a byte will be emitted")
     result = remove_pois(link, [(args.name, args.lat, args.lon)],
-                         args.backup_dir or pathlib.Path.home() / "AmbitAppBackups")
+                         args.backup_dir or pathlib.Path.home() / "SommetBackups")
     print(json.dumps(result))
     return 0 if result.get("ok") else 1
 
@@ -1885,7 +1885,7 @@ def main():
                              "Default Waypoint (17), what the watch itself uses.")
     parser.add_argument("--backup-dir", metavar="DIR", default=None,
                         help="delpoi: where the copy of the POI list goes (default "
-                             "~/AmbitAppBackups; saved as POIs/<serial>/POIs_pre_<time>.bin)")
+                             "~/SommetBackups; saved as POIs/<serial>/POIs_pre_<time>.bin)")
     parser.add_argument("--write", action="store_true",
                         help="actually emits; without this option nothing is sent")
     parser.add_argument("--meta", metavar="CAPTURE",

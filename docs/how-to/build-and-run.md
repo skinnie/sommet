@@ -2,7 +2,7 @@
 
 Kept in sync with the "Build / run / test quick reference" section of `CLAUDE.md` (repo root).
 
-- **Desktop**: `./build-desktop.sh` → binary at `desktop/build/ambitapp`; run with `./run-desktop.sh`
+- **Desktop**: `./build-desktop.sh` → binary at `desktop/build/sommet`; run with `./run-desktop.sh`
   (it also starts the Python backend on `:8766`).
 - **Android**: `./build-android.sh` (debug) or `./build-android.sh release` (standalone, bundle baked in).
   - Android is React Native: a **debug** APK needs Metro (`cd android && npm start` + `adb reverse tcp:8081 tcp:8081`);
@@ -26,7 +26,7 @@ mkdocs build --strict   # verifies nav/links, fails on any warning
 A build that passes can still fail on a user's machine (a library missing from the package, or one
 that needs a newer CPU). Run the packaged app on the oldest machine you have:
 
-    SMOKE_BACKEND=<path to dist/ambit-backend> tools/release_smoke.sh <ssh-host>   # before tagging
+    SMOKE_BACKEND=<path to dist/sommet-backend> tools/release_smoke.sh <ssh-host>   # before tagging
     tools/release_smoke.sh <ssh-host> 0.2.66                                       # after publishing
 
 It downloads the AppImage on that machine, runs its backend on a spare port with a throwaway home

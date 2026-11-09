@@ -82,7 +82,7 @@ def walk_candidates(data):
 
 def to_gpx(entries):
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<gpx version="1.1" creator="ambit-app kailash_eventlog.py (unconfirmed format)">']
+             '<gpx version="1.1" creator="Sommet kailash_eventlog.py (unconfirmed format)">']
     for offset, lat, lon, name, extra in entries:
         esc_name = (name or f"event@0x{offset:x}").replace("&", "&amp;").replace("<", "&lt;")
         lines.append(f'  <wpt lat="{lat/1e7:.7f}" lon="{lon/1e7:.7f}"><name>{esc_name}</name>'

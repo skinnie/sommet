@@ -123,7 +123,7 @@ def build_training_item(activity_id, duration_minutes, intensity, name,
         off 39 u8   padding (0)
 
     UPDATED 2026-08-22: charset changed iso-8859-15 -> utf-8. This struct itself was never
-    verified against a real capture (see the ambit-app project memory's TrainingProgram
+    verified against a real capture (see the sommet project memory's TrainingProgram
     finding - decompiled-code-derived, medium confidence), so "ISO-8859" here was always an
     assumption, not a confirmed byte value the way custom_modes.py's was. Changed anyway for
     consistency with what IS now confirmed on real hardware: every other watch NAME field in

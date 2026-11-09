@@ -17,12 +17,14 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import pathlib
+
 import ambit_format as F
 import geo_util
 import route_library
 import track_color
 
-BOUCLE = "/media/skinnie/05a64eef-3fdf-450f-aaf7-09748f80297c/ambit-app/assets/Boucle+5km.gpx"
+BOUCLE = str(pathlib.Path(__file__).resolve().parent.parent / "assets" / "Boucle+5km.gpx")
 
 
 def bumpy_gpx(n=200):

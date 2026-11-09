@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import AmbitApp
+import SommetUi
 
 // Copy one watch's setup onto another. Only one watch connects at a time over the cable, so
 // the flow is guided and sequential (André, 2026-09-02, UX fix #3):

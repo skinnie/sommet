@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Step 3: the real navigation shell. Home/Activities/Routes/POIs/Backup/Settings pages are
 // still placeholders (their own steps fill them in) - this is about the shell itself:

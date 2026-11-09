@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtCore
-import AmbitApp
+import SommetUi
 import "../ActivityViewLogic.js" as AVL
 
 // One activity (André, 2026-09-27 redesign - mockup artifact 8KKpqaVBCdPUvDUAhzya8h, plan

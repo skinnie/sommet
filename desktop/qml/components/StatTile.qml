@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One number in a tile (André, 2026-11-02, desktop picks #12): a label, the value with its
 // unit, and a short caption under it, such as "▲ 4 vs 7-day average". `badge` adds a small tag

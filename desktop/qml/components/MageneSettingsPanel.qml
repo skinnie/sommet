@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Magene C406 device settings panel on the GPS settings page (André, 2026-09-25) - the OneLap app's "bike computer function
 // settings" screen: backlight, auto power-off, auto pause, tones, start reminder, estimated

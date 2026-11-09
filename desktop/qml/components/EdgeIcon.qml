@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A silhouette of a Garmin Edge (André, 2026-09-04, reference photo; geometry tuned against an
 // offscreen render). Portrait body, a screen with even margins in the upper part, three front

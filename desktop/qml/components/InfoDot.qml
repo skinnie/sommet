@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A small "(i)" that explains on hover, and stays open when clicked (touch screens), until
 // clicked again. Drawn, not a glyph: the app's icon font has no info glyph. One for the whole

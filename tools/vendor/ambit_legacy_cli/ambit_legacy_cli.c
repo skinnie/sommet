@@ -16,7 +16,7 @@
  * this project: add, read back, verify, revert).
  * Ambit 1/2 personal-SETTINGS write (weight/HR/etc, not waypoints) is real too (SuuntoLink
  * does it) but its wire format has never been captured in this project - see the
- * ambit-app-ambit12-settings-write memory.
+ * sommet-ambit12-settings-write memory.
  *
  * `sport-mode-write-presets` added 2026-08-23 (André: "do like them", after confirming
  * openambit2's own "Sport mode editor: full read/write to watch" claim is marketing - its
@@ -104,7 +104,7 @@ static int write_gpx(const char *path, ambit_log_entry_t *entry, const char *nam
     FILE *f = fopen(path, "w");
     if (!f) return -1;
     fprintf(f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    fprintf(f, "<gpx version=\"1.1\" creator=\"ambit-app legacy_cli\" "
+    fprintf(f, "<gpx version=\"1.1\" creator=\"sommet legacy_cli\" "
                "xmlns=\"http://www.topografix.com/GPX/1/1\">\n");
     fprintf(f, "  <trk><name>%s</name><trkseg>\n", name);
     int points = 0;
@@ -850,7 +850,7 @@ static const preset_t PRESETS[] = {
  * to every watch with no per-model check (their own gap, not something we should inherit).
  * Ground truth is SuuntoLink's own real code: `getMaxSportModes(Variant.AMBIT/AMBIT2/AMBIT2_R/
  * AMBIT2_S)` all return 10 (ran ambit/sport_mode.js live via node, electron stubbed, same
- * method this project already uses for other per-model facts - see ambit-app-hardware-fleet-
+ * method this project already uses for other per-model facts - see sommet-hardware-fleet-
  * check memory). getMaxDisplays() for the same variants returns 8 - the number André actually
  * remembered ("8 screens max" is real, just the wrong axis: it caps displays PER mode, not the
  * count of modes; moot here anyway since every preset carries 0 displays). So this writes only
@@ -1257,7 +1257,7 @@ static int cmd_settings_write(const char *key, long value, int dry_run) {
 
 /* Real flash-region WRITE: chunked 0x0b16 data_write + the 0x0b18 commit tail that makes it
  * stick (openambit omits the tail and its writes silently revert after reconnect - see the
- * ambit-app-legacy-write-commit-tail note). Used to restore the Ambit1/2 route region
+ * sommet-legacy-write-commit-tail note). Used to restore the Ambit1/2 route region
  * (0x041EB0, tail extra 0xFFFFFA1A) and, in principle, any legacy flash region.
  *
  * The chunk size is the DEVICE'S OWN driver_param (Ambit2 1024, Ambit1 512 - device_support.c):

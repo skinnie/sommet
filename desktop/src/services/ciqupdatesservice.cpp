@@ -7,8 +7,8 @@
 #include <QSettings>
 
 // Repo root is baked in at configure time (see desktop/CMakeLists.txt); "" is only a dev fallback.
-#ifndef AMBITAPP_REPO_ROOT
-#define AMBITAPP_REPO_ROOT ""
+#ifndef SOMMET_REPO_ROOT
+#define SOMMET_REPO_ROOT ""
 #endif
 
 static QString defaultToolPath()
@@ -17,7 +17,7 @@ static QString defaultToolPath()
     const QString override = s.value(QStringLiteral("edge/ciqToolPath")).toString();
     if (!override.isEmpty())
         return override;
-    const QString repoRoot = QDir(QStringLiteral(AMBITAPP_REPO_ROOT)).absolutePath();
+    const QString repoRoot = QDir(QStringLiteral(SOMMET_REPO_ROOT)).absolutePath();
     return repoRoot + QStringLiteral("/tools/ciq_updates.py");
 }
 

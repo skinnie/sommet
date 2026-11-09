@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
-import AmbitApp
+import SommetUi
 
 // Step 9. On-watch POIs shown as a real per-POI list with a thumbnail map and Export, since
 // 2026-08-08 (see the "On the watch" Card below for the fuller story). Add is a REAL watch
@@ -558,7 +558,7 @@ PageFlickable {
         // Real, 2026-08-22: Ambit1/2 waypoints via /api/legacy/settings' own waypoints[]
         // (tools/legacy_link.py -> openambit's libambit_navigation_read). Read-only: write
         // is openambit's libambit_navigation_write, real but never hardware-tested here for
-        // this family - see the ambit-app-hardware-fleet-check memory.
+        // this family - see the sommet-hardware-fleet-check memory.
         Card {
             id: legacyPoiCard
             width: parent.width

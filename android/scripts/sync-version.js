@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * One version for every platform: the HIGHER of android/package.json "version" and the desktop's
- * project(AmbitApp VERSION ...) in desktop/CMakeLists.txt.
+ * project(Sommet VERSION ...) in desktop/CMakeLists.txt.
  *
  * It used to take package.json alone, which silently set the desktop BACK whenever the desktop
  * had been bumped on its own (2026-10-03: 0.2.45 -> 0.2.42, on a plain `npm install`, since this
@@ -21,7 +21,7 @@
  *   android/src/config/version.ts        APP_VERSION            (the in-app "About" string, JS)
  *   android/android/app/build.gradle     versionName + versionCode (code = major*10000+minor*100+patch)
  *   android/ios/.../project.pbxproj       MARKETING_VERSION + CURRENT_PROJECT_VERSION
- *   desktop/CMakeLists.txt                project(AmbitApp VERSION ...)
+ *   desktop/CMakeLists.txt                project(Sommet VERSION ...)
  *   android/package.json (+ lockfile)     "version", when the desktop was ahead
  *
  * Android build.gradle and desktop CMake could self-read package.json at build time, but a single
@@ -42,7 +42,7 @@ if (!SEMVER.test(PKG_V)) { console.error(`sync-version: package.json version "${
 // The desktop's own version, when the file is there (it is not in an Android-only checkout).
 let DESKTOP_V = '';
 try {
-  const cm = /project\(AmbitApp VERSION (\d+\.\d+\.\d+)/.exec(
+  const cm = /project\(Sommet VERSION (\d+\.\d+\.\d+)/.exec(
     fs.readFileSync(path.join(ROOT, 'desktop', 'CMakeLists.txt'), 'utf8'));
   if (cm) DESKTOP_V = cm[1];
 } catch { /* no desktop tree */ }
@@ -83,7 +83,7 @@ patch('android/ios/Sommet.xcodeproj/project.pbxproj', [
   [/CURRENT_PROJECT_VERSION = [^;]+;/g, `CURRENT_PROJECT_VERSION = ${CODE};`],
 ]);
 patch('desktop/CMakeLists.txt', [
-  [/project\(AmbitApp VERSION [0-9.]+/, `project(AmbitApp VERSION ${V}`],
+  [/project\(Sommet VERSION [0-9.]+/, `project(Sommet VERSION ${V}`],
 ]);
 
 console.log(`sync-version: ${V} (build ${CODE}) — ${changed} file(s) updated`);

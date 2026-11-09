@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Watch settings - its own sidebar page (moved out of Settings 2026-08-14, André: "create a
 // new menu/window for it, after sports modes"). These are the settings written to the watch
@@ -229,7 +229,7 @@ PageFlickable {
                         text: qsTr("This watch can also use GLONASS satellites, and has its " +
                                     "own storage for their orbital data. Suunto's software " +
                                     "never sends it to this model, so those satellites start " +
-                                    "cold every time. AmbitApp sends both GPS and GLONASS " +
+                                    "cold every time. Sommet sends both GPS and GLONASS " +
                                     "orbital data, which can speed up getting a fix. Tick " +
                                     "this to send GPS only.")
                     }

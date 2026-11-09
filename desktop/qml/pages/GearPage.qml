@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import AmbitApp
+import SommetUi
 
 // Gear tracker (v3, desktop) — parity with Android. Imports bikes/shoes + components + service
 // reminders from intervals.icu (GearService) and lets you edit them (write-through: each edit

@@ -20,7 +20,7 @@ Started read-only; two real writes added same day (2026-08-22): GPS orbit data
 libambit_navigation_write, exercised here for the first time in this project - add, read
 back, confirm present, same discipline as every other real write in this project). Personal
 SETTINGS write (weight/HR/etc, not waypoints) is real too (SuuntoLink does it) but its wire
-format has never been captured in this project (see the ambit-app-ambit12-settings-write
+format has never been captured in this project (see the sommet-ambit12-settings-write
 memory), so there's nothing safe to send for THAT specific piece yet.
 
     ./tools/legacy_link.py device-info
@@ -47,7 +47,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 def _binary_path():
     """The compiled ambit_legacy_cli binary - dev tree path, or PyInstaller's frozen
     _MEIPASS/tools/vendor/... (bundled the same way tools/ itself is - see
-    desktop/backend/server.py's own FROZEN branch, tools/packaging/ambit_backend.spec)."""
+    desktop/backend/server.py's own FROZEN branch, tools/packaging/sommet_backend.spec)."""
     candidates = [
         HERE / "vendor" / "ambit_legacy_cli" / "ambit_legacy_cli",
         HERE / "vendor" / "ambit_legacy_cli" / "ambit_legacy_cli.exe",
@@ -376,7 +376,7 @@ def route_send(gpx_paths, write=False, backup_dir=None):
     `gpx_paths` are route GPX files (<rtept>, waypoints typed "Waypoint" - what route_pins.py
     --target ambit / --plain writes). Without `write` nothing is sent: the result says what
     would be. Before a write the current route region and waypoint list are saved to
-    `backup_dir` (~/AmbitAppBackups/legacy_nav by default) so they can be put back."""
+    `backup_dir` (~/SommetBackups/legacy_nav by default) so they can be put back."""
     import time                                               # noqa: PLC0415
     import legacy_route                                       # noqa: PLC0415
     from build_route import route_from_gpx                    # noqa: PLC0415

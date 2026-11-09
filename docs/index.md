@@ -1,4 +1,4 @@
-# ambit-app
+# sommet
 
 Interoperability reverse engineering, to send GPX routes to a **Suunto Ambit3** — and now
 Traverse and Kailash too — without Movescount, which is dead, without an account and without

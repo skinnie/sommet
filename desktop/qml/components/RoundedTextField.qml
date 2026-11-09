@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real request 2026-08-09 ("for everything possible, never use true square stuff, always
 // rounded corners") - QtQuick.Controls Basic style's TextField background has no radius at

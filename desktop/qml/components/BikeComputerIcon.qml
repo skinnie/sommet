@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Picks the right head-unit silhouette for the connected device (André, 2026-09-04: "when
 // hammerhead is connected we see the hammerhead icon, when any garmin edge is connected we see

@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Persists the Plan page's loaded route + weather across navigation. The nav shell loads pages
 // through a Loader (Main.qml), which DESTROYS a page when you switch away and rebuilds it fresh

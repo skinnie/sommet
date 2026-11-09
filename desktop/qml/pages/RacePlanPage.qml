@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
-import AmbitApp
+import SommetUi
 
 // Race planner (2026-09-18): import a GPX, set the start + controls (each with a BRM time limit),
 // optionally give your typical rolling-road speed, and get a control-by-control timeline with

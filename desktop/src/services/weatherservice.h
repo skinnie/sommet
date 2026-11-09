@@ -6,10 +6,10 @@
 #include <QTimer>
 #include <QVariantList>
 
-// AMBITAPP_SPEC.md, "Weather": Open-Meteo (no API key, simple REST, good European
+// docs/reference/sommet-spec.md, "Weather": Open-Meteo (no API key, simple REST, good European
 // forecasts). Calls Open-Meteo directly - unlike DeviceService, this has nothing to do with
 // the watch or the Python backend, so there's no reason to route it through
-// ambitapp-v2/backend/server.py.
+// desktop/backend/server.py.
 //
 // Refreshes itself on a 10-minute timer in the background (real request, 2026-08-07) so the
 // card stays current without the user having to reopen the app. "If weather retrieval fails"

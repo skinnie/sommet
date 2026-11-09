@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Choose which watch Testing mode pretends to be - André, 2026-08-11: "testing mode, opens a
 // window and we can choose device, based on all the characteristics we already know...always

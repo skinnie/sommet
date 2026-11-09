@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 import "../ActivityViewLogic.js" as AVL
 import "../ActivityChartDraw.js" as ACD
 

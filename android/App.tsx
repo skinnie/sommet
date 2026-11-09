@@ -50,6 +50,7 @@ import type { GarminConnectResult } from './src/native/GarminModule';
 import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
 import { t, dateLocale, fmtDate } from './src/i18n';
+import { migrateOldStorageKeys } from './src/services/StorageKeyMigration';
 
 // ─── Types de navigation ──────────────────────────────────────────────────────
 
@@ -147,6 +148,10 @@ async function processOAuthUrl(url: string | null) {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Settings saved under the app's old name move to the new keys before anything reads them.
+  const [keysReady, setKeysReady] = useState(false);
+  useEffect(() => { migrateOldStorageKeys().finally(() => setKeysReady(true)); }, []);
+  if (!keysReady) return null;
   return (
     <ThemeModeProvider>
       <ExperimentalProvider>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AmbitApp V2's Python backend bridge - wraps this repo's existing, hardware-proven CLI
+"""Sommet (desktop)'s Python backend bridge - wraps this repo's existing, hardware-proven CLI
 tools (`tools/write_nav.py`, `tools/exercise_log.py`, `tools/sgee.py`) behind a local
 HTTP/JSON API, so the Qt/QML app's C++ Services layer never needs to know Python exists.
 See `../README.md`'s "Architecture decision" section for why the backend stays Python
@@ -53,7 +53,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 import ble_bridge
 
 # When frozen by PyInstaller (the packaged desktop download - see
-# tools/packaging/ambit_backend.spec), __file__ lives inside a temporary extraction dir, not
+# tools/packaging/sommet_backend.spec), __file__ lives inside a temporary extraction dir, not
 # the repo, so the repo-relative paths below don't exist. The spec bundles tools/, the app
 # catalog and the demo data as data files under sys._MEIPASS instead; use those when frozen.
 FROZEN = getattr(sys, "frozen", False)
@@ -75,14 +75,20 @@ PYTHON = sys.executable
 # real, hardware-tested backup/restore mechanism (see that file's own run_nav()/
 # build_restore() - "the backup that milestone 4 asked for and never had") - this just picks
 # a real place on disk for PREFIX to live, one directory per timestamped backup.
-BACKUP_DIR = Path.home() / "AmbitAppBackups"
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.append(str(TOOLS_DIR))          # appended, so no tool shadows a library
+import sommet_paths  # noqa: E402
+
+# Up to 0.2.66 the app's folders carried its old name (AmbitApp): move them once, here, before
+# anything below reads them. The desktop app does the same before it starts this backend.
+BACKUP_DIR = sommet_paths.backups_dir()
 FIRMWARE_DIR = BACKUP_DIR / "firmware"
 
 # Training Program (2026-08-12, "movescount era called them training program") - saved plans
 # are user documents (authored offline, kept across sessions, re-installable as dates roll
 # by), so they live in the user's home like backups do, not inside the repo. One JSON file
 # per plan, the same schema tools/training_plan.py documents.
-PLANS_DIR = Path.home() / "AmbitAppPlans"
+PLANS_DIR = Path.home() / "SommetPlans"
 
 # Planned-move fallback: Movescount ActivityID by DEFAULT sport-mode name, for when the watch
 # isn't connected to read its own CustomModes (the authoritative source - user-renamed modes
@@ -127,23 +133,23 @@ EMBER_COFFEE_IDS = {"black_coffee", "espresso", "americano", "coffee_milk", "lat
 # that cloud for a local ~/.openambit/sport_modes.json. Same architecture here, same "a real
 # place in the user's home" reasoning as PLANS_DIR above: this file IS the user's sport modes,
 # editable offline, pushed to the watch on demand.
-LEGACY_SPORT_MODES_FILE = Path.home() / "AmbitAppPlans" / "legacy_sport_modes.json"
+LEGACY_SPORT_MODES_FILE = Path.home() / "SommetPlans" / "legacy_sport_modes.json"
 
-GPSTRACKPOD_DIR = Path.home() / "AmbitAppBackups" / "gpstrackpod"
+GPSTRACKPOD_DIR = Path.home() / "SommetBackups" / "gpstrackpod"
 
 # Suunto T6 (2026-08-14, "implement Suunto t6 ... only as experimental") - exported heart-rate
 # logs (FIT + a JSON sample sidecar for the merge) land here; merged GPS+HR activities land in
 # the sibling folder. Same built-blind, no-real-device-to-test-against reasoning as the GPS
 # Track Pod above - see tools/suunto_t6.py's own module docstring.
-SUUNTOT6_DIR = Path.home() / "AmbitAppBackups" / "suuntot6"
-SUUNTOX6HR_DIR = Path.home() / "AmbitAppBackups" / "suuntox6hr"
-LEGACYMERGE_DIR = Path.home() / "AmbitAppBackups" / "legacy-merged"
+SUUNTOT6_DIR = Path.home() / "SommetBackups" / "suuntot6"
+SUUNTOX6HR_DIR = Path.home() / "SommetBackups" / "suuntox6hr"
+LEGACYMERGE_DIR = Path.home() / "SommetBackups" / "legacy-merged"
 # Persistent on-disk cache of decoded legacy route tracks (André 2026-08-29). The full route
 # read is ~79s on macOS (data volume: ~13.5KB of track points at the ~90ms/report floor), and
 # the in-memory read cache dies on reconnect/app restart. Keyed by the route region's head
 # checksum (crc16 over info+points -> changes on any route edit), so a hit is correct; only a
 # miss pays the full read. Survives restart AND replug, keeps full-track map previews.
-ROUTE_CACHE_DIR = Path.home() / "AmbitAppBackups" / "routecache"
+ROUTE_CACHE_DIR = Path.home() / "SommetBackups" / "routecache"
 
 # Live sleep-recording (Polar PMD PPI) state: the detached tools/polar_sleep.py process + its
 # output file, so record/status and record/stop can find it. None = no recording in flight.
@@ -177,7 +183,7 @@ GLONASS_ORBIT_URL = "https://devices.suunto-operations.com/devices/glonassorbit/
 # actually guarantee - a QML XMLHttpRequest per keystroke could not. The UI searches on Enter,
 # not per keystroke, for the same reason.
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_USER_AGENT = "AmbitApp/1.0 (open-source Suunto Ambit companion; place search)"
+NOMINATIM_USER_AGENT = "Sommet/1.0 (open-source Suunto Ambit companion; place search)"
 _NOMINATIM_LOCK = threading.Lock()
 _NOMINATIM_LAST = [0.0]
 
@@ -368,7 +374,7 @@ def demo_custom_modes_path():
     import tempfile
     if DEMO["custommodes"] is None:
         src = DEMO_DIR / "custommodes.bin"
-        fd, path = tempfile.mkstemp(prefix="ambitapp-demo-", suffix=".bin")
+        fd, path = tempfile.mkstemp(prefix="sommet-demo-", suffix=".bin")
         with os.fdopen(fd, "wb") as out:
             out.write(src.read_bytes())
         DEMO["custommodes"] = path
@@ -966,7 +972,7 @@ def selected_is_legacy():
 
 
 # Kailash (Hoopoe). Its product id is the one this project had to add a fallback bucket for
-# ([[ambit_app_kailash_usb_crash_root_cause]]); named here so backup can dispatch on it the
+# ([[sommet_kailash_usb_crash_root_cause]]); named here so backup can dispatch on it the
 # same way selected_is_legacy() does for Ambit1/2.
 KAILASH_PRODUCT_IDS = {0x002A}
 
@@ -2422,7 +2428,7 @@ class Handler(BaseHTTPRequestHandler):
     ROUTE_LIBRARY_DIR = str(BACKUP_DIR / "Routes")
 
     def _handle_library(self, action, body):
-        """The Routes page's saved-route library (tools/route_library.py, ~/AmbitAppBackups/Routes).
+        """The Routes page's saved-route library (tools/route_library.py, ~/SommetBackups/Routes).
         GET /api/library -> {routes}; POST /api/library/save {name, gpx} -> {id, existed} (same GPX
         twice = one entry); /get {id} -> {name, gpx}; /rename {id, name}; /delete {id}."""
         d = self.ROUTE_LIBRARY_DIR
@@ -2719,7 +2725,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "no tiles"})
                 return
             args += tiles
-        out_dir = Path.home() / "AmbitAppBackups" / "wahoo"
+        out_dir = Path.home() / "SommetBackups" / "wahoo"
         out_dir.mkdir(parents=True, exist_ok=True)
         progress, log = out_dir / "maps-job.json", out_dir / "maps-job.log"
         for f in (progress, log):
@@ -3590,7 +3596,7 @@ class Handler(BaseHTTPRequestHandler):
         Deliberately a separate endpoint from /api/settings, not a branch inside it: that
         endpoint's schema (settings_write.py's Ambit3/Kailash field tables) doesn't apply to
         this much smaller, differently-shaped struct, and this family has no write path yet
-        either (see the ambit-app-ambit12-settings-write memory) - hijacking the existing
+        either (see the sommet-ambit12-settings-write memory) - hijacking the existing
         read+write Settings page would invite a write UI this protocol can't back up.
         Real, hardware-tested 2026-08-22 against André's Ambit1 (weight/birthyear/HR/etc
         all read correctly; 0 waypoints/routes currently on that watch)."""
@@ -4424,7 +4430,7 @@ class Handler(BaseHTTPRequestHandler):
         if selected_is_legacy():
             # Real write, 2026-08-22: openambit's libambit_navigation_write, preserves
             # existing waypoints (read-append-write, same discipline as write_nav.py's own
-            # addpoi above) - see tools/legacy_link.py and the ambit-app-hardware-fleet-check
+            # addpoi above) - see tools/legacy_link.py and the sommet-hardware-fleet-check
             # memory for the live test this was validated against before being wired here.
             code, out, err = run_tool("legacy_link.py", ["poi-add", name, str(lat), str(lon)])
             info = self._parse_last_json_line(out)
@@ -6186,7 +6192,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # Garmin Connect body-composition (Garmin Index scale) for the Weight page's "Garmin"
     # source. tools/garmin_weight.py owns the OAuth (garminconnect/garth) + the fetch; here we
-    # just shell out. The token store lives under AmbitAppBackups so a login persists.
+    # just shell out. The token store lives under SommetBackups so a login persists.
     GARMIN_TOKENS = str(BACKUP_DIR / "garmin_tokens")
 
     def _handle_garmin_weight(self):
@@ -8444,7 +8450,7 @@ class Handler(BaseHTTPRequestHandler):
                                   "started": _SLEEP_REC["started"]})
             return
         body = body or {}
-        out_dir = Path.home() / "AmbitAppBackups" / "sleep"
+        out_dir = Path.home() / "SommetBackups" / "sleep"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"verity_ppi_{int(time.time())}.json"
         args = [PYTHON, str(TOOLS_DIR / "polar_sleep.py"), "record", "--out", str(out_path),
@@ -8913,7 +8919,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "or \"field\""})
             return
 
-        out_dir = Path(tempfile.mkdtemp(prefix="ambitapp-plan-"))
+        out_dir = Path(tempfile.mkdtemp(prefix="sommet-plan-"))
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(plan, f)
             plan_path = f.name
@@ -9433,7 +9439,7 @@ class Handler(BaseHTTPRequestHandler):
         only actual disk write is the two .bin files themselves, not the watch.
 
         Body may carry an optional "dir" - the folder to write the backup into instead of the
-        default ~/AmbitAppBackups (André, 2026-08-16: "save to a folder... your favourite cloud
+        default ~/SommetBackups (André, 2026-08-16: "save to a folder... your favourite cloud
         folder, so it can be synced"). Pointing it at a Dropbox/OneDrive/Drive sync folder is how
         the app does keyless cloud backup now, no OAuth."""
         body = body or {}
@@ -9530,7 +9536,7 @@ class Handler(BaseHTTPRequestHandler):
         # What IS irreplaceable on a Kailash is its DeviceHistory (visited cities/countries,
         # travel stats, the activity-mode logbook) and its TrackLog (the passive GPS track) -
         # and those are exactly what a firmware flash wipes
-        # ([[ambit_app_kailash_desktop_home_fix]]). Neither is touched by `nav --save`, so a
+        # ([[sommet_kailash_desktop_home_fix]]). Neither is touched by `nav --save`, so a
         # Kailash backup that captured nothing is what this replaces.
         #
         # This is an ARCHIVE, not a restore point: there is no proven write path for either
@@ -9601,7 +9607,7 @@ class Handler(BaseHTTPRequestHandler):
                 if wpts:
                     routes_g, loose = self._legacy_route_groups(wpts)
                     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-                             '<gpx version="1.1" creator="ambit-app legacy_link.py">']
+                             '<gpx version="1.1" creator="Sommet legacy_link.py">']
                     for w in wpts:
                         nm = str(w.get("name", "")).replace("&", "&amp;").replace("<", "&lt;")
                         lines.append('  <wpt lat="%s" lon="%s"><name>%s</name></wpt>'
@@ -9663,14 +9669,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Never push one watch's regions at a different watch. This project's standing rule
-        # is to verify the device before any flash write ([[ambit_app_verify_device_before_write]]).
+        # is to verify the device before any flash write ([[sommet_verify_device_before_write]]).
         #
         # The authority is the MODEL, not a family (André, 2026-08-27: "I would say the safe
         # side, back up by model... by family may be risky no?" - and he is right: "Ambit"
         # covers Ambit1, Ambit2, Ambit3 and Traverse, which do NOT share layouts. Traverse's
         # waypoint descriptor alone differs from Peak's and decodes to garbage
-        # ([[ambit_app_traverse_waypoint_decode]]), and the region bases differ too
-        # ([[ambit_app_native_region_base_hardcoding]]). A family check would have called that
+        # ([[sommet_traverse_waypoint_decode]]), and the region bases differ too
+        # ([[sommet_native_region_base_hardcoding]]). A family check would have called that
         # pairing safe.) The contents hint is kept for LABELLING only and never authorises.
         #
         # So: serial must match when the backup records one, model must match always, and a
@@ -9816,7 +9822,7 @@ def main():
     except Exception as exc:                              # noqa: BLE001 - never block the backend
         print(f"scale listener not started: {exc}")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"AmbitApp backend bridge running at http://{args.host}:{args.port}/ "
+    print(f"Sommet backend bridge running at http://{args.host}:{args.port}/ "
           f"(Ctrl+C to stop)")
     try:
         server.serve_forever()

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Offline maps - the OruxMaps-style "download any area of the world for use with no signal"
 // page (André, 2026-08-30: "select zones to download... I can be in France and want to download

@@ -73,7 +73,7 @@ KNOWN_CONTAINER_MAGICS = (b"SFI2ST", b"SFI1")
 # André's own SuuntoLink cache) starts "SFI1\x00\x01\x02\x05..." not "SFI2ST" - a related
 # but distinct container tag for the legacy family. Verified --compare-clean against a real
 # USBPcap capture of André's own Ambit1 firmware update before this was trusted (see
-# ambit_app_ambit1_firmware memory) - the command sequence (0x0202/0x0e00/0x0e01.../0x0e03/
+# sommet_ambit1_firmware memory) - the command sequence (0x0202/0x0e00/0x0e01.../0x0e03/
 # 0x0200) and chunking are otherwise identical to the Ambit3 family already proven here.
 
 

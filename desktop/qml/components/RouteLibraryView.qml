@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Routes - the first screen (André, 2026-09-26): the old Suunto Routes page, like POIs. The top
 // card imports a GPX (preview, then send it to a connected device - no planning needed) and opens

@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // The result of an action, shown under the button that caused it (André, 2026-11-02, desktop
 // picks #7). Replaces the loose green/red caption lines: a card with a thin coloured bar on the

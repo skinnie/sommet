@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // The big map - real request, 2026-08-11 (André, R2): "Routes when we click on the map, open
 // a window with a map zoomed and the option to zoom in, zoom out, move the app, with mouse.

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // How to get water / food / cemetery stops onto a route: use PitStopper (pitstopper.net) and load ITS
 // export instead of the original GPX. One card, shown on both the Route and Race Plan pages so they

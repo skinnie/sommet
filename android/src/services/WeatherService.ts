@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 // in intent: same Open-Meteo endpoint/params, same Nominatim reverse-geocode, same
 // IP-based location fallback (same HTTPS services), same WMO weather-code -> icon/label mapping, same
 // 10-minute auto-refresh, same "hide until hasFetchedOnce, then show a friendly offline
-// message rather than an error" rule. No API key anywhere, matching AMBITAPP_SPEC.md's own
+// message rather than an error" rule. No API key anywhere, matching docs/reference/sommet-spec.md's own
 // "Open-Meteo (no API key)" choice - see weatherservice.h's own header comment.
 
 export interface ForecastDay {

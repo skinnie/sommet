@@ -25,7 +25,7 @@ QUrl LocalFileService::downloadsLocation() const
 
 QUrl LocalFileService::backupsLocation() const
 {
-    return QUrl::fromLocalFile(QDir::homePath() + QStringLiteral("/AmbitAppBackups"));
+    return QUrl::fromLocalFile(QDir::homePath() + QStringLiteral("/SommetBackups"));
 }
 
 bool LocalFileService::openFolder(const QUrl &folderUrl)
@@ -109,7 +109,7 @@ QString LocalFileService::backupDatabase(const QUrl &destFolder)
 
     QString destRoot = destFolder.toLocalFile();
     if (destRoot.isEmpty())
-        destRoot = QDir::homePath() + QStringLiteral("/AmbitAppBackups");
+        destRoot = QDir::homePath() + QStringLiteral("/SommetBackups");
 
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
     const QString outDir = destRoot + QStringLiteral("/sommet-data-") + stamp;
@@ -135,7 +135,7 @@ QString LocalFileService::backupDatabase(const QUrl &destFolder)
 
     // Weigh-ins live outside those databases (desktop audit 2026-10-29: this backup left them
     // out): the ones typed in are in the app's settings ([weight] manual, the JSON list
-    // WeightService::loadManual() reads) and a Bluetooth scale's in ~/AmbitAppBackups/scale.
+    // WeightService::loadManual() reads) and a Bluetooth scale's in ~/SommetBackups/scale.
     // Both are saved here in their own formats, so they can be put back exactly as they were.
     const QByteArray manualWeighIns =
         QSettings().value(QStringLiteral("weight/manual")).toString().toUtf8();
@@ -147,7 +147,7 @@ QString LocalFileService::backupDatabase(const QUrl &destFolder)
             failed.append(QStringLiteral("manual-weighins.json (%1)").arg(out.errorString()));
     }
     const QString scaleWeighIns =
-        QDir::homePath() + QStringLiteral("/AmbitAppBackups/scale/weighins.jsonl");
+        QDir::homePath() + QStringLiteral("/SommetBackups/scale/weighins.jsonl");
     if (QFileInfo::exists(scaleWeighIns)) {
         if (QFile::copy(scaleWeighIns, QDir(outDir).filePath(QStringLiteral("scale-weighins.jsonl"))))
             ++copied;

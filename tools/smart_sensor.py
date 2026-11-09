@@ -337,7 +337,7 @@ def main():
                      help="unpair/remove the belt from Bluetooth entirely")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON object instead of human-readable lines - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     args = ap.parse_args()
     if not args.status and not args.forget:
         ap.error("nothing to do - pass --status or --forget")

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real, 2026-08-10 ("on dark theme the menu for switch dark light system has grey
 // letters, not correct") - SettingsPage.qml's Appearance card used plain stock

@@ -83,7 +83,7 @@ export async function hasAnthropicKey(): Promise<boolean> {
 // chatBackend). Saved on its own, apart from the key. Before this switch existed the replies
 // simply followed whether a key was stored, so with nothing saved yet that is still the answer -
 // an install that already chats with Claude keeps doing so.
-const CHAT_BACKEND_KEY = 'ambitapp:coach:chatBackend';
+const CHAT_BACKEND_KEY = 'sommet:coach:chatBackend';
 
 export async function getChatBackend(): Promise<ChatBackend> {
   try {

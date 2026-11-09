@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Setting the watch's clock - André, 2026-08-11 (item 15): "regarding when you click, I would
 // prefer we change to a window appearing like we did for the data fields, with the option

@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // The catalogue of metrics an activity can show, for the configurable Activities columns
 // (André, 2026-08-16: "on the place of distance/duration/ascent/calories have elegant dropdown

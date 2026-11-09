@@ -1,7 +1,7 @@
-# AmbitApp
+# Sommet
 
 > Saved here 2026-08-06 as a reference/context document. This describes a separate Qt 6 /
-> QML / C++ desktop application ("AmbitApp") with its own existing codebase, distinct from
+> QML / C++ desktop application ("Sommet") with its own existing codebase, distinct from
 > the Python reverse-engineering tooling in the rest of this repo (`tools/`) and from the
 > React Native `opensportsync` fork referenced in `HANDOFF.md` as the mobile base app. That
 > Qt/QML codebase itself is not present in this repo/session - this file is the spec only,
@@ -11,11 +11,11 @@
 
 ## Mission
 
-AmbitApp is the modern companion application for legacy Suunto Ambit watches.
+Sommet is the modern companion application for legacy Suunto Ambit watches.
 
 Its purpose is to preserve and improve the Ambit experience after the official Suunto ecosystem.
 
-AmbitApp is NOT trying to become:
+Sommet is NOT trying to become:
 
 - Garmin Connect
 - Suunto App
@@ -24,7 +24,7 @@ AmbitApp is NOT trying to become:
 
 Those platforms already exist.
 
-AmbitApp focuses on the watch.
+Sommet focuses on the watch.
 
 Everything starts with the watch.
 
@@ -40,7 +40,7 @@ Reliable
 
 Outdoor
 
-If a feature does not improve one of those three, it probably does not belong in AmbitApp.
+If a feature does not improve one of those three, it probably does not belong in Sommet.
 
 ---
 

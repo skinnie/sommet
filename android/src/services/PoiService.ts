@@ -8,7 +8,7 @@ import { saveWatchBackup } from './WatchBackup';
 import { t } from '../i18n';
 
 // ─── SBEM0102 POI decoding ─────────────────────────────────────────────────────
-// Mirrors ambit-app's tools/ambit_format.py parse_sbem_poi_list(): after the
+// Mirrors sommet's tools/ambit_format.py parse_sbem_poi_list(): after the
 // fixed 14-byte [u32 0][u8 1][u8 1]["SBEM0102"] prefix, a run of
 // [u8 id][u8 len | 0xff + u32 LE len][len bytes]. Entry 0x55 is a POI: three
 // NUL-terminated strings (name, route_name, stamp), five u8, then lat/lon as
@@ -295,7 +295,7 @@ export async function addPoiToWatch(
 // real local-first pattern as NavigationService.ts's own getCachedNavigation() (see its
 // header comment): a persisted last-known snapshot for an instant "On the watch" list, kept
 // fresh by a real watch read in the background, not a scheme for skipping that read.
-const POI_CACHE_KEY = 'ambitapp:cachedPois';
+const POI_CACHE_KEY = 'sommet:cachedPois';
 
 /** The locally persisted copy of the watch's POIs, if any. */
 export async function getCachedPois(): Promise<WatchPoi[] | null> {

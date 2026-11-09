@@ -1,5 +1,5 @@
 // Which dated workouts this tablet put on each watch, like the desktop's
-// ~/AmbitAppBackups/calendar/installed-<serial>.json. The tablet and the PC keep separate plans;
+// ~/SommetBackups/calendar/installed-<serial>.json. The tablet and the PC keep separate plans;
 // with this record each sync erases only its own workouts and past ones, and leaves the other
 // device's upcoming ones (TrainingCalendarCore.leftToOthers, André 2026-11-01).
 // Kept in the app's private files under calendar/installed-<serial>.json, a list of labels.

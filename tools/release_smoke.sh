@@ -5,7 +5,7 @@
 # times because nothing ever ran the *packaged* app on *old hardware*. This does.
 #
 #     tools/release_smoke.sh <ssh-host> [version]      # version like 0.2.66; default: latest
-#     SMOKE_BACKEND=<path to a local ambit-backend> tools/release_smoke.sh <ssh-host>
+#     SMOKE_BACKEND=<path to a local sommet-backend> tools/release_smoke.sh <ssh-host>
 #         tests an unreleased backend build BEFORE tagging (it still takes the shared libraries
 #         from the latest release's AppImage).
 #
@@ -30,7 +30,7 @@ echo "Release smoke test: $VER on $HOST"
 PAYLOAD="$(mktemp -d)"
 trap 'rm -rf "$PAYLOAD"' EXIT
 if [ -n "${SMOKE_BACKEND:-}" ]; then
-    cp "$SMOKE_BACKEND" "$PAYLOAD/ambit-backend.local"
+    cp "$SMOKE_BACKEND" "$PAYLOAD/sommet-backend.local"
     echo "Testing the local backend $SMOKE_BACKEND (not the release's own)"
 fi
 cp "$ROOT/tools/packaging/check_frozen_imports.py" "$ROOT/tools/release_smoke_checks.py" "$PAYLOAD/"
@@ -62,11 +62,13 @@ fi
 chmod +x Sommet.AppImage
 ./Sommet.AppImage --appimage-extract 'usr/bin/backend/*' >/dev/null 2>&1
 ./Sommet.AppImage --appimage-extract 'usr/lib/libhidapi*' >/dev/null 2>&1
-B="$W/squashfs-root/usr/bin/backend/ambit-backend"
+B="$W/squashfs-root/usr/bin/backend/sommet-backend"
+# Releases up to v0.2.66 named it ambit-backend (the app's old name).
+[ -x "$B" ] || B="$W/squashfs-root/usr/bin/backend/ambit-backend"
 # Same environment the app gives its backend (backendprocess.cpp): the AppImage's usr/lib first.
 export LD_LIBRARY_PATH="$W/squashfs-root/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 [ -x "$B" ] || { echo "  FAIL  no backend inside the AppImage"; exit 1; }
-if [ -f "$W/ambit-backend.local" ]; then cp "$W/ambit-backend.local" "$B"; chmod +x "$B"; fi
+if [ -f "$W/sommet-backend.local" ]; then cp "$W/sommet-backend.local" "$B"; chmod +x "$B"; fi
 echo "  ok    downloaded and unpacked ($(du -h Sommet.AppImage | cut -f1))"
 echo "  host  $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs) / $(. /etc/os-release; echo "$PRETTY_NAME")"
 

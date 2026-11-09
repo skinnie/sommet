@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // A search box (André, 2026-11-02, desktop picks #9): magnifier on the left, text from the left,
 // a × to clear once there's text, and Esc clears too. Same field look as RoundedTextField

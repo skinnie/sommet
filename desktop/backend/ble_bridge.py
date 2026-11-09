@@ -40,7 +40,7 @@ LOG_ROLL_BYTES = 5 * 1024 * 1024
 
 # Must match tools/ble_server.py's SOCKET_PATH exactly - not re-derived, so the two can never
 # drift apart.
-SOCKET_PATH = Path.home() / ".cache" / "AmbitApp" / "ble.sock"
+SOCKET_PATH = Path.home() / ".cache" / "Sommet" / "ble.sock"
 
 # How long to wait for the daemon subprocess to bind its control socket after being spawned.
 # Local process startup (Python interpreter + dbus/GLib imports), not a BLE operation - a few
@@ -67,7 +67,7 @@ class BleBridge:
     def __init__(self):
         self._lock = threading.Lock()
         self._proc = None
-        self._log_path = Path.home() / ".cache" / "AmbitApp" / "ble_daemon.log"
+        self._log_path = Path.home() / ".cache" / "Sommet" / "ble_daemon.log"
         # Real bug, found live 2026-08-11 wiring routes/settings: write_nav.py's own
         # functions (read_pois(), send_plan(), main()'s own summary print) read
         # `link.dry_run`/`link.sent` as PLAIN ATTRIBUTES - the real shape `write_nav.Link`

@@ -248,8 +248,8 @@ vendored into Sommet.
   its delta (zsync) updater `appimageupdatetool`.
 - **[PyInstaller](https://github.com/pyinstaller/pyinstaller)** (GPL-2.0-or-later with a runtime
   exception that permits distributing the frozen output under any licence) - freezes the Python
-  watch backend into the single `ambit-backend` executable bundled in every desktop download
-  (`tools/packaging/ambit_backend.spec`).
+  watch backend into the single `sommet-backend` executable bundled in every desktop download
+  (`tools/packaging/sommet_backend.spec`).
 - **[hidapi](https://github.com/libusb/hidapi)** (GPL-3.0-or-later / BSD-3-Clause, dual) - the USB
   HID library the frozen backend's `hid` binding loads to reach the watch; shipped unmodified as a
   shared library inside the Windows/macOS/Linux downloads.

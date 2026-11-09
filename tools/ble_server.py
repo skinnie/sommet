@@ -72,7 +72,7 @@ SERVICE_UUID = "98ae7120-e62e-11e3-badd-0002a5d5c51b"
 NOTIFY_CHAR_UUID = "d0fd6b80-e62e-11e3-a2e9-0002a5d5c51b"
 WRITE_CHAR_UUID = "c6339440-e62e-11e3-a5b3-0002a5d5c51b"
 
-BASE_PATH = "/org/ambitapp/nsp"
+BASE_PATH = "/org/sommet/nsp"
 AGENT_PATH = BASE_PATH + "/agent"
 
 # Real request, 2026-08-11 (André, via the desktop-app conversation): "port the bluetooth
@@ -85,7 +85,7 @@ AGENT_PATH = BASE_PATH + "/agent"
 # any other tool - reaches it through a local control socket instead of trying to open BLE
 # itself. Mirrors the Android shape (AmbitBleModule owns the connection, every ReactMethod
 # call reaches into it) with a Unix socket standing in for the shared in-process g_device.
-SOCKET_PATH = Path.home() / ".cache" / "AmbitApp" / "ble.sock"
+SOCKET_PATH = Path.home() / ".cache" / "Sommet" / "ble.sock"
 
 
 class ControlSocketServer:
@@ -468,7 +468,7 @@ def build_classes():
             """Wakes a RequestPasskey() wait early with a rejection instead of leaving it
             hung until its own 60s timeout - for when the device disconnects mid-pairing.
 
-            Suunto's own app (jadx diff, 2026-08-21 - see ambit_app_ble_stability_suunto_app_diff
+            Suunto's own app (jadx diff, 2026-08-21 - see sommet_ble_stability_suunto_app_diff
             memory) has a dedicated `BluetoothOperationWaitBonding` queue step that treats a
             GATT disconnect DURING bonding as an explicit, named failure rather than an
             ambiguous generic disconnect. Same idea here: `start_discovery()`'s own disconnect
@@ -918,7 +918,7 @@ def forget_suunto_bonds(bus, dbus, adapter):
 # Non-blocking pause between StopDiscovery() and Connect(), scheduled on the GLib main
 # loop rather than a blocking time.sleep() - the mainloop thread must never block, same
 # constraint _send()'s own chained timeout_add pacing already documents. Suunto's own app
-# (jadx diff, 2026-08-21 - ambit_app_ble_stability_suunto_app_diff memory) added a generic
+# (jadx diff, 2026-08-21 - sommet_ble_stability_suunto_app_diff memory) added a generic
 # `QueueOperationDelay` primitive between 4.73.6 and 6.12.7 for exactly this kind of
 # empirically-needed settle time around BLE calls; this is that same idea applied to the one
 # place in this file two radio operations (scan-stop, connect) happen back-to-back.
@@ -1610,7 +1610,7 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     gatt_manager.RegisterApplication(app.path, {},
                                      reply_handler=registered, error_handler=failed)
     # No advertisement of our own: the watch is the one calling, and the tablet never
-    # advertises either. The old optional "AmbitApp" one only added radio traffic next to the
+    # advertises either. The old optional "Sommet" one only added radio traffic next to the
     # scan (removed 2026-10-25 with the scan bursts, after it kept a mouse from reconnecting).
 
     # NOT automatic any more. Clearing bonds every run fixed the first pairing and broke

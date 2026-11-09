@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A small dependency-free date-series line chart (dots at each point), for the Health page's
 // resting-HR and steps series. series = [{date: "YYYY-MM-DD", value: number}]. Same Canvas

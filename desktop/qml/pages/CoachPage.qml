@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import AmbitApp
+import SommetUi
 
 // Coach (v2 concept, implemented 2026-08-21) — composes the two Artifact mockups (Fresh
 // Today's readiness beacon, Ride Coach's chat) into one screen, backed by CoachService's

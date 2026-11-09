@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Magene C406 data screens panel on the GPS settings page (André, 2026-09-25) - the OneLap app's page editor: which data fields
 // each screen shows. Format + field catalogue: tools/magene_pages.py (decoded from the OneLap

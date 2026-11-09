@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Real, 2026-08-09 ("Full SuuntoLink-style redesign") - matches SuuntoLink's own real
 // circular screen-preview mockup (assets/ambit3 pcap/v2/screens sports modes/

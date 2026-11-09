@@ -27,7 +27,7 @@ Lille's real coordinates, confirming the unit even though the descriptor's own `
 these two specific fields is empty.
 
     ./tools/kailash_history.py
-    ./tools/kailash_history.py --json   # for ambitapp-v2/backend/server.py, not for a person
+    ./tools/kailash_history.py --json   # for desktop/backend/server.py, not for a person
     ./tools/kailash_history.py --gps    # also reads sml.DeviceLog - see its own docstring below
 
 **`--gps`, added 2026-08-08, still needs a real cable test**: `sml.DeviceHistory` (this file's
@@ -312,7 +312,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--json", action="store_true",
                      help="print one JSON object instead of human-readable lines - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     ap.add_argument("--gps", action="store_true",
                      help="also query sml.DeviceLog (raw GPS samples of the most recent "
                           "'GPS Power Use' recording) - see this file's own docstring")
@@ -334,7 +334,7 @@ def main():
         out = dict(h)
         if d is not None:
             out["device_log"] = d  # new key, existing keys unchanged - safe for existing
-                                    # ambitapp-v2/backend/server.py consumers of this JSON
+                                    # desktop/backend/server.py consumers of this JSON
         print(json.dumps(out))
     else:
         show_history(h)

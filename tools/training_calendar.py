@@ -219,10 +219,10 @@ def rebuild_apps_region(raw_blocks):
 # 2026-10-24: a 33-minute test changed to 10 s steps stayed 33 minutes). The binary is compiled
 # at sync, so there is nothing on the watch to compare with; the sync remembers a fingerprint of
 # what it installed and reinstalls a kept label whose plan workout no longer matches it.
-INSTALLED_DIR = pathlib.Path.home() / "AmbitAppBackups" / "calendar"
+INSTALLED_DIR = pathlib.Path.home() / "SommetBackups" / "calendar"
 # Pre-write copies of the regions a sync or remove rewrites: the folder the sport-mode editors
 # use. Never next to this file: in the packaged app that is a temporary or read-only folder.
-BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "custom_modes"
+BACKUP_DIR = pathlib.Path.home() / "SommetBackups" / "custom_modes"
 
 
 def backup_path(kind, serial=None):
@@ -572,7 +572,7 @@ def sync(link, plan, today, write, json_out, auto_start=None):
         writes.append(("CustomModes", cm_base, new_cm_bytes))
     backup = None
     if writes:
-        # A restore point for the sport modes, in ~/AmbitAppBackups (not next to this file:
+        # A restore point for the sport modes, in ~/SommetBackups (not next to this file:
         # the backend also runs sync() in its own process for Bluetooth, and a packaged app's
         # program folder is temporary or read-only).
         backup = str(backup_path("CustomModes_pre_calendar", serial))

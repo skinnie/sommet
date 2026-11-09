@@ -8,9 +8,9 @@
 #include <QUrl>
 #include <QVariantList>
 
-// AMBITAPP_SPEC.md's architecture: QML -> ViewModels -> Services -> Current Backend ->
+// docs/reference/sommet-spec.md's architecture: QML -> ViewModels -> Services -> Current Backend ->
 // libambit. This is the first real "Services" class - a thin HTTP client against
-// ambitapp-v2/backend/server.py (see that file and ../../README.md's "Architecture
+// desktop/backend/server.py (see that file and ../../README.md's "Architecture
 // decision" section for why the backend is Python, not C++). It knows nothing about the
 // watch protocol itself, only how to ask the local backend about it.
 //

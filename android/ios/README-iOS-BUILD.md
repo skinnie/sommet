@@ -1,4 +1,4 @@
-# AmbitApp — iOS/iPadOS port status & build guide
+# Sommet — iOS/iPadOS port status & build guide
 
 iOS target for Ambit3 / Traverse / Kailash (the **BLE** watches). Ambit1/2 are
 USB-only and unreachable from iOS — they stay desktop/Android-only.
@@ -38,7 +38,7 @@ Started 2026-08-28. See memory `sommet-ios-ble-central-model` /
 1. **Scaffold the iOS RN project.** This Mac has Xcode 26.3 but **no node/CocoaPods**.
    With them installed, generate the `ios/` app project for RN 0.84 (e.g. a
    fresh `npx @react-native-community/cli init` at matching version, then copy in
-   `ios/AmbitApp.xcodeproj` + `Podfile`), or add an iOS target to the RN app.
+   `ios/Sommet.xcodeproj` + `Podfile`), or add an iOS target to the RN app.
 2. **Compile the C core into the app.** Add these to the app target (or a small
    pod/static-lib), with build settings:
    - Sources: everything in `cpp/libambit/*.c` **except** `libambit_android.c`,

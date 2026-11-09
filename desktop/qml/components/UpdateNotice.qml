@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import AmbitApp
+import SommetUi
 
 // "Sommet 0.2.58 is ready" (André, 2026-11-03, 🟣124): the newer version, the first lines of
 // what's new, and a Download button. On Home it closes with ×, until the next version comes

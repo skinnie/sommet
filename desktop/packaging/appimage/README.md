@@ -7,7 +7,7 @@ asks for Qt 6.5+ (Mint's own `apt` tops out at 6.4.2) plus a running Python back
 carries all of that inside itself.
 
 This is the Linux counterpart to the Windows `.zip` and macOS `.dmg` the release workflow already
-produces. Like them, it bundles the **frozen Python backend** (`backend/ambit-backend`, made with
+produces. Like them, it bundles the **frozen Python backend** (`backend/sommet-backend`, made with
 PyInstaller) next to the executable, exactly where `desktop/src/services/backendprocess.cpp`
 looks for it — so the app auto-starts the backend and **Settings and every other backend-fed page
 are populated on first launch**. (Running a bare from-source `Sommet` binary without the backend

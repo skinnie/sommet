@@ -698,7 +698,7 @@ export default function HomeScreen() {
   // Real bug, found live 2026-08-21 (André: "the watch kinda don't reconnect after a
   // while"). This screen used to assume a BLE link, once up, "stays up until explicitly
   // closed" (see the old comment near bleConnectedRef's other uses) — but the watch's own
-  // BLE session really is short-lived and watch-driven (ambit_app_ble_workflow_reliability
+  // BLE session really is short-lived and watch-driven (sommet_ble_workflow_reliability
   // memory), so it drops on its own after a while with nothing here ever finding out. The
   // native side (AmbitBleModule.kt) reconnects fine when re-triggered — this was purely a
   // stale-UI-state bug: `bleConnected` never flipped back to false, so the app kept

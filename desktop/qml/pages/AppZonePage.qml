@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Suunto Apps builder launcher. Merged 2026-08-23 (André): one card, two options, instead of
 // two separate nav entries (App Zone + Intervals) that each opened a different tool. Neither

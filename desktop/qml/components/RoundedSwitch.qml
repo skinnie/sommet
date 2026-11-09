@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real request 2026-08-09 ("display dark and storm alarm still have squared buttons") -
 // the installed Qt Basic style's own Switch.qml does round its track (radius: 8 on a

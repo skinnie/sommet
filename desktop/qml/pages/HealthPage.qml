@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Health page (André, 2026-08-24): daily resting heart rate and steps from Garmin Connect.
 // Login is shared with the Weight page's Garmin sign-in (same token store), so this page just

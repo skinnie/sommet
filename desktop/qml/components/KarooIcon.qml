@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A silhouette of a Hammerhead Karoo (André, 2026-09-04, reference photo; geometry tuned against
 // an offscreen render). A tall portrait slab that is almost all screen behind a thin even bezel,

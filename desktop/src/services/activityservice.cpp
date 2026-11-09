@@ -74,7 +74,7 @@ static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 ActivityService::ActivityService(QObject *parent) : QObject(parent)
 {
     openDatabase();
-    QFile cfg(QStringLiteral(":/qt/qml/AmbitApp/assets/activity_view.json"));
+    QFile cfg(QStringLiteral(":/qt/qml/SommetUi/assets/activity_view.json"));
     if (cfg.open(QIODevice::ReadOnly))
         m_viewConfig = QJsonDocument::fromJson(cfg.readAll()).object().toVariantMap();
     else

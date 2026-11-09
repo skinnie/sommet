@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // "Search on a map" - real request, 2026-08-11 (André, for POIs and the Kailash home
 // picker): "1st box 'search on a map', like we do for google maps, and once we select it

@@ -25,7 +25,7 @@ LIBAMBIT_DIR="$HERE/../openambit_libambit"
 #   * libambit's CMakeLists declares a cmake_minimum_required below 3.5, which CMake 4
 #     refuses outright; CMAKE_POLICY_VERSION_MINIMUM re-admits it without editing upstream.
 # Windows (desktop-release.yml's windows job, 2026-09-04): never had a build step at all -
-# the Windows CI job only froze ambit-backend.exe, so ambit_legacy_cli.exe never existed in
+# the Windows CI job only froze sommet-backend.exe, so ambit_legacy_cli.exe never existed in
 # a shipped build and every Ambit1/2 endpoint 502'd with "ambit_legacy_cli is not built" on
 # Windows specifically (macOS got its own build step 2026-08-27; Windows was simply missed).
 # HIDAPI_DRIVER=windows: the vendored hid-windows.c talks straight to the native Win32 HID

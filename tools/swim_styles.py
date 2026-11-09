@@ -20,7 +20,7 @@ Ambit1/2 have no SBEM settings at all and are not handled here.
 
 The write sends only the StyleCoeff entries (one 0x1101, like SuuntoLink sends one settings
 screen at a time), after saving the watch's current settings to
-~/AmbitAppBackups/swim-styles/, and is confirmed by reading the settings back. Strokes the
+~/SommetBackups/swim-styles/, and is confirmed by reading the settings back. Strokes the
 file doesn't list keep the watch's own values.
 """
 

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Totals - real request, 2026-08-11 (André): "Create a new screen: Totals (For the year) -
 // Hours outside (gps acitities, sum up hours) ... Kms by #activity (person can choose),

@@ -4,7 +4,7 @@
 // Garmin Connect and NO cloud. It is a thin C++ front to the Python tools in tools/
 // (edge_screens_device.py, which wraps garmin_edge_screens.py) — the same "the Python tool does the
 // device work, the desktop calls it" principle used for Bryton/Magene. Registered into QML as the
-// AmbitApp singleton EdgeScreensService (QML_ELEMENT/QML_SINGLETON below).
+// SommetUi singleton EdgeScreensService (QML_ELEMENT/QML_SINGLETON below).
 //
 // The tool reads the SPORT-profile FIT (mesg 14 data screens); this service just runs it, parses
 // its JSON, and exposes it to EdgeScreensPage.qml. Read-only until saveScreen(), which writes to the

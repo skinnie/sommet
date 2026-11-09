@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One small status tag for the whole app (André, 2026-11-02, desktop picks #6): Connected,
 // Experimental, Soon, Due, Update available, Off. A light tint, a thin border and the text, all

@@ -33,7 +33,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 /*
- * EXPERIMENTAL — BLE support for AmbitApp. Ambit3 / Traverse / Kailash.
+ * EXPERIMENTAL — BLE support for Sommet. Ambit3 / Traverse / Kailash.
  *
  * ARCHITECTURE (corrected 2026-08-09 — this is the whole ballgame, see HANDOFF.md
  * Milestone 7 item 8): the Ambit3 BLE protocol is INVERTED from an ordinary
@@ -83,7 +83,7 @@ private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b3
 
 private const val SCAN_TIMEOUT_MS = 15_000L
 // Matches Suunto's own BluetoothOperationWaitBonding timeout (jadx diff, 2026-08-21 -
-// ambit_app_ble_stability_suunto_app_diff memory) - a bonding attempt gets this long to
+// sommet_ble_stability_suunto_app_diff memory) - a bonding attempt gets this long to
 // resolve to BOND_BONDED/BOND_NONE before it's treated as a named failure.
 private const val BOND_TIMEOUT_MS = 60_000L
 // From the scan match to the watch subscribing to our notify characteristic. The watch can
@@ -604,7 +604,7 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
                 } else if (!nativeInitStarted) {
                     if (bondingInProgress) {
                         // Distinct, expected failure - not a generic drop. Suunto's own app
-                        // (jadx diff, 2026-08-21 - ambit_app_ble_stability_suunto_app_diff
+                        // (jadx diff, 2026-08-21 - sommet_ble_stability_suunto_app_diff
                         // memory) has a dedicated BluetoothOperationWaitBonding queue step
                         // that treats a GATT disconnect DURING bonding as its own named
                         // case rather than routing it through the same generic disconnect

@@ -34,7 +34,7 @@
 //
 // Dropbox / Google Drive / OneDrive (added 2026-08-12, "implement the ones that the user can
 // set up easily by itself: open a login site and approve, or copy an API key to a file") -
-// same self-serve principle as Strava, not a shared AmbitApp-owned app: each user registers
+// same self-serve principle as Strava, not a shared Sommet-owned app: each user registers
 // their own free app on the provider's own developer console (a five-minute click-through,
 // same as Strava's own strava.com/settings/api step) and pastes the client ID (+secret where
 // the provider needs one) in here. All three use the same loopback-callback OAuth flow as

@@ -1,8 +1,8 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // The base surface every content card in the app builds on (Home's device card, activity
-// cards, route/POI cards, etc.) - AMBITAPP_SPEC.md's Design Language: "Rounded cards, Subtle
+// cards, route/POI cards, etc.) - docs/reference/sommet-spec.md's Design Language: "Rounded cards, Subtle
 // shadows." One implementation, so a future design tweak (radius, shadow strength) changes
 // every card in the app at once, the same reasoning as Theme.qml for colors.
 Rectangle {

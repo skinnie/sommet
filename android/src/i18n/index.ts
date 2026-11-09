@@ -91,7 +91,7 @@ const fr = {
 
   // HomeScreen — connecting flow (v2.3.2 beta)
   homeSearchingTitle: 'Recherche de votre appareil, veuillez patienter…',
-  // Real, 2026-08-10 ("under the icon put AmbitApp and a funny quote")
+  // Real, 2026-08-10 ("under the icon put Sommet and a funny quote")
   homeTagline: "L'aventure commence dehors.",
   homeNoDeviceTitle:
     "Aucun appareil détecté. Vérifiez le câble et l'appareil, ou utilisez l'app sans appareil.",
@@ -295,7 +295,7 @@ const fr = {
     '(accès "App folder"). Ajoutez ces deux Redirect URI : http://localhost (pour l\'app ' +
     'ordinateur) et opensportsync://oauth/dropbox (pour cette app) - la même application ' +
     'sert les deux. Puis collez sa clé et son secret ci-dessous. Seul votre dossier ' +
-    '"AmbitApp Backups" dans Dropbox est utilisé.',
+    '"Sommet Backups" dans Dropbox est utilisé.',
   cloudGoogleDriveDesc: 'Créez votre propre application gratuite sur console.cloud.google.com ' +
     '(activez l\'API Google Drive, créez un ID client OAuth de type "Desktop app"), puis ' +
     'collez son ID et son secret ci-dessous. Seuls les fichiers créés par cette application ' +
@@ -1038,7 +1038,7 @@ const en: typeof fr = {
 
   // HomeScreen — connecting flow (v2.3.2 beta)
   homeSearchingTitle: 'Searching for your device, please wait…',
-  // Real, 2026-08-10 ("under the icon put AmbitApp and a funny quote like 'Adventure
+  // Real, 2026-08-10 ("under the icon put Sommet and a funny quote like 'Adventure
   // starts outside' or suggest me something") - a few other real options considered,
   // easy one-line swaps if a different tone is wanted: "Track it. Trust it." /
   // "Your next summit is calling." / "Built for the trail, not the couch."
@@ -1276,7 +1276,7 @@ const en: typeof fr = {
   cloudDropboxDesc: 'Register your own free app at dropbox.com/developers/apps (App folder ' +
     'access). Add both Redirect URIs: http://localhost (for the desktop app) and ' +
     'opensportsync://oauth/dropbox (for this app) - the same app serves both. Then paste ' +
-    'its App key and App secret below. Only your own "AmbitApp Backups" folder in Dropbox ' +
+    'its App key and App secret below. Only your own "Sommet Backups" folder in Dropbox ' +
     'is ever touched.',
   cloudGoogleDriveDesc: 'Register your own free app at console.cloud.google.com (enable the ' +
     'Google Drive API, create an OAuth Client ID of type "Desktop app"), then paste its ' +

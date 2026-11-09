@@ -1,7 +1,7 @@
-# AmbitApp V3 changelog
+# Sommet V3 changelog
 
-Tracks work that goes beyond AmbitApp V2's initial scope (see `AMBITAPP_SPEC.md` and
-`ambitapp-v2/README.md` for what V2 itself is) - the real capabilities layered on top as
+Tracks work that goes beyond Sommet (desktop)'s initial scope (see `docs/reference/sommet-spec.md` and
+`desktop/README.md` for what V2 itself is) - the real capabilities layered on top as
 they land, on the way to what André/Vincent have been calling "V3": wireless sync
 (Milestone 7/BLE) and anything else V2 deliberately deferred. Newest entries first.
 
@@ -296,7 +296,7 @@ Already there: the info buttons (tap shows the explanation).
 - **Switches for 2 or 3 choices:** appearance, map style, and the scale's sex setting.
 - **The workout builder's checkboxes** have the drawn tick.
 - **Plain errors** on Activities, Health, and Weight: one sentence, Try again, Details and Send
-  logs (`ErrorBanner.tsx`). Android now keeps a log file (`ambitapp.log` in the app's files,
+  logs (`ErrorBanner.tsx`). Android now keeps a log file (`sommet.log` in the app's files,
   kept under 200,000 characters); Send logs opens a mail with its last lines, like the PC
   (`LogService.ts`; test: `LogService.test.ts`).
 - Checked on the tablet, in light and dark: Home, Settings, Routes, Activities, Health,
@@ -382,7 +382,7 @@ Already there: the info buttons (tap shows the explanation).
   its plan. Another device's upcoming workouts stay and keep their WORKOUT-menu places, like a
   workout installed by hand; this device's later workouts wait for a free place. The same
   date and name in both plans goes on the watch once. The PC already kept a record per watch
-  of what it installed (`~/AmbitAppBackups/calendar/installed-<serial>.json`); the tablet now
+  of what it installed (`~/SommetBackups/calendar/installed-<serial>.json`); the tablet now
   keeps one too (`files/calendar/installed-<serial>.json`). A desktop auto-start rule pointing
   at another device's workout stays as well. (`training_calendar.left_to_others`,
   `TrainingCalendarCore.leftToOthers`, `CalendarRecord.ts`; tests: `PlanDiffOtherDevice` and
@@ -472,7 +472,7 @@ Found in the tablet audit of 30-31/10 (FZ-M1 + Ambit3 Peak).
 - **Learned swim styles are backed up, restored and copied.** They are settings
   (`Sports.Swimming.StyleCoeff`, one record per stroke: style byte + 4 int16), so no backup
   held them. New `tools/swim_styles.py` reads, saves and writes them back: it writes only the
-  swim entries in one 0x1101, saves the watch's settings to `~/AmbitAppBackups/swim-styles/`
+  swim entries in one 0x1101, saves the watch's settings to `~/SommetBackups/swim-styles/`
   first and confirms by reading back. Hardware-tested on André's Peak: a test value written and
   removed again, the full settings reply byte-identical afterwards. The entry id comes from
   each watch's schema (0x40 on the Peak, Sport and Run, 0x41 on the Vertical).
@@ -490,7 +490,7 @@ Found in the tablet audit of 30-31/10 (FZ-M1 + Ambit3 Peak).
   Update Tool fills both: the file, and midnight (local) 14 days after today. Its newer Wi-Fi
   and Bluetooth routes use other files, so the USB route follows the Update Tool.
   `tools/bryton_ee.py` shows how long the device's data lasts and replaces both files, after a
-  backup to `~/AmbitAppBackups/bryton-ee/<time>/`, and only when the device already holds the
+  backup to `~/SommetBackups/bryton-ee/<time>/`, and only when the device already holds the
   same kind of file; the date is never later than the end the file covers. Desktop Home Bryton
   card: "GPS data good until …" and "Update GPS data"; Android Bryton screen: the same card
   (`BrytonEe.ts`). Tried on André's Aero 60: its data had run out on 6 October; after the
@@ -558,7 +558,7 @@ Found in a desktop audit on 2026-10-29.
   "Open backup folder" is no longer cut off. The description says what a backup really holds
   (no more "Profiles are future").
 - **The app-data backup includes weigh-ins**, typed-in and from a Bluetooth scale.
-- **Pre-write backups go to `~/AmbitAppBackups`, named per watch.** The workout installer,
+- **Pre-write backups go to `~/SommetBackups`, named per watch.** The workout installer,
   intervals workouts, plan sync, Apps/CustomModes recovery and the Ambit1/2 route sender saved
   them next to the program (temporary or read-only in the packaged app), in a relative folder,
   or in a path hard-coded to one computer.
@@ -682,7 +682,7 @@ Checked on André's Ambit3 Peak (fw 2.4.17) over Bluetooth and USB, 2026-10-20 t
   prompt), and turns it off again if the Bluetooth helper fails to start. New how-to: keep a
   Bluetooth watch paired on Linux.
 - **POIs and routes:** remove a POI or a route from the watch. Sending or removing a route keeps
-  every POI: they're saved to `~/AmbitAppBackups/POIs/<serial>/` first and put back, with one
+  every POI: they're saved to `~/SommetBackups/POIs/<serial>/` first and put back, with one
   retry from an empty list. A route goes to a watch with no POIs over Bluetooth. A new route
   replaces the one of the same name. POI names are cut to the watch's 15-byte limit. A removal
   over Bluetooth is refused if another watch connected since the list was read.
@@ -1416,7 +1416,7 @@ also where each activity's GPX/FIT text lives, and `gear.db`) had **no** backup 
 desktop that made `activities.db` a silent single point of failure.
 
 - **New "Your activities & gear" card on the Backup page**, always visible (app data exists
-  with or without a watch). Two actions: *Create backup now* (writes to `~/AmbitAppBackups`) and
+  with or without a watch). Two actions: *Create backup now* (writes to `~/SommetBackups`) and
   *Save to a folder…* (a `FolderDialog` - point it at a Dropbox/OneDrive/Drive-synced folder for
   keyless cloud backup, the same model as the watch-backup cards), plus *Open backup folder*.
 - **`LocalFileService::backupDatabase()`** - pure local copy, no watch and no Python backend, so
@@ -1617,7 +1617,7 @@ block for detail.
 ## 2026-08-11: desktop backend can reach the BLE connection, not just USB
 
 - **`tools/ble_server.py` gained a local control socket** (`ControlSocketServer`, Unix
-  socket at `~/.cache/AmbitApp/ble.sock`) so it can stay the one long-lived process holding
+  socket at `~/.cache/Sommet/ble.sock`) so it can stay the one long-lived process holding
   the watch's BLE connection open while other processes issue commands through it - it was
   previously only reachable from a terminal.
 - **New `desktop/backend/ble_bridge.py`**: starts/stops the `ble_server.py` daemon and
@@ -1662,7 +1662,7 @@ block for detail.
     its now-dead backend route/handler (`/api/open-instructions`, `open_path()`) - the
     guidance lives on the page itself now, nothing to click for it.
   - `VARIANT_NAMES` (the compiled-app compatibility list) gets the same "Ambit3" -> "Ambit 3"
-    spacing as `ambitapp-v2`'s own `HomeViewModel._modelNames` - the tool's own product name
+    spacing as `desktop/`'s own `HomeViewModel._modelNames` - the tool's own product name
     ("Ambit3 Workout Builder") is intentionally unchanged, only the Suunto watch model names
     it reports.
 
@@ -1677,7 +1677,7 @@ block for detail.
   what the user's own default browser already does once the tool's local server is up). New
   `IntervalsService::launch()` prefers the packaged build for the current OS (checked
   directly - only Linux exists so far), falling back to `python3 tools/workout_gui.py`; the
-  repo-root path it needs is baked in at CMake configure time (`AMBITAPP_REPO_ROOT`), the
+  repo-root path it needs is baked in at CMake configure time (`SOMMET_REPO_ROOT`), the
   same "fixed convention" reasoning `DeviceService`'s hardcoded backend address already uses.
   Live-verified: clicking "Open Workout Builder" opened a real browser tab on
   `127.0.0.1:8765` showing the real tool. New `IntervalsIcon.qml` (four bars, alternating
@@ -1685,7 +1685,7 @@ block for detail.
   `color`-driven shape instead of embedding that raster PNG directly - keeps NavItem's
   selected-state color inversion working the same way it does for every other nav icon,
   which a fixed two-tone PNG sitting on a solid selected background would have broken.
-- **Ambit3 Peak icon exported to Downloads**: no such asset existed inside `ambitapp-v2`
+- **Ambit3 Peak icon exported to Downloads**: no such asset existed inside `desktop/`
   itself (it draws the Ambit hero icon as a plain Material Symbols glyph, not a custom image -
   see `HomePage.qml`'s own comment on why a real product photo isn't embedded there, a
   licensing call, unrelated to this). The real one turned out to already be sitting in the
@@ -1772,7 +1772,7 @@ block for detail.
 - **Raw technical errors no longer shown directly in the UI** - "Error transferring
   http://127.0.0.1:8766/api/nav - server replied: Bad Gateway" is accurate but not useful
   to look at; `DeviceService` now shows a plain "Watch not connected" and logs the real
-  detail to a real file (`QStandardPaths::AppDataLocation`/`ambitapp.log`) instead, so
+  detail to a real file (`QStandardPaths::AppDataLocation`/`sommet.log`) instead, so
   nothing is actually lost, just moved somewhere a person debugging this can find it without
   it being thrown at whoever's just using the app.
 - **Activities got a real "Retry" button** on its error state - the only way to retry used
@@ -1990,9 +1990,9 @@ after this fix) - real next step.
 
 ---
 
-## 2026-08-07: first real Qt6 build - `ambitapp-v2` compiles, one real bug found and fixed
+## 2026-08-07: first real Qt6 build - `desktop/` compiles, one real bug found and fixed
 
-The build gap flagged since `ambitapp-v2` was first written - "structurally correct Qt6/QML,
+The build gap flagged since `desktop/` was first written - "structurally correct Qt6/QML,
 but nobody has actually compiled this yet" - is closed. Built for the first time, on André's
 own Linux Mint (Ubuntu-based) machine, with real terminal access shared between André and
 this session.
@@ -2013,21 +2013,21 @@ this session.
   rendering engine as a submodule), all 535 build targets succeeded clean. Given the
   machine's internal disk only had 8.9 GB free, everything large - the Qt SDK itself, the
   MapLibre clone/build/install, and the `ccache` cache - was deliberately kept on the
-  external drive `ambit-app` already lives on, not the internal disk.
+  external drive `sommet` already lives on, not the internal disk.
 - Machine has 4 cores but only ~8.8 GB available RAM and no swap - built at `-j2`, not
   `-j4`, specifically to avoid an OOM kill partway through a long native C++ build.
 
 **The one real compile bug, found and fixed:** every one of the app's six `QML_SINGLETON`
 C++ service classes (`DeviceService`, `WeatherService`, `ActivityService`, `RouteService`,
 `PoiService`, `BackupService`) failed identically - "was not declared in this scope" inside
-`qt_add_qml_module`'s auto-generated `ambitapp_qmltyperegistrations.cpp`. Root cause: that
+`qt_add_qml_module`'s auto-generated `sommet_app_qmltyperegistrations.cpp`. Root cause: that
 generated file looks up each header by bare filename
 (`#if __has_include(<deviceservice.h>)`), not by its real path under `src/services/` -
 without that directory explicitly on the include path, every check silently fails and the
-`#include` gets skipped. Fixed with one line, `target_include_directories(ambitapp PRIVATE
-src/services)` in `CMakeLists.txt` - see `ambitapp-v2/README.md` for the same note in
+`#include` gets skipped. Fixed with one line, `target_include_directories(sommet_app PRIVATE
+src/services)` in `CMakeLists.txt` - see `desktop/README.md` for the same note in
 context. Confirmed on real hardware, not simulated: `python3 tools/selftest.py`-style
-before/after, the binary (`build/ambitapp`, 3.1 MB) exists and links after the fix, didn't
+before/after, the binary (`build/sommet`, 3.1 MB) exists and links after the fix, didn't
 before.
 
 **Follow-up, same session: a second real bug, found by actually running the binary.**
@@ -2035,7 +2035,7 @@ Launched it for the first time (backend bridge running, real display) and every 
 storm of `Unable to assign [undefined] to QColor/double/int/QString/bool` - Theme and Icons
 (and every other QML singleton: FeatureFlags, DeviceCapabilities, MapService, and all four
 ViewModels) had every property come back undefined. Root cause, found in the generated
-`build/AmbitApp/qmldir`: entries read `Theme 1.0 qml/Theme.qml` instead of `singleton Theme
+`build/SommetUi/qmldir`: entries read `Theme 1.0 qml/Theme.qml` instead of `singleton Theme
 1.0 qml/Theme.qml` - the `singleton` keyword was missing for every one of those 9 types.
 `CMakeLists.txt` had `set_source_files_properties(qml/Theme.qml PROPERTIES
 QT_QML_SINGLETON_TYPE true)` *after* `qt_add_qml_module()`, but `qt_add_qml_module` reads
@@ -2073,7 +2073,7 @@ write, not the wrapper bytes originally suspected. `PMEM20_SPORT_MODE_START` (`0
 `PMEM20_APP_START` (`0x927c0`) match this project's own independently-discovered region
 addresses exactly - strong cross-confirmation this is the right mechanism.
 
-**This project deliberately keeps GPL code out of `ambit-app`, on purpose - almost missed
+**This project deliberately keeps GPL code out of `sommet`, on purpose - almost missed
 that and copied `libambit` straight in.** `csrc/test/crypto.c`'s own header says it plainly:
 CRC16/SHA-256 are reimplemented there specifically "so the serializer can be built without
 copying GPL code into this repository." `device_driver_ambit3_navigation.c` was written as a
@@ -2151,7 +2151,7 @@ identical between C and Python - passes (434-byte body, confirmed identical). Wi
 `oss/opensportsync-main`'s vendored `libambit/` alongside the navigation module - its
 `CMakeLists.txt` globs `libambit/*.c`, so it's picked up automatically, no build-file edit
 needed. **Not wired to anything yet, on either side** - no JNI bridge call on Android, no
-caller in `ambitapp-v2`'s backend - deliberately, since nothing here has touched a real
+caller in `desktop/`'s backend - deliberately, since nothing here has touched a real
 watch. That's the next real step, alongside the still-open region-closing-structure question
 and the tail/commit-write hypothesis from the entry above.
 
@@ -2160,7 +2160,7 @@ and the tail/commit-write hypothesis from the entry above.
 Discovered while following up on André's "V3.1 added garmin etrex usb support" - the
 `GARMIN_USB_IMPORT_SPEC.md` path he gave (`oss/opensportsync-main/`) turned out to be a
 sibling folder on the same mounted drive as this repo (`/media/skinnie/.../oss/`), not a
-subfolder of `ambit-app`. Confirmed it's a real, mature, currently-developed React Native
+subfolder of `sommet`. Confirmed it's a real, mature, currently-developed React Native
 Android app - v0.2.1 shipped per its own `CHANGELOG.md`, v0.3.0 (BLE) in progress, 14
 completed architecture phases including real Strava/Runalyze/Livelox OAuth2 (PKCE S256), IGN
 map tiles, and a real Kotlin+NDK USB bridge to `libambit` - not a disposable "test base" as
@@ -2169,7 +2169,7 @@ opensportsync"/"superseded" language (written 2026-08-06, before this was found)
 premature and has been corrected - see its "Two real apps" note.
 
 **Separate, more urgent finding**: `oss/opensportsync-main` has **no git repository at all**
-(`ambit-app/.git` exists, `oss/opensportsync-main/.git` does not, confirmed with `find`
+(`sommet/.git` exists, `oss/opensportsync-main/.git` does not, confirmed with `find`
 across the whole mount). Real, versioned-by-changelog, substantially-featured software with
 zero version control is a real backup/history risk independent of any decision about how the
 two apps relate - worth fixing on its own.
@@ -2184,15 +2184,15 @@ Both requested after the entries below, now built:
 - **Backup page** gets a real "Firmware" section: checks for the latest firmware
   (`BackupService.checkFirmware()` -> `GET /api/firmware`) and can save it locally
   (`downloadFirmware()` -> `POST /api/firmware/download`, backend saves straight to
-  `~/AmbitAppBackups/firmware/`, no base64-through-JSON detour for a 2 MB file). **Carries an
+  `~/SommetBackups/firmware/`, no base64-through-JSON detour for a 2 MB file). **Carries an
   explicit, bold, always-visible warning, exactly as asked**: this is for backup only, there
   is no known way to flash the watch over this protocol, and the only supported firmware
   update path is Suunto's own official app.
 
 Both new backend endpoints (`GET /api/firmware`, `POST /api/firmware/download`) tested live
 against the connected reference watch before being wired into the UI - confirmed the same
-2,161,424-byte file, saved to `~/AmbitAppBackups/firmware/Emu-fw_2.4.17-70.2.17414.bin`.
-`selftest.py` still 25/25. Not compiled (same standing caveat as all of AmbitApp V2 - no Qt6
+2,161,424-byte file, saved to `~/SommetBackups/firmware/Emu-fw_2.4.17-70.2.17414.bin`.
+`selftest.py` still 25/25. Not compiled (same standing caveat as all of Sommet (desktop) - no Qt6
 dev headers in this sandbox), but every backend call behind it is real and verified.
 
 ## 2026-08-07: real firmware-update check + download link, verified live
@@ -2229,7 +2229,7 @@ figure out the `SFI2` container format before assuming anything about what's ins
 ## 2026-08-07: real device identity + live battery, verified on real hardware
 
 **New**: `tools/device_info.py` - model, serial, firmware/hardware version, and live battery
-charge percentage, read straight off the watch. Wired into `ambitapp-v2/backend/server.py`
+charge percentage, read straight off the watch. Wired into `desktop/backend/server.py`
 (`GET /api/device`), `DeviceService` (C++), and Home's device-hero card - battery and
 firmware no longer say "Not available yet."
 
@@ -2280,15 +2280,15 @@ command instead.
 
 ---
 
-## 2026-08-06/07: AmbitApp V2 - all 11 spec steps built
+## 2026-08-06/07: Sommet (desktop) - all 11 spec steps built
 
-Full Qt 6 / QML desktop app per `AMBITAPP_SPEC.md` - a second real app alongside
+Full Qt 6 / QML desktop app per `docs/reference/sommet-spec.md` - a second real app alongside
 `opensportsync`/React Native (`oss/opensportsync-main`), not a replacement of it; see
 `HANDOFF.md`'s "Two real apps" note, corrected 2026-08-07 after finding that fork is real and
 actively developed on this machine. Real, hardware-tested Python tooling (`tools/*.py`) stays
 the actual backend for the desktop app,
-reached through a local HTTP bridge (`ambitapp-v2/backend/server.py`) rather than ported to
-C++ - see `ambitapp-v2/README.md`'s "Architecture decision" section for why.
+reached through a local HTTP bridge (`desktop/backend/server.py`) rather than ported to
+C++ - see `desktop/README.md`'s "Architecture decision" section for why.
 
 All 11 steps built: Theme, Card, navigation shell, Home (device hero + Connections),
 Weather (Open-Meteo), Maps (real MapLibre Qt bindings over OpenStreetMap), Activities (real
@@ -2298,7 +2298,7 @@ built on `write_nav.py`'s own already-proven `nav --save`/`restore`), and Settin
 
 Full detail, including every honestly-stated gap (battery/firmware were still "Not
 available yet" at this point - closed by the entry above), lives in
-`ambitapp-v2/README.md` - not duplicated here. Written but never compiled in this
+`desktop/README.md` - not duplicated here. Written but never compiled in this
 environment (no Qt6 dev headers in this sandbox) - real build/test still needed on a
 machine with a proper Qt 6.5+ dev setup, except where individual pieces (like the entry
 above) were separately verified against real hardware.
@@ -2382,7 +2382,7 @@ screenshot (a "volunteer-run servers... osm.wiki/Blocked" tile), not guessed. Ro
 which sends no `User-Agent` at all - a real violation of OSMF's tile usage policy
 (operations.osmfoundation.org/policies/tiles/), which explicitly requires one. Fixed with a
 `TileNetworkAccessManagerFactory` in `main.cpp` (a `QQmlNetworkAccessManagerFactory`
-subclass) that stamps `AmbitApp/2.0` on every QML network request. Since OSMF's block is
+subclass) that stamps `Sommet/2.0` on every QML network request. Since OSMF's block is
 typically IP-based and time-limited (may not clear immediately even with the fix),
 `MapService.qml`'s default provider was switched to `"cyclosm"` (confirmed working
 throughout this same session) until it lapses - `"osm"` is still one click away in Settings.
@@ -2486,7 +2486,7 @@ actually place a point" reason.
 
 **Backup: "Open backup folder" replacing "Rehearse restore".** Real request - the per-backup
 "Rehearse restore" button was replaced with "Open backup folder"
-(`LocalFileService::openFolder()`, `QDesktopServices::openUrl` on `~/AmbitAppBackups`,
+(`LocalFileService::openFolder()`, `QDesktopServices::openUrl` on `~/SommetBackups`,
 mirroring `backend/server.py`'s own `BACKUP_DIR` constant client-side rather than adding a
 network round trip just to ask for a fixed, already-known path). "Restore" itself already
 reports its own result text, which was Rehearse's whole purpose here.
@@ -2578,11 +2578,11 @@ this same entry) before any of the above was verified live.
 
 ## 2026-08-08: v2.3.0 tagged, connection auto-refresh redesigned, Garmin eTrex support built
 
-**v2.3.0, tagged and committed for the first time.** This whole `ambitapp-v2/` tree (and the
+**v2.3.0, tagged and committed for the first time.** This whole `desktop/` tree (and the
 supporting `tools/*.py` changes underneath it) had never actually been committed to this
 repo before - a huge amount of real, hardware-verified work sitting only in the working
 tree. Committed the real source (Qt app, backend, the `tools/*.py` files it depends on,
-`AMBITAPP_SPEC.md`/`CREDITS.md`/`LICENSE`) - deliberately not the many scratch/binary
+`docs/reference/sommet-spec.md`/`CREDITS.md`/`LICENSE`) - deliberately not the many scratch/binary
 artifacts sitting alongside it in this same working tree (test flash-region dumps, `dist/`,
 `obsolete/`, build logs, a couple of personal-route GPX files left out on privacy grounds
 given the remote is a real public GitHub repo) - and tagged `v2.3.0` as stable. `CMakeLists.
@@ -2683,7 +2683,7 @@ after reviewing the Garmin work above:
   them have anything to do while one is.
 - The Garmin backup button was "Choose folder and back up"; renamed to "Create backup now"
   to match Suunto's own wording exactly - still opens the folder-choose dialog first (a
-  real difference from Suunto's fixed `~/AmbitAppBackups`), just worded the same way.
+  real difference from Suunto's fixed `~/SommetBackups`), just worded the same way.
 - Settings' "General" Card reports the Python backend bridge's own status, which Garmin
   support has nothing to do with (`GarminService` talks directly to a mounted filesystem,
   no backend involved). Swapped for a "Supported devices" Card while a Garmin is connected,

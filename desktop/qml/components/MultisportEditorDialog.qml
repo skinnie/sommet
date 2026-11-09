@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Build a multisport combo: a name, which kind it is, and the ORDER the watch steps through.
 //

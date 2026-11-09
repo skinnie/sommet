@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Same real request as RoundedButton.qml ("rounded squares on sport modes buttons and
 // settings buttons/sliders") applied to Slider's own handle - the Basic style's default

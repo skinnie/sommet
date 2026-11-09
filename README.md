@@ -19,7 +19,7 @@ Within the features we have:
 - Update orbital data: gps and glonass (for the glonass devices)
 - Device manual: download them in pdf format
 - Activities: download from the watch,view on a map, export them in gpx, fit, to local, cloud or 3rd party services (strava, runalyze, intervals.icu, others to come)
-- Routes: Import/send a gpx route to the watch (with its distance, climb and altitude graph), remove a route from the watch, export the routes on the watch to gpx format. Sending or removing a route keeps your POIs; a copy of them is saved first in `~/AmbitAppBackups/POIs/`
+- Routes: Import/send a gpx route to the watch (with its distance, climb and altitude graph), remove a route from the watch, export the routes on the watch to gpx format. Sending or removing a route keeps your POIs; a copy of them is saved first in `~/SommetBackups/POIs/`
 - POIs: Import/send a POI to the watch (via a map search, or coordinates), remove a POI, export the POIs on the map to gpx
 - Calendar: visual calendar with days where activities were done
 - Totals: totals of a certain activity
@@ -127,8 +127,8 @@ Windows) and an **Android** app (React Native). Both talk to a watch over USB; t
 app additionally supports Bluetooth. Start by cloning:
 
 ```
-git clone https://github.com/skinnie/sommet.git ambit-app
-cd ambit-app
+git clone https://github.com/skinnie/sommet.git sommet
+cd sommet
 ```
 
 ### Android

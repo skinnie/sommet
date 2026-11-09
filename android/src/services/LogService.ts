@@ -19,7 +19,7 @@ export const MAX_LOG_CHARS = 200_000;
 export const KEEP_LOG_CHARS = 100_000;
 
 export function logPath(): string {
-  return `${RNFS.DocumentDirectoryPath}/ambitapp.log`;
+  return `${RNFS.DocumentDirectoryPath}/sommet.log`;
 }
 
 // The one sentence shown for an error, the desktop's LogService.userMessage().

@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
-import AmbitApp
+import SommetUi
 
 // Step 7: real Apple-Photos-style activity cards, backed by ActivityService (parses the
 // backend's raw GPX into distance/duration/elevation/track). Selecting a card opens

@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One total, with its equivalents underneath - the repeated unit of the Totals page.
 //

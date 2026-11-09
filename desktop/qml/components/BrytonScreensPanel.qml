@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Bryton Aero 60 data screens - System/Grid.ini via tools/bryton_grid.py (/api/bryton/grid): per
 // screen, shown or hidden, how many fields and which field sits in each cell, with a preview in

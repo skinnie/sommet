@@ -3,7 +3,7 @@ import { buildAppsRegion, decodeApps } from '../AppsCodec';
 
 // Same reasoning/values as this feature's desktop hardware+unit tests (training_calendar.py) -
 // kept a direct parallel so a divergence between the two ports would show up as a test
-// difference, not a silent drift (see ambit_app_android_decoder_drift memory).
+// difference, not a silent drift (see sommet_android_decoder_drift memory).
 
 function fakeAppsRegion(names: string[]): Uint8Array {
   let region: Uint8Array = new Uint8Array(0);

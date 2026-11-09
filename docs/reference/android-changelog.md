@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the AmbitApp Android app (fork of `guiguoz/opensportsync`) are
+All notable changes to the Sommet Android app (fork of `guiguoz/opensportsync`) are
 recorded here, newest first.
 
 ## 0.2.25 (2026-08-30)
@@ -187,7 +187,7 @@ Smart Sensor) for community testing. Both apps compile (Android APK + desktop Qt
 Cable-tested, community-feedback features behind one toggle, each with a visible "unproven,
 back up first" warning. Nothing here is on by default.
 
-- **App Zone (Suunto Apps).** Install Suunto Apps onto the watch. AmbitApp ships **no** Suunto
+- **App Zone (Suunto Apps).** Install Suunto Apps onto the watch. Sommet ships **no** Suunto
   content (proprietary, and the App Zone service is long dead) — you **import your own**
   SuuntoLink `suunto-apps/index.json` (parsed natively into a compact local catalog), then
   browse/search and install onto a sport-mode screen. The Apps-region build and the
@@ -263,7 +263,7 @@ home screen.
 
 Merges two real, independent lines of work that developed in parallel on separate machines/
 terminals today, both starting from the same 2.3.4-beta base: the UI/theme redesign below
-(2.5.0 through 2.5.10, built in a separate `ambitapp-v2.5.0` working copy specifically so
+(2.5.0 through 2.5.10, built in a separate `sommet-v2.5.0` working copy specifically so
 the other one stayed undisturbed) and the Kailash/CustomModes/Settings feature work (2.5.11,
 built directly in this repo). Reconciled via a real three-way merge (base = the shared
 2.3.4-beta ancestor, mirrored to Android's own git history at commit `a4d2680`) - most files
@@ -307,7 +307,7 @@ subtree` import (internal repo housekeeping, not a user-facing change - see
 
 - Follow-up polish pass on the v2.5.0 redesign, based on real-device screenshots.
 - Uniform `ActionTile` height regardless of whether a progress subtitle is showing.
-- New `Logo` mark (mountain + "AmbitApp" wordmark) on the searching/connecting/timeout/
+- New `Logo` mark (mountain + "Sommet" wordmark) on the searching/connecting/timeout/
   error screens, with a version badge; text on those screens now scales up ~12.5%+,
   further scaled by the device's own screen width (clamped) instead of a fixed size.
 - New outlined `watch` (Ambit3 Peak) and `etrex` (Garmin eTrex 10) icons, shown centered
@@ -330,7 +330,7 @@ subtree` import (internal repo housekeeping, not a user-facing change - see
 
 ## V2.5.0 - 2.5.0 (2026-08-08)
 
-- Full UI redesign, built in a new sibling folder (`ambitapp-v2.5.0`, this one) so the
+- Full UI redesign, built in a new sibling folder (`sommet-v2.5.0`, this one) so the
   `opensportsync-main` working copy stays untouched. Visual layer only — no service,
   handler, or state-machine logic changed.
 - Replaced the neon-cyan-on-navy look with a flat, grayscale black/white (light) and dark/
@@ -439,7 +439,7 @@ read route, POI, orbital data, activity sync. Experimental, gated behind a clear
 disclaimer. Protocol layer (frame format, command set, Service Changed handling) is
 confirmed against a real hardware capture; the BLE connect/pairing step itself is still
 being debugged on real hardware and not yet fully reliable. See `HANDOFF.md` in the
-ambit-app research project for the detailed status.
+sommet research project for the detailed status.
 
 ## V2 - 0.2.1
 

@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Connect IQ updates — lists the installed Connect IQ apps on a connected Garmin Edge and flags
 // which have a newer version in Garmin's store. No Garmin login: it reads the device's own CIQ

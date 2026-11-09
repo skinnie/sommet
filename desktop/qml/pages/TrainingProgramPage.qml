@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtCore
-import AmbitApp
+import SommetUi
 import "../SwimWorkout.js" as SW
 
 // Training Program - real request, 2026-08-12 (André: "how can we build from scratch a

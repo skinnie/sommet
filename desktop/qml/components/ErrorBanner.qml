@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // One error banner for the whole app - real request, 2026-08-11 (André, G1). Pages used to
 // print a service's `lastError` straight into the UI, which meant raw backend stderr and Qt

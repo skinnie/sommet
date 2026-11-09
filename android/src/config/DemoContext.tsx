@@ -6,8 +6,8 @@ import { DemoDevice, demoDeviceFor } from '../services/DemoDevices';
 // the app can be explored without one. Persisted (enabled + which watch), same AsyncStorage +
 // context pattern as ThemeModeContext / ExperimentalContext. Default OFF.
 
-const ENABLED_KEY = 'ambitapp:demo:enabled';
-const VARIANT_KEY = 'ambitapp:demo:variant';
+const ENABLED_KEY = 'sommet:demo:enabled';
+const VARIANT_KEY = 'sommet:demo:variant';
 
 interface DemoContextValue {
   enabled: boolean;

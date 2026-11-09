@@ -99,7 +99,7 @@ void DeviceService::logToFile(const QString &line)
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dir);
-    QFile file(dir + QStringLiteral("/ambitapp.log"));
+    QFile file(dir + QStringLiteral("/sommet.log"));
     if (!file.open(QIODevice::Append | QIODevice::Text))
         return;  // real but non-critical - never blocks the actual UI/retry flow on this
     QTextStream out(&file);

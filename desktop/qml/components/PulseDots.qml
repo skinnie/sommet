@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Sommet's "working" mark: three dots that pulse in turn (160 ms apart). Used by LoadingPill,
 // busy buttons, the Coach while Claude writes, and the firmware steps. Dots, not a spinner

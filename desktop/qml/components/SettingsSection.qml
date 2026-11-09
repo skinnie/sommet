@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One closed row in Settings (André, 2026-10-21: the Settings split, "progressive disclosure").
 // Shows the section's title and its current value; a click, Enter or Space opens the full

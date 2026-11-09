@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(AmbitApp VERSION 0.2.65 LANGUAGES CXX)
+project(Sommet VERSION 0.2.65 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,24 +70,24 @@ option(SOMMET_PERSONAL "Build local-only personal extensions from desktop/person
 
 qt_standard_project_setup(REQUIRES 6.5)
 
-qt_add_executable(ambitapp
+qt_add_executable(sommet_app
     src/main.cpp
 )
 
-# The QML module URI is "AmbitApp" (below), which Qt materialises as an "AmbitApp" directory
-# in the build tree. On a case-INSENSITIVE filesystem (macOS APFS, Windows) a target output
-# also named "ambitapp" collides with that directory - the macOS linker fails with
-# "ld: open() failed, errno=21 (Is a directory) for 'ambitapp'". Naming the OUTPUT "Sommet"
-# both dodges the collision and is the correct user-facing brand (the internal target/module
-# names stay ambitapp/AmbitApp so nothing else in this file changes). MACOSX_BUNDLE makes the
+# The QML module URI is "SommetUi" (below), which Qt materialises as a "SommetUi" directory
+# in the build tree. The module is deliberately NOT named "Sommet": the program file is named
+# "Sommet" (OUTPUT_NAME below), and a file and a directory of the same name can't share the
+# build folder (on macOS APFS / Windows the case-insensitive match is enough - the linker failed
+# with "ld: open() failed, errno=21 (Is a directory)" on the first Mac build). The CMake target
+# is "sommet_app" for the same reason. MACOSX_BUNDLE makes the
 # macOS output a real Sommet.app (the release .dmg wraps it); WIN32_EXECUTABLE drops the
 # console window on the Windows GUI build. All three are no-ops on Linux except the rename.
-set_target_properties(ambitapp PROPERTIES
+set_target_properties(sommet_app PROPERTIES
     OUTPUT_NAME Sommet
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
     # Without these, Qt stamps the macOS Info.plist with its placeholders: CFBundleIdentifier
-    # com.yourcompany.ambitapp and CFBundleName ambitapp (the old internal target name). The app
+    # com.yourcompany.sommet_app and CFBundleName sommet_app (the internal target name). The app
     # already brands itself Sommet everywhere else and writes QSettings under com.sommet.Sommet,
     # so align the bundle identity to match (spotted on the first Mac build, 2026-08-27).
     MACOSX_BUNDLE_GUI_IDENTIFIER com.sommet.Sommet
@@ -112,13 +112,13 @@ set_target_properties(ambitapp PROPERTIES
 # runtime setWindowIcon(icon.png) in main.cpp (and a .desktop file's Icon= at install time).
 if(APPLE)
     # Copy icon.icns into Sommet.app/Contents/Resources (where CFBundleIconFile points).
-    target_sources(ambitapp PRIVATE packaging/icon.icns)
+    target_sources(sommet_app PRIVATE packaging/icon.icns)
     set_source_files_properties(packaging/icon.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
 elseif(WIN32)
     # Compile the .ico into the executable's resources so Explorer/taskbar show it. CMake
     # routes .rc files to the platform resource compiler (windres for MinGW, rc for MSVC).
-    target_sources(ambitapp PRIVATE packaging/sommet.rc)
+    target_sources(sommet_app PRIVATE packaging/sommet.rc)
 endif()
 
 # Pure-QML singletons - see qml/Theme.qml's own header comment for why these are QML, not
@@ -188,8 +188,8 @@ set_source_files_properties(qml/TrainingPlanSync.qml PROPERTIES
     QT_QML_SINGLETON_TYPE true
 )
 
-qt_add_qml_module(ambitapp
-    URI AmbitApp
+qt_add_qml_module(sommet_app
+    URI SommetUi
     VERSION 1.0
     QML_FILES
         qml/Main.qml
@@ -413,7 +413,7 @@ qt_add_qml_module(ambitapp
         # 2026-08-07 switch to Qt's built-in "osm" plugin, left on disk but out of the build
 )
 
-target_link_libraries(ambitapp PRIVATE
+target_link_libraries(sommet_app PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Qml
@@ -423,15 +423,15 @@ target_link_libraries(ambitapp PRIVATE
     Qt6::Sql
 )
 if(SOMMET_HAS_WEBCAM_SCAN)
-    target_link_libraries(ambitapp PRIVATE Qt6::Multimedia ZXing::ZXing)
-    target_compile_definitions(ambitapp PRIVATE SOMMET_HAS_WEBCAM_SCAN)
+    target_link_libraries(sommet_app PRIVATE Qt6::Multimedia ZXing::ZXing)
+    target_compile_definitions(sommet_app PRIVATE SOMMET_HAS_WEBCAM_SCAN)
 endif()
 
-# qt_add_qml_module's auto-generated type-registration file (ambitapp_qmltyperegistrations.cpp)
+# qt_add_qml_module's auto-generated type-registration file (sommet_app_qmltyperegistrations.cpp)
 # looks up each QML_ELEMENT header by bare filename (__has_include(<deviceservice.h>)), not by
 # its path under src/services/ - needs that directory on the include path explicitly, or every
 # one of those checks silently fails and the include gets skipped (2026-08-07, first real build).
-target_include_directories(ambitapp PRIVATE
+target_include_directories(sommet_app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/services
 )
@@ -439,8 +439,8 @@ target_include_directories(ambitapp PRIVATE
 # IntervalsService's own repo-root path for launching tools/workout_gui.py / dist/<os>/ - see
 # that Service's own header comment for why this is baked in at configure time rather than
 # guessed at runtime.
-target_compile_definitions(ambitapp PRIVATE
-    AMBITAPP_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
+target_compile_definitions(sommet_app PRIVATE
+    SOMMET_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
     # Single source of truth for the app version: the CMake project() version,
     # surfaced to QML via QCoreApplication::applicationVersion (Qt.application.version).
     # Previously the About card hardcoded "v0.2.1" and silently drifted from PROJECT_VERSION.
@@ -449,10 +449,10 @@ target_compile_definitions(ambitapp PRIVATE
 
 # Local-only extensions (see the SOMMET_PERSONAL option above). When ON, define the guard for
 # main.cpp's hook and pull in every desktop/personal/*.cmake, which add their own sources / QML
-# to the ambitapp target. When OFF (public + CI + release default) this whole block is skipped,
+# to the sommet target. When OFF (public + CI + release default) this whole block is skipped,
 # so the build is byte-for-byte the public app. CONFIGURE_DEPENDS re-globs when files change.
 if(SOMMET_PERSONAL)
-    target_compile_definitions(ambitapp PRIVATE SOMMET_PERSONAL)
+    target_compile_definitions(sommet_app PRIVATE SOMMET_PERSONAL)
     file(GLOB _sommet_personal_ext CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/personal/*.cmake")
     foreach(_ext ${_sommet_personal_ext})

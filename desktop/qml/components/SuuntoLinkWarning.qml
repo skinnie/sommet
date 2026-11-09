@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // SuuntoLink warning (André, 2026-09-28: "suunto link warning should be present in every
 // firmware flash or even when opening our app"). Suunto's own desktop app grabs any Ambit on

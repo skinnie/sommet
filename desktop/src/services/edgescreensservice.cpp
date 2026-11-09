@@ -9,8 +9,8 @@
 #include <QStandardPaths>
 
 // Repo root is baked in at configure time (see desktop/CMakeLists.txt); "" is only a dev fallback.
-#ifndef AMBITAPP_REPO_ROOT
-#define AMBITAPP_REPO_ROOT ""
+#ifndef SOMMET_REPO_ROOT
+#define SOMMET_REPO_ROOT ""
 #endif
 
 // Path to the Python tool that does the device work. Defaults to the bundled tools/ next to the
@@ -22,7 +22,7 @@ static QString defaultToolPath()
     const QString override = s.value(QStringLiteral("edge/toolPath")).toString();
     if (!override.isEmpty())
         return override;
-    const QString repoRoot = QDir(QStringLiteral(AMBITAPP_REPO_ROOT)).absolutePath();
+    const QString repoRoot = QDir(QStringLiteral(SOMMET_REPO_ROOT)).absolutePath();
     return repoRoot + QStringLiteral("/tools/edge_screens_device.py");
 }
 

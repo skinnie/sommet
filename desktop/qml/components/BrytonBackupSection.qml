@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Bryton Aero 60 backup & restore, one half per connection (André, 2026-11-08: "for screens use
 // cable, for sensors use bluetooth"):
@@ -8,7 +8,7 @@ import AmbitApp
 //   mode "sensors" - on the Bluetooth panel: saves the paired-sensor list read over BLE. The Aero
 //     60 has no "write this sensor id" command (its own app pairs by scanning with the sensor
 //     awake), so a sensors backup is a record: each entry says what to re-pair, on which bike.
-// Both list the same ~/AmbitAppBackups/bryton folder (tools/bryton_backup.py), filtered to the
+// Both list the same ~/SommetBackups/bryton folder (tools/bryton_backup.py), filtered to the
 // backups that hold their half.
 Column {
     id: root

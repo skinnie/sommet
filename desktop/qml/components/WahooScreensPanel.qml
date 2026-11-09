@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Wahoo ELEMNT data pages - the whole layout, built-in pages included (tools/wahoo_pages.py,
 // /api/wahoo/pages). The ELEMNT takes a complete layout over either link: the USB cable (adb

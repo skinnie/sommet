@@ -12,8 +12,8 @@ This is the data layer only. The GUI recovery flow that consumes it (auto-identi
 serial, else a "which watch do you want to recover?" picker, else the SuuntoLink message)
 is described in FIRMWARE_FLASHER_DESIGN.md.
 
-Storage: a JSON object keyed by serial at $AMBIT_APP_DATA/known_watches.json (default
-~/.config/ambit-app/known_watches.json), so it is shared across every tool and the backend.
+Storage: a JSON object keyed by serial at $SOMMET_DATA/known_watches.json (default
+~/.config/Sommet/known_watches.json), so it is shared across every tool and the backend.
 """
 
 import json
@@ -25,8 +25,8 @@ from write_nav import PRODUCT_IDS
 
 
 def registry_path():
-    base = os.environ.get("AMBIT_APP_DATA")
-    root = pathlib.Path(base) if base else pathlib.Path.home() / ".config" / "ambit-app"
+    base = os.environ.get("SOMMET_DATA")
+    root = pathlib.Path(base) if base else pathlib.Path.home() / ".config" / "Sommet"
     return root / "known_watches.json"
 
 

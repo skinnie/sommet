@@ -61,7 +61,7 @@ def _u16(b, o):
 
 # hrbelt_and_pods bit layout, decoded from a real SuuntoLink<->Ambit2 USBPcap 2026-08-26
 # (mode toggled one accessory at a time; cross-checked against the factory Cycling mode
-# 0x08c3 = HR+Bike+Power+Cadence). See docs / the ambit-app-ambit2-arrived memory.
+# 0x08c3 = HR+Bike+Power+Cadence). See docs / the sommet-ambit2-arrived memory.
 POD_BITS = {
     "hr_belt":     0x0003,   # bits 0+1
     "power_pod":   0x0040,   # bit 6

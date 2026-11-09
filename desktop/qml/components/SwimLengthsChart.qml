@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 import "../ActivityViewLogic.js" as AVL
 import "../ActivityChartDraw.js" as ACD
 

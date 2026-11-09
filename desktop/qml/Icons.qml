@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 
-// AMBITAPP_SPEC.md, "Icons": "Use Material Symbols Rounded. No emoji. No platform-specific
+// docs/reference/sommet-spec.md, "Icons": "Use Material Symbols Rounded. No emoji. No platform-specific
 // icons." Codepoints and the subsetting process are documented in
 // assets/fonts/NOTICE.md - add a new icon there, not by guessing a codepoint here.
 //

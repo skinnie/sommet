@@ -14,7 +14,7 @@
 // day's workout - see that file's docstring for the whole mechanism and its live-compiler
 // probing) and workout_install.py writes them. This service wraps backend/server.py's four
 // /api/trainingprogram endpoints; plan authoring itself is fully offline (local JSON in
-// ~/AmbitAppPlans), only compiling needs internet and only installing needs the watch.
+// ~/SommetPlans), only compiling needs internet and only installing needs the watch.
 class TrainingProgramService : public QObject
 {
     Q_OBJECT

@@ -2,7 +2,7 @@ pragma Singleton
 import QtQuick
 import QtCore
 
-// AMBITAPP_SPEC.md, "Maps": "Create a MapService abstraction... The UI must never care
+// docs/reference/sommet-spec.md, "Maps": "Create a MapService abstraction... The UI must never care
 // where tiles come from." MapView.qml (components/) is the only thing that reads this - a
 // plain, direct XYZ slippy-tile renderer, no QtLocation/GeoServices plugin involved at all
 // (see MapView.qml's own header comment for why that plugin was abandoned).
@@ -24,10 +24,10 @@ import QtCore
 // same testing, so it's the safer default until OSM's own block lapses - "OpenStreetMap
 // (standard)" is still one click away in Settings.
 //
-// Offline: real pre-downloaded MBTiles regions are not built yet - AMBITAPP_SPEC.md lists
+// Offline: real pre-downloaded MBTiles regions are not built yet - docs/reference/sommet-spec.md lists
 // that as "future" explicitly. What DOES exist, since 2026-08-11 (main.cpp's
 // TileNetworkAccessManager): every tile fetched is kept in a real on-disk HTTP cache
-// (QNetworkDiskCache, ~/.cache/AmbitApp/AmbitApp/tiles on Linux), so anywhere already
+// (QNetworkDiskCache, ~/.cache/Sommet/Sommet/tiles on Linux), so anywhere already
 // viewed once loads instantly and keeps rendering with zero network at all - a real,
 // incidental offline capability for already-visited areas, just not a way to pre-fetch a
 // region you haven't looked at yet.

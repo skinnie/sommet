@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Every dialog in this app, themed - real bug, 2026-08-11 (André, on the row picker): "the
 // screen that appears has white background and grey letters not being visible, and not

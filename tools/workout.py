@@ -95,12 +95,12 @@ def _load_compile_key():
     """The compiler's x-functions-key. In priority:
       1. env var COMPILE_KEY
       2. tools/.compile_key
-      3. ~/.config/ambitapp/compile_key
+      3. ~/.config/sommet/compile_key
       4. PUBLIC_COMPILE_KEY - pavel's own forum-published key, so it works with no setup."""
     if os.environ.get("COMPILE_KEY"):
         return os.environ["COMPILE_KEY"].strip()
     for p in (pathlib.Path(__file__).with_name(".compile_key"),
-              pathlib.Path.home() / ".config" / "ambitapp" / "compile_key"):
+              pathlib.Path.home() / ".config" / "sommet" / "compile_key"):
         try:
             return p.read_text().strip()
         except OSError:
@@ -303,7 +303,7 @@ def compile_source(request_text, verbose=False):
     if not COMPILE_KEY or COMPILE_KEY == "***REMOVED***":
         raise RuntimeError(
             "no compiler key. Provide the community/pavel App-Zone compiler's x-functions-key "
-            "via env COMPILE_KEY, or tools/.compile_key, or ~/.config/ambitapp/compile_key "
+            "via env COMPILE_KEY, or tools/.compile_key, or ~/.config/sommet/compile_key "
             "(all gitignored - never commit it).")
     req = urllib.request.Request(
         COMPILE_URL, data=request_text.encode("utf-8"), method="POST",

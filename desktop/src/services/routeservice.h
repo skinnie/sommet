@@ -7,7 +7,7 @@
 #include <QVariantList>
 
 // Step 8. Two real, distinct capabilities this project's Python tooling already has -
-// AMBITAPP_SPEC.md's "Existing Features: Route management - Import GPX, Export GPX, Upload,
+// docs/reference/sommet-spec.md's "Existing Features: Route management - Import GPX, Export GPX, Upload,
 // Download" - and one honest gap between them:
 //
 // - "on-watch routes" (what `write_nav.py nav` already reads back and shows) - real, parsed

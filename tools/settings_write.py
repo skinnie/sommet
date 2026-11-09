@@ -212,7 +212,7 @@ KAILASH_SETTINGS = {
     # sml.DeviceSettings.HomeLocation, packing two int32 sub-fields (Latitude 0x28,
     # Longitude 0x29), each with a real <MOD> tag confirming the degrees*1e7 encoding
     # this project's own POI format already uses. Confirmed absent from the Ambit3's own
-    # descriptor entirely - Kailash-only. See ambit_app_kailash_home_location_field
+    # descriptor entirely - Kailash-only. See sommet_kailash_home_location_field
     # memory. Unlike every other key in this table, these two are GROUP members, not
     # top-level entries - read_all()/write_one() below resolve that generically. Values
     # are decimal degrees (not the raw int32), range-checked before any write is sent;
@@ -711,7 +711,7 @@ def _find_field(schema, path_suffix):
 def _group_containing(schema, fid):
     """The id of the GROUP entry that packs `fid` as one of its own sub-fields, or None
     if `fid` is itself a plain top-level scalar entry (true for every curated field until
-    HomeLocation - see ambit_app_kailash_home_location_field memory). On the wire, a
+    HomeLocation - see sommet_kailash_home_location_field memory). On the wire, a
     group's members never appear as their own top-level SBEM entries, only packed
     together inside their parent group's single entry."""
     for gid, members in schema.groups.items():

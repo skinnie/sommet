@@ -12,8 +12,8 @@ import { base64ToBytes, bytesToBase64 } from './Base64';
 type SgeeWriter = { updateSgee(path: string): Promise<boolean> };
 
 // GPS orbital data (AGPS/SGEE) — live, unauthenticated Suunto endpoint.
-// Verified working 2026-08-05 against real hardware: see ambit-app/sgee_andre.md
-// and ambit-app/tools/README.md. NOT the same as the account-tied cloudapi.suunto.com
+// Verified working 2026-08-05 against real hardware: see sommet/sgee_andre.md
+// and sommet/tools/README.md. NOT the same as the account-tied cloudapi.suunto.com
 // host — this is devices.suunto-operations.com, found in SuuntoLink's own
 // production.json, and it needs no AppKey/serial/account for this specific path.
 const SGEE_URL = 'https://devices.suunto-operations.com/devices/gpsorbit/binary';

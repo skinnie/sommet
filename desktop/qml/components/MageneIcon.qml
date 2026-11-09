@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A silhouette of a Magene C406 Pro (André, 2026-09-24, from the product photo
 // static.magene.com/img/p/9/5/95-large_default.jpg; proportions re-checked 2026-09-25 against his

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Edge Screens — editor for a Garmin Edge activity profile's data screens, over USB (no Garmin
 // Connect, no cloud). Modelled on Garmin's own "Edit Screen" UX (a screen list, then a per-screen

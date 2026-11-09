@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Grey rows shaped like the list to come, while a long read runs (André, 2026-11-02, desktop
 // picks #13). One animation for the whole block, kept light for the X230: the rows pulse

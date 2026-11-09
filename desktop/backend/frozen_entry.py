@@ -1,14 +1,14 @@
 """PyInstaller entry point for the packaged watch helper (see
-tools/packaging/ambit_backend.spec and BackendProcess on the C++ side).
+tools/packaging/sommet_backend.spec and BackendProcess on the C++ side).
 
 A normal checkout never runs this - there `desktop/backend/server.py` is started directly
 (by run-desktop.sh) and it shells out to `python tools/<script>.py` for each watch tool. But
 in the frozen download there is no separate `python`: the only executable is this frozen
 program. So it wears two hats, chosen by the command line:
 
-  ambit-backend                      -> run the HTTP backend (server.main())
-  ambit-backend --tool <path> [args] -> behave like `python <path> [args]`
-  ambit-backend --workout-builder    -> run the Interval Workout Builder (tools/workout_gui.py)
+  sommet-backend                      -> run the HTTP backend (server.main())
+  sommet-backend --tool <path> [args] -> behave like `python <path> [args]`
+  sommet-backend --workout-builder    -> run the Interval Workout Builder (tools/workout_gui.py)
 
 server.py's run_tool() uses the second form (via sys.executable + "--tool") so each watch
 tool still runs in its own fresh process - the isolation server.py deliberately relies on -
@@ -22,7 +22,7 @@ import sys
 
 
 def _bundled_tools_dir():
-    # In the frozen build, tools/ is unpacked under sys._MEIPASS (see ambit_backend.spec);
+    # In the frozen build, tools/ is unpacked under sys._MEIPASS (see sommet_backend.spec);
     # from a plain source run this file's siblings are in ../../tools relative to the repo.
     from pathlib import Path
 

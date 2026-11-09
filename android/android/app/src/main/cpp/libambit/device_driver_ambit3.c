@@ -1460,7 +1460,7 @@ static size_t ambit3_poi_name_len(const char *name)
  * names seen on the Peak). SuuntoLink's own import does send the whole list, but only
  * after a 0x0b04, which empties the store (assets/pcap/ambit3poiimport). Checked by the
  * count (0x0b02) going up by exactly one. Never touches the Waypoints/Routes regions.
- * Byte layout ported from ambit-app/tools/ambit_format.py's build_poi_record().
+ * Byte layout ported from sommet/tools/ambit_format.py's build_poi_record().
  * `name` must be non-empty. Returns 0 on success, -1 on failure.
  */
 int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat, double lon, int type)
@@ -1781,7 +1781,7 @@ cleanup:
 /*
  * Reads `length` bytes starting at `address` into a caller-allocated
  * `out_buffer`, via 0x0b17 ([u32 address][u32 length] out, the same eight
- * bytes then the data back) -- ambit-app's tools/write_nav.py read_flash(),
+ * bytes then the data back) -- sommet's tools/write_nav.py read_flash(),
  * ported directly; this is what makes reading the Waypoints/Routes regions
  * (and nothing else, this project's own log-reading code has its own
  * chunker with unrelated bounds tied to the log region) possible.

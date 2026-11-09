@@ -803,7 +803,7 @@ def to_gpx(header, samples):
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<gpx version="1.1" creator="ambit-app exercise_log.py"'
+        '<gpx version="1.1" creator="Sommet exercise_log.py"'
         ' xmlns="http://www.topografix.com/GPX/1/1">',
         f'  <metadata><time>{meta_time}</time></metadata>',
         f'  <trk><name>{header["activity_name"]}</name>',
@@ -1634,7 +1634,7 @@ def main():
     # read-only). Reuses the already-open Link and already-decoded headers to mark each
     # newly-read move synced on the watch (command 0x1201) so the Suunto app / SuuntoLink
     # don't duplicate it - the experimental Settings toggle. See tools/mark_synced.py and
-    # the ambit-app-activity-sync-no-delete finding. Only marks the entries decoded THIS
+    # the sommet-activity-sync-no-delete finding. Only marks the entries decoded THIS
     # run (with --known-count, that's just the new ones, so each move is marked once, the
     # call that first reads it), and never for --from FILE (nothing to write to).
     ap.add_argument("--mark-synced", action="store_true",

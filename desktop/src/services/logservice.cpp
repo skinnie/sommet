@@ -28,7 +28,7 @@ LogService::LogService(QObject *parent) : QObject(parent)
 QString LogService::logPath() const
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return dir + QStringLiteral("/ambitapp.log");
+    return dir + QStringLiteral("/sommet.log");
 }
 
 QString LogService::userMessage() const

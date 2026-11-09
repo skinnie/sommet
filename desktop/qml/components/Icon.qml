@@ -1,8 +1,8 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One glyph from Icons.qml, rendered at a given size/color. `Icon { glyph: Icons.home }`
-// everywhere an icon is needed - AMBITAPP_SPEC.md's "Material Symbols Rounded, no emoji, no
+// everywhere an icon is needed - docs/reference/sommet-spec.md's "Material Symbols Rounded, no emoji, no
 // platform-specific icons" rule lives here and nowhere else.
 Text {
     id: root

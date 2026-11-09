@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A silhouette of the original Wahoo ELEMNT (André's unit, 2026-10-02). It is portrait, with a
 // row of LEDs along the top edge, a screen taking most of the face, and three front keys under

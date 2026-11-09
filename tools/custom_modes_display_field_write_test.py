@@ -39,7 +39,7 @@ import custom_modes as CM
 from ambit_pcap import FlashImage
 from write_nav import Link, check_memory_map, read_flash, read_memory_map, send_plan
 
-BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "custom_modes"
+BACKUP_DIR = pathlib.Path.home() / "SommetBackups" / "custom_modes"
 NAME_TO_INDEX = {v: k for k, v in CM.FIELD_TYPES.items()}
 
 
@@ -164,7 +164,7 @@ def main():
                           "and reports what would change")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON line instead of human-readable output - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     args = ap.parse_args()
     quiet = args.json
 

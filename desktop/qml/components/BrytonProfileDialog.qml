@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Bryton Aero 60 <-> intervals.icu profile reconciliation (André, 2026-09-24).
 //

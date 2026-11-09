@@ -2,14 +2,14 @@ pragma Singleton
 import QtQuick
 import QtCore
 
-// Every color used anywhere in the app comes from here - AMBITAPP_SPEC.md's own rule
+// Every color used anywhere in the app comes from here - docs/reference/sommet-spec.md's own rule
 // ("Never hardcode colors... Future themes should require zero UI changes"). The "future
 // Settings -> theme control" this file's own comment anticipated is real now
 // (SettingsPage.qml's own Appearance card) - it just sets `Theme.override` to
 // "light"/"dark"/"system"; nothing else in the UI needed to change.
 //
 // Palette notes: teal primary/accent carried over from this project's other recent work
-// (the packaging download page, the app icon - tools/packaging/make_icon.py) so AmbitApp has
+// (the packaging download page, the app icon - tools/packaging/make_icon.py) so Sommet has
 // one consistent visual identity end to end, not a new color chosen in isolation here.
 QtObject {
     id: root

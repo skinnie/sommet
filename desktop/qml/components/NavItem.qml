@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // One row in NavRail.qml - icon, label, and its own selected/hover state. Split out from
 // NavRail itself so Sport Modes (hidden behind FeatureFlags.sportModes) is just one more
@@ -44,7 +44,7 @@ Rectangle {
     // Hover = cardNested, like the Settings rows: the rail itself is Theme.card, so hovering in
     // card colour showed nothing (fixed 2026-11-02).
     color: selected ? Theme.primary : (hoverHandler.hovered ? Theme.cardNested : _hoverClear)
-    // AMBITAPP_SPEC.md's own Design Language lists "Subtle animations" as a real
+    // docs/reference/sommet-spec.md's own Design Language lists "Subtle animations" as a real
     // requirement - real, 2026-08-09 ("general desktop polish pass"): before this, every
     // color in the app (hover, selection, theme changes) snapped instantly with zero
     // animation anywhere in the codebase, confirmed via a real grep for Behavior/

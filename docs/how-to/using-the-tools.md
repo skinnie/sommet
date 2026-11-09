@@ -29,7 +29,7 @@ for byte against a capture, packet sequence included.
 ```
 
 A route write ends with a commit that empties the watch's POI list. The tools save the POIs to
-`~/AmbitAppBackups/POIs/<serial>/POIs_pre_<date>.bin` first, then put them back; if that fails
+`~/SommetBackups/POIs/<serial>/POIs_pre_<date>.bin` first, then put them back; if that fails
 twice, the error names this file.
 
 A route's distance is the whole GPX summed with the 6371 km Earth radius, and its ascent and

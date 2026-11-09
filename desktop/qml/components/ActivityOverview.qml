@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 import "../ActivityViewLogic.js" as AVL
 
 // The activity screen's Overview (André, 2026-09-27; mockup artifact 8KKpqaVBCdPUvDUAhzya8h):

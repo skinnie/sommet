@@ -38,7 +38,7 @@ WORKOUT JSON (see tools/workout.py for the full schema; durations in seconds):
              {"type": {"typeName": "cooldown"}, "duration": {"durationName": "time", "value": 5},
               "target": {"targetName": "none"}}]}
 The guidance binary is compiled from this JSON by the community/Komposti compiler (compile_workout),
-which needs its key set (env COMPILE_KEY / tools/.compile_key / ~/.config/ambitapp/compile_key).
+which needs its key set (env COMPILE_KEY / tools/.compile_key / ~/.config/sommet/compile_key).
 """
 import argparse
 import datetime
@@ -271,13 +271,13 @@ def compile_workout(workout, lang=None):
     SAME compiler WorkoutSyncer.java uploaded to (<Type>guidance</Type>, <Source>=workout JSON); we
     just feed it JSON instead of our old hand-written app-zone source (which produced a tiny
     beeps-only binary and no band - that was the whole miss). Needs the compiler key (env COMPILE_KEY
-    / tools/.compile_key / ~/.config/ambitapp/compile_key, all gitignored)."""
+    / tools/.compile_key / ~/.config/sommet/compile_key, all gitignored)."""
     import workout as W
     if not W.COMPILE_KEY or W.COMPILE_KEY == "***REMOVED***":
         raise SystemExit(
             "no compiler key. The guidance binary is produced by the community/Komposti compiler; "
             "provide its x-functions-key via env COMPILE_KEY, tools/.compile_key, or "
-            "~/.config/ambitapp/compile_key (all gitignored - never commit it).")
+            "~/.config/sommet/compile_key (all gitignored - never commit it).")
     activity_id = workout.get("activityId", 3)
     workout = with_default_labels(workout, lang)  # blank step -> phase word in the watch's language
     workout = with_si_units(workout)  # target/step-end units -> the SI units the program compares

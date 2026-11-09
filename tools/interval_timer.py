@@ -43,7 +43,7 @@ from ambit_pcap import FlashImage
 from custom_modes_field_write_test import find_settings_base
 from write_nav import Link, check_memory_map, read_flash, read_memory_map, send_plan
 
-BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "custom_modes"
+BACKUP_DIR = pathlib.Path.home() / "SommetBackups" / "custom_modes"
 
 TYPE_TIME = 1        # value in whole seconds, shown as mm'ss
 TYPE_DISTANCE = 0    # value in meters, shown as km

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Routes on the Wahoo ELEMNT (tools/wahoo_routes.py, /api/wahoo/routes). Routes are sent from the
 // Routes page's "Send to…" menu like for every other device; this card lists what's on the ELEMNT

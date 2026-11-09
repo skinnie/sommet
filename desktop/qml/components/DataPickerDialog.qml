@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
-import AmbitApp
+import SommetUi
 
 // SuuntoLink's own "CHOOSE WHAT TO SHOW IN THIS ROW" screen (its Figure 5, and
 // assets/ambit3 pcap/v2/screens sports modes/display1row1graphoptions.JPG): the values
@@ -78,7 +78,7 @@ ThemedDialog {
         AppsService.searchCatalog("", DeviceService.model, -1)
     }
 
-    // Import the user's own SuuntoLink catalogue (suunto-apps/index.json). AmbitApp ships no
+    // Import the user's own SuuntoLink catalogue (suunto-apps/index.json). Sommet ships no
     // Suunto app content; each user supplies their own licensed copy. Real, 2026-08-14.
     FileDialog {
         id: indexFileDialog
@@ -203,7 +203,7 @@ ThemedDialog {
                     topPadding: Theme.spacingSmall
                 }
 
-                // Import prompt - shown until a catalogue has been imported. AmbitApp ships no
+                // Import prompt - shown until a catalogue has been imported. Sommet ships no
                 // Suunto app content (proprietary, and the App Zone service is dead), so the
                 // user imports their own SuuntoLink suunto-apps/index.json. On Linux, where
                 // SuuntoLink isn't installed, they copy that file from a Windows/Mac install.

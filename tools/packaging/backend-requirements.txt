@@ -1,4 +1,4 @@
-# Python packages the frozen backend (ambit-backend, PyInstaller) must contain.
+# Python packages the frozen backend (sommet-backend, PyInstaller) must contain.
 # Installed by every desktop release job before freezing (.github/workflows/desktop-release.yml).
 # PyInstaller only bundles what is INSTALLED at freeze time: a tool that imports a package lazily
 # (inside a function) still "works" in CI and then fails on the user's machine. That shipped

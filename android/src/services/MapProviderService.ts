@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // while Leaflet (used here) has no such limit.
 export type MapProvider = 'ign' | 'osm' | 'cyclosm';
 
-const STORAGE_KEY = 'ambitapp:mapProvider';
+const STORAGE_KEY = 'sommet:mapProvider';
 const DEFAULT_PROVIDER: MapProvider = 'ign';
 
 export async function getMapProvider(): Promise<MapProvider> {

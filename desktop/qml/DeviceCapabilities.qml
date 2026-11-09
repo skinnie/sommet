@@ -1,8 +1,8 @@
 pragma Singleton
 import QtQuick
-import AmbitApp
+import SommetUi
 
-// AMBITAPP_SPEC.md, "Device Capabilities": "Never hardcode watch models. Instead expose
+// docs/reference/sommet-spec.md, "Device Capabilities": "Never hardcode watch models. Instead expose
 // capabilities... The UI should automatically adapt." A page/button just binds to
 // `DeviceCapabilities.supportsRoutes` etc., never to `model === "Ambit3"` anywhere.
 //
@@ -11,7 +11,7 @@ import AmbitApp
 // actually read it: real, live proof was a French Ambit1 connected while Watch
 // Settings/Sport Modes/Routes were all open - each page called its Ambit3-only SBEM
 // endpoint regardless, got a real "ok: false" back (the honest, correct answer - Ambit1
-// predates SBEM, see [[ambit_app_hardware_fleet_check]] project history), and the shared
+// predates SBEM, see [[sommet_hardware_fleet_check]] project history), and the shared
 // ErrorBanner showed "An error has occurred. Please send the logs." for what is really
 // just "this feature doesn't apply to this watch." That is the actual reason this keeps
 // happening on every new device family: this file existed for exactly this, and was never
@@ -21,8 +21,8 @@ import AmbitApp
 // confirmed live (2026-08-22) that the SBEM object queries this app's Routes/POIs/Sport
 // Modes/Apps pages depend on all come back empty on real Ambit1 hardware, not an error.
 // Device identity/battery/settings-write (the one field-level SBEM path that predates the
-// object model, see [[ambit_app_ambit12_settings_write]]) still work. No BLE on this
-// family either ([[ambit_app_device_lineup]] - Ambit1/2 are USB-cable-only).
+// object model, see [[sommet_ambit12_settings_write]]) still work. No BLE on this
+// family either ([[sommet_device_lineup]] - Ambit1/2 are USB-cable-only).
 QtObject {
     readonly property var _legacyModels: (["Bluebird", "Duck", "Colibri", "Greentit"])
     readonly property bool _isLegacy: _legacyModels.indexOf(DeviceService.model) !== -1
@@ -77,7 +77,7 @@ QtObject {
     //     re-downloaded and expires on its own, so capturing it is pointless.
     // So the card promised a watch backup that captures nothing, and - the part that matters
     // - `nav --save` never touches TrackLog or DeviceHistory, which IS the irreplaceable data
-    // on this watch and IS what a firmware flash wipes ([[ambit_app_kailash_desktop_home_fix]]).
+    // on this watch and IS what a firmware flash wipes ([[sommet_kailash_desktop_home_fix]]).
     // Backing up a Kailash properly means those two regions and is a real feature, not a flag.
     // With this false, BackupPage falls through to its dedicated Ember card, so Ember backup
     // is still offered.
@@ -102,7 +102,7 @@ QtObject {
     // The Watch Settings page's SettingsWriteService calls /api/settings, the Ambit3 SBEM
     // path - real device-level settings ARE readable/writable on Ambit1/2 too, but only
     // through the separate /api/legacy/settings this page doesn't call yet (see
-    // [[ambit_app_ambit12_settings_write]]) - that's a real follow-up, not done here.
+    // [[sommet_ambit12_settings_write]]) - that's a real follow-up, not done here.
     // Watch settings work on the legacy family too now: GET /api/settings device-dispatches
     // and serves the Ambit1's own fields in the same schema (35 of them, grouped
     // General/Units/Personal). They come back writable:false - this project has never
@@ -126,7 +126,7 @@ QtObject {
     property bool supportsNavigation: !_isLegacy
     property bool supportsBluetooth: !_isLegacy
     // Firmware update: real and hardware-proven for Ambit3 (Peak) and, as of 2026-08-22,
-    // Ambit1 too (see [[ambit_app_hardware_fleet_check]]) - but exposing a live Firmware
+    // Ambit1 too (see [[sommet_hardware_fleet_check]]) - but exposing a live Firmware
     // page to end users is a real product decision beyond fixing this file's own wiring,
     // not made here. Stays false; revisit deliberately, don't flip as a side effect.
     property bool supportsFirmware: false

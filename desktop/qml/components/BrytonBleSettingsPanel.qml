@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Bryton Aero 60 device settings over Bluetooth (André, 2026-09-26) - the Bryton Active app's
 // "General settings" for the Aero 60 (SettingGeneralSetting460Activity): backlight, GPS mode,

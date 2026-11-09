@@ -5,7 +5,7 @@ duplicate it. Opt-in feature (Settings -> Experimental features, OFF by default)
 is no duplicated workouts; the downside is the move can no longer be re-retrieved from the
 watch if the Suunto app later fails to keep it. Nothing here deletes anything - the watch
 still reclaims log space by circular-buffer wraparound, independent of this flag. See the
-`ambit-app-activity-sync-no-delete` finding.
+`sommet-activity-sync-no-delete` finding.
 
 Own file, this project's own "one file per format" convention (importing `Link`/constants
 from `write_nav.py`, never growing it into a dispatcher).

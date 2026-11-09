@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A loading indicator with some life in it - real request, 2026-08-11 (André, on the
 // Activities page): "there is a message that appears says loading etc etc 'there is no

@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Temporary content for pages whose real build is a later step (Home is Step 4, Routes/POIs
 // redesign are Steps 8/9, etc.) - each page file already exists at its real name/location so

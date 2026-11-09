@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Ember "log a meal" - search Open Food Facts + USDA by name, or by barcode: typed, or read by
 // the webcam ("Scan", EmberScanView.qml), pick a food, set the grams, log. Recent picks show while the

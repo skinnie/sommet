@@ -1,9 +1,9 @@
 pragma Singleton
 import QtCore
 import QtQuick
-import AmbitApp
+import SommetUi
 
-// AMBITAPP_SPEC.md's QML -> ViewModels -> Services layering: HomePage.qml binds to this,
+// docs/reference/sommet-spec.md's QML -> ViewModels -> Services layering: HomePage.qml binds to this,
 // never to DeviceService directly. Right now that's a thin pass-through plus one piece of
 // real presentation logic (the status text/color) - as Weather/Activities services land in
 // later steps, Home's view of them gets added here too, not scattered across HomePage.qml.

@@ -45,8 +45,8 @@ function loadRoute(p) {
 const defaults = [
   path.join(os.homedir(), 'Downloads', 'brm200_thierache-22420880-1790285622-203.gpx'),
   path.join(os.homedir(), 'Downloads', 'lh2025v3.oacDzGCh_vXmMdeNH1f7k.gpx'),
-  ...fs.readdirSync(path.join(ROOT, '..', '..', 'ambit-app', 'garmin-import')).filter(f => f.startsWith('2026-06-06_06-02-21'))
-    .map(f => path.join(ROOT, '..', '..', 'ambit-app', 'garmin-import', f)),
+  ...fs.readdirSync(path.join(ROOT, 'garmin-import')).filter(f => f.startsWith('2026-06-06_06-02-21'))
+    .map(f => path.join(ROOT, '..', '..', 'sommet', 'garmin-import', f)),
 ].filter(p => fs.existsSync(p));
 const routes = (process.argv.slice(2).length ? process.argv.slice(2) : defaults).map(loadRoute);
 

@@ -5,7 +5,7 @@ import type { LatLon } from './RouteSimplify';
 // to GpxParser.ts which reads GPX files SYNCED FROM the watch (a recorded
 // activity, always <trk><trkseg><trkpt> with timestamps).
 //
-// Route GPX conventions vary by source (per ambit-app/tools/README.md):
+// Route GPX conventions vary by source (per sommet/tools/README.md):
 //  - <rte><rtept> is the "proper" route-point element, no timestamps needed.
 //  - Some exporters use a plain <trk><trkseg><trkpt> instead — same shape as
 //    an activity export, just without real timing, so it's supported as a
@@ -14,7 +14,7 @@ import type { LatLon } from './RouteSimplify';
 //    exports mark a route's start/end as <type>Begin</type>/<type>End</type>,
 //    which is a *different* convention from an on-device waypoint and is
 //    NOT treated as one here — only <type>Waypoint</type> counts. This
-//    matches ambit-app's own build_route.py: a route needs at least one
+//    matches sommet's own build_route.py: a route needs at least one
 //    real on-device waypoint to show up in the watch's Navigation menu at
 //    all, confirmed on hardware, so if none is found this parser
 //    synthesizes a Start/End pair from the route's own first/last point.
@@ -95,7 +95,7 @@ export function parseRouteGpx(gpxXml: string, fallbackName: string): ParsedRoute
   // A route needs >= 1 on-device waypoint to appear in the watch's own
   // Navigation menu at all (confirmed on hardware, see HANDOFF.md). If the
   // source GPX had none, synthesize a Start/End pair from the track itself
-  // — same fallback ambit-app's own build_route.py applies.
+  // — same fallback sommet's own build_route.py applies.
   const waypoints = onDeviceWaypoints.length > 0
     ? onDeviceWaypoints
     : [

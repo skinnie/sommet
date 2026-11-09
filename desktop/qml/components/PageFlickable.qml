@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Real fix, 2026-08-11 (André: desktop scroll "kinda buggy"). Root cause was every
 // scrolling page being a bare Flickable with none of its wheel behaviour configured.

@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Step 6, rebuilt 2026-08-07. Originally QtLocation's real MapView + a plugin (first
 // maplibre-native-qt, then Qt's built-in "osm" plugin) - both abandoned after real hardware

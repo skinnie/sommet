@@ -1034,7 +1034,7 @@ def main():
                           " live from the watch) - for capturing a clean before/after pair")
     ap.add_argument("--json", action="store_true",
                      help="print one JSON line instead of human-readable output - for "
-                          "ambitapp-v2/backend/server.py, not meant for a person to read")
+                          "desktop/backend/server.py, not meant for a person to read")
     ap.add_argument("--list-field-types", action="store_true",
                      help="print the real FIELD_TYPES catalog as one JSON line and exit - "
                           "no watch touched, for a UI's own data-field picker")

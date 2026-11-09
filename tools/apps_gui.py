@@ -144,7 +144,7 @@ HTML_PAGE = r"""<!doctype html>
      whatever the browser's own default page background happened to be - no real "light
      mode" to switch to on a browser whose default is already dark. `data-theme` on <html>
      picks the palette: "light"/"dark" force one, "system" (the default) follows the OS via
-     prefers-color-scheme, same three-state idea as AmbitApp's own Theme.qml `override`. */
+     prefers-color-scheme, same three-state idea as Sommet's own Theme.qml `override`. */
   :root {
     --bg: #F6F8F9; --card: #FFFFFF; --text: #1A1D22; --muted: #5B6270;
     --border: #00000022; --code-bg: #00000010; --primary: #167E6A;
@@ -346,7 +346,7 @@ async function fetchJson(url, opts) {
 }
 // Theme (2026-08-08 request: "have a light mode... a button to switch from light mode, to
 // dark to system") - three-state cycle, persisted so it survives a reload, same idea as
-// AmbitApp's own Theme.qml `override` property.
+// Sommet's own Theme.qml `override` property.
 const THEME_KEY = "ambit_workout_theme";
 const THEME_ORDER = ["light", "dark", "system"];
 const THEME_LABELS = {light: "Theme: Light", dark: "Theme: Dark", system: "Theme: System"};
@@ -367,7 +367,7 @@ applyTheme(localStorage.getItem(THEME_KEY) || "system");
 // (docs/history.md) - translated here to the names people actually buy so "compatible with"
 // is readable. Left untranslated (falls through to the raw name) for anything not in
 // this project's own confirmed codename table.
-// Spacing between "Ambit" and its generation number matches ambitapp-v2's own
+// Spacing between "Ambit" and its generation number matches sommet-v2's own
 // HomeViewModel.qml _modelNames table (2026-08-08 request, applied in both places for the
 // same reason: "Ambit3" -> "Ambit 3").
 const VARIANT_NAMES = {

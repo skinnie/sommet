@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Wahoo ELEMNT device settings (André, 2026-10-03: "follow your order. be sure to have them usb
 // and bluetooth. don't re-invent the wheel UI wise") - the same read / edit / "Save" flow and row

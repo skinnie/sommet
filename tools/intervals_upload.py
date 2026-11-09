@@ -38,7 +38,7 @@ def _multipart(fields: dict[str, str], file_field: str, filename: str,
                data: bytes) -> tuple[bytes, str]:
     """Build a multipart/form-data body by hand (urllib has no multipart helper, and the rest
     of this project deliberately avoids the `requests` dependency - see intervals_stats.py)."""
-    boundary = "----ambitapp" + base64.urlsafe_b64encode(os.urandom(9)).decode()
+    boundary = "----sommet" + base64.urlsafe_b64encode(os.urandom(9)).decode()
     ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     out = bytearray()
     for k, v in fields.items():

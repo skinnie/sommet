@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Bike computers available right now, shared across pages (2026-09-25). USB ones (Bryton/Edge/
 // Karoo) are cheap to re-probe from any page (/api/mtp/devices), but the Magene C406 is Bluetooth:

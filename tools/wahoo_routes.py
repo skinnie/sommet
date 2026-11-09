@@ -47,7 +47,7 @@ DB = APP + "/databases/BoltApp.sqlite"
 SD_ROUTES = "/sdcard/routes"
 IMPORTED = APP + "/files/routes/12"
 EXTS = (".gpx", ".tcx", ".fit")
-BACKUP_DIR = os.path.join(os.path.expanduser("~"), "AmbitAppBackups", "wahoo")
+BACKUP_DIR = os.path.join(os.path.expanduser("~"), "SommetBackups", "wahoo")
 
 
 # Wahoo's routing page (support.wahoofitness.com, "Routes for ELEMNT computers", read 2026-10-19):

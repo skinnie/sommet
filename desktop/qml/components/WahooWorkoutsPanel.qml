@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Planned workouts on the Wahoo ELEMNT (tools/wahoo_workout.py, /api/wahoo/workouts) - the twin of
 // WahooRoutesPanel. Workouts are sent from Training Program (right-click a day → Send to Wahoo

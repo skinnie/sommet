@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // One tooltip for the whole app (André, 2026-11-02, desktop picks #10; on 2026-08-23 he said
 // the stock ToolTip "doesn't match at all our design"). A card with a hairline, round corners

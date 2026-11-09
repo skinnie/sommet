@@ -92,7 +92,7 @@ selector, Health (Garmin). The matrix above is the shape to converge the scatter
 
 Your **Race S (runs, HRV, sleep) and Karoo (rides) reach us only via intervals today.** There is
 no direct Suunto-cloud import built (the Suunto Cloud API is gated/parked — see the
-`ambit_app_cloud_api_landscape` note). So:
+`sommet_cloud_api_landscape` note). So:
 
 - **You cannot fully ditch intervals yet** without losing Race S + Karoo data, unless we add a
   **direct Suunto-cloud import** (activities + HRV + sleep).

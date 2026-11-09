@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Four bars alternating low/high heights - a plain interval-training profile (rest/effort/
 // rest/effort), the same motif as tools/packaging/icon.png (this project's own workout-

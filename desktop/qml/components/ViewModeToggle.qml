@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // The map/list view control for the top of a list page (Activities/Routes/POIs). Moved out of
 // Settings onto the pages themselves - André, 2026-08-16. Originally a two-segment pill, but it

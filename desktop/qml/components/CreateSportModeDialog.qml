@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Create one single-sport mode: give it a name, pick what sport it is.
 //

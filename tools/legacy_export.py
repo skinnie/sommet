@@ -57,7 +57,7 @@ def write_gpx(points: list[dict], out_path, *, name: str = "Suunto activity") ->
     meta_time = _iso_utc(points[0]["time"]) if points else _iso_utc(datetime.now(timezone.utc))
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<gpx version="1.1" creator="ambit-app legacy_export.py" {_GPX_NS} {_GPXTPX_NS}>',
+        f'<gpx version="1.1" creator="Sommet legacy_export.py" {_GPX_NS} {_GPXTPX_NS}>',
         f'  <metadata><time>{meta_time}</time></metadata>',
         f'  <trk><name>{_xml_escape(name)}</name><trkseg>',
     ]

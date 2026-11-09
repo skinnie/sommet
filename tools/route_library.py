@@ -9,7 +9,7 @@ routes you import or plan are kept, so they're still there next time).
     ./tools/route_library.py delete <dir> <id>
 
 Storage: one <id>.gpx per route plus index.json [{id, name, created, distanceMeters,
-ascentMeters, sha1}] in <dir> (the backend passes ~/AmbitAppBackups/Routes). Saving the same GPX
+ascentMeters, sha1}] in <dir> (the backend passes ~/SommetBackups/Routes). Saving the same GPX
 again (same content hash) doesn't add a second copy - it returns the existing entry (renamed if a
 new name is given), so importing a file twice never duplicates it. stdlib only.
 """

@@ -8,6 +8,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlNetworkAccessManagerFactory>
 
+#include "services/apppaths.h"
 #include "services/backendprocess.h"
 #include "services/tilecachepaths.h"
 
@@ -75,11 +76,11 @@ public:
 
 }  // namespace
 
-// Bootstraps the QML application - deliberately thin. Per AMBITAPP_SPEC.md's architecture
+// Bootstraps the QML application - deliberately thin. Per docs/reference/sommet-spec.md's architecture
 // diagram (QML -> ViewModels -> Services -> Current Backend -> libambit), no watch-protocol
 // logic belongs here or anywhere in C++ yet: the "Current Backend" for now is the existing,
 // hardware-proven Python tooling (tools/*.py), reached over HTTP by C++ Services classes as
-// those get built (see ambitapp-v2/backend/ once that step lands). This file only ever
+// those get built (see desktop/backend/ once that step lands). This file only ever
 // starts the UI.
 int main(int argc, char *argv[])
 {
@@ -99,6 +100,9 @@ int main(int argc, char *argv[])
 
     // Start the bundled watch helper if this is a packaged download (no-op in a dev build,
     // where run-desktop.sh starts the Python backend instead). See BackendProcess for why.
+    // Folders saved under the app's old name (AmbitApp) move to the new names first, so the
+    // backend never starts on an empty new folder while the data sits in the old one.
+    AppPaths::moveOldFolders();
     BackendProcess::startIfBundled(&app);
 
     // Real, 2026-08-09 ("use the android app icon for our desktop app") - same mark as
@@ -106,13 +110,13 @@ int main(int argc, char *argv[])
     // silhouette for desktop sizes by tools/packaging/make_desktop_app_icon.py. Set on the
     // QGuiApplication (not a per-window property) so it applies to the taskbar/dock entry
     // too, not just the QML window's own icon.
-    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/AmbitApp/packaging/icon.png")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/SommetUi/packaging/icon.png")));
 
     // Registered once, here, rather than via a QML FontLoader per Icon instance - qml/Icons.qml
     // just references the family name. See assets/fonts/NOTICE.md for what this font actually
     // is (a subsetted Material Symbols Rounded) and why it's this small.
     QFontDatabase::addApplicationFont(
-        QStringLiteral(":/qt/qml/AmbitApp/assets/fonts/MaterialSymbolsRounded.ttf"));
+        QStringLiteral(":/qt/qml/SommetUi/assets/fonts/MaterialSymbolsRounded.ttf"));
 
     // Must be set before the engine is used for anything (it lazily creates its default
     // QNetworkAccessManager on first network request) - and must outlive `engine`, which this
@@ -134,7 +138,7 @@ int main(int argc, char *argv[])
     registerPersonalExtensions();
 #endif
 
-    engine.loadFromModule("AmbitApp", "Main");
+    engine.loadFromModule("SommetUi", "Main");
 
     return app.exec();
 }

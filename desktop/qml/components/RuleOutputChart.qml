@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A lightweight, dependency-free line chart for one logged Suunto App output (a ruleoutput
 // series carried on an activity as {label, times[], values[]}). The app has no charting

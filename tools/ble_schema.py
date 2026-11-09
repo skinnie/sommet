@@ -29,7 +29,7 @@ single-entry SBEM push whose meaning is entirely its entry id. Over BLE the Suun
 it for `EventBoard` events (0xf5 NewMove.DateTime, 0xf6 SyncRequest.SyncScope), NOT to write
 the per-activity synced flag. `IsMcSynced` (id 0x5c, read-only in the 0x1200 logbook
 summary) never appears as a wire write in either activity capture. See
-docs/explanation/kailash-ble-findings.md and the ambit-app memory for the fuller writeup.
+docs/explanation/kailash-ble-findings.md and the sommet memory for the fuller writeup.
 
     ./tools/ble_schema.py CAPTURE.pklg              # full field table, sorted by id
     ./tools/ble_schema.py CAPTURE.pklg --grep Sync  # only paths matching a substring

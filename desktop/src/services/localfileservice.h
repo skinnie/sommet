@@ -21,7 +21,7 @@ class LocalFileService : public QObject
     // Android app's own save-to-Downloads behavior (opensportsync-main's saveToDownloads())
     // as closely as a desktop file-picker dialog can.
     Q_PROPERTY(QUrl downloadsLocation READ downloadsLocation CONSTANT)
-    // Mirrors backend/server.py's own BACKUP_DIR constant (~/AmbitAppBackups) - not asked
+    // Mirrors backend/server.py's own BACKUP_DIR constant (~/SommetBackups) - not asked
     // over HTTP since it's a fixed, well-known path either side can compute the same way,
     // the same "fixed convention, not configurable yet" pattern DeviceService's own comment
     // already documents for the backend's address.
@@ -66,7 +66,7 @@ public:
     // Back up the app's OWN databases - activities.db (which is also where every activity's
     // GPX/FIT text lives, so this IS the activity backup) and gear.db - into a timestamped
     // "sommet-data-YYYYMMDD-HHmmss" subfolder of destFolder (André, 2026-08-30: "can't choose
-    // where to save the database"). An empty destFolder falls back to ~/AmbitAppBackups, the
+    // where to save the database"). An empty destFolder falls back to ~/SommetBackups, the
     // same default the watch backup uses; a chosen folder can be a Dropbox/OneDrive/Drive sync
     // folder for keyless cloud backup, matching the watch-backup card's own model.
     //

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // One activity as a LIST row - real request, 2026-08-11 (André, item 16): "For activities, in
 // settings let's add the option: see as a map, see as a list. the first is the one we already

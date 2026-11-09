@@ -16,9 +16,9 @@ manifest.json (schema below). Restore validates the saved Grid.ini parses as rea
 one-time Grid.ini.bak on the device, then copies the file back. Grid.ini is a config file on a FAT
 volume, not firmware: the worst realistic failure is screens resetting, recoverable from the .bak.
 
-    ./tools/bryton_backup.py backup  /media/<user>/BRYTON [--sensors sensors.json] [--root ~/AmbitAppBackups]
+    ./tools/bryton_backup.py backup  /media/<user>/BRYTON [--sensors sensors.json] [--root ~/SommetBackups]
     ./tools/bryton_backup.py backup-ble --address AA:BB:… --sensors sensors.json
-    ./tools/bryton_backup.py list    [--root ~/AmbitAppBackups]
+    ./tools/bryton_backup.py list    [--root ~/SommetBackups]
     ./tools/bryton_backup.py restore /media/<user>/BRYTON <backup-folder>
 
 Every command prints one JSON line on stdout.
@@ -37,7 +37,7 @@ import bryton_grid  # noqa: E402
 SCHEMA = "sommet-device-backup/1"
 GRID_REL = os.path.join("System", "Grid.ini")
 DEVICE_TXT = os.path.join("System", "device.txt")
-DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), "AmbitAppBackups")
+DEFAULT_ROOT = os.path.join(os.path.expanduser("~"), "SommetBackups")
 
 
 def _device_meta(mount):

@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // WeatherService gives raw Open-Meteo numbers; this turns a WMO weather code into an icon
 // glyph and a human label - real presentation logic, kept out of both the C++ Service (which

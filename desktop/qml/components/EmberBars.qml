@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // Ember bar chart (André, 2026-08-25) - the amber/green bars from the Ember concept mockup,
 // drawn on a Canvas like MetricChart, with an optional dashed goal line. series = [{date, value}].

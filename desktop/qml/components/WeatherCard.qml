@@ -1,7 +1,7 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
-// AMBITAPP_SPEC.md, "Weather" originally said "if weather retrieval fails: hide the card, no
+// docs/reference/sommet-spec.md, "Weather" originally said "if weather retrieval fails: hide the card, no
 // popup, no error." Superseded by a real request (2026-08-07): show a friendly offline
 // message in the card instead of hiding it outright. Still hidden before the very first
 // refresh() attempt has finished (hasFetchedOnce), so there's no flash of "offline" on launch.

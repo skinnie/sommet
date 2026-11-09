@@ -101,7 +101,7 @@ const THEME_OPTIONS: { mode: ThemeMode; icon: IconName; label: () => string }[] 
 // the baseline). Connections, Appearance, Show in the sidebar and Backup & restore stay open at the
 // top; everything else is one closed row each (SettingsSection) showing its current value. Which
 // rows are open is remembered between visits.
-const OPEN_SECTIONS_KEY = 'ambitapp:settings:openSections';
+const OPEN_SECTIONS_KEY = 'sommet:settings:openSections';
 const CLOSED_SECTIONS = ['activities', 'health', 'maps', 'weather', 'ember', 'coach', 'database',
   'catalog', 'experimental', 'testing', 'firmware', 'devices', 'about'];
 // How many apps the Coach's offline workout catalogue holds (data/systm-sample.json).

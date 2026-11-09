@@ -8,7 +8,7 @@ No account, no cloud, no pairing: the scale advertises its reading while someone
     listener.status()                                  # {listening, address, lastWeighIn, error, ...}
     series(height_cm, sex, offset_pct)                 # one reading per day, body composition added
 
-Weigh-ins are appended to ~/AmbitAppBackups/scale/weighins.jsonl, one JSON object per line
+Weigh-ins are appended to ~/SommetBackups/scale/weighins.jsonl, one JSON object per line
 (t, weightKg, impedanceOhm or null, address). The chosen scale lives in scale.json next to it.
 Body composition is NOT stored: it is computed on read (tools/body_composition.py), so a changed
 height, sex or offset applies to the whole history.
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import body_composition  # noqa: E402
 import etekcity_scale  # noqa: E402
 
-DATA_DIR = Path.home() / "AmbitAppBackups" / "scale"
+DATA_DIR = Path.home() / "SommetBackups" / "scale"
 
 
 def _paths(data_dir):

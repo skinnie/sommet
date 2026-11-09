@@ -1,4 +1,4 @@
-// SuuntoLink's Douglas-Peucker simplification, ported from ambit-app's
+// SuuntoLink's Douglas-Peucker simplification, ported from sommet's
 // tools/ambit_simplify.py (reconstructed there from route_simplifier.js and
 // verified byte-for-byte against real captures: 1066->336 and 2911->852
 // points, both reproducing the captured point body exactly).

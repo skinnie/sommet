@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtCore
-import AmbitApp
+import SommetUi
 
 // Step 11, the last one. General/Connections/Maps/Weather/Backup/About per the spec.
 // Weather's "Manual location" is the one section that's fully real end to end - it's the
@@ -1691,7 +1691,7 @@ PageFlickable {
                         // pure-QML SommetMark Canvas rendered its dashed sync ring differently
                         // at this small size, which read as "wrong icon" next to the Dock.
                         Image {
-                            source: "qrc:/qt/qml/AmbitApp/packaging/icon.png"
+                            source: "qrc:/qt/qml/SommetUi/packaging/icon.png"
                             width: 46; height: 46
                             sourceSize.width: 92; sourceSize.height: 92
                             smooth: true

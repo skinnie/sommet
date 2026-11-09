@@ -11,7 +11,7 @@ byte-for-byte identical. See V3_CHANGELOG.md's 2026-08-07 entry. This resolves t
 "does CustomModes need a CMD_NAV_COMMIT" question from workout_install.py's own docstring -
 yes, the full Routes/Waypoints-style sequence, not GpsSGEE's simpler one.
 
-Safety: backs up to ~/AmbitAppBackups/ before touching flash (same directory the backend's
+Safety: backs up to ~/SommetBackups/ before touching flash (same directory the backend's
 BackupService already uses); reads back immediately after and reports whether the region is
 still byte-identical; aborts instead of writing if the memory map doesn't match expectations.
 
@@ -26,7 +26,7 @@ import custom_modes as CM
 from ambit_pcap import FlashImage
 from write_nav import Link, check_memory_map, read_flash, read_memory_map, send_plan
 
-BACKUP_DIR = pathlib.Path.home() / "AmbitAppBackups" / "custom_modes"
+BACKUP_DIR = pathlib.Path.home() / "SommetBackups" / "custom_modes"
 
 
 def main():

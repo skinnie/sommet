@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // What an empty page says (André, 2026-11-02, desktop picks #11): an icon, a title, one
 // sentence on what to do, and optionally one button that does it. Modelled on Home's "No watch

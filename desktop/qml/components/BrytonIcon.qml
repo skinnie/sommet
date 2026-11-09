@@ -1,5 +1,5 @@
 import QtQuick
-import AmbitApp
+import SommetUi
 
 // A silhouette of a Bryton Aero 60, redrawn 2026-09-25 from André's front-view reference
 // (the first 09-24 version drew a landscape unit, which the Aero 60 is not). A portrait body a

@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import AmbitApp
+import SommetUi
 
 // Fresh OpenStreetMap maps for the Wahoo ELEMNT (André, 2026-10-03: "osm based tiles interest me,
 // if we can integrated it is nice!"). tools/wahoo_maps.py builds zoom-8 tiles here with
