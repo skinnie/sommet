@@ -1,6 +1,6 @@
 import {
   sportNameForIntervalsType, sportNameForGarminType, humanizeSportType, canonicalSportName,
-  isFootSport, isJunkActivity,
+  isFootSport, isJunkActivity, isShortTestActivity, HIDE_SHORT_TEST_ACTIVITIES,
 } from '../SportNames';
 import { ACTIVITY_TYPES } from '../ActivityColors';
 
@@ -48,11 +48,16 @@ describe('SportNames', () => {
     expect(isFootSport('Indoor cycling')).toBe(false);
   });
 
-  it('junk = under two minutes AND under 100 m', () => {
-    expect(isJunkActivity(21, 0)).toBe(true);
-    expect(isJunkActivity(90, 0)).toBe(true);
-    expect(isJunkActivity(50, 300)).toBe(false);
-    expect(isJunkActivity(120, 0)).toBe(false);
+  it('short test entry = under two minutes AND under 100 m', () => {
+    expect(isShortTestActivity(21, 0)).toBe(true);
+    expect(isShortTestActivity(90, 0)).toBe(true);
+    expect(isShortTestActivity(50, 300)).toBe(false);
+    expect(isShortTestActivity(120, 0)).toBe(false);
+    expect(isShortTestActivity(600, 0)).toBe(false);
+  });
+
+  it('drops short entries only when hiding is switched on (off here, on in the personal build)', () => {
+    expect(isJunkActivity(21, 0)).toBe(HIDE_SHORT_TEST_ACTIVITIES);
     expect(isJunkActivity(600, 0)).toBe(false);
   });
 });

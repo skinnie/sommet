@@ -1,4 +1,5 @@
 import * as Garmin from '../native/GarminModule';
+import { isJunkActivity } from './SportNames';
 import type { GarminConnectResult, GarminVolumeInfo } from '../native/GarminModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { writeFitFile, writeGpxFile } from './GpxService';
@@ -128,7 +129,7 @@ export async function syncEdgeRides(onState: (s: EdgeRideSync) => void): Promise
         const ride = decodeFit(base64ToBytes(b64));
         const id = edgeActivityId(todo[i]);
         const start = ride.startTime ? Date.parse(ride.startTime) / 1000 : NaN;
-        const junk = ride.durationSeconds < 60 && ride.distanceMeters < 100;   // desktop rule
+        const junk = isJunkActivity(ride.durationSeconds, ride.distanceMeters);   // SportNames rule
         if (!junk && !(isFinite(start) && dedup.hasRide(start, ride.durationSeconds, ride.distanceMeters))
             && (await writeGpxFile(id, rideToGpx(ride, creator)))) {
           await writeFitFile(id, b64);

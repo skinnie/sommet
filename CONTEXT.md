@@ -84,7 +84,7 @@ _Avoid_: activity type, discipline
 A sport done on foot, the only kind that shows pace (min/km); every other sport shows speed (km/h).
 
 **Junk activity**:
-An Activity shorter than 2 minutes and shorter than 100 m. It is a test recording and is not kept.
+An Activity shorter than 2 minutes and shorter than 100 m: a test recording. Only the developer's personal build hides these; the public apps keep every recording.
 _Avoid_: test activity, short activity
 
 **Duplicate**:

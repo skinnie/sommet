@@ -32,13 +32,14 @@
 
 #include "samemove.h"
 
-// Junk/test entry: under two minutes AND under 100 m. One rule for every source (André,
-// 2026-08-24: "it was tests for our app"; 2026-10-04: watch moves too - the list still showed
-// 0-1 minute runs with no distance, read off the watch while testing). Android's twin is
-// SportNames.isJunkActivity.
+// Short test entry: under two minutes AND under 100 m. Hiding them was for the developer's own
+// testing (2026-08-24: "it was tests for our app"), so it is off here: everyone sees every
+// recording, as the Suunto app does. The personal build turns it on. Android's twin is
+// SportNames.HIDE_SHORT_TEST_ACTIVITIES / isJunkActivity.
+static constexpr bool kHideShortTestActivities = false;
 static bool isJunkActivity(int durationS, double distanceM)
 {
-    return durationS < 120 && distanceM < 100.0;
+    return kHideShortTestActivities && durationS < 120 && distanceM < 100.0;
 }
 
 // Done indoors (Zwift, trainer, treadmill, indoor rower, gym, pool): no real GPS track. A Zwift

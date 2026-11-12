@@ -1,4 +1,5 @@
 import { writeFitFile, writeGpxFile } from './GpxService';
+import { isJunkActivity } from './SportNames';
 import { BikeImportDedup } from './BikeImportDedup';
 import { bytesToBase64 } from './Base64';
 import { downloadRide, rideList, withMagene } from './MageneDevice';
@@ -46,7 +47,7 @@ export async function syncMageneRides(address: string, onState: (s: MageneSyncSt
             const ride = decodeFit(fit);
             const id = mageneActivityId(todo[i]);
             const start = ride.startTime ? Date.parse(ride.startTime) / 1000 : todo[i];
-            const junk = ride.durationSeconds < 60 && ride.distanceMeters < 100;   // desktop rule
+            const junk = isJunkActivity(ride.durationSeconds, ride.distanceMeters);   // SportNames rule
             if (!junk && !dedup.hasRide(start, ride.durationSeconds, ride.distanceMeters)
                 && (await writeGpxFile(id, rideToGpx(ride)))) {
               await writeFitFile(id, bytesToBase64(fit));

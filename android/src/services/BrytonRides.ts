@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+import { isJunkActivity } from './SportNames';
 import { base64ToBytes } from './Base64';
 import { writeFitFile, writeGpxFile } from './GpxService';
 import { BikeImportDedup } from './BikeImportDedup';
@@ -40,7 +41,7 @@ export async function syncBrytonRides(onState: (s: BrytonRideSync) => void): Pro
         const ride = decodeFit(base64ToBytes(b64));
         const id = brytonActivityId(todo[i]);
         const start = ride.startTime ? Date.parse(ride.startTime) / 1000 : NaN;
-        const junk = ride.durationSeconds < 60 && ride.distanceMeters < 100;   // desktop rule
+        const junk = isJunkActivity(ride.durationSeconds, ride.distanceMeters);   // SportNames rule
         if (!junk && !(isFinite(start) && dedup.hasRide(start, ride.durationSeconds, ride.distanceMeters))
             && (await writeGpxFile(id, rideToGpx(ride, 'Sommet (Bryton Aero 60)')))) {
           await writeFitFile(id, b64);

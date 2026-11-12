@@ -53,13 +53,23 @@ export function canonicalSportName(name: string): string {
     || (/\s/.test(n) ? n : humanizeSportType(n));
 }
 
-/** Junk/test entry: under two minutes AND under 100 m. Same rule as the desktop
- *  (activityservice.cpp isJunkActivity). André, 2026-08-24: "it was tests for our app";
- *  2026-10-04: one-minute watch tests counted too, so the limit went from one minute to two. */
+/** Short test entry: under two minutes AND under 100 m. Same rule as the desktop
+ *  (activityservice.cpp isShortTestActivity). */
 export const JUNK_MAX_S = 120;
 export const JUNK_MAX_M = 100;
-export function isJunkActivity(durationS: number, distanceM: number): boolean {
+export function isShortTestActivity(durationS: number, distanceM: number): boolean {
   return (Number(durationS) || 0) < JUNK_MAX_S && (Number(distanceM) || 0) < JUNK_MAX_M;
+}
+
+/** Hiding short test entries was for the developer's own testing (2026-08-24: "it was tests
+ *  for our app"), so it is off here: everyone sees every recording, as the Suunto app does.
+ *  The personal build turns it on (true). Desktop twin: activityservice.cpp
+ *  kHideShortTestActivities. */
+export const HIDE_SHORT_TEST_ACTIVITIES = false;
+
+/** True when an activity should be dropped as a short test entry (only when hiding is on). */
+export function isJunkActivity(durationS: number, distanceM: number): boolean {
+  return HIDE_SHORT_TEST_ACTIVITIES && isShortTestActivity(durationS, distanceM);
 }
 
 /** Done indoors (Zwift, trainer, treadmill, indoor rower, gym, pool): no real GPS track. A Zwift

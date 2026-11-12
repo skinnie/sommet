@@ -1,6 +1,6 @@
 import SQLite, { SQLiteDatabase } from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
-import { canonicalSportName, isJunkActivity, JUNK_MAX_S, JUNK_MAX_M } from '../services/SportNames';
+import { canonicalSportName, isJunkActivity, JUNK_MAX_S, JUNK_MAX_M, HIDE_SHORT_TEST_ACTIVITIES } from '../services/SportNames';
 
 SQLite.enablePromise(true);
 
@@ -350,10 +350,12 @@ async function tidyImportedActivities(db: SQLiteDatabase): Promise<void> {
   // it, so a plain delete came straight back at the next orphan scan / watch read (seen on the
   // tablet, 2026-10-03). deleted_activities is what every import path already honours. No
   // Sommet Sync tombstone - this is a local view rule, not a delete to push to other devices.
-  await db.executeSql(
-    `INSERT OR IGNORE INTO deleted_activities (id, deleted_at)
-       SELECT id, ? FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`, [Date.now()]);
-  await db.executeSql(`DELETE FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`);
+  if (HIDE_SHORT_TEST_ACTIVITIES) {
+    await db.executeSql(
+      `INSERT OR IGNORE INTO deleted_activities (id, deleted_at)
+         SELECT id, ? FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`, [Date.now()]);
+    await db.executeSql(`DELETE FROM activities WHERE duration_s < ${JUNK_MAX_S} AND distance_m < ${JUNK_MAX_M}`);
+  }
   // Copies of intervals.icu moves made from their own track files (tablet audit F21,
   // 2026-10-31): an "icu:<n>" move keeps its track as "icu_<n>.gpx", and the orphan-file scan
   // took each such file for a lost move (OrphanGpx.ts). Only the copy goes: the real row keeps
