@@ -3,10 +3,10 @@
 #   1. the Python backend (desktop/backend/server.py, http://127.0.0.1:8766)
 #   2. the Qt app
 #
-# Real, live gotcha found 2026-08-09: the Qt app never spawns the backend itself (checked -
-# no QProcess for it anywhere in desktop/src/), so running build-desktop.sh's own binary
-# directly shows "backend not running" even though the build is fine. This script exists so
-# that doesn't happen again.
+# Release builds start their bundled backend themselves (desktop/src/services/backendprocess.cpp),
+# but a source build has no bundled backend, so running build-desktop.sh's own binary directly
+# shows "backend not running" even though the build is fine. This script starts
+# desktop/backend/server.py first so that doesn't happen.
 #
 # (The offline BRouter route-planner was removed 2026-08-31 - the Plan page now takes a
 # finished GPX and adds weather + climb, so there's no routing engine to start here.)

@@ -1,5 +1,7 @@
 # OpenSportsSync — Architecture & État du projet
 
+> Historical: opensportsync's architecture at the time of the fork (August 2026). Not maintained; parts no longer match (no Livelox, maps are Leaflet in a WebView, the app is called Sommet, iOS exists).
+
 ## Objectif
 Application Android personnelle (React Native Bare Workflow) pour connecter une montre Suunto Ambit via câble USB OTG, extraire les logs d'activité (NDK/C++/Kotlin), les afficher sur carte IGN, et les exporter vers Livelox.
 

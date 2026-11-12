@@ -1,7 +1,8 @@
 # v2.3 beta — Garmin USB mass-storage GPX/FIT import (planning doc)
 
-Status: **research/planning only, no code written yet.** This document exists to be filled
-in as we go, per the project's usual practice of documenting before implementing.
+Status: implemented. The code is in `android/src/services/GarminActivityService.ts`,
+`GarminGpxExportService.ts` and `EtrexExport.ts`. This document was written as the plan before
+the code, and the sections below are kept as written then.
 
 ## App architecture: multi-device support (André, 2026-08-07)
 
@@ -25,7 +26,7 @@ data, activity read, 3rd-party sync, BLE). No changes.
 | Feature | Behavior |
 |---|---|
 | Activities (read) | Read from the device's `GPSData` `OutputFromUnit` path (`Garmin/GPX/Current/Current.gpx` on this unit — resolved from `GarminDevice.xml` per the discovery strategy above, not hardcoded) |
-| 3rd-party sync | Identical pipeline to Ambit — same Strava/Runalyze/Livelox/Intervals.icu integrations, since they operate on the already-parsed GPX/FIT data, not on anything Ambit-specific |
+| 3rd-party sync | Identical pipeline to Ambit — same Strava/Runalyze/Intervals.icu integrations, since they operate on the already-parsed GPX/FIT data, not on anything Ambit-specific |
 | Orbital/AGPS data | **Not applicable, not offered.** This is a Suunto-specific concept (GPS ephemeris upload via `0x0b15`) with no Garmin equivalent — the Garmin feature set simply doesn't have this button |
 | Upload GPX (routes) | **Real safety rule, explicit from André, confirmed 2026-08-07: NEVER write to the Garmin's internal memory, no exceptions.** Only available when an SD card is detected inside the device; writes go to `<SD card volume>\Garmin\GPX`, never the internal-memory volume. If no SD card is present, the upload feature must be disabled/hidden with a clear reason shown, not silently fail or fall back to internal memory. **A warning must also be shown to the user** (André, 2026-08-07) — surface the SD-card-only restriction explicitly in the UI, not just enforce it silently in code |
 | POI | **Confirmed 2026-08-07: same "never write internal memory, SD-card-only, with a user-facing warning" restriction applies here too** — same underlying write operation as routes (a GPX file, just with `<wpt>` elements instead of `<trk>`/`<rte>`), same rule, no distinction. Written to `<SD card volume>\Garmin\GPX`, same as routes |

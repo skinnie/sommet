@@ -1,8 +1,8 @@
 # sommet
 
-Interoperability reverse engineering, to send GPX routes to a **Suunto Ambit3** — and now
-Traverse and Kailash too — without Movescount, which is dead, without an account and without
-a server.
+Sommet syncs and manages old Suunto Ambit 1/2/3, Traverse and Kailash watches (plus Garmin
+eTrex and some bike computers) without Movescount, an account or a server: routes, POIs, sport
+modes, settings, activities and workouts, over USB and Bluetooth LE.
 
 The binary format of the watch's navigation database is decoded and verified byte for byte
 against USB and Bluetooth captures of SuuntoLink and the Suunto app. The serializer exists in
@@ -24,5 +24,5 @@ technical protection measure or redistribute manufacturer software. See the
 - Looking for a spec, a device list, or the changelog? See [reference](reference/index.md).
 - Want the background and the "why"? Read the [explanations](explanation/index.md).
 
-Current project status, milestone by milestone, lives in `HANDOFF.md` at the repo root — it
-changes fast enough that it's kept out of this stable documentation site.
+Current project status, release by release, is in the [changelog](reference/v3-changelog.md),
+and what works on which watch is in the [compatibility matrix](reference/compatibility.md).

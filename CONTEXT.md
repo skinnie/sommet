@@ -40,6 +40,16 @@ _Avoid_: device (when a Suunto watch is meant), unit
 An Ambit1 or Ambit2: USB only, no Bluetooth, older protocol.
 _Avoid_: Bluebird, old Ambit
 
+**Older Suunto device**:
+A Suunto T6, T6c, T6d, X6HR or the GPS Track Pod, read over serial or USB. Experimental.
+_Avoid_: legacy (that word is for the Ambit1/2)
+
+**GPS (handheld)**:
+A Garmin eTrex 10, 20, 20x, 30 or 30x.
+
+**Sensor**:
+A Bluetooth heart-rate or sleep sensor (Suunto Smart Sensor, Polar Verity Sense).
+
 **Bike computer**:
 A cycling head unit from another maker (Garmin Edge, Bryton, Wahoo ELEMNT, Magene, Karoo, Coros Dura).
 _Avoid_: head unit, GPS, watch
@@ -101,7 +111,7 @@ A planned, structured session (warm-up, intervals, rest) sent to a watch before 
 _Avoid_: guided workout (as a general word), training, plan
 
 **Training Program**:
-A calendar of Workouts sent to a watch.
+A calendar of Workouts sent to a watch or bike computer.
 _Avoid_: training plan, schedule
 
 **Race Plan**:
@@ -117,7 +127,7 @@ The food and energy log inside Sommet.
 _Avoid_: nutrition, food diary
 
 **Coach**:
-The screen that shows training load and form.
+The screen that shows training load, form and readiness, with an optional chat (your own API key).
 
 ### Working on the project
 

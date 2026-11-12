@@ -1,4 +1,45 @@
-# Ambit3 navigation database analysis tooling
+# tools/ - device tools run by the backend (and standalone)
+
+Each script does one job with a device or a file. The desktop backend runs them, and each one
+also runs alone from a terminal. Most write nothing without `--write`. Run `./tools/NAME.py -h`
+for the flags. The groups below name the main scripts; the `test_*.py` files are their tests.
+
+- Suunto over USB (Ambit3, Traverse, Kailash): `write_nav.py` (routes, POIs, settings,
+  logbook), `sgee.py` (orbit data), `custom_modes.py` and `sport_mode_manage.py` (sport modes),
+  `settings_write.py`, `apps.py`, `exercise_log.py`, `device_info.py`, `backup_all.py`,
+  `list_watches.py`, `firmware_check.py`, `firmware_flash.py`, `firmware_write.py`,
+  `guided_workout.py`, `training_calendar.py`, `training_program.py`.
+- Suunto over Bluetooth: `ble_link.py` (transport), `ble_server.py`, `ble_activities.py`,
+  `ble_routes.py`, `ble_pois.py`, `ble_settings.py`, `ble_sgee.py`, `ble_logs.py`,
+  `ble_pklg.py` (reads captures).
+- Ambit1/2 (legacy watches): `legacy_link.py`, `legacy_route.py`, `legacy_sport_modes.py`,
+  built on `vendor/ambit_legacy_cli/`.
+- Older Suunto devices (experimental): `suunto_t6.py`, `suunto_x6hr.py`, `gps_track_pod.py`,
+  `legacy_merge.py`, `legacy_export.py`.
+- Kailash: `kailash_history.py`, `kailash_tracklog.py`, `kailash_eventlog.py`.
+- Garmin: `garmin_sync.py`, `garmin_weight.py`, `garmin_personal.py`,
+  `garmin_to_intervals.py` (Garmin Connect), `etrex_export.py` (eTrex),
+  `edge500_profile.py`, `edge500_course.py`, `edge500_workout.py` (Edge 500),
+  `garmin_edge_screens.py`, `edge_screens_device.py` (Edge data screens).
+- Bike computers: `mtp_import.py` (rides over USB), `bryton_ble.py`, `bryton_profile.py`,
+  `bryton_grid.py`, `bryton_workout.py`, `bryton_track.py` (Bryton Aero 60),
+  `magene_import.py`, `magene_device.py`, `magene_pages.py`, `magene_route.py`,
+  `magene_workout.py` (Magene C406).
+- Scales and sensors: `etekcity_scale.py`, `scale_service.py`, `body_composition.py`,
+  `smart_sensor.py`, `polar_sleep.py`, `sleep_stage.py`, `hrv_strap.py`, `hrv.py`.
+- intervals.icu: `intervals_upload.py`, `intervals_events.py`, `intervals_athlete.py`,
+  `intervals_workout.py`, `intervals_stats.py`.
+- Race Plan: `race_event.py`, `race_timeline.py`, `race_pois.py`, `race_weather.py` and the
+  other `race_*.py` files.
+- Checks and release: `check.sh` (every check that needs no device, run before each commit),
+  `selftest.py` (the capture corpus), `release_smoke.sh` with `release_smoke_checks.py` (a
+  published Linux release on a real machine), `release_notes.py`.
+- `vendor/`: code from other projects, with their licence files or headers: `openambit_libambit/`
+  (openambit's libambit, GPLv3), `suunto_t6_sync/` (MIT), `gpspod/` (MIT) and
+  `ambit_legacy_cli/` (this project's CLI on top of libambit). See
+  `docs/reference/credits.md`.
+
+## Ambit3 navigation database
 
 Decodes the USBPcap captures of SuuntoLink writing routes to a Suunto Ambit3, and
 verifies the binary format byte by byte against the source GPX files.
@@ -19,7 +60,7 @@ timestamp. Everything else is computed.
 The captures are not versioned (see `.gitignore`): they are recordings of personal
 hardware, and they carry the watch serial number.
 
-## Modules
+### Modules
 
 | File | Role |
 |---|---|
@@ -36,30 +77,41 @@ hardware, and they carry the watch serial number.
 | `sbem_schema.py` | SuuntoLink schema dictionary, names the SBEM payloads |
 | `custom_modes.py` | decodes CustomModes (sport modes): settings, displays, multisport, app rules |
 | `sport_mode_manage.py` | creates/deletes sport modes and builds, edits and deletes multisport combos; enforces the real limits (10 modes, 2 combos, 2-6 legs, transitions cost a slot) and replays `removeandaddsportsmodeandmultisport` byte-exact with `--selftest` |
-| `custom_modes_write.py` | encodes CustomModes' BXml body (inverse of `custom_modes.py`), verified byte-for-byte against real live watch data - see `V3_CHANGELOG.md` |
-| `custom_modes_writeback_test.py` | real-hardware-confirmed write of the CustomModes region (chunk writes + padded hash + commit) - see `V3_CHANGELOG.md` |
+| `custom_modes_write.py` | encodes CustomModes' BXml body (inverse of `custom_modes.py`), verified byte-for-byte against real live watch data - see `docs/reference/v3-changelog.md` |
+| `custom_modes_writeback_test.py` | real-hardware-confirmed write of the CustomModes region (chunk writes + padded hash + commit) - see `docs/reference/v3-changelog.md` |
 | `apps.py` | decodes the Apps flash region (installed Suunto App bytecode), IDs against SuuntoLink's catalog |
 | `exercise_log.py` | decodes ExerciseLog (recorded moves) to GPX and FIT; reports each move's logged Suunto App outputs (ruleoutput1..5) |
 | `app_logging.py` | turns a Suunto App's logging on/off (EXERCISE_MODES_RULE `LogRule`) - revives the Movescount feature of recording an app's output into the Move; a single-byte CustomModes edit, dry-run by default. Firmware emission of ruleoutput still needs a real recorded-move confirmation |
 | `sgee.py` | writes GPS/GLONASS orbital data (AGPS) to GpsSGEE |
-| `device_info.py` | model/serial/firmware/hardware version + live battery charge, verified on real hardware - see `V3_CHANGELOG.md` |
-| `firmware_check.py` | asks Suunto's real device-info service for the latest firmware + a real download link, given a model/hw version (or read live) - see `V3_CHANGELOG.md` |
-| `firmware_flash.py` | decodes/replays the firmware-update wire protocol against a downloaded firmware container; READ-ONLY, no `--write` - two real unknowns (bootloader-entry trigger, the 0x0e00 header's 8-byte prefix) still block a real install, see the module's own docstring |
-| `training_program.py` | EXPERIMENTAL - writes a TrainingProgram item; no real capture to verify against |
+| `device_info.py` | model/serial/firmware/hardware version + live battery charge, verified on real hardware - see `docs/reference/v3-changelog.md` |
+| `firmware_check.py` | asks Suunto's real device-info service for the latest firmware + a real download link, given a model/hw version (or read live) - see `docs/reference/v3-changelog.md` |
+| `firmware_flash.py` | decodes/replays the firmware-update wire protocol against a downloaded firmware container; dry-run and `--compare` only, no `--write`. The protocol is fully decoded (both former unknowns closed 2026-08-11), see the module's own docstring |
+| `firmware_write.py` | the real firmware writer, the one write that can brick a watch; run it only with the owner present and his go-ahead. With no flag it reads the watch and checks the file but sends nothing; `--probe-enter` only enters the bootloader; `--stream-only` streams the file and stops before the commit; `--commit` does the full flash. `--expect-model` is required, `--expect-serial` is needed when two watches of the same model are plugged in, `--json` prints progress for a GUI |
+| `training_program.py` | writes planned moves to the TrainingProgram region (the watch's own "Today 1/2" planned-move card); dry-run by default; hardware-confirmed 2026-09-03 on an Ambit3 Sport |
 | `workout.py` | generates App Zone source for a structured workout, compiles it via the live community compiler; portable, no OS/GUI dependency |
 | `workout_gui.py` | local browser GUI (wanarun.net-style step builder) on top of `workout.py`; packaged as a standalone desktop app, see `packaging/README.md` |
 | `suuntolink_catalog.py` | finds and safely appends to SuuntoLink's own `suunto-apps/index.json`, the documented real install path (`forum.suunto.com/topic/7592`) |
 | `workout_install.py` | EXPERIMENTAL, CLI-only - this project's own Apps/CustomModes flash writer; byte-exact encoding proven, but installed apps show an unresolved real "app error" on hardware, paused (`training_program_andre.md` Finding 19) |
 | `selftest.py` | chains everything over the whole corpus |
 
-## Writing to the watch
+### Writing to the watch
 
 ```
 ./tools/write_nav.py reset                       # simulates, nothing is emitted
 ./tools/write_nav.py reset --compare CAPTURE     # checks against a capture
 ./tools/write_nav.py route GPX --meta CAPTURE
 ./tools/write_nav.py reset --write               # ACTUALLY EMITS
+./tools/write_nav.py restore PREFIX              # writes back a `nav --save PREFIX` backup
+./tools/write_nav.py restore PREFIX --from-leftovers  # undo a reset from the saved regions
+./tools/write_nav.py addpoi --name NAME --lat DEG --lon DEG [--type ID_OR_NAME]
+./tools/write_nav.py delpoi --name NAME --lat DEG --lon DEG [--backup-dir DIR]
+./tools/write_nav.py delroute --name NAME [--backup-dir DIR]
 ```
+
+All of these are dry runs until `--write` is added. Other flags: `--set-pois-json PATH` (route,
+reset, restore: set the watch's whole POI list from a JSON list instead of putting back the
+POIs read off it), `--device NAME` (which watch to open when more than one is plugged in) and
+`--verbose` (logs every 64-byte report).
 
 A navigation write **erases the watch's POI store**, confirmed on hardware 2026-08-04. So the
 sequence follows SuuntoLink's: `0x0b24` reads the complete POI list before the writes, and
@@ -87,7 +139,7 @@ The `settings` action is the exception, and it is read-only: it sends the `0x110
 query, four zero bytes, which is what SuuntoLink sends on every connection, and
 decodes the reply through the schema dictionary. It therefore needs the cable but
 takes no `--write`, and refuses one. Its point is `WhitelistedBleDevices`, the
-watch's BLE pairing bond, which is step 1 of the BLE milestone in `HANDOFF.md`.
+watch's BLE pairing bond.
 
 ```
 ./tools/write_nav.py settings                    # reads the watch, read-only
@@ -111,9 +163,12 @@ is in the reply, so a truncated list is visible rather than silent.
 ./tools/write_nav.py logbook                     # the activities, first page
 ./tools/write_nav.py nav                         # the navigation database, off the watch
 ./tools/write_nav.py nav --save backup           # and keep the raw regions
+./tools/write_nav.py nav --route-gpx N [--route-gpx-out PATH]  # one route as GPX
+./tools/write_nav.py nav --json                  # every route's points as JSON, last line
+./tools/write_nav.py nav --routes-gpx-json       # every route's GPX as JSON, last line
 ```
 
-`nav` is the read path `HANDOFF.md` asked for and never had. `0x0b17` takes
+`nav` reads the navigation database back. `0x0b17` takes
 `[u32 address][u32 length]` and answers with the same eight bytes then the data, 1024 at a
 time as SuuntoLink does in `ambit3full`; `nav` walks the `Waypoints` and `Routes` regions that
 way and decodes them with the same structures the serializer writes. It skips `GpsSGEE`, which
@@ -135,8 +190,8 @@ length and an eight-character digest, which still tells two reads apart or match
 Use it for anything that leaves the machine.
 
 The reassembly of a long reply is exercised by `--from`, which replays the 589-byte
-`0x1100` of `ambit3full`. The live read path did run against the watch on 2026-08-03; the
-write path never has.
+`0x1100` of `ambit3full`. The live read path ran against the watch on 2026-08-03, and the
+write path was confirmed on hardware on 2026-08-04 (see "Writing to the watch" above).
 
 `tools/sgee.py` writes GPS/GLONASS extended ephemeris (AGPS orbital data) to the `GpsSGEE`
 region `nav` skips. A separate file, not a `write_nav.py` action - it only imports `Link`/
@@ -155,7 +210,12 @@ absent from the capture. `--compare` is address-scoped rather than whole-capture
 ./tools/sgee.py FILE                          # simulates, nothing is emitted
 ./tools/sgee.py FILE --compare CAPTURE         # checks against a capture
 ./tools/sgee.py FILE --write                   # ACTUALLY EMITS
+./tools/sgee.py --status [--json]              # reads the watch's orbit-data date, writes nothing
+./tools/sgee.py FILE --glonass --device kailash --write  # GlonassSGEE region (Kailash only)
 ```
+
+`--device NAME` picks the watch when more than one is plugged in; in practice it is needed with
+`--glonass`, since the Ambit3 family has no GlonassSGEE region.
 
 `FILE` is a raw ephemeris blob with no wrapper of its own - what SuuntoLink itself caches on
 disk, confirmed byte-identical to `assets/WIndows apps/Suuntolink/sgee.7d`. A live, free
@@ -178,24 +238,28 @@ that is 47117 reports of 64 bytes, are re-encoded identically. Established along
 parameter suggests by deriving both from a single integer, the firmware capture showing a
 `0x0102` with `send_recv=1` and `format=9`.
 
-## C serializer
+### C serializer
 
-`csrc/device_driver_ambit3_navigation.{c,h}` is written to drop into openambit's
+`shared/libambit/device_driver_ambit3_navigation.{c,h}` (moved there from `csrc/` so the
+desktop tools and the mobile app use one copy, see `csrc/Makefile`) is written to drop into openambit's
 `src/libambit/` unmodified: it depends only on `crc16.h` and `sha256.h`, both already
 present. The transport layer is left outside, which makes serialization testable without a
 watch: `ambit3_navigation_plan()` produces the list of writes, and the caller passes them to
 `libambit_pmem20_data_write` then to `ambit_command_data_tail_len`.
 
 ```
-make -C csrc        # builds the harness
-make -C csrc test   # compares its output to the Python reference and to the captures
+make -C csrc        # builds both harnesses (navigation and sport modes)
+make -C csrc test   # compares their output to the Python references and to the captures
 ```
+
+`make -C csrc test` runs `tools/c_reference.py` for navigation and
+`tools/sport_modes_c_reference.py` for `shared/libambit/device_driver_ambit3_sport_modes.c`.
 
 Result: the 10 and 20 `0x0b16` packets of `route12km` and `route128km` are reproduced byte
 for byte, as are both closing hashes, and the reset plan matches the hashes of `routedelete`
 and `poiimport`.
 
-## Verified format
+### Verified format
 
 Reference watch: `Emu` (Ambit3 Peak), fw 2.4.17, hw 70.2.17414.
 
@@ -286,7 +350,7 @@ Integrity: `crc16_ccitt_false(descriptors || points)` in the route header,
 SHA-256 of the whole region, unwritten bytes at `0xff`. `GpsSGEE` is the exception: hash of
 the written bytes only.
 
-## SBEM schema dictionary
+### SBEM schema dictionary
 
 The `descr+SERIAL+FW` file in SuuntoLink's data folder is an SBEM0102 that names and types
 every SML field of the firmware: 278 fields, 27 groups and 19 queryable objects for 2.4.17.
@@ -317,7 +381,7 @@ What the descriptor adds, beyond navigation:
 - the logbook index, `0x8a`, 47 fields including `MemArea.StartAddress1/EndAddress1`: the
   flash address of every activity, that is the whole read path for moves.
 - the `DeviceSettings` tree, readable (`0x1100`) and writable (`0x1101`), including
-  `WhitelistedBleDevices` - see the BLE milestone in `HANDOFF.md`.
+  `WhitelistedBleDevices`.
 - `settings_write.py`'s curated `AMBIT3_SETTINGS`/`KAILASH_SETTINGS` tables resolve most
   fields directly by schema path, but some real settings are GROUPs packing more than one
   value into a single entry rather than a plain scalar leaf - Kailash's own `HomeLocation`
@@ -331,7 +395,7 @@ The regions declared by the `0x0b21` are nine, not three: `Waypoints`, `Routes`,
 `GpsSGEE`, `CustomModes`, `TrainingProgram`, `ExerciseLog`, `EventLog` and `BlePairingInfo`
 (450 bytes at address 1332).
 
-## Simplification
+### Simplification
 
 Douglas-Peucker, a single pass at 2 m, distance to the line, planar projection, the
 waypoints splitting the track. Reproduces 336 points out of 1066 and 852 out of 2911, and
@@ -342,7 +406,7 @@ The 2 m tolerance is pinned (1, 3 and 4 m fail). The projection radius is not: f
 true in `route_simplifier.js`, which the Grand Tour fixture proves since it carries
 altitudes.
 
-## Table ordering, with a reproduced SuuntoLink defect
+### Table ordering, with a reproduced SuuntoLink defect
 
 Routes are sorted by decreasing modification date. The waypoint descriptor table follows the
 **reverse** order of the routes, but the index table follows their **direct** order: the two
@@ -355,7 +419,7 @@ value there: SuuntoLink computed it over all the routes of the application, incl
 that was not enabled and therefore not written (`route.js` filters on `watchEnabled`). One
 byte diverges, and that application state is not derivable from a GPX.
 
-## Verification coverage
+### Verification coverage
 
 Mutation test: a flipped bit in a point or in a descriptor is caught by the CRC and by the
 hash; in an index table, by the hash alone (the CRC does not cover the indexes); in a

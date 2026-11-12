@@ -1,5 +1,7 @@
 # Compatibility matrix — what works on which watch
 
+> Not maintained since 2026-08-12; see the "Checked on" lines in [v3-changelog.md](v3-changelog.md).
+
 What has been **tested on real hardware**, feature by feature, watch by watch. This is the honest
 answer to a user's "will it work on *my* watch?" — and the checklist that gates a release. A cell is
 only marked working once André has confirmed a real test on that physical watch (see the test ritual

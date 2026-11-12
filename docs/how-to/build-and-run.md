@@ -1,8 +1,8 @@
 # Build and run
 
-Kept in sync with the "Build / run / test quick reference" section of `CLAUDE.md` (repo root).
+Kept in sync with the "Building and installing" section of `README.md` (repo root).
 
-- **Desktop**: `./build-desktop.sh` → binary at `desktop/build/sommet`; run with `./run-desktop.sh`
+- **Desktop**: `./build-desktop.sh` → binary at `desktop/build/Sommet`; run with `./run-desktop.sh`
   (it also starts the Python backend on `:8766`).
 - **Android**: `./build-android.sh` (debug) or `./build-android.sh release` (standalone, bundle baked in).
   - Android is React Native: a **debug** APK needs Metro (`cd android && npm start` + `adb reverse tcp:8081 tcp:8081`);

@@ -21,8 +21,9 @@ rules there matter for old hardware, and both are easy to get wrong:
 1. **Build on an OLD base (build-old, run-everywhere).** An AppImage bundles Qt and the app but
    still links against the **glibc of the build machine**. Built on a current distro it would
    demand a current glibc and refuse to start on an older one — the exact failure we are fixing.
-   The CI job therefore builds inside an **`ubuntu:20.04` container** (glibc 2.31, 2020), so the
-   result runs on Mint 22.x and on distros years older.
+   The CI job runs on the **`ubuntu-22.04` runner** (glibc 2.35), with no container, so the
+   result runs on **Ubuntu 22.04 / Mint 21 and newer**. To reach older distros, the job's steps
+   would have to run inside an `ubuntu:20.04` container (glibc 2.31) instead.
 
 2. **Target the baseline CPU (`-march=x86-64 -mtune=generic`).** The reference old machine is an
    Intel **Q9550** (Core 2 Quad, 2008): it has SSE4.1 but **no SSE4.2, no POPCNT, no AVX** — i.e.
@@ -39,6 +40,15 @@ AppImages mount themselves with libfuse2. Older distros have it; some very new o
 a user's machine has no libfuse2, the AppImage still runs with:
 
     ./Sommet-linux-x86_64.AppImage --appimage-extract-and-run
+
+### USB access (udev rule)
+The AppImage can't give itself access to the watch's USB device: that needs a udev rule, once.
+Without it the backend sees the watch but gets "Permission denied". The rule is
+`99-suunto-sommet.rules` in this folder; it isn't inside the AppImage or the release files, so
+download it, then unplug and replug the watch:
+
+    curl -fsSL https://raw.githubusercontent.com/skinnie/sommet/main/desktop/packaging/appimage/99-suunto-sommet.rules | sudo tee /etc/udev/rules.d/99-suunto-sommet.rules
+    sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ### Graphics libraries (checked on Debian 13, 2026-11-12)
 The AppImage leaves out the OpenGL/EGL libraries on purpose: they have to match the computer's own
@@ -67,9 +77,9 @@ than only the release page.
 ## Building it yourself (optional)
 
 `build-appimage.sh` in this folder does the assembly locally. For a portable result it must run on
-an old base — use the CI job, or run the script inside an `ubuntu:20.04` container. Run on a
-current distro it still produces a working AppImage, but one that only runs on distros as new as
-the build machine.
+an old base — use the CI job, or run the script on Ubuntu 22.04 (or in an `ubuntu:22.04`
+container, or `ubuntu:20.04` for older distros). Run on a current distro it still produces a
+working AppImage, but one that only runs on distros as new as the build machine.
 
 ## Credits and licenses
 

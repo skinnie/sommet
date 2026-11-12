@@ -72,19 +72,17 @@ automatic compile call.
 
 ## If something goes wrong
 
-**The page stays on "creating workout...".** Up to now this happened when Sommet couldn't save its
-copy of the workout, for example when your Downloads folder has another name (a Linux system in
-another language) or lives in OneDrive. The next release saves to your real Downloads folder and
-shows an error instead of waiting. Until then, make sure a folder named `Downloads` exists in your
-home folder, and restart your computer: an older copy of the builder can keep running in the
-background.
+**The page stays on "creating workout...".** Versions before 0.2.50 did this when Sommet couldn't
+save its copy of the workout, for example when your Downloads folder has another name (a Linux
+system in another language) or lives in OneDrive. Since 0.2.50 the builder saves to your real
+Downloads folder and shows an error instead of waiting. If you still see it, update Sommet and
+restart your computer: an older copy of the builder can keep running in the background.
 
 **"couldn't read the watch's sport modes - is it connected and on the time screen?"**
 - Put the watch on its time screen and check the cable.
-- On Linux, Sommet keeps hold of the watch while it's open, and older versions of the builder
-  couldn't share it: close Sommet completely (and its watch helper, if you started that from a
-  terminal), then press Install to Watch again. The next release lends the watch to the builder
-  by itself.
+- Sommet lends the watch to the builder by itself since 0.2.50. On an older version, close
+  Sommet completely (and its watch helper, if you started that from a terminal), then press
+  Install to Watch again.
 - Close SuuntoLink if it's running; it also takes the watch.
 
 **"The WORKOUT menu is full".** The watch shows five workouts. The page offers to replace one;

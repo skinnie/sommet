@@ -1,7 +1,7 @@
 # Sommet
 
-Sommet, french name for Peak, is an application to sync and manage Suunto Ambit 1, Ambit 2, Ambit 3, Traverse , Traverse Alpha and Kailash families/variants + Garmin Etrex 10/20/20x/30/30x GPSr.
-The aim is to provide the same features to Android, Linux and later on if possible Mac and Windows.
+Sommet, french name for Peak, is an application to sync and manage Suunto Ambit 1, Ambit 2, Ambit 3, Traverse, Traverse Alpha and Kailash families/variants + Garmin Etrex 10/20/20x/30/30x GPSr.
+The aim is to provide the same features on Android, Linux, macOS and Windows. Each release has an Android APK, a Linux AppImage, a Windows `.zip` and a macOS `.dmg`.
 
 ## Supported devices
 
@@ -18,7 +18,7 @@ Within the features we have:
 - Sync time with watch: from the current time of the device or another timezone
 - Update orbital data: gps and glonass (for the glonass devices)
 - Device manual: download them in pdf format
-- Activities: download from the watch,view on a map, export them in gpx, fit, to local, cloud or 3rd party services (strava, runalyze, intervals.icu, others to come)
+- Activities: download from the watch, view on a map, export them in gpx, fit, to local, cloud or 3rd party services (strava, runalyze, intervals.icu, others to come)
 - Routes: Import/send a gpx route to the watch (with its distance, climb and altitude graph), remove a route from the watch, export the routes on the watch to gpx format. Sending or removing a route keeps your POIs; a copy of them is saved first in `~/SommetBackups/POIs/`
 - POIs: Import/send a POI to the watch (via a map search, or coordinates), remove a POI, export the POIs on the map to gpx
 - Calendar: visual calendar with days where activities were done
@@ -41,8 +41,13 @@ Within the features we have:
 - Suunto HR Sensor: connection of the sensor, check battery level, firmware version, etc
 - Kailash specific: places visit, countries visited, export activity (categorized by default as walk)
 - Etrex specific: download activities (categorized by default as walk), import/export POIs, import/export routes.
-- GPS Pod Support : integration of Suunto GPS Pod support (experimental - no device to test)
-- Suunto T6 support: integration of Suunto T6 support (experimental - no device to test)
+- GPS Track Pod support: experimental, no device to test. Hidden until you switch it on in **Settings → Show in the sidebar → GPS Track Pod**
+- Suunto T6 / X6HR support: experimental, no device to test. Hidden until you switch it on in **Settings → Show in the sidebar → T6/X6**
+- Offline maps: download the map tiles of an area to use it without internet
+- Sommet Sync: one shared app database between your computers and phone, through your own server (NAS)
+- Route weather: the route planner shows the weather along a route
+- Export all activities: every activity in the list into a folder at once (Activities page, desktop)
+- Connect IQ (Garmin Edge): check which Connect IQ apps on the Edge have an update
 
 
 ## Install (Linux desktop)
@@ -60,6 +65,15 @@ Core 2 Quad Q9550), because an old watch often means an old computer. If your ma
 libfuse2, run it with `./Sommet-linux-x86_64.AppImage --appimage-extract-and-run`. Updates are
 delta downloads via `appimageupdatetool`, and the app tells you when a new version is out. Building
 from source is only for developers — see `desktop/README.md` and `desktop/packaging/appimage/README.md`.
+
+To use a watch over USB, Linux also needs a udev rule, once. The AppImage can't add it itself:
+without it the app sees the watch but gets "Permission denied". Install the rule, then unplug
+and replug the watch:
+
+```
+curl -fsSL https://raw.githubusercontent.com/skinnie/sommet/main/desktop/packaging/appimage/99-suunto-sommet.rules | sudo tee /etc/udev/rules.d/99-suunto-sommet.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
 
 ## Screenshots
 
@@ -83,7 +97,7 @@ person's data).
 
 
 I am not at all responsible for errors, failures, bricked devices, etc. This software is provided as is.
-Currently main features were tested with Ambit 3, Traverse and Kailash in Android and Linux Mint 22. Normally most features work with Ambit 1 and 2 (I don't have yet the watches to test). Complications of each feature may require further testing (sports modes, settings, etc)
+Currently main features were tested with Ambit 3, Traverse and Kailash in Android and Linux Mint 22, and with an Ambit2 on Windows. Normally most features work with the Ambit 1 too (I don't have one to test). Complications of each feature may require further testing (sports modes, settings, etc)
 
 
 The app was entirely vibe coded with Claude, given my lack of knowledge. It was fueled in stubbornness, coffee and good will to bring some features for these watches for some operative systems.
@@ -120,7 +134,7 @@ Fortunately we leave wonderful times, and with AI and community work, why not tr
 ## Desktop: Why Linux first?
 First because there was one projects already advanced: openambit.
 Second, because linux is also, on my opinion a great way to "revive" old hardware and make usable again.
-Third: windows and mac users have suunto app which can get them to the functionalities. Normally the app will run on mac and windows, I just haven't tested it.
+Third: windows and mac users have suunto app which can get them to the functionalities. The app runs on Windows too (tested with an Ambit2) and on macOS (started, but not tested with a watch yet).
 
 
 ## Mobile: why android?
@@ -134,8 +148,8 @@ Second because I have an old Panasonic Thoughpad windows tablet that I can get a
 > only. Use it on your own hardware, at your own risk.
 
 There are two apps in this repo: a **desktop** app (Qt 6 / QML, for Linux / macOS /
-Windows) and an **Android** app (React Native). Both talk to a watch over USB; the Android
-app additionally supports Bluetooth. Start by cloning:
+Windows) and an **Android** app (React Native). Both talk to a watch over USB; the Android app
+also over Bluetooth, and the desktop has experimental Bluetooth (Ambit3 family, Linux). Start by cloning:
 
 ```
 git clone https://github.com/skinnie/sommet.git sommet
@@ -193,14 +207,16 @@ the first launch shows a one-time "unverified developer" prompt: on macOS right-
 app → Open → Open; on Windows click "More info" → "Run anyway".
 
 > **Note:** the watch engine (the Python helper) is bundled inside these downloads and the
-> app starts it automatically, so no separate setup is needed. This end-to-end packaging is
-> new and **not yet confirmed against a real watch on Mac/Windows** — if a download misbehaves,
-> building from source with `run-desktop.sh` (below) is the proven path.
+> app starts it automatically, so no separate setup is needed. The Windows `.zip` was checked
+> with a real Ambit2; the macOS `.dmg` is **not yet confirmed against a real watch**. If a
+> download misbehaves, building from source with `run-desktop.sh` (below) is the proven path.
 
 To build it yourself (on Linux the AppImage above is easier; building is for developers):
 
-The desktop app is Qt 6 / QML with a small stdlib-only Python backend that does the actual
-USB work. Prerequisites (all three platforms):
+The desktop app is Qt 6 / QML with a Python backend that does the actual USB work. The
+backend runs on the standard library; some features need extra packages, listed in
+`tools/packaging/backend-requirements.txt` (`bleak` for Bluetooth, `garminconnect` for Garmin
+Connect, `pyserial` for the T6 / X6HR cable, `numpy` for sleep stages). Prerequisites (all three platforms):
 - **Qt 6.5+** and **CMake** (3.21+) with a C++ compiler. On **Debian 13 / Ubuntu 25.04+** the
   system Qt is new enough: `./build-desktop.sh` checks the packages and prints the
   `sudo apt install` line for anything missing (the full list is in `desktop/README.md`).
@@ -208,7 +224,7 @@ USB work. Prerequisites (all three platforms):
   `CMAKE_PREFIX_PATH=~/Qt/6.8.3/gcc_64 ./build-desktop.sh`, without the system `qt6-*`
   packages (two Qt copies in one build give errors like "Cannot assign object of type
   Core.Settings").
-- **Python 3.8+** on `PATH` (runs the backend)
+- **Python 3.9+** on `PATH` (runs the backend)
 - **USB access to the watch** (Linux): the `hid` module and a udev rule, or the watch is never
   found. On Mint/Ubuntu: `sudo apt install python3-hid libhidapi-hidraw0`, then
   `echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1493", MODE="0666"' | sudo tee /etc/udev/rules.d/99-suunto.rules`
@@ -225,21 +241,21 @@ Build, then run:
 ./run-desktop.sh        # starts the Python backend on :8766, then launches the app
 ```
 
-**Run it with `run-desktop.sh`, not the bare binary** — the app does not spawn its own
-backend, so launching `desktop/build/Sommet` directly shows "backend not running".
+**Run it with `run-desktop.sh`, not the bare binary.** The release downloads start their
+bundled backend by themselves, but a source build has none bundled, so launching
+`desktop/build/Sommet` directly shows "backend not running".
 
 Per-platform build command and output (the two helper scripts are Linux/macOS shell
 scripts; on Windows run the raw `cmake` commands):
 
 | Platform | Command | Output | Status |
 |----------|---------|--------|--------|
-| **Linux** | `./build-desktop.sh` | `desktop/build/Sommet` | ✅ Built and run on real hardware (Linux Mint, Qt 6.12.0) |
-| **macOS** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Sommet.app` | ⚠️ Should work; not tested yet |
-| **Windows** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Release/Sommet.exe` | ⚠️ Should work; not tested yet |
+| **Linux** | `./build-desktop.sh` | `desktop/build/Sommet` | ✅ Built and run on real hardware (Linux Mint, Qt 6.12.0); source build also checked on Debian 13 (system Qt 6.8.2) |
+| **macOS** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Sommet.app` | ⚠️ App runs; not tested with a watch yet |
+| **Windows** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Release/Sommet.exe` | ✅ Release `.zip` tested with a real Ambit2 |
 
-On macOS and Windows, start the backend yourself before launching the binary:
-`cd desktop/backend && python3 server.py` (use `python` on Windows). Only the **Linux**
-build is confirmed on real hardware so far.
+On macOS, `run-desktop.sh` starts the backend and opens `Sommet.app`. On Windows, start the
+backend yourself before launching the binary: `cd desktop/backend && python server.py`.
 
 ### Linux: pairing a watch over Bluetooth (the password prompt)
 
@@ -350,10 +366,10 @@ bug in the app. Without the permission granted, the reads are throttled further,
 
 ### Interval Workout Builder (optional companion)
 
-The app has an **Intervals** section for building a structured interval workout and compiling
-it into a real Suunto App for the watch (Ambit3 only). That feature is powered by a **separate
-little tool**, the *Workout Builder* — it opens in your web browser as its own local app,
-not inside the main window.
+The **Apps** page has an **Open Workout Builder** button for building a structured interval
+workout and installing it as a native guided workout in the watch's WORKOUT menu (Ambit3
+family). That feature is powered by a **separate little tool**, the *Workout Builder* — it
+opens in your web browser as its own local app, not inside the main window.
 
 Two things worth knowing:
 
@@ -482,7 +498,7 @@ Services and libraries the app talks to at runtime:
 - **[intervals.icu](https://intervals.icu/)** — its public API backs activity/gear import and
   export, the wellness and weight feeds, and the profile/activity-level writes to the watch.
 - **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** — the Wahoo SYSTM
-  workout catalogue the Coach can read from (its offline sample ships as `coach/data/`).
+  workout catalogue the Coach can read from (its offline sample ships as `desktop/assets/coach/systm-sample.json`).
 - **[Open Food Facts](https://world.openfoodfacts.org/)** (database under ODbL) and **[USDA FoodData Central](https://fdc.nal.usda.gov/)**
   (public domain) — the food search behind Ember's meal logging. The idea came from
   [SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness); none of its code is used (its

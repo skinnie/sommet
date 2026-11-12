@@ -7,8 +7,15 @@ reverse-engineering here would have been possible, or would have taken far longe
   especially **Emil Ljungdahl** (`libambit`'s original author) - the real, working reference
   implementation this project checks its own findings against throughout. `libambit`'s design
   (the `device_driver_*`/`pmem20` split, the BXml sport-mode format, the whole USB transport
-  layer) is the foundation this project's own C code is written to sit alongside, not inside
-  of - see `csrc/`'s own notes on why openambit's GPLv3 code was kept out of this repo.
+  layer) is the foundation this project's own C code is written to sit alongside. `libambit`
+  (GPLv3) is vendored in two places: `tools/vendor/openambit_libambit/` (upstream commit
+  `ca910d10`, its `COPYING` kept, one patch to `pmem20.c` described in its `README.md`) for the
+  Ambit1/2 tools, and `android/android/app/src/main/cpp/libambit/` for the mobile app. Sommet is
+  GPLv3 too, so both copies are used under the same licence.
+
+- **[starryalley/AmbitSync](https://github.com/starryalley/AmbitSync)** (GPLv3) - the Android app
+  whose USB OTG changes to `libambit` and `hidapi` opensportsync builds on to reach an Ambit
+  from an Android phone.
 
 - **[opensportsync](https://github.com/guiguoz/opensportsync)** and its author - the React
   Native base this project's own Android app (`android/` in this repo - imported via a real
@@ -18,7 +25,8 @@ reverse-engineering here would have been possible, or would have taken far longe
 - **[marguslt](https://github.com/marguslt)** - several independent, real contributions cited
   throughout this project: the firmware-download-link recipe
   (`gist.github.com/marguslt/8cffaa78152503b29b91920de845e536`), the workout/App-Zone gists,
-  and [`openmoves`](https://github.com/marguslt/openmoves).
+  and [`openmoves`](https://github.com/marguslt/openmoves), marguslt's fork of
+  **[bwaldvogel/openmoves](https://github.com/bwaldvogel/openmoves)** (MIT, Benedikt Waldvogel).
 
 - **[sebchastang](https://forum.suunto.com/user/sebchastang)** - author of a complete,
   published set of real interval-training Suunto Apps (`IntervalCounter`, `IntervalRun`,
@@ -63,7 +71,8 @@ reverse-engineering here would have been possible, or would have taken far longe
   bikes / shoes / components / service reminders both talk to its API.
 
 - **[OpenStreetMap](https://www.openstreetmap.org/copyright)** - © OpenStreetMap contributors
-  (ODbL). The map views render OSM tiles.
+  (ODbL). The map views render OSM tiles: **CyclOSM** (served by OpenStreetMap France), standard
+  OSM, and **IGN Géoplateforme** tiles for France.
 
 - **[PitStopper](https://pitstopper.net)** - the route POI search whose GPX export the Race Plan
   reads for water / food / shelter stops along a route (`tools/race_pois.py`).
@@ -83,8 +92,9 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
 - **The CTL / ATL / TSB "Performance Manager" model** - Eric Banister's impulse-response model
   of training load, popularised as the Performance Manager Chart by **Dr. Andrew Coggan** and
   **Hunter Allen** (and TrainingPeaks). The Coach's Fitness / Fatigue / Freshness readiness math
-  (`coachservice.cpp`'s exponentially-weighted CTL/ATL pass) is that model - honestly limited
-  here to a duration-based load signal, since this device family decodes no power or HR strap.
+  (`coachservice.cpp`'s exponentially-weighted CTL/ATL pass) is that model. When intervals.icu
+  is connected, the load comes from it; otherwise each move's load is Banister's TRIMP from its
+  average HR (see openathlete below).
 
 - **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** - the SYSTM
   catalogue MCP server the Coach's "live" library source is designed to read (via a small HTTP
@@ -92,24 +102,26 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
 
 - **[googlarz/suunto-mcp](https://github.com/googlarz/suunto-mcp)** - the modern-Suunto
   (SuuntoPlus Guides) MCP server whose `push_workout_guide` / IntervalPlan format the Coach's
-  Suunto-Race device sink maps onto. That sink lives in the local `coach/` scaffold rather than
-  the shipped app, but its design and workout-guide shape are taken directly from this project.
+  Suunto-Race device sink maps onto. That sink is not part of the shipped app: it was written in
+  a local `coach/` scaffold that is not in this repository. Its design and workout-guide shape
+  are taken directly from this project.
 
 - **Wahoo SYSTM** (formerly **The Sufferfest**) - the structured-workout catalogue whose real
   sessions (TSS / IF / 4DP metrics) the Coach's library and its bundled offline sample
-  (`systm-sample.json`) are built from. SYSTM and its content are Wahoo's; used here only to
+  (`desktop/assets/coach/systm-sample.json` and `android/src/data/systm-sample.json`) are built
+  from. SYSTM and its content are Wahoo's; used here only to
   describe and match workouts, not redistributed.
 
 - **The App-Zone interval/workout example authors** - real, published App-Zone-language
   workout apps this project's structured-workout findings (Findings 8-11) were checked against.
   Chief among them **[claha/suunto](https://github.com/claha/suunto)**, whose Python generator
-  encodes a repeat block as one `Suunto.mod(STEP, N)` conditional per step-position - a
-  concrete technique dissected in `docs/explanation/training-program.md` - and alongside it
+  encodes a repeat block as one `Suunto.mod(STEP, N)` conditional per step-position - and
+  alongside it
   **[follesoe/suunto-ambit-intervals](https://github.com/follesoe/suunto-ambit-intervals)**,
   **[hefler/SuuntoApps](https://github.com/hefler/SuuntoApps)**,
   **[AdamHodgson/Suunto-Interval-Training](https://github.com/AdamHodgson/Suunto-Interval-Training)**,
-  and **[Httqm/Suunto](https://github.com/Httqm/Suunto)** (kept as a reference copy under
-  `githubprojects/Suunto`). These examples let this project confirm the App-Zone step/target
+  and **[Httqm/Suunto](https://github.com/Httqm/Suunto)** (kept as a local reference copy,
+  not in this repository). These examples let this project confirm the App-Zone step/target
   model against real code rather than reverse-engineered material alone.
 
 - **[ruvido/goambit](https://github.com/ruvido/goambit)** and
@@ -131,7 +143,9 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   ride-list wire format come from its `docs/PROTOCOL.md`. Its committed code implements the Pages
   config channel; the ride-**download** CC03 framing its docs call "work in progress" was worked
   out here from the live device and CRC-verified (see `docs/reference/magene_c406_protocol.md`).
-  No code was copied - the protocol notes were the foundation, and the device is import-only here.
+  No code was copied - the protocol notes were the foundation. Beyond ride import, Sommet also
+  controls the device (`tools/magene_device.py`) and sends routes and workouts to it
+  (`tools/magene_route.py`, `tools/magene_workout.py`).
 
 - **[WSTRN/C406pro_Hack](https://github.com/WSTRN/C406pro_Hack)** - a custom Zephyr firmware and
   hardware teardown for the Magene C406 Pro. This project does not touch the firmware, but its
@@ -174,6 +188,22 @@ The **Coach** feature (readiness beacon + chat) stands on further prior work:
   (MIT) - the phone camera barcode scan in Ember (`android/src/components/EmberBarcodeScanner.tsx`).
   On Android it uses CameraX and **Google ML Kit** barcode scanning (bundled on-device model,
   used under Google's ML Kit terms; nothing leaves the phone); on iOS, Apple's AVFoundation.
+
+- **[fullcarbonbike/Activity-Profile-Editor](https://github.com/fullcarbonbike/Activity-Profile-Editor)**
+  (MIT) - the Garmin Edge built-in data-field id to name map and the data-screen arrangement
+  (A/B) survey behind the Edge data-screen editor (`tools/garmin_edge_screens.py`),
+  cross-checked on a real Edge 1040 Solar.
+
+- **[cyberjunky/python-garminconnect](https://github.com/cyberjunky/python-garminconnect)** (MIT) -
+  the Garmin Connect client behind activity, weight and health sync (`tools/garmin_sync.py`,
+  `tools/garmin_weight.py`).
+
+- **[Anthropic Claude API](https://www.anthropic.com/api)** - optional, powers the Coach chat
+  when you supply your own API key. The app works without it.
+
+- **[poppler](https://poppler.freedesktop.org/)**'s `pdftotext` - the desktop reads roadbook PDFs
+  with `pdftotext -layout` (`tools/roadbook_import.py`) when it is installed on the system. It
+  is not bundled.
 
 If anyone belongs on this list and isn't here, that's an omission to fix, not a judgment -
 say so and it'll be corrected.
@@ -250,6 +280,37 @@ vendored into Sommet.
   exception that permits distributing the frozen output under any licence) - freezes the Python
   watch backend into the single `sommet-backend` executable bundled in every desktop download
   (`tools/packaging/sommet_backend.spec`).
-- **[hidapi](https://github.com/libusb/hidapi)** (GPL-3.0-or-later / BSD-3-Clause, dual) - the USB
-  HID library the frozen backend's `hid` binding loads to reach the watch; shipped unmodified as a
-  shared library inside the Windows/macOS/Linux downloads.
+
+## Libraries bundled in the apps
+
+The desktop app's frozen Python backend (`tools/packaging/backend-requirements.txt`):
+
+- **[bleak](https://github.com/hbldh/bleak)** - Bluetooth (watches, bike computers, scales).
+- **[hid](https://pypi.org/project/hid/)** - the Python binding for USB watches.
+- **[hidapi](https://github.com/libusb/hidapi)** - the USB HID library the `hid` binding loads to
+  reach the watch; shipped unmodified as a shared library inside the Windows/macOS/Linux
+  downloads. Its source headers offer GPLv3, a BSD-style licence or the original HIDAPI licence.
+  A copy of its header is also vendored in the mobile app's native code
+  (`android/android/app/src/main/cpp/libambit/hidapi/`), next to Sommet's own Android
+  implementation (`hid-android.c`), and in `tools/vendor/openambit_libambit/hidapi/`.
+- **[python-garminconnect](https://github.com/cyberjunky/python-garminconnect)** (MIT) - see
+  above.
+- **[pyserial](https://github.com/pyserial/pyserial)** - the Suunto T6 / X6HR serial cable.
+- **[NumPy](https://numpy.org/)** - sleep stages (`tools/sleep_stage.py`).
+
+The desktop app itself links **[Qt 6](https://www.qt.io/)** under the LGPLv3 (dynamically
+linked, so it can be relinked against your own build of Qt).
+
+The mobile app's main runtime libraries (`android/package.json`). `node_modules` is not part of
+this repository, so their licences are not listed here; see each package:
+
+- **[React Native](https://reactnative.dev/)** and **React**
+- **@react-navigation** (`native`, `native-stack`, `stack`)
+- **react-native-sqlite-storage**, **react-native-fs**, **react-native-keychain**,
+  **react-native-svg**, **react-native-webview**, **react-native-screens**,
+  **react-native-safe-area-context**, **@react-native-async-storage/async-storage**
+- **fast-xml-parser** - GPX parsing
+- **Leaflet** and **react-native-camera-kit** - see above
+- **[pdf.js](https://github.com/mozilla/pdf.js)** (Apache-2.0, Mozilla Foundation) - the Android
+  roadbook-PDF reader. Version 6.3.289 is inlined as `android/src/config/pdfjsInline.js` by
+  `tools/gen_pdfjs_inline.js`, with its licence notice kept at the top of each inlined file.

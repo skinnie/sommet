@@ -1,10 +1,12 @@
 # Day-One Quickstart — Ambit3 Offline Route Sync
 
-> **Historical entry point** - written early in the project; `HANDOFF.md` is the current entry point.
+> Historical (August 2026): written on day one of the project and kept as a record. Both
+> unknowns below were solved long ago, and the handoff files it names are no longer in the
+> repository. For the current state, see the [changelog](../reference/v3-changelog.md) and the
+> [compatibility matrix](../reference/compatibility.md).
 
-A one-page orientation for a developer (working with Claude) picking up this project. Read this
-first, then dive into `obsolete/AMBIT3-SUUNTO-HANDOFF.md` (marked partly wrong at its own top - `HANDOFF.md` is current) for the full detail. **Do not write to a watch
-until you've read §19 (write-safety) of the full handoff.**
+A one-page orientation for a developer (working with Claude) picking up this project, as it
+was written at the start.
 
 ---
 
@@ -30,7 +32,7 @@ opensportsync (Android), **C** = openambit desktop full Ambit3 (routes, POIs, sp
 5. **BLE and USB share everything above the frame layer** — one serializer, one NSP layer, two
    thin frame wrappers. Build the serializer once.
 
-## What is NOT yet known (the only two real unknowns)
+## What was NOT yet known then (both since solved)
 
 - ⚠️ **The 12-byte route-point encoding** (relative-coordinate transform). Decodable from
   `libkomposti-ng.so` (`TreeToStruct` + the Ambit3 route path) checked against the **matched
@@ -90,7 +92,7 @@ only new work is the BLE transport + the session-login token.
 
 ## Assets you must have (ask for these)
 
-Full handoff `obsolete/AMBIT3-SUUNTO-HANDOFF.md` (marked partly wrong at its own top - `HANDOFF.md` is current) · the six pcap captures (`routesmall`, `route12km`,
+The full handoff (no longer in the repository) · the six pcap captures (`routesmall`, `route12km`,
 `route128km`, `sync`, `routedelete`, `poiimport`) · the two **matched source GPX** files ·
 `libkomposti-ng.so` (+ its Ghidra C export) · the deobfuscated SuuntoLink JS · openambit &
 opensportsync source.
@@ -106,7 +108,7 @@ handoff §16.3.)*
 
 ## First question to ask Claude on day one
 
-> "Read `obsolete/AMBIT3-SUUNTO-HANDOFF.md` (marked partly wrong at its own top - `HANDOFF.md` is current) and the capture files. Confirm the delete/reset byte sequence
+> "Read the handoff and the capture files. Confirm the delete/reset byte sequence
 > from `routedelete`, and give me the exact bytes I need to send to empty the Ambit3 route list.
 > Do not propose the full serializer yet."
 

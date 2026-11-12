@@ -1,8 +1,7 @@
 # Supported devices
 
-Every device this project targets (PROJECT_RULES.md rule 2: "cross-device... the whole real
-device family, not just the Ambit3 Peak reference watch"), its internal codename where one
-exists, and its official manual link. Manual URLs are sourced from `manualslinks` at the repo
+Every device this project targets, its internal codename where one exists, and its official
+manual link. Manual URLs are sourced from `manualslinks` at the repo
 root and wired into the app on Home (desktop `HomePage.qml`/`HomeViewModel.qml`, Android
 `HomeScreen.tsx`/`config/manuals.ts`) next to the Hardware field.
 
@@ -28,7 +27,7 @@ Reference watch identification is the real 0x0000 device-info reply
 (`DeviceService.model`/`AmbitDeviceInfo.model` on Android) - see `history.md`/
 `workout_gui.py`'s `VARIANT_NAMES` for how these codenames were confirmed.
 
-## Garmin (USB mass storage, activity import only)
+## Garmin eTrex (USB mass storage: activities, POIs, routes)
 
 No codename - `GarminDevice.xml`'s own `<Model><Description>` free-text field
 (`GarminService.model` / `GarminModule`'s `model`) is matched by family instead, since Garmin's
@@ -43,7 +42,7 @@ Matching rule (`garminManualUrl` on desktop, `garminManualUrlFor()` on Android):
 description containing "22x" or "32x" gets the second guide; everything else in the eTrex
 10/20/30 generation gets the first.
 
-## Bike computers (activity import only)
+## Bike computers
 
 Head units whose recorded rides Sommet imports into the library (source-tagged per brand) and,
 when the intervals.icu export scope is "all", uploads to intervals.icu as the device's own FIT.
@@ -54,6 +53,9 @@ Import for all of them; the Bryton Aero 60 and Magene C406 Pro are also configur
 | Garmin Edge | `edge` | USB (MTP / gvfs) | `Garmin/Activities/*.fit`; Linux gvfs path (`tools/mtp_import.py`) |
 | Hammerhead Karoo | `karoo` | USB (MTP / gvfs) | `FitFiles/*.fit`; MTP enabled in the Karoo's dev options |
 | Bryton Aero 60 | `bryton` | USB mass storage (mounted drive) | rides at the volume root (`YYMMDDHHMMSS.fit`); also profile sync (`Profile.bin`), data screens (`Grid.ini`, `tools/bryton_grid.py`), workouts from the Training Program, Follow Track routes |
+| Garmin Edge 500 | `edge` | USB mass storage (mounted drive) | `Garmin/Activities/*.fit` (`tools/mtp_import.py`); also profile read/write (`tools/edge500_profile.py`), TCX course send (`tools/edge500_course.py`) and FIT workout send (`tools/edge500_workout.py`) |
+| Garmin Edge (data screens) | - | USB | Edge data-screen editor: reads and edits the data fields of an activity profile (`tools/garmin_edge_screens.py`, `tools/edge_screens_device.py`); checked on an Edge 1040 Solar |
+| Coros Dura | - | Coros cloud (Training Hub API) | the Dura keeps rides in internal flash with no USB access, so import goes through the cloud (`android/src/services/ApiCoros.ts`, `CorosActivityService.ts`, mobile app only); the code is not yet wired to a screen |
 | Magene C406 Pro | `c406` | **Bluetooth LE** (must bond) | no USB data mode; rides, profile sync, device settings, data screens, clock/time zone, altitude calibration, route + workout send (desktop and Android); protocol in [`magene_c406_protocol.md`](magene_c406_protocol.md) |
 
 The Edge/Karoo/Bryton import over USB (`tools/mtp_import.py` handles both the gvfs-MTP Garmins

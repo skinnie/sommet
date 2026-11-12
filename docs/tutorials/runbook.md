@@ -1,11 +1,14 @@
 # Runbook - what to do next, step by step
 
+> Historical (August 2026): this was the task list while the route format was being worked
+> out, and it is kept as a record. The setup steps in task 0 still apply. For the current
+> state, see the [changelog](../reference/v3-changelog.md).
+
 Copy-paste instructions for the person with the watch. No prior context needed. Each task
 says what it is for, exactly what to type, what a good result looks like, and what to send
 back.
 
-This file is the current task list and gets rewritten as tasks are done. `HANDOFF.md` is the
-reasoning behind it; you do not need to read it to follow this.
+This file was the task list at the time and was rewritten as tasks were done.
 
 **Where:** the **Linux Mint** side of the X230, in a terminal. Not Windows. Windows stays
 useful only for making SuuntoLink captures.
@@ -322,10 +325,9 @@ POI you had.
 which is the fix from this task being tested. With an empty POI list that question has no
 answer. Restore them first and the check becomes real.
 
-We have not built a command to write POIs ourselves. It is a genuine gap, since the exact
-route depends on the Suunto app and SuuntoLink and this project exists to do without them, but
-it is not needed to finish task 4 and the format is fully known, so it is a short job when it
-comes up rather than now.
+Since then, `tools/write_nav.py` can write POIs itself: `addpoi --name NAME --lat DEG --lon DEG
+[--type TYPE] --write` adds one, and `delpoi` removes them (it saves a copy of the POI list
+first).
 
 ---
 

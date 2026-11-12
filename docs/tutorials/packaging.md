@@ -1,69 +1,44 @@
 # Packaging the Workout Builder as a standalone app
 
-Turns `tools/workout_gui.py` (a local web server + browser UI, stdlib-only, no third-party
-dependencies) into a real double-click app for Windows, macOS and Linux, via
-[PyInstaller](https://pyinstaller.org/). The Linux build is done and verified end to end
-(build + run + a live compile through the network, all from the frozen executable, in
-`dist/linux/`) - the mechanism is identical cross-platform, but PyInstaller cannot
-cross-compile, so the actual Windows/macOS binaries still need building on those OSes.
+Turns `tools/workout_gui.py` (a local web server and browser page, standard library only) into
+a double-click app for Windows, macOS and Linux, with [PyInstaller](https://pyinstaller.org/).
+PyInstaller cannot cross-compile, so each binary is built on its own OS. The Sommet desktop
+downloads already bundle the builder (the Apps page has an "Open Workout Builder" button), so
+this page is only for running it on its own.
 
 ## What ships
 
 Double-clicking the built app starts a local server on `127.0.0.1:8765` and opens it in your
-default browser - the same UI as running `python3 tools/workout_gui.py` directly, just without
-needing Python installed separately. It can:
+default browser. It is the same page as `python3 tools/workout_gui.py`, without needing Python
+installed. It can:
 
-- build a structured workout and compile it into a real Suunto App via the live community
-  compiler (`ambitappscompiler.azurewebsites.net`, see `training_program_andre.md` Finding 6) -
-  the one thing that needs an internet connection; everything else works offline, including
-  revisiting anything already compiled (see "Offline use" below);
-- every successful compile is also saved as its own `.json` file in `~/AmbitWorkouts` (all
-  three OSes), independent of SuuntoLink or the in-browser History list;
-- **Windows/macOS**: "Add to SuuntoLink" appends the compiled result straight into SuuntoLink's
-  own `suunto-apps/index.json` (auto-detected per OS) so it shows up in SuuntoLink's own "Add
-  Suunto App" picker next time the watch connects - the documented, community-used path
-  (`forum.suunto.com/topic/7592`'s first post), not this project's own flash writer, which hit
-  an unresolved real "app error" on hardware and is paused (Finding 19). The real `index.json`
-  is backed up first, every time, to `index_old.json` next to it (one generation - each write
-  overwrites the previous backup with whatever was there right before that write, not the
-  original-ever state; ask if you want deeper history kept);
-- **Linux**: SuuntoLink doesn't exist for Linux at all, so instead of a doomed "Add to
-  SuuntoLink" attempt, the button here is "Open instructions" - it opens a real README
-  (`~/AmbitWorkouts/README - read this on Linux.txt`, written fresh on every compile) that
-  states exactly where the compiled `.json` files are and walks through copying one to a
-  Windows/Mac machine and using "Import compiled JSON" + "Add to SuuntoLink" there. Also notes,
-  honestly: running SuuntoLink itself under Wine is theoretically possible (it's an Electron
-  app) but untested and unsupported here - Electron apps are historically unreliable under
-  Wine, and the copy-the-file route is the one this project has actually verified;
-- **"Import compiled JSON"** (Advanced section) closes that loop: load a `.json` compiled
-  elsewhere (e.g. built on Linux) into the Windows/Mac app to get a real "Add to SuuntoLink"
-  button for it - History (browser `localStorage`) doesn't carry over between machines, so
-  without this there'd be no way to act on a file compiled somewhere else.
+- build a guided workout step by step (time, distance or lap steps, with heart rate, pace,
+  speed or power targets, and repeats);
+- "Create Workout": compile it into the watch's own guidance format on the community compiler
+  (`ambitappscompiler.azurewebsites.net`). This is the only step that needs an internet
+  connection;
+- "Install to Watch": add it to a sport mode's WORKOUT menu straight over USB. No SuuntoLink
+  and no account, on Linux, macOS and Windows alike. The watch shows five workouts; when the
+  menu is full the page offers to replace one, and nothing is installed until you choose;
+- save every created workout as its own `.json` file in `~/Downloads/AmbitWorkouts` (your real
+  Downloads folder, also when it has another name or lives in OneDrive), and keep a History
+  list in the browser;
+- export and import a workout as JSON.
 
-**Never replace SuuntoLink's `index.json` by hand with a downloaded/saved compiled file.**
-Confirmed straight from the original author of this method (Pavel Samokha,
-`forum.suunto.com/topic/7592`): "in index.json it's an JSON array, but compiler output is one
-json object with assumption that user might want to add it to existing array of apps, not
-replacing it completely with one." The compiler's output is deliberately a single object, meant
-to be *appended* to the real array (which is exactly what `suuntolink_catalog.py`'s
-`add_entry()` does) - replacing the whole file with just that one object breaks SuuntoLink
-outright (confirmed on real hardware, 2026-08-06: "unknown error" / "apps not iterable", blank
-sport-mode screens). Always use the app's own "Add to SuuntoLink" button; if it ever does go
-wrong, `index_old.json` (written right next to the real file on every use) is the way back.
+See [Create a structured workout](../how-to/create-a-structured-workout.md) for using it.
 
-It does **not** touch the watch's flash directly - `workout_install.py` (this project's own
-writer) is a separate, CLI-only tool, deliberately not part of this packaged app.
+The old SuuntoLink flow (write App Zone source, "Create App", "Add to SuuntoLink", "Import
+compiled JSON") now lives in a separate tool, `tools/apps_gui.py` (the App Zone builder, on
+`127.0.0.1:8767`). It is not part of this packaged app.
 
 ## Offline use
 
-The page itself (HTML/CSS/JS) is fully self-contained - no CDN, no external fonts, nothing -
-so building/editing a workout, browsing History, exporting/importing a workout file, "Add to
-SuuntoLink" and "Open instructions" all work with no network at all. The one thing that
-genuinely can't work offline is the "Create App" compile step itself, since it calls the live
-community compiler this project doesn't run a copy of - attempting it offline fails with a
-plain "couldn't reach the compiler... you're offline" message rather than a crash. Compile
-anything you need while online and it's usable offline from then on (saved to `~/AmbitWorkouts`
-and to History automatically).
+The page itself (HTML, CSS, JS) is self-contained: no CDN and no external fonts. Building and
+editing a workout, History, export and import, and "Install to Watch" for a workout created
+earlier all work with no network. "Create Workout" calls the live community compiler, which
+this project doesn't run a copy of, so offline it fails with a plain "couldn't reach the
+compiler" message. Create what you need while online; it is saved and usable offline after
+that.
 
 ## One-time setup (per platform)
 
@@ -77,27 +52,21 @@ None, really - each build script now detects Python and PyInstaller itself:
   Debian/Ubuntu's "externally managed environment" pip restriction entirely, since a venv is
   always installable-into regardless of that policy.
 
-`workout_gui.py`, `workout.py` and `suuntolink_catalog.py` are pure standard library - nothing
-else to install once PyInstaller is there.
+`workout_gui.py` and `guided_workout.py` use the standard library for the page and the
+compile step. Writing to the watch over USB needs the `hid` package and the native hidapi
+library, as for the rest of `tools/`.
 
 ## Building
 
-PyInstaller does not cross-compile - each of the three below has to be built by running its
-script *on that OS*. **Linux is already built**, right here, verified working: `dist/linux/
-Ambit3 Workout Builder`. Windows and Mac need building on those actual machines - the scripts
-below are ready, just run them there.
+PyInstaller does not cross-compile: build each one by running its script on that OS.
 
-**Linux** (already done, rebuild any time with):
+**Linux**:
 
 ```
 ./tools/packaging/build_linux.sh
 ```
 
-Produces `dist/linux/Ambit3 Workout Builder`. One real caveat specific to this platform:
-SuuntoLink has no Linux build at all, so the "Add to SuuntoLink" button will always report
-"couldn't find it" here - `suuntolink_catalog.py` knows this and says so plainly rather than
-searching pointlessly. The compile half works exactly the same as everywhere else; the
-compiled JSON can be copied to a Windows/Mac machine that does run SuuntoLink.
+Produces `dist/linux/Ambit3 Workout Builder`.
 
 **Windows** (run on Windows):
 
@@ -129,7 +98,7 @@ the first time - it looks like nothing happened at all, not like an error dialog
 the app -> Open -> Open (once) to get past it, or System Settings -> Privacy & Security ->
 scroll down -> "Open Anyway". Real code-signing needs an Apple Developer account, out of scope
 here. After that first approval, if double-clicking ever still seems to do nothing, check
-`~/AmbitWorkouts/app.log` - the packaged app has no visible console window (`console=False` in
+`~/Downloads/AmbitWorkouts/app.log` - the packaged app has no visible console window (`console=False` in
 the spec), so a startup failure that used to be silent now gets logged there instead.
 
 ## Icon
@@ -172,20 +141,7 @@ applies to this packaged app, not SuuntoLink's own alone:
 Practical wording for a release page: **macOS 10.15 (Catalina) or later, Windows 8 or later,
 64-bit Linux.**
 
-## Toward Android / React Native integration
+## Android
 
-Not attempted, and deliberately not designed around yet - but the architecture already points
-the right way. `workout.py` (the workout-JSON -> App-Zone-source -> live-compiler logic) has
-zero GUI or OS dependency; it's a plain function pipeline plus one HTTP POST. `workout_gui.py`
-(the local server/browser UI) and `suuntolink_catalog.py` (desktop-OS-specific file surgery on
-SuuntoLink's own install) are both intentionally kept separate from it for exactly this reason.
-
-Given this project's base app is React Native (`guiguoz/opensportsync`, per `HANDOFF.md`), the
-straightest path when that day comes is almost certainly **porting `workout.py`'s logic to
-TypeScript** (it's ~250 lines, no numerical/crypto complexity, just string templating and one
-`fetch()` call) rather than embedding a Python runtime in the APK (e.g. via Chaquopy, which
-targets native Kotlin/Java apps, not React Native's JS bridge, and would add real size/
-complexity for very little gained reuse). `suuntolink_catalog.py`'s feature has no Android
-equivalent at all - a phone doesn't run SuuntoLink - so that part simply wouldn't carry over;
-whatever install path Android gets would need to be this project's own writer (once Finding
-19's real "app error" is actually solved) or something else entirely.
+The Android app has its own Workout Builder and Training Program screens, written in
+TypeScript, so it does not use this packaged app.

@@ -1,14 +1,14 @@
 # Ambit3 Workout Builder on Mac - notes and workarounds
 
-Everything real found while getting the packaged app working on André's actual Mac
-(2026-08-06). Companion to `tools/packaging/README.md` (the general build doc) - this one is
-specifically the "here's what actually goes wrong on a real Mac and how to get past it" notes.
+What went wrong while getting the packaged Workout Builder working on a real Mac (first written
+2026-08-06), and how to get past it. The general build notes are in
+[Packaging](packaging.md) and `tools/packaging/README.md`.
 
 ## Building and installing
 
 ```
-rm -rf "/Users/andre/Desktop/sommet/tools/packaging/.build-venv"
-cd "/Users/andre/Desktop/sommet"
+rm -rf "$HOME/Desktop/sommet/tools/packaging/.build-venv"
+cd "$HOME/Desktop/sommet"
 ./tools/packaging/build_mac.sh
 ```
 
@@ -23,8 +23,8 @@ cd "/Users/andre/Desktop/sommet"
 - If you ever manually copy/paste `tools/packaging/build_mac.sh` itself (rather than getting
   it via a normal file copy), run `chmod +x tools/packaging/build_mac.sh` first - pasted/
   downloaded files lose the executable bit.
-- Use **absolute paths** for any manual cleanup command (`rm -rf "/Users/andre/Desktop/
-  sommet/tools/packaging/.build-venv"`, not a relative one). Relative paths depend on
+- Use **absolute paths** for any manual cleanup command (`rm -rf "$HOME/Desktop/sommet/tools/packaging/.build-venv"`,
+  not a relative one). Relative paths depend on
   which folder Terminal is currently in, and typing the wrong one silently does nothing
   (`rm -rf` on a nonexistent path is not an error) rather than failing loudly - this caused
   real, repeated confusion (looked like the fix wasn't working, when really the delete
@@ -37,55 +37,20 @@ double-click the first time, and it can look like nothing happened at all rather
 an obvious error. Right-click the app -> **Open** -> **Open** (once), or **System Settings ->
 Privacy & Security -> scroll down -> "Open Anyway"**.
 
-## "Add to SuuntoLink" needs a real macOS permission
+## Using it
 
-The app modifies a file inside another app's bundle (`Suuntolink.app`), which macOS gates
-behind a permission separate from Gatekeeper:
+The builder makes native guided workouts: "Create Workout" compiles the workout (this needs an
+internet connection), and "Install to Watch" adds it to a sport mode's WORKOUT menu over USB.
+It does not use SuuntoLink, so it needs no extra macOS permission. Close SuuntoLink before
+installing, because it also takes the watch. Created workouts are saved in
+`~/Downloads/AmbitWorkouts`.
 
-1. **System Settings -> Privacy & Security -> App Management** (use **Full Disk Access**
-   instead if your macOS version doesn't have an App Management section).
-2. Find **"Ambit3 Workout Builder"** in that list and enable it. If it's not listed yet, click
-   **+** and add it manually from `/Applications/Ambit3 Workout Builder.app`.
-3. **Fully quit the app and reopen it** - a running process doesn't pick up a permission
-   grant retroactively. `killall "Ambit3 Workout Builder"` (closing the browser tab alone
-   does *not* quit it - it keeps running quietly as a background server), then relaunch.
-
-**This permission can need re-granting after every rebuild.** The app is unsigned, and every
-`build_mac.sh` run produces a brand-new binary - macOS sometimes ties the permission to that
-specific binary, so a grant from before a rebuild can silently stop applying. If "Add to
-SuuntoLink" that used to work suddenly fails again right after a rebuild, remove "Ambit3
-Workout Builder" from the permissions list (select it, click **-**), re-add it fresh, quit/
-reopen, and try again.
-
-## After a successful "Add to SuuntoLink"
-
-- The app tries to auto-launch SuuntoLink for you. **If SuuntoLink was already open, this
-  most likely just brings its window to the front rather than making it re-read the catalog
-  file it already loaded at startup.** If a newly added app doesn't show up, fully quit
-  SuuntoLink (Cmd+Q) and reopen it.
-- **Every click of "Add to SuuntoLink" appends a brand-new catalog entry - it never checks
-  whether one already exists.** Retrying after an error (permission issue, etc.) leaves the
-  earlier failed-looking attempts behind as real duplicate entries once the retry succeeds.
-  Harmless clutter, not a sign of corruption - and safely identifiable/cleanable later if
-  wanted, since every entry this tool adds gets a `ruleId` of 90,000,000+
-  (`suuntolink_catalog.py`'s `CUSTOM_RULE_ID_BASE`), deliberately far above anything in the
-  real official catalog (~13.7 million max) - a cleanup would only ever touch entries this
-  tool added, never a real Suunto app.
-- The app name shown in SuuntoLink's picker is taken from the workout's own name, not the
-  compiler's generic default ("Ambit App") - fixed in `workout_gui.py`'s `/api/compile`
-  handler. If you see "Ambit App" for something you just added, check you're not looking at
-  an old entry added before this fix (same appends-only behavior as above - old entries never
-  get renamed, only new ones use the fixed name).
-
-## Never replace SuuntoLink's `index.json` by hand
-
-Confirmed on real hardware, 2026-08-06: manually swapping in a downloaded/saved compiled-app
-JSON as the whole `index.json` breaks SuuntoLink outright ("unknown error" / "apps not
-iterable", blank sport-mode screens on the watch) - the file has to stay the full array of
-every app SuuntoLink knows about; a compiled app is meant to be *appended*, never used to
-replace it. Always use the app's own "Add to SuuntoLink" button, which does this correctly.
-If it ever does go wrong, `index_old.json` (written right next to the real file on every
-successful use) is the way back - copy it back over `index.json`.
+The older "Create App" and "Add to SuuntoLink" flow is now in the App Zone builder,
+`tools/apps_gui.py`, which is not part of this packaged app. If you use that one on a Mac,
+"Add to SuuntoLink" changes a file inside `Suuntolink.app`, so macOS asks for the App
+Management permission (System Settings > Privacy & Security > App Management, or Full Disk
+Access on older macOS). Never replace SuuntoLink's `index.json` by hand with a compiled file:
+it must stay the full list of apps, and `index_old.json` next to it is the way back.
 
 ## "First run always crashes/hangs, second run is instant"
 
@@ -94,7 +59,7 @@ Real, reproducible, still unresolved as anything other than a workaround. Confir
 - Running the actual binary directly from Terminal (`"/Applications/Ambit3 Workout
   Builder.app/Contents/MacOS/Ambit3 Workout Builder"`) is **instant, every time** - so the
   app itself has no startup bug.
-- The app's own crash/error log (`~/AmbitWorkouts/app.log`) has **no entry** for these
+- The app's own crash/error log (`~/Downloads/AmbitWorkouts/app.log`) has **no entry** for these
   failures - confirms whatever's happening stops the process before the Python code even
   starts running, i.e. it's not something this project's own code could catch or fix.
 - Tried `xattr -cr "/Applications/Ambit3 Workout Builder.app"` (strips any quarantine flag)
@@ -114,7 +79,4 @@ the first double-click after installing/rebuilding doesn't seem to do anything.
 | `bad interpreter: No such file or directory` | Delete `.build-venv`, rebuild |
 | Double-click does nothing (first time ever) | Right-click -> Open -> Open |
 | Double-click does nothing (every first launch) | Just try again - known unresolved quirk |
-| "Add to SuuntoLink" - permission/not allowed | System Settings -> Privacy & Security -> App Management -> enable the app -> quit/reopen |
-| "Add to SuuntoLink" - `doesn't look like a JSON array` | Don't guess-fix by hand - check `index_old.json`'s real shape first |
-| Added app still shows "Ambit App" | Probably an old entry from before the name fix - add a new one and check that instead |
-| New app not visible in SuuntoLink | Fully quit (Cmd+Q) and reopen SuuntoLink |
+| "couldn't read the watch's sport modes" | Watch on its time screen, cable in, SuuntoLink closed |

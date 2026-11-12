@@ -33,9 +33,7 @@ independently created software to exchange data with a device its owner already 
   others, Article 6 of EU Directive 2009/24/EC and 17 U.S.C. §1201(f).
 
 If you represent the manufacturer and something here concerns you, the maintainers would
-rather hear it directly and fix it than have you guess at our intent — see
-[`SUUNTO_DEV_REQUESTS.md`](https://github.com/skinnie/sommet/blob/main/SUUNTO_DEV_REQUESTS.md), which is a standing, good-faith request
-for technical information, not a demand.
+rather hear it directly and fix it than have you guess at our intent.
 
 ---
 
@@ -50,8 +48,8 @@ Movescount was retired in 2021. These models are supported in the **Suunto app**
 GPS data and activity upload, while route, POI and sport-mode transfer moved to
 **SuuntoLink** over the cable. The Kailash synced with the separate iOS-only 7R app rather
 than with Movescount, and is not supported in the Suunto app. Two capabilities that depended
-on Movescount's authoring service — training programs (planned moves) and interval workouts —
-have no current equivalent.
+on Movescount's authoring service, training programs (planned moves) and interval workouts,
+have no equivalent in Suunto's current software. Sommet now writes both.
 
 This project documents the wire protocol and on-device data formats of these watches and
 implements them in open code, so an owner can move their own data without a service account.
@@ -68,8 +66,8 @@ Three deliverables sharing one core:
 
 | Component | What it is | Transport |
 |---|---|---|
-| **`tools/`** | The reference implementation: ~30 Python modules that read and write every format described below. Python 3 standard library only. | USB |
-| **`desktop/`** | A Qt 6 / QML desktop app (Linux, Windows, macOS) driving those tools through a local Python bridge server. | USB |
+| **`tools/`** | The reference implementation: about 200 Python modules that read and write every format described below. The core format code uses the Python 3 standard library only; USB needs `hid`, Bluetooth `bleak`, Garmin Connect `garminconnect` and sleep stages `numpy` (see `tools/packaging/backend-requirements.txt`). | USB and Bluetooth LE |
+| **`desktop/`** | A Qt 6 / QML desktop app (Linux, Windows, macOS) driving those tools through a local Python bridge server. | USB, and Bluetooth LE (experimental, Ambit3 family, Linux) |
 | **`android/`** | A React Native + `libambit` (C/NDK) Android app, forked from [`guiguoz/opensportsync`](https://github.com/guiguoz/opensportsync). | USB-OTG **and** Bluetooth LE |
 | **`csrc/`** | The route serialiser in plain C, written to drop into openambit's `libambit` unmodified. | — |
 
@@ -92,7 +90,7 @@ not attempt to replace any of them:
 | **Suunto's orbital-data service** | AGPS / SGEE updates | The orbital data written to the watch is fetched from the manufacturer's own service, exactly as the official software fetches it, on explicit user action. This project derived how the watch stores it, not the data itself. No credentials are used or held. |
 | **Suunto's device-info service** | Firmware version check and download link | Both the "is a newer firmware available" query and the image itself come from the manufacturer. |
 | **A SuuntoLink installation, once** | Naming any protocol field | The schema descriptor that names the device's data fields is downloaded and cached on disk by SuuntoLink. It is what makes protocol payloads readable rather than guessed. It is **not** redistributed here — each user supplies their own, from their own machine, and it never leaves it. |
-| **SuuntoLink itself** | Firmware updates; installing watch apps from the official catalogue | The firmware protocol is documented but not implemented here. The watch-app install path adds an entry to SuuntoLink's own local catalogue and lets SuuntoLink perform the install. |
+| **SuuntoLink itself** | Firmware updates; installing watch apps from the official catalogue | Use SuuntoLink for normal firmware updates. Sommet has its own flasher for emergencies only. The watch-app install path adds an entry to SuuntoLink's own local catalogue and lets SuuntoLink perform the install. |
 
 Everything else — routes, POIs, waypoints, sport modes, device settings, recorded activities,
 backups — is local and works with no manufacturer software running and no network connection.
@@ -125,7 +123,7 @@ stores data — and this project's own code implementing them.
 | **Framing (BLE)** | `0x7e`-delimited, SLIP-escaped, 12-byte header, CRC32 trailer over header + payload. |
 | **Payloads** | A command envelope identical over USB and BLE, carrying typed records in the device's own SBEM0102 encoding. Field identifiers come from the device's own schema descriptor, on the user's machine. |
 | **On-device regions** | Navigation database (routes and waypoints), sport modes, watch apps, recorded-move log, orbital data, training program, event log, pairing info. |
-| **Firmware** | **Documented, not implemented.** The tooling is read-only and has no write path; two details remain unverified and no write will be attempted. Use SuuntoLink to update firmware. |
+| **Firmware** | Implemented (`tools/firmware_flash.py`, `tools/firmware_write.py`, `/api/firmware/flash`) and verified on an Ambit3 Peak, which was flashed and recovered over USB. Meant for emergencies only; use SuuntoLink for normal updates. |
 
 Because the envelope, the record encoding and the region formats are identical over USB and
 BLE, a feature implemented once works over both transports.
@@ -147,10 +145,13 @@ BLE, a feature implemented once works over both transports.
 | Suunto Traverse | Jabiru | `0x002b` | ✅ | 🟡 |
 | Suunto Traverse Alpha | Loon | `0x002d` | ✅ | 🟡 |
 | **Suunto Kailash** | **Hoopoe** | `0x002a` | ✅ hardware-confirmed (2026-08-10) | ✅ hardware-confirmed |
-| Garmin eTrex (10 / 30) | — | VID `0x091e` | ✅ activity import only | — |
+| Garmin eTrex (10 / 20 / 20x / 30 / 30x) | — | VID `0x091e` | ✅ activities, POIs, routes | — |
 
 **Legend:** ✅ confirmed on real hardware · 🟡 same driver and protocol family, not yet tested
 on that specific model · ❌ not possible · — the hardware does not have it.
+
+Bike computers and the older Suunto devices (experimental) are listed in
+[Supported devices](../reference/supported-devices.md).
 
 Two points worth stating plainly:
 
@@ -162,7 +163,7 @@ Two points worth stating plainly:
   SuuntoLink can sync a Kailash's clock over cable (confirmed live, 2026-08-10), but its own
   activity/travel-history data path was Bluetooth-and-7R-app-only. This project's own USB
   driver used to crash on a Kailash too, but that was a real bug in this project's own code
-  (a double-free in the shared flash-read path, fixed 2026-08-10 - see `HANDOFF.md`/git
+  (a double-free in the shared flash-read path, fixed 2026-08-10, see the git
   history), not a watch or protocol limitation. This app now supports full cable sync for
   Kailash: device identify, TrackLog and DeviceHistory reads, and watch clock sync are all
   confirmed live over USB.
@@ -171,7 +172,7 @@ Two points worth stating plainly:
 
 ## Feature matrix — Android app (USB-OTG + Bluetooth LE)
 
-Version 3.0.0-beta. `U` = over USB-OTG, `B` = over Bluetooth LE.
+Mobile app version 0.2.60 (desktop app 0.2.66). `U` = over USB-OTG, `B` = over Bluetooth LE.
 
 | Feature | Ambit 1 | Ambit2 family | Ambit3 family | Traverse / Alpha | Kailash |
 |---|---|---|---|---|---|
@@ -192,10 +193,10 @@ Version 3.0.0-beta. `U` = over USB-OTG, `B` = over Bluetooth LE.
 | Navigation backup (create) | 🟡 | 🟡 | ✅ | 🟡 | — |
 | Kailash travel history / visited places | — | — | — | — | ✅ U *(2026-08-10)* ✅ B |
 | Firmware version check + download link *(from the manufacturer's service)* | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Firmware updates | ❌ *(use SuuntoLink)* | ❌ | ❌ | ❌ | ❌ |
+| Firmware flashing *(emergencies only; use SuuntoLink for normal updates)* | not tested | not tested | ✅ U | 🟡 U | 🟡 U |
 | Weather (Open-Meteo), maps (IGN / OSM / CyclOSM) | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-## Feature matrix — Desktop app (Qt 6 / QML, USB cable only)
+## Feature matrix — Desktop app (Qt 6 / QML, USB cable and experimental Bluetooth LE)
 
 | Feature | Ambit 1 | Ambit2 family | Ambit3 family | Traverse / Alpha | Kailash |
 |---|---|---|---|---|---|
@@ -203,29 +204,25 @@ Version 3.0.0-beta. `U` = over USB-OTG, `B` = over Bluetooth LE.
 | Send GPX route | 🟡 | 🟡 | ✅ | 🟡 | — |
 | Route rehearse-before-write + thumbnail preview | ✅ | ✅ | ✅ | ✅ | — |
 | Read on-watch routes (summary) | 🟡 | 🟡 | ✅ | 🟡 | — |
-| Download a route's actual GPS points | ❌ *(port pending)* | ❌ | ❌ | ❌ | — |
+| Download a route's actual GPS points | 🟡 | 🟡 | ✅ | 🟡 | — |
 | POI list + Add form with live map preview | 🟡 | 🟡 | ✅ | 🟡 | — |
-| POI import / export | ❌ *(port pending)* | ❌ | ❌ | ❌ | — |
+| POI import / export | 🟡 | 🟡 | ✅ | 🟡 | — |
 | Activities → GPX / FIT, cards, map detail | ✅ | ✅ | ✅ | 🟡 | ❌ |
 | Backup: create / list / rehearse / restore | 🟡 | 🟡 | ✅ | 🟡 | — |
 | Orbital / AGPS write | 🟡 | 🟡 | ✅ | 🟡 | ❌ |
 | Sport modes read + edit | — | — | ✅ | 🔬 | — |
 | Firmware check + download-for-backup | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Firmware flashing *(emergencies only; use SuuntoLink for normal updates)* | not tested | not tested | ✅ | 🟡 | 🟡 |
 | Weather, maps, Connections | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Bluetooth LE | ❌ *(desktop is cable-only)* | ❌ | ❌ | ❌ | ❌ |
+| Bluetooth LE *(experimental, Linux)* | — | — | 🟡 | 🟡 | 🟡 |
 
-**iOS:** not started. The transport is understood, a Mac and an iPhone are available, and the
-serialiser is shared — so it is scoped implementation work, not research. Nothing is built.
+**iOS:** in progress, not released. The app builds from `android/ios/`, and Bluetooth sync was
+confirmed on a real Ambit3 on an iPhone (see the [Android changelog](../reference/android-changelog.md)).
 
 ### Why the desktop gaps exist
 
-- **No Bluetooth on desktop.** The BLE transport was built in the Android app's native layer.
-  Porting it to the desktop's Python backend is implementation work that has not been done —
-  not an open technical question.
-- **Route point download and POI import return honest errors on desktop.** Both are real,
-  hardware-confirmed capabilities elsewhere in this project, but that code is not in the
-  desktop backend's copy of the writer yet.
-- **Activity charts / laps / notes tabs** need a charting library decision.
+- **Bluetooth on desktop is experimental.** It covers the Ambit3 family on Linux and is
+  switched on in Settings. See [Keep a Bluetooth watch paired on Linux](../how-to/bluetooth-pairing-on-linux.md).
 - **Sport-specific activity icons:** the raw sport-type byte in exported GPX is not decoded to
   a name anywhere in this project, so every activity card uses one generic icon rather than a
   guessed mapping.
@@ -241,24 +238,21 @@ serialiser is shared — so it is scoped implementation work, not research. Noth
 | POI transfer to watch, wireless | Same cable path as routes | ✅ **Yes**, cable and Bluetooth | Import from GPX or typed coordinates, and export back. |
 | Sport-mode / display customisation, wireless | Moved to SuuntoLink over cable | ✅ **Yes**, cable and Bluetooth | Rename, autolap, HR limits, sensor pods, per-display field editing. Byte-exact against what the official tool writes. Ambit3 confirmed; Traverse family not yet mapped. |
 | Personal info / body metrics sync, wireless | Not carried over | 🟡 **Partly** | The personal-profile fields (gender, weight, height, max/rest HR, activity level, birthday) are read and decoded live. The write channel works and is used for other settings, but these fields are not exposed in either UI yet. No format blocker — UI work. |
-| Daily steps / activity trend | Not carried over | 🟡 **Read path found, live-tested** | The watch stores it, and it is reachable with the same query machinery already used for the logbook. Read confirmed on hardware; not yet surfaced in either app. |
+| Daily steps / activity trend | Not carried over | ✅ **Yes** | The watch stores it, and it is reachable with the same query machinery already used for the logbook. Read confirmed on hardware; the desktop Health page shows steps per weekday. |
 | Training programs / planned moves | Not carried over | ✅ **Native, hardware-confirmed (2026-09-03)** | The watch shows the Movescount-era "Today 1/2" planned-move card from its own TrainingProgram flash region (TIME mode → [Next]), exactly as user-guide §3.39 describes — no app, no workaround. The one blocker behind every earlier failed write was a **4-byte header signature** at offset 4 (`3C 46 50 5A`): the desktop packer copies the prior region's bytes 4..7, which on a Movescount-initialised watch were always this constant, but on an erased region became `0xFFFFFFFF` and the firmware rejected the header. Found by decompiling the watch's **TI MSP430X** firmware (a year of prior "impenetrable firmware" analysis had been reading the nRF51 BLE co-processor image by mistake). `tools/training_program.py` writes single moves or a whole `--plan`; the desktop "Sync to watch" action writes the plan as native cards alongside the WORKOUT-menu guidance. |
-| Interval workouts (browsable WORKOUT menu, live segment graph, §3.18) | Not carried over | ❌ **Blocked** | These are not watch-app bytecode but sport-mode rules carrying a declarative trigger structure the firmware interprets natively. **Open:** the trigger byte encoding cannot be confirmed, because there is no traffic left anywhere to observe it in. The authoring half is solved — the workout description schema round-trips through this project's own generator. |
+| Interval workouts (browsable WORKOUT menu, live segment graph, §3.18) | Not carried over | ✅ **Yes** | The Workout Builder (`tools/workout_gui.py`, bundled in the desktop app) creates guided interval workouts and installs them to the watch's WORKOUT menu over USB; on Android, guided workouts go through the Training Program. See [Create a structured workout](../how-to/create-a-structured-workout.md). |
 | Watch apps (App Zone) | SuuntoLink still installs apps from its bundled catalogue; the authoring compiler is gone | 🟡 **Install yes, authoring no** | Installing a catalogue app with this project's tooling works and renders on hardware. **Open:** binaries from the surviving community compiler are accepted by the watch but never execute, even a trivial one-line app. There is no compiler whose output runs on this firmware. |
 | Orbital / AGPS data | Kept (Suunto app and SuuntoLink) | ✅ **Yes**, using the manufacturer's own service | The write is byte-exact against reference traffic and hardware-confirmed. **The data still comes from the manufacturer** — a real dependency, not a replacement. |
 | Activity upload and storage | Kept for these models via the Suunto app; the Movescount analysis layer is gone | ✅ **Local alternative** | Local library, GPX/FIT export, and OAuth2 upload to Strava, Runalyze, Livelox and Intervals.icu, at the user's choice. |
-| Firmware updates | Kept (SuuntoLink) | 🟡 **Check and download only, by choice** | Version check and download link work against the manufacturer's service. The update protocol is documented but not implemented. |
+| Firmware updates | Kept (SuuntoLink) | ✅ **Yes, for emergencies** | Version check and download link work against the manufacturer's service. The flasher is verified on an Ambit3 Peak; use SuuntoLink for normal updates. |
 | Kailash sync | Not supported in the Suunto app; activity/cities-visited sync was 7R-app-only (iOS, Bluetooth-only) | ✅ **Yes**, over Bluetooth and USB cable | Pair, identify, read and write settings including Home Location, read travel history and visited places, and export a recorded activity to GPX from the watch's ephemeral sample store. Confirmed live over both Bluetooth and, as of 2026-08-10, USB cable (device identify, TrackLog, DeviceHistory, and watch clock sync). |
 | Movescount web route planner | Not carried over | ✅ **Local alternative** | In-app maps (IGN / OSM / CyclOSM) and route import with preview. |
 
 **Legend:** ✅ implemented · 🟡 partially implemented, no technical blocker · 🔬 understood, one
 unknown left · ❌ blocked on an unresolved unknown.
 
-The two capabilities still blocked — interval workouts and training programs (planned moves) —
-are the two whose authoring lived on a service that no longer runs. There is nothing left to observe for
-either, which is why they are open questions rather than pending implementation. See
-[`SUUNTO_DEV_REQUESTS.md`](https://github.com/skinnie/sommet/blob/main/SUUNTO_DEV_REQUESTS.md) for exactly what information would close
-them.
+Interval workouts and training programs (planned moves) both had their authoring on a
+service that no longer runs. Both now work without it.
 
 ---
 
@@ -287,10 +281,11 @@ Nothing in the matrices above is inferred from a datasheet. This is what it ran 
 
 SuuntoLink (Windows and macOS), the Suunto app (Android and iOS), the Suunto 7R app (iOS),
 [openambit](https://github.com/openambitproject/openambit)'s `libambit` — used as a
-cross-check throughout, with four real traps in it documented in `HANDOFF.md` — and
+cross-check throughout, and
 `guiguoz/opensportsync`.
 
-**Build and runtime requirements:** Python 3 (standard library only) for `tools/`; `gcc` and
+**Build and runtime requirements:** Python 3 for `tools/` (plus `hid`, `bleak`, `garminconnect`
+and `numpy` for USB, Bluetooth, Garmin Connect and sleep stages); `gcc` and
 `libm` for the C serialiser; Qt 6.5+ for the desktop app; Android 9+ (API 28+), NDK r26+ and
 an OTG cable for the Android app.
 
@@ -362,7 +357,7 @@ an explicit flag.
 - The navigation regions carry a checksum over their own contents; every read validates
   itself against it.
 - Backups are real region dumps, restorable, and rehearsable before restore.
-- **Firmware is never written.** Use SuuntoLink.
+- **Firmware is written only by the emergency flasher.** For a normal update, use SuuntoLink.
 - Scope is matched to the hardware: a 2012–2015 black-and-white watch with no optical HR
   sensor, a slow CPU and little storage.
 
@@ -375,15 +370,14 @@ hardware you own, at your own risk; see the licence text for the full disclaimer
 
 | Document | Contents |
 |---|---|
-| [`HANDOFF.md`](https://github.com/skinnie/sommet/blob/main/HANDOFF.md) | **Start here.** Full project state, milestone by milestone, with every derivation and dated finding. |
+| [Changelog (desktop)](../reference/v3-changelog.md) | **Start here.** Project state, release by release, with dated findings. |
+| [Compatibility matrix](../reference/compatibility.md) | What works on which watch. |
 | [`tools/README.md`](https://github.com/skinnie/sommet/blob/main/tools/README.md) | The format specification: memory map, structures, coordinate formula, simplification, hashes, field schema. |
 | [Runbook](../tutorials/runbook.md) | Step-by-step instructions for whoever physically has the watch. |
 | [History](history.md) | Watch-family background, codenames, timeline, adjacent open-source projects. |
 | [App spec](../reference/sommet-spec.md) | Design language and feature spec for the apps. |
 | [`desktop/README.md`](https://github.com/skinnie/sommet/blob/main/desktop/README.md), [`android/README.md`](https://github.com/skinnie/sommet/blob/main/android/README.md) | Per-app architecture, build instructions, and the current gap lists. |
-| [Kailash BLE findings](kailash-ble-findings.md) | The Kailash Bluetooth protocol. |
-| [`SUUNTO_DEV_REQUESTS.md`](https://github.com/skinnie/sommet/blob/main/SUUNTO_DEV_REQUESTS.md) | A good-faith request for the specific technical information that would close the two remaining blocked features. |
-| [Unresolved questions](unresolved-questions.md) | Open protocol questions, kept shareable standalone. |
+| [Kailash scoping note](kailash-scoping-note.md) | Early reverse-engineering notes on the Kailash. |
 
 ---
 
