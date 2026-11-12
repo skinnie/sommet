@@ -759,6 +759,10 @@ void ActivityService::openDatabase()
     // here, same protection as the start|name tombstones.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_deleted (uid TEXT PRIMARY KEY)"));
+    // intervals.icu activities the last import didn't list, with when that was first seen
+    // (ms). One missing reply isn't a delete: the prune waits for a second import a day later.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS intervals_missing (external_id TEXT PRIMARY KEY, since INTEGER)"));
     // Original FITs the NAS has confirmed (Sommet Sync uid). Only these may be dropped locally in
     // "nas" originals mode; a row not in here keeps its FIT until the NAS has it.
     q.exec(QStringLiteral(
@@ -2093,13 +2097,53 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     // must not empty the list.
     if (!windowStart.isEmpty() && !fetched.isEmpty()) {
         QList<Held> gone;
+        QStringList goneIds;
         int inWindow = 0;
         for (auto it = existing.cbegin(); it != existing.cend(); ++it) {
             if (it->idx == INT_MIN || it->start < windowStart)
                 continue;                       // added in this run, or older than the reply covers
             ++inWindow;
-            if (!fetched.contains(it.key()))
+            if (!fetched.contains(it.key())) {
                 gone.append(*it);
+                goneIds.append(it.key());
+            }
+        }
+        // A prune deletes on the NAS and every synced device for good, so one reply that leaves
+        // an activity out (paging, a passing API gap) must not do it: an activity is only pruned
+        // when an import at least a day after the first miss still doesn't list it (2026-11-12
+        // review). What is listed again is forgotten.
+        {
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+            constexpr qint64 kConfirmAfterMs = 24LL * 3600 * 1000;
+            QHash<QString, qint64> since;
+            QSqlQuery m(m_db);
+            if (m.exec(QStringLiteral("SELECT external_id, since FROM intervals_missing")))
+                while (m.next())
+                    since.insert(m.value(0).toString(), m.value(1).toLongLong());
+            QSqlQuery clr(m_db);
+            clr.prepare(QStringLiteral("DELETE FROM intervals_missing WHERE external_id = ?"));
+            for (auto it = since.cbegin(); it != since.cend(); ++it)
+                if (!goneIds.contains(it.key())) {
+                    clr.bindValue(0, it.key());
+                    clr.exec();
+                }
+            QSqlQuery add(m_db);
+            add.prepare(QStringLiteral("INSERT OR IGNORE INTO intervals_missing (external_id, since) VALUES (?, ?)"));
+            QList<Held> confirmed;
+            for (int i = 0; i < gone.size(); ++i) {
+                const auto f = since.constFind(goneIds.at(i));
+                if (f == since.cend()) {
+                    add.bindValue(0, goneIds.at(i));
+                    add.bindValue(1, nowMs);
+                    add.exec();
+                } else if (nowMs - f.value() >= kConfirmAfterMs) {
+                    confirmed.append(gone.at(i));
+                }
+            }
+            if (confirmed.size() != gone.size())
+                qInfo().noquote() << "[intervals] import:" << (gone.size() - confirmed.size())
+                                  << "missing for less than a day - kept until the next import confirms";
+            gone = confirmed;
         }
         qInfo().noquote() << "[intervals] import:" << fetched.size() << "listed," << count << "new,"
                           << gone.size() << "no longer there, of" << inWindow << "held";
