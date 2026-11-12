@@ -2,12 +2,14 @@
 #include "backenderror.h"
 #include "sport_names_generated.h"
 #include "apppaths.h"
+#include "freefilename.h"
 
 #include <QDebug>
 #include <QRegularExpression>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1076,6 +1078,108 @@ QString ActivityService::trackGpx(int idx, const QString &device, const QString 
     w.writeEndElement(); w.writeEndElement(); w.writeEndElement();
     w.writeEndDocument();
     return out;
+}
+
+void ActivityService::exportAllToFolder(const QUrl &folder, const QVariantList &activities,
+                                        bool gpx, bool fit)
+{
+    if (m_exportAll.running)
+        return;
+    const QString dir = folder.toLocalFile();
+    if (dir.isEmpty() || !QFileInfo(dir).isDir()) {
+        emit exportAllFinished(0, 0, 0, tr("That folder doesn't exist."));
+        return;
+    }
+    m_exportAll = ExportAllJob{};
+    m_exportAll.dir = dir;
+    m_exportAll.gpx = gpx;
+    m_exportAll.fit = fit;
+    for (const QVariant &v : activities) {
+        const QVariantMap a = v.toMap();
+        if (!a.contains(QStringLiteral("index")))
+            continue;
+        m_exportAll.queue.append({a.value(QStringLiteral("index")).toInt(),
+                                  a.value(QStringLiteral("device")).toString()});
+    }
+    m_exportAll.total = m_exportAll.queue.size();
+    m_exportAll.running = true;
+    emit exportAllProgress(0, m_exportAll.total);
+    QTimer::singleShot(0, this, &ActivityService::exportAllStep);
+}
+
+void ActivityService::cancelExportAll()
+{
+    if (m_exportAll.running)
+        m_exportAll.cancelled = true;
+}
+
+void ActivityService::exportAllStep()
+{
+    ExportAllJob &job = m_exportAll;
+    auto finish = [this, &job](const QString &error) {
+        job.running = false;
+        emit exportAllFinished(job.gpxFiles, job.fitFiles, job.skipped, error);
+    };
+    if (job.cancelled) {
+        finish(tr("Stopped."));
+        return;
+    }
+    auto write = [](const QString &path, const QByteArray &data) {
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(data) == data.size();
+    };
+    // ~25 activities per pass keeps each pass well under a frame budget on an old PC.
+    for (int n = 0; n < 25 && !job.queue.isEmpty(); ++n) {
+        const auto [idx, device] = job.queue.takeFirst();
+        ++job.done;
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral(
+            "SELECT name, start_time, gpx_text, fit_base64 FROM activities "
+            "WHERE idx = ? AND COALESCE(device, '') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (!m_db.isOpen() || !q.exec() || !q.next()) {
+            ++job.skipped;
+            continue;
+        }
+        const QString name = q.value(0).toString();
+        const QDateTime start = QDateTime::fromString(q.value(1).toString(), Qt::ISODateWithMs);
+        const QString stamp = start.isValid() ? start.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HHmm"))
+                                              : QString::number(idx);
+        const QString base = name.isEmpty() ? stamp : stamp + QLatin1Char(' ') + name;
+        bool wrote = false;
+        if (job.gpx) {
+            QString text = q.value(2).toString();
+            if (text.isEmpty())
+                text = trackGpx(idx, device, name);
+            if (!text.isEmpty()) {
+                if (!write(freeFileName(job.dir, base + QStringLiteral(".gpx")), text.toUtf8())) {
+                    finish(tr("Couldn't write to %1.").arg(job.dir));
+                    return;
+                }
+                ++job.gpxFiles;
+                wrote = true;
+            }
+        }
+        if (job.fit) {
+            const QByteArray fitBytes = QByteArray::fromBase64(q.value(3).toString().toLatin1());
+            if (!fitBytes.isEmpty()) {
+                if (!write(freeFileName(job.dir, base + QStringLiteral(".fit")), fitBytes)) {
+                    finish(tr("Couldn't write to %1.").arg(job.dir));
+                    return;
+                }
+                ++job.fitFiles;
+                wrote = true;
+            }
+        }
+        if (!wrote)
+            ++job.skipped;
+    }
+    emit exportAllProgress(job.done, job.total);
+    if (job.queue.isEmpty())
+        finish(QString());
+    else
+        QTimer::singleShot(0, this, &ActivityService::exportAllStep);
 }
 
 void ActivityService::fetchIntervalsFit(int idx, const QString &device)

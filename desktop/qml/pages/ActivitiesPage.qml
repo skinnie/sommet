@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Dialogs
 import SommetUi
 
 // Step 7: real Apple-Photos-style activity cards, backed by ActivityService (parses the
@@ -348,11 +349,28 @@ Item {
         onChosen: (m) => Theme.activitiesView = m
     }
 
+    // "Export all" (a user's request, 2026-11-12): writes the activities shown into a folder,
+    // one file each. Sits at the right end of the view dropdown's line.
+    Text {
+        id: exportAllLink
+        z: 3
+        anchors.right: parent.right
+        anchors.rightMargin: Theme.spacingLarge + Theme.spacingMedium
+        anchors.verticalCenter: activitiesViewToggle.verticalCenter
+        visible: root.selectedActivity === null && root.sortedActivities.length > 0
+        text: qsTr("Export all…")
+        color: exportAllHover.hovered ? Theme.primary : Theme.mutedText
+        font.pixelSize: Theme.fontSizeCaption
+        font.bold: true
+        TapHandler { onTapped: exportAllDialog.open() }
+        HoverHandler { id: exportAllHover; cursorShape: Qt.PointingHandCursor }
+    }
+
     Row {
         id: activitiesSortSimple
         // Starts to the right of the view dropdown so both share one horizontal line (map view).
         anchors.left: activitiesViewToggle.right
-        anchors.right: parent.right
+        anchors.right: exportAllLink.left
         anchors.leftMargin: Theme.spacingLarge
         anchors.rightMargin: Theme.spacingLarge
         // Share the view dropdown's horizontal line.
@@ -607,6 +625,112 @@ Item {
         visible: root.selectedActivity !== null
         activity: root.selectedActivity
         onBack: root.selectedActivity = null
+    }
+
+    FolderDialog {
+        id: exportAllFolder
+        title: qsTr("Choose a folder for the exported files")
+        currentFolder: LocalFileService.exportFolder
+        onAccepted: {
+            LocalFileService.rememberExportFolder(selectedFolder)
+            exportAllDialog.folder = selectedFolder
+            exportAllDialog.resultText = ""
+            // Only the keys: the rows themselves can carry whole tracks.
+            ActivityService.exportAllToFolder(selectedFolder,
+                root.sortedActivities.map(a => ({ index: a.index, device: a.device || "" })),
+                exportGpxBox.checked, exportFitBox.checked)
+        }
+    }
+
+    ThemedDialog {
+        id: exportAllDialog
+        title: qsTr("Export all activities")
+        standardButtons: Dialog.NoButton
+        width: 430
+        property url folder
+        property bool running: false
+        property int done: 0
+        property int total: 0
+        property string resultText: ""
+        onOpened: { if (!running) resultText = "" }
+
+        Connections {
+            target: ActivityService
+            function onExportAllProgress(done, total) {
+                exportAllDialog.running = true
+                exportAllDialog.done = done
+                exportAllDialog.total = total
+            }
+            function onExportAllFinished(gpxFiles, fitFiles, skipped, error) {
+                exportAllDialog.running = false
+                let parts = []
+                if (exportGpxBox.checked)
+                    parts.push(gpxFiles === 1 ? qsTr("1 GPX file") : qsTr("%1 GPX files").arg(gpxFiles))
+                if (exportFitBox.checked)
+                    parts.push(fitFiles === 1 ? qsTr("1 FIT file") : qsTr("%1 FIT files").arg(fitFiles))
+                let msg = qsTr("Saved %1.").arg(parts.join(qsTr(" and ")))
+                if (skipped > 0)
+                    msg += " " + (skipped === 1 ? qsTr("1 activity had no track or FIT to save.")
+                                                : qsTr("%1 activities had no track or FIT to save.").arg(skipped))
+                exportAllDialog.resultText = error ? error + " " + msg : msg
+            }
+        }
+
+        contentItem: Column {
+            spacing: Theme.spacingLarge
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeBody
+                text: (root.sortedActivities.length === 1
+                       ? qsTr("Saves the activity in the list")
+                       : qsTr("Saves the %1 activities in the list").arg(root.sortedActivities.length))
+                      + " " + qsTr("into a folder you pick, one file each, named by date and time. "
+                                   + "Nothing is overwritten.")
+            }
+            Column {
+                spacing: Theme.spacingSmall
+                RoundedCheckBox { id: exportGpxBox; text: qsTr("GPX (track)"); checked: true; enabled: !exportAllDialog.running }
+                RoundedCheckBox { id: exportFitBox; text: qsTr("FIT (all the data, where there is one)"); checked: false; enabled: !exportAllDialog.running }
+            }
+            Text {
+                visible: exportAllDialog.running || exportAllDialog.resultText !== ""
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontSizeBody
+                text: exportAllDialog.running
+                      ? qsTr("Saving %1 of %2…").arg(exportAllDialog.done).arg(exportAllDialog.total)
+                      : exportAllDialog.resultText
+            }
+            Item {
+                width: parent.width
+                height: 36
+                Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: exportAllDialog.running ? qsTr("Stop") : qsTr("Close")
+                        onClicked: exportAllDialog.running ? ActivityService.cancelExportAll()
+                                                           : exportAllDialog.close()
+                    }
+                    RoundedButton {
+                        visible: !exportAllDialog.running && exportAllDialog.resultText !== ""
+                        text: qsTr("Open folder")
+                        onClicked: LocalFileService.openFolder(exportAllDialog.folder)
+                    }
+                    RoundedButton {
+                        visible: !exportAllDialog.running && exportAllDialog.resultText === ""
+                        enabled: exportGpxBox.checked || exportFitBox.checked
+                        text: qsTr("Choose folder…")
+                        onClicked: exportAllFolder.open()
+                    }
+                }
+            }
+        }
     }
 
     // Centered, modal confirm for a right-click delete. ThemedDialog dims the whole app behind

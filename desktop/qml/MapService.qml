@@ -40,7 +40,7 @@ QtObject {
     // file needing to know persistence is involved. (QtObject has no default property, so the
     // Settings child is an explicit named property with its own id - see Theme.qml's note.)
     property alias provider: mapSettings.provider  // "osm", "cyclosm" or "ign"
-    property Settings mapSettingsObj: Settings {
+    property QtObject mapSettingsObj: Settings {
         id: mapSettings
         category: "map"
         property string provider: "cyclosm"

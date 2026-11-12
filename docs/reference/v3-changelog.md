@@ -7,6 +7,31 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-12: Export all activities, remembered export folder, Debian 13 fixes (0.2.66)
+
+From a user's report (Ambit3 Peak, building from source on Debian 13):
+
+1. **The app didn't start on Debian's Qt** ("Cannot assign object of type Core.Settings to property
+   of type QQmlSettings*"). Nine `property Settings x: Settings {}` declarations are now
+   `property QtObject`, which no Qt build can reject. Their workaround (`Qt.labs.settings`) is
+   deprecated; not used.
+2. **Map warnings after closing an activity** (`_spanPxAt is not a function ... invalid context`): the
+   map's delayed refit is a Timer that dies with the map instead of `Qt.callLater`.
+3. **Remembered export folder**: GPX/FIT/route/POI save windows open in the folder of the last
+   file saved, Downloads until then.
+4. **Export all** (Activities page, top right; desktop): every activity in the list into a folder,
+   one GPX each (the original GPX, or one built from the track) and the FIT where there is one,
+   named "YYYY-MM-DD HHmm <name>". Never overwrites. Checked on a copy of a 4,601-activity
+   database: 3,695 GPX, all valid XML, point counts equal to the stored tracks. **Android**: a
+   download icon on the Activities screen saves them into Downloads/Sommet export <date>/ (the
+   current sport filter applies); built by CI only, not yet tried on a phone.
+5. The report's crash when saving a GPX (`Gtk:ERROR gtkpathbar.c`) is GTK's own save window, which
+   a source build uses through Qt's gtk3 plugin. The AppImage doesn't ship that plugin, so it uses
+   Qt's own window or the desktop portal. Not tested on Debian 13 yet (the reporter will try the
+   AppImage).
+
+---
+
 ## 2026-11-08: Garmin login in the release builds, NAS sync losing late uploads, Bryton backups (0.2.65)
 
 1. **Garmin Connect login failed on every release build** ("No module named 'garminconnect'", seen

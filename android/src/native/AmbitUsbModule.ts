@@ -183,6 +183,13 @@ export function saveToDownloads(filePath: string, fileName: string, mimeType = '
   return NativeAmbit.saveToDownloads(filePath, fileName, mimeType);
 }
 
+/** Like saveToDownloads(), into Downloads/<subfolder>/ (used by "Export all"). Never
+ * overwrites a file already there. */
+export function saveToDownloadsIn(filePath: string, subfolder: string, fileName: string,
+                                  mimeType = 'application/gpx+xml'): Promise<void> {
+  return NativeAmbit.saveToDownloadsIn(filePath, subfolder, fileName, mimeType);
+}
+
 /** Opens the system "Save as" picker (Storage Access Framework), defaulting to
  * the Downloads folder — the user can browse elsewhere, but accepting the
  * picker's default is equivalent to saveToDownloads(). Resolves with the

@@ -33,6 +33,7 @@ import { MetricColumnMenu } from '../components/ui/MetricColumnMenu';
 import { deleteIntervalsIcuActivity } from '../services/ApiIntervalsIcu';
 import { EmptyState, PulseDots, SkeletonList } from '../components/ui/primitives';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
+import { exportAllToDownloads } from '../services/ExportAll';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'LogList'>;
 
@@ -139,10 +140,40 @@ export default function LogListScreen() {
   // shell: the phone's bottom tab row is already full, and these three (list / calendar /
   // totals) are one family of "what have I done" views, so grouping them is the adaptive
   // choice (rule 2, "UI evolutive according to the device").
+  // "Export all" (2026-11-12, desktop parity): every activity in the list (or the chosen sport)
+  // into a new Downloads folder. `exporting` is the progress line; stopRef ends a run early.
+  const [exporting, setExporting] = useState('');
+  const stopExport = React.useRef(false);
+  const runExportAll = useCallback(async (withFit: boolean) => {
+    stopExport.current = false;
+    setExporting(t.exportAllProgress(0, 0));
+    try {
+      const sport = activeFilter === ALL ? '' : activeFilter;
+      const r = await exportAllToDownloads(sport, withFit,
+        (done, total) => setExporting(t.exportAllProgress(done, total)), () => stopExport.current);
+      Alert.alert(t.exportAllTitle, t.exportAllDone(r.folder, r.gpxFiles, r.fitFiles, r.skipped));
+    } catch (e: any) {
+      Alert.alert(t.error, t.saveError + (e?.message ?? ''));
+    } finally {
+      setExporting('');
+    }
+  }, [activeFilter]);
+  const askExportAll = useCallback(() => {
+    if (exporting) return;
+    Alert.alert(t.exportAllTitle, t.exportAllMsg(activeFilter === ALL ? '' : activeFilter), [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.exportAllGpxFit, onPress: () => runExportAll(true) },
+      { text: t.exportAllGpx, onPress: () => runExportAll(false) },
+    ]);
+  }, [activeFilter, exporting, runExportAll]);
+
   React.useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <View style={styles.headerActions}>
+          <TouchableOpacity onPress={askExportAll} hitSlop={8} accessibilityLabel={t.exportAllTitle}>
+            <Icon name="download" size={22} color={exporting ? theme.mutedText : theme.text} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('Calendar')} hitSlop={8}>
             <Icon name="calendar" size={22} color={theme.text} />
           </TouchableOpacity>
@@ -152,7 +183,7 @@ export default function LogListScreen() {
         </View>
       ),
     });
-  }, [navigation, theme, styles]);
+  }, [navigation, theme, styles, askExportAll, exporting]);
 
   // ─── Paged loading (André, 2026-09-29) ─────────────────────────────────────
   // "not worth to load all the 4XXX activities ... load it progressively ... I would say 30". The
@@ -395,7 +426,11 @@ export default function LogListScreen() {
             <Text style={styles.emptyFilterText}>{t.noFilter}</Text>
           </View>
         }
-        ListHeaderComponent={preparing ? <Text style={styles.deleteHint}>{preparing}</Text> : null}
+        ListHeaderComponent={exporting ? (
+          <TouchableOpacity onPress={() => { stopExport.current = true; }} activeOpacity={0.7}>
+            <Text style={styles.deleteHint}>{exporting}  ·  {t.exportAllStop}</Text>
+          </TouchableOpacity>
+        ) : preparing ? <Text style={styles.deleteHint}>{preparing}</Text> : null}
         ListFooterComponent={
           loadErr
             ? <ErrorBanner detail={loadErr} context={t.activitiesLoadContext} showPlainDetail

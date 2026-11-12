@@ -30,7 +30,7 @@ QtObject {
     // property instead of an implicit child. (2) `property alias X: settings.field` needs
     // a real `id:`, not just a property name - fixed by giving the nested object its own
     // id (settingsId) instead of relying on the property name (settingsObj) alone.
-    property Settings settingsObj: Settings {
+    property QtObject settingsObj: Settings {
         id: settingsId
         category: "appearance"
         property string themeOverride: "system"

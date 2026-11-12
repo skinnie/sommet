@@ -1390,6 +1390,52 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    // ─── saveToDownloadsIn() ──────────────────────────────────────────────────
+    // Same as saveToDownloads(), into a subfolder of Downloads ("Download/<subfolder>/"), for
+    // "Export all". Never overwrites: MediaStore renames a clash itself ("name (1).gpx"); on
+    // API 28 we pick "name (2).gpx", "name (3).gpx", ... ourselves.
+    @ReactMethod
+    fun saveToDownloadsIn(filePath: String, subfolder: String, fileName: String, mimeType: String, promise: Promise) {
+        try {
+            val file = java.io.File(filePath)
+            if (!file.exists()) {
+                promise.reject("FILE_NOT_FOUND", "File not found: $filePath")
+                return
+            }
+            val safeSub = subfolder.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/" + safeSub)
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = reactApplicationContext.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw Exception("Couldn't create the file in Downloads")
+                resolver.openOutputStream(uri)?.use { os -> file.inputStream().copyTo(os) }
+                values.clear()
+                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } else {
+                val dir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), safeSub)
+                dir.mkdirs()
+                var target = java.io.File(dir, fileName)
+                var n = 2
+                while (target.exists()) {
+                    target = java.io.File(dir, "${fileName.substringBeforeLast('.')} ($n).${fileName.substringAfterLast('.', "")}")
+                    n++
+                }
+                file.copyTo(target)
+            }
+            promise.resolve(null)
+        } catch (e: Exception) {
+            promise.reject("SAVE_ERROR", e.message ?: "Unknown error")
+        }
+    }
+
     // ─── disconnect() ─────────────────────────────────────────────────────────
     @ReactMethod
     fun disconnect(promise: Promise) {

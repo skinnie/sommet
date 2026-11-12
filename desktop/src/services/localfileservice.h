@@ -21,6 +21,10 @@ class LocalFileService : public QObject
     // Android app's own save-to-Downloads behavior (opensportsync-main's saveToDownloads())
     // as closely as a desktop file-picker dialog can.
     Q_PROPERTY(QUrl downloadsLocation READ downloadsLocation CONSTANT)
+    // Where export save windows open: the folder of the last file saved through saveText() /
+    // saveBase64() (or picked by rememberExportFolder()), Downloads until then or if that folder
+    // is gone. A user asked for this (2026-11-12): every export used to start in Downloads.
+    Q_PROPERTY(QUrl exportFolder READ exportFolder NOTIFY exportFolderChanged)
     // Mirrors backend/server.py's own BACKUP_DIR constant (~/SommetBackups) - not asked
     // over HTTP since it's a fixed, well-known path either side can compute the same way,
     // the same "fixed convention, not configurable yet" pattern DeviceService's own comment
@@ -34,6 +38,8 @@ public:
     explicit LocalFileService(QObject *parent = nullptr);
 
     QUrl downloadsLocation() const;
+    QUrl exportFolder() const;
+    Q_INVOKABLE void rememberExportFolder(const QUrl &folderUrl);
     QUrl backupsLocation() const;
     QString databaseLocation() const;
 
@@ -80,4 +86,5 @@ public:
 
 signals:
     void databaseLocationChanged();
+    void exportFolderChanged();
 };

@@ -53,7 +53,7 @@ QtObject {
 
     // What the rider's PitStopper CUSTOM TAG means. PitStopper does not export the tag's name, so it is
     // a setting (cemetery | water | food | other), remembered between runs. André's tag is cemetery.
-    property Settings poiSettings: Settings {
+    property QtObject poiSettings: Settings {
         id: poiSettingsId
         category: "racepois"
         property string customTag: "cemetery"

@@ -352,7 +352,7 @@ Item {
     function saveGpxFile(name, gpx) {
         exportGpxText = gpx
         saveDayDialog.title = qsTr("Save GPX")
-        saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
+        saveDayDialog.currentFile = LocalFileService.exportFolder + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
         saveDayDialog.open()
     }
 
@@ -672,7 +672,7 @@ Item {
                 if (!res || !res.ok || !res.gpx) { statusMsg = (res && res.error) ? res.error : qsTr("Export failed"); return }
                 exportGpxText = res.gpx
                 saveDayDialog.title = qsTr("Export day as GPX")
-                saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
+                saveDayDialog.currentFile = LocalFileService.exportFolder + "/" + name.replace(/[^\w -]/g, "_") + ".gpx"
                 saveDayDialog.open()
             })
     }
@@ -700,7 +700,7 @@ Item {
                 }
                 exportGpxText = res.gpx
                 saveDayDialog.title = qsTr("Export for eTrex")
-                saveDayDialog.currentFile = LocalFileService.downloadsLocation + "/"
+                saveDayDialog.currentFile = LocalFileService.exportFolder + "/"
                     + (name + (mode === "track" ? " - eTrex track" : " - eTrex route")).replace(/[^\w -]/g, "_") + ".gpx"
                 saveDayDialog.open()
             })

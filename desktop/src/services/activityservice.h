@@ -204,6 +204,16 @@ public:
     // dedup is by a stable per-activity key kept in QSettings, so re-running is a no-op.
     Q_INVOKABLE void exportActivitiesToIntervals(const QVariantList &activities);
 
+    // "Export all" (a user's request, 2026-11-12): writes the given activities (each map needs
+    // {index, device}, e.g. the Activities list as shown) into folder, one file per activity named
+    // "YYYY-MM-DD HHmm <name>.gpx" / ".fit". GPX = the original GPX if there is one, else one
+    // built from the stored track; FIT = the stored FIT (none for GPX-only moves). Never
+    // overwrites: a name already there gets " (2)". Runs in small batches so the window stays
+    // responsive; reports through exportAllProgress / exportAllFinished.
+    Q_INVOKABLE void exportAllToFolder(const QUrl &folder, const QVariantList &activities,
+                                       bool gpx, bool fit);
+    Q_INVOKABLE void cancelExportAll();
+
     // --- Sommet Sync: self-hosted shared activities DB across the user's devices (#SYNC-2) ---
     // Two-way sync of the local activities against a self-hosted endpoint (sync-server/sync.php),
     // so the same history appears on every Sommet install the user points at that server. Mirrors
@@ -247,6 +257,10 @@ signals:
     void trackBackfillProgress(int done, int total);
     void trackBackfillFinished(int filled, int remaining);
     void exportFinished(int uploaded, int failed);
+    void exportAllProgress(int done, int total);
+    // skipped = activities that had nothing to write (no track and no FIT); error set if the
+    // folder couldn't be written to (the run stops there).
+    void exportAllFinished(int gpxFiles, int fitFiles, int skipped, const QString &error);
     void exportError(const QString &message);
     // fitBase64 empty + error set when it couldn't be fetched.
     void intervalsFitReady(int idx, const QString &device, const QString &fitBase64,
@@ -268,6 +282,15 @@ private:
                            const QString &address, const QStringList &files);
     QNetworkAccessManager m_network;
     QSqlDatabase m_db;
+    // exportAllToFolder() state, worked through by exportAllStep().
+    struct ExportAllJob {
+        QList<QPair<int, QString>> queue;   // (idx, device)
+        QString dir;
+        bool gpx = true, fit = false;
+        int total = 0, done = 0, gpxFiles = 0, fitFiles = 0, skipped = 0;
+        bool running = false, cancelled = false;
+    } m_exportAll;
+    void exportAllStep();
     // Fetch an intervals.icu import's FIT, store it on the row, then call `done(fit, error)`.
     // Shared by Export (fetchIntervalsFit) and the charts (requestStreams).
     void fetchIntervalsFitThen(int idx, const QString &device,

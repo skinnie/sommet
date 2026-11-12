@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Sommet VERSION 0.2.65 LANGUAGES CXX)
+project(Sommet VERSION 0.2.66 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -363,6 +363,7 @@ qt_add_qml_module(sommet_app
         src/services/syncservice.cpp
         src/services/connectionsservice.h
         src/services/connectionsservice.cpp
+        src/services/freefilename.h
         src/services/localfileservice.h
         src/services/localfileservice.cpp
         src/services/garminservice.h

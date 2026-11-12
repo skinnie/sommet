@@ -23,7 +23,7 @@ QtObject {
 
     // The plan draft and the switches, shared with TrainingProgramPage (one Settings object,
     // so an edit on the page is what the plug-in sync sends).
-    property Settings settings: Settings {
+    property QtObject settings: Settings {
         category: "trainingProgram"
         property string draft: ""
         // Route 2, opt-in (f6dbb10, 2026-10-21): every mode of a plan sport runs the next

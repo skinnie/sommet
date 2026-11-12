@@ -22,7 +22,7 @@ QtObject {
     // turning it back on brings it back as it was. A plugged-in device always shows. The first
     // time this runs, each switch starts on for a device already paired (or, for the Wahoo,
     // already seen on the cable) and off otherwise. ---
-    property Settings shownObj: Settings {
+    property QtObject shownObj: Settings {
         id: shownId
         category: "devicesOnHome"
         property bool magene: false
@@ -34,9 +34,9 @@ QtObject {
     property alias brytonBleShown: shownId.brytonBle
     property alias wahooShown: shownId.wahoo
     // What Home remembers (same QSettings keys as HomePage.qml), read once for the first run.
-    property Settings mageneMemoryObj: Settings { id: mageneMemoryId; category: "magene"; property string address: "" }
-    property Settings brytonMemoryObj: Settings { id: brytonMemoryId; category: "brytonble"; property string address: "" }
-    property Settings wahooMemoryObj: Settings { id: wahooMemoryId; category: "wahoo"; property bool seen: false }
+    property QtObject mageneMemoryObj: Settings { id: mageneMemoryId; category: "magene"; property string address: "" }
+    property QtObject brytonMemoryObj: Settings { id: brytonMemoryId; category: "brytonble"; property string address: "" }
+    property QtObject wahooMemoryObj: Settings { id: wahooMemoryId; category: "wahoo"; property bool seen: false }
     function _initShown() {
         if (shownId.initialised)
             return

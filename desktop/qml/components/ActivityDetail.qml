@@ -282,7 +282,7 @@ Item {
         title: qsTr("Export activity as GPX")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("GPX files (*.gpx)")]
-        currentFolder: LocalFileService.downloadsLocation
+        currentFolder: LocalFileService.exportFolder
         onAccepted: root.saveError = LocalFileService.saveText(selectedFile, root._exportGpx)
     }
     FileDialog {
@@ -290,7 +290,7 @@ Item {
         title: qsTr("Export activity as FIT")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("FIT files (*.fit)")]
-        currentFolder: LocalFileService.downloadsLocation
+        currentFolder: LocalFileService.exportFolder
         onAccepted: root.saveError = LocalFileService.saveBase64(selectedFile, root._exportFit)
     }
     // GPS track is loaded on demand: recent rides keep it inline, older ones are deferred by the
@@ -305,7 +305,7 @@ Item {
     property string _fitError: ""
     function _openFitDialog() {
         const safeName = (activity.name || "activity").replace(/[\\/:*?"<>|]/g, "_")
-        fitExportDialog.currentFile = LocalFileService.downloadsLocation + "/" + safeName + ".fit"
+        fitExportDialog.currentFile = LocalFileService.exportFolder + "/" + safeName + ".fit"
         fitExportDialog.open()
     }
     property int _resolvedCount: 0
@@ -847,7 +847,7 @@ Item {
                                 root._exportGpx = root._hasGpxFile ? activity.gpxText
                                     : ActivityService.trackGpx(activity.index, activity.device || "", activity.name || "")
                                 const safeName = (activity.name || "activity").replace(/[\\/:*?"<>|]/g, "_")
-                                gpxExportDialog.currentFile = LocalFileService.downloadsLocation + "/" + safeName + ".gpx"
+                                gpxExportDialog.currentFile = LocalFileService.exportFolder + "/" + safeName + ".gpx"
                                 gpxExportDialog.open()
                             }
                         }

@@ -23,6 +23,26 @@ QUrl LocalFileService::downloadsLocation() const
     return QUrl::fromLocalFile(dir);
 }
 
+QUrl LocalFileService::exportFolder() const
+{
+    const QString last = QSettings().value(QStringLiteral("export/lastFolder")).toString();
+    if (!last.isEmpty() && QFileInfo(last).isDir())
+        return QUrl::fromLocalFile(last);
+    return downloadsLocation();
+}
+
+void LocalFileService::rememberExportFolder(const QUrl &folderUrl)
+{
+    const QString dir = folderUrl.toLocalFile();
+    if (dir.isEmpty() || !QFileInfo(dir).isDir())
+        return;
+    QSettings s;
+    if (s.value(QStringLiteral("export/lastFolder")).toString() == dir)
+        return;
+    s.setValue(QStringLiteral("export/lastFolder"), dir);
+    emit exportFolderChanged();
+}
+
 QUrl LocalFileService::backupsLocation() const
 {
     return QUrl::fromLocalFile(QDir::homePath() + QStringLiteral("/SommetBackups"));
@@ -179,12 +199,18 @@ static QString writeFile(const QUrl &fileUrl, const QByteArray &data)
 
 QString LocalFileService::saveText(const QUrl &fileUrl, const QString &text)
 {
-    return writeFile(fileUrl, text.toUtf8());
+    const QString err = writeFile(fileUrl, text.toUtf8());
+    if (err.isEmpty())
+        rememberExportFolder(QUrl::fromLocalFile(QFileInfo(fileUrl.toLocalFile()).absolutePath()));
+    return err;
 }
 
 QString LocalFileService::saveBase64(const QUrl &fileUrl, const QString &base64)
 {
-    return writeFile(fileUrl, QByteArray::fromBase64(base64.toUtf8()));
+    const QString err = writeFile(fileUrl, QByteArray::fromBase64(base64.toUtf8()));
+    if (err.isEmpty())
+        rememberExportFolder(QUrl::fromLocalFile(QFileInfo(fileUrl.toLocalFile()).absolutePath()));
+    return err;
 }
 
 QString LocalFileService::readText(const QUrl &fileUrl)

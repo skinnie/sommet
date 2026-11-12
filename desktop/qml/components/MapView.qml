@@ -283,7 +283,7 @@ Item {
     // can see the full trace") - margin loosened twice (0.8 -> 0.65 -> 0.5, i.e. 50%
     // padding) after real eTrex hardware testing kept showing a real track still slightly
     // cropped - erring toward showing clearly more than the bare minimum by default.
-    // Component.onCompleted now defers its first fit via Qt.callLater(): a real, standard
+    // Component.onCompleted now defers its first fit to the next event-loop pass (refitLater): a real, standard
     // QML technique for "wait until this item's own layout pass (anchors.fill against a
     // parent whose own size may still be settling through a Card/Column chain) has actually
     // finished" - calling _refitZoom() synchronously here could still see a stale width on
@@ -306,10 +306,14 @@ Item {
         }
         currentZoom = z
     }
-    Component.onCompleted: { _rebuildRouteMetrics(); Qt.callLater(_refitZoom) }
-    onTrackPointsChanged: Qt.callLater(_refitZoom)
-    onMarkersChanged: Qt.callLater(_refitZoom)
-    onColoredSegmentsChanged: { _rebuildRouteMetrics(); Qt.callLater(_refitZoom) }
+    // A 0 ms Timer rather than Qt.callLater: the timer dies with the map, so a fit queued just
+    // before the map closes never runs on a dead object ("_spanPxAt is not a function ...
+    // invalid context", seen in a user's log on Debian 13).
+    Timer { id: refitLater; interval: 0; onTriggered: root._refitZoom() }
+    Component.onCompleted: { _rebuildRouteMetrics(); refitLater.restart() }
+    onTrackPointsChanged: refitLater.restart()
+    onMarkersChanged: refitLater.restart()
+    onColoredSegmentsChanged: { _rebuildRouteMetrics(); refitLater.restart() }
     onWidthChanged: _refitZoom()
     onHeightChanged: _refitZoom()
 

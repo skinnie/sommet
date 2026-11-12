@@ -39,7 +39,7 @@ PageFlickable {
         title: qsTr("Export POI as GPX")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("GPX files (*.gpx)")]
-        currentFolder: LocalFileService.downloadsLocation
+        currentFolder: LocalFileService.exportFolder
         property string pendingGpx: ""
         onAccepted: root.saveError = LocalFileService.saveText(selectedFile, pendingGpx)
     }
@@ -792,7 +792,7 @@ PageFlickable {
                                     poiExportDialog.pendingGpx = PoiService.buildWaypointGpx(
                                         modelData.name, modelData.lat, modelData.lon)
                                     poiExportDialog.currentFile =
-                                        LocalFileService.downloadsLocation + "/" + safeName + ".gpx"
+                                        LocalFileService.exportFolder + "/" + safeName + ".gpx"
                                     poiExportDialog.open()
                                 }
                             }

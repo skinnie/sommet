@@ -99,7 +99,7 @@ QtObject {
         "0x1b": "Emu", "0x1c": "Finch", "0x1e": "Ibisbill", "0x2c": "Kaka",
         "0x2b": "Jabiru", "0x2d": "Loon", "0x2a": "Hoopoe",
     })
-    property Settings _watchModelStore: Settings {
+    property QtObject _watchModelStore: Settings {
         id: watchModelStore
         category: "watchModels"
         property string json: "{}"

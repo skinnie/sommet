@@ -172,7 +172,7 @@ PageFlickable {
         title: qsTr("Export route as GPX")
         fileMode: FileDialog.SaveFile
         nameFilters: [qsTr("GPX files (*.gpx)")]
-        currentFolder: LocalFileService.downloadsLocation
+        currentFolder: LocalFileService.exportFolder
         property string gpx: ""
         onAccepted: {
             const err = LocalFileService.saveText(selectedFile, gpx)
@@ -181,7 +181,7 @@ PageFlickable {
     }
     function saveGpx(name, gpx) {
         exportDialog.gpx = gpx
-        exportDialog.currentFile = LocalFileService.downloadsLocation + "/" + (name || "route").replace(/[\\/:*?"<>|]/g, "_") + ".gpx"
+        exportDialog.currentFile = LocalFileService.exportFolder + "/" + (name || "route").replace(/[\\/:*?"<>|]/g, "_") + ".gpx"
         exportDialog.open()
     }
 
