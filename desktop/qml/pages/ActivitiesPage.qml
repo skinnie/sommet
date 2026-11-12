@@ -552,15 +552,22 @@ Item {
         // top margin, with the grid painting right up against/behind it (z: 1 on the banner
         // only fixed which one is on top, not the fact they occupied the same space). Drops
         // below the banner's own bottom edge, with real spacing, only while it's visible.
-        anchors.top: activitiesSortSimple.visible ? activitiesSortSimple.bottom
+        // The "Showing cached activities" line sits under the header line; the cards start below
+        // it instead of covering it (2026-11-12, seen in the README screenshots).
+        anchors.top: cachedBanner.visible ? cachedBanner.bottom
+                     : activitiesSortSimple.visible ? activitiesSortSimple.bottom
                      : trackLogLoadingBanner.visible ? trackLogLoadingBanner.bottom
                      : activityLoadingPill.visible ? activityLoadingPill.bottom : parent.top
-        anchors.topMargin: activitiesSortSimple.visible ? Theme.spacingMedium
+        anchors.topMargin: (cachedBanner.visible || activitiesSortSimple.visible) ? Theme.spacingMedium
                            : (trackLogLoadingBanner.visible || activityLoadingPill.visible)
                            ? Theme.spacingMedium : Theme.spacingLarge
         visible: root.selectedActivity === null && Theme.activitiesView !== "list"
         clip: true
-        cellWidth: 360 + Theme.spacingMedium
+        // As many columns as fit at the card's minimum width (360), then the cards widen to
+        // fill the row - an upright window shows one full-width card, not one card and an empty
+        // half (2026-11-12).
+        readonly property int columnsFit: Math.max(1, Math.floor(width / (360 + Theme.spacingMedium)))
+        cellWidth: Math.floor(width / columnsFit)
         cellHeight: 280 + Theme.spacingMedium
         reuseItems: true
         // Real, 2026-08-09 ("align the box with the loading gps track to be centered
@@ -579,6 +586,7 @@ Item {
             ActivityCard {
                 anchors.left: parent.left
                 anchors.top: parent.top
+                width: parent.width - Theme.spacingMedium
                 activity: modelData
                 onOpened: root.selectedActivity = modelData
                 onDeleteRequested: root.requestDelete(modelData)

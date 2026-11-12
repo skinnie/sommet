@@ -1027,43 +1027,28 @@ PageFlickable {
                     width: parent.width
                     spacing: 2
                     Text { text: qsTr("Pods"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
-                    // Reactive, no fixed gap (André, 2026-08-13): each pod takes an equal share of
-                    // the card width, so all pods stay on ONE line at any window/device width
-                    // rather than overflowing or wrapping. The label elides only if a device is
-                    // genuinely too narrow. This is the multi-device-safe alternative to picking a
-                    // spacing number that "just fits" one width.
-                    Row {
-                        id: podsRow
+                    // Each pod is one checkbox with its own (clickable) label, at its natural width,
+                    // a clear gap between pods; a narrow window wraps to a second line instead of
+                    // cutting labels (2026-11-12: "Power p..." and labels sitting nearer the next
+                    // box than their own).
+                    Flow {
                         width: parent.width
+                        spacing: Theme.spacingLarge
                         Repeater {
                             model: root.podBits
-                            delegate: Row {
-                                id: podRow
+                            delegate: RoundedCheckBox {
                                 required property var modelData
-                                width: podsRow.width / root.podBits.length
-                                spacing: Theme.spacingSmall
                                 // Only show a pod this watch actually supports (HR belt always).
-                                visible: podRow.modelData.cap === ""
-                                         || root.caps[podRow.modelData.cap] === true
-                                RoundedCheckBox {
-                                    id: podCheck
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    checked: modeColumn.mode ? (modeColumn.mode.useHw & podRow.modelData.bit) !== 0 : false
-                                    enabled: !modeColumn.busy
-                                    onToggled: {
-                                        const newUseHw = checked
-                                            ? (modeColumn.mode.useHw | podRow.modelData.bit)
-                                            : (modeColumn.mode.useHw & ~podRow.modelData.bit)
-                                        CustomModesService.writeField(modeColumn.mode.name, { "UseHw": newUseHw })
-                                    }
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: podRow.width - podCheck.width - podRow.spacing
-                                    elide: Text.ElideRight
-                                    text: podRow.modelData.label
-                                    color: Theme.text
-                                    font.pixelSize: Theme.fontSizeLabel
+                                visible: modelData.cap === "" || root.caps[modelData.cap] === true
+                                text: modelData.label
+                                font.pixelSize: Theme.fontSizeLabel
+                                checked: modeColumn.mode ? (modeColumn.mode.useHw & modelData.bit) !== 0 : false
+                                enabled: !modeColumn.busy
+                                onToggled: {
+                                    const newUseHw = checked
+                                        ? (modeColumn.mode.useHw | modelData.bit)
+                                        : (modeColumn.mode.useHw & ~modelData.bit)
+                                    CustomModesService.writeField(modeColumn.mode.name, { "UseHw": newUseHw })
                                 }
                             }
                         }

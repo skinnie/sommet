@@ -84,8 +84,11 @@ export function TrackPreview({
     );
   }
 
+  // Re-measured on every layout, not only the first: turning the tablet changes the width, and a
+  // mosaic fitted to the old width left the track off-centre and cut at the edge (2026-11-12).
   const onLayout = (e: LayoutChangeEvent) => {
-    if (boxWidth === null) setBoxWidth(Math.round(e.nativeEvent.layout.width));
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w > 0 && w !== boxWidth) setBoxWidth(w);
   };
 
   if (boxWidth === null) {
@@ -101,7 +104,7 @@ export function TrackPreview({
   const projected = validPoints.map(p => mosaic.project(p.lat, p.lon));
 
   return (
-    <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]}>
+    <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}>
       {mosaic.tiles.map(tile => (
         <Image
           key={`${mosaic.z}-${tile.x}-${tile.y}`}

@@ -271,6 +271,18 @@ DEMO = {"enabled": False, "custommodes": None, "variant": "Emu"}
 DEMO_DEVICE_PREFIXES = ("Suunto Ambit", "Suunto Traverse", "Kailash")
 
 
+# Testing mode: (firmware, hardware) per sample watch, from Suunto's own firmware file names
+# (e.g. kaylash_Hoopoe-fw_2.0.5-72.1.0.zip); Ambit2 S / R from Suunto's update service
+# (tools/firmware_check.py: Colibri-/Greentit-fw_2.0.16-75.3.19201, 2026-11-12).
+DEMO_FIRMWARE = {
+    "Emu": ("2.4.17", "70.2.17414"), "Finch": ("2.4.17", "70.2.17414"),
+    "Ibisbill": ("2.4.17", "70.2.17414"), "Kaka": ("1.1.22", "72.1.0"),
+    "Hoopoe": ("2.0.5", "72.1.0"), "Jabiru": ("2.0.22", "71.2.0"), "Loon": ("2.0.22", "71.2.0"),
+    "Bluebird": ("2.5.7", "69.1.18948"), "Duck": ("2.0.16", "75.3.19201"),
+    "Colibri": ("2.0.16", "75.3.19201"), "Greentit": ("2.0.16", "75.3.19201"),
+}
+
+
 def demo_ambit():
     """True when Testing mode is standing in for a WATCH.
 
@@ -5236,6 +5248,15 @@ class Handler(BaseHTTPRequestHandler):
             info["model"] = DEMO["variant"]
             if row.get("productName"):
                 info["name"] = row["productName"]
+            # The sample's firmware/hardware numbers follow the chosen watch: taken from the names
+            # of Suunto's own firmware files for each model. A model with no file on record shows
+            # none rather than another model's.
+            fw_hw = DEMO_FIRMWARE.get(DEMO["variant"])
+            if fw_hw:
+                info["fw_version"], info["hw_version"] = fw_hw
+            else:
+                info.pop("fw_version", None)
+                info.pop("hw_version", None)
             self._send_json(200, info)
             return
         if use_ble():

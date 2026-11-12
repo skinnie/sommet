@@ -449,7 +449,7 @@ export default function LogListScreen() {
           >
             {viewMode === 'map' && !!item.gpx_path && (
               <View style={styles.cardThumb}>
-                <ActivityThumbnail gpxPath={item.gpx_path} height={72} />
+                <ActivityThumbnail gpxPath={item.gpx_path} height={160} />
               </View>
             )}
             <View style={styles.cardRow}>
