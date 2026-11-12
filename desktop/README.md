@@ -34,6 +34,23 @@ and the Python backend, runs on old distros and old CPUs like the Core 2 Quad Q9
 `../run-desktop.sh`, which starts the Python backend *and* the app — a bare `Sommet` binary with
 no backend boots with Settings and every backend-fed page **blank** (see `src/services/backendprocess.cpp`).
 
+**Building on Debian 13 / Ubuntu 24.04 or newer** (their own Qt is 6.8, no `aqtinstall` needed).
+Checked on Debian 13 (Qt 6.8.2), 2026-11-12:
+
+    sudo apt install build-essential cmake ca-certificates qt6-base-dev qt6-declarative-dev \
+      qt6-declarative-dev-tools qt6-tools-dev libqt6sql6-sqlite qt6-svg-plugins \
+      qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-dialogs \
+      qml6-module-qtquick-layouts qml6-module-qtcore qml6-module-qtquick-window \
+      qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qtquick-effects \
+      qml6-module-qtquick-shapes
+    ./build-desktop.sh && ./run-desktop.sh
+
+Without `qt6-svg-plugins` the app runs but some icons stay blank. Don't mix this with a Qt from
+`aqtinstall`: two Qt copies in one build is what gives errors like "Cannot assign object of type
+Core.Settings to property of type QQmlSettings*". The open/save windows of a source build are
+GTK's when your desktop uses Qt's gtk3 theme, and that GTK window can crash on its own
+(`gtkpathbar.c ... assertion failed`); the AppImage doesn't have this problem.
+
 **What's genuinely live** (calls the real backend/Open-Meteo, not mock data): connection
 status, weather (current + 3-day forecast, hides itself with no error on failure), Activities
 (real GPX parsing into distance/duration/elevation/map per recorded move, "Apple Photos"

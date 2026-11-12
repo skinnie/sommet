@@ -40,6 +40,17 @@ a user's machine has no libfuse2, the AppImage still runs with:
 
     ./Sommet-linux-x86_64.AppImage --appimage-extract-and-run
 
+### Graphics libraries (checked on Debian 13, 2026-11-12)
+The AppImage leaves out the OpenGL/EGL libraries on purpose: they have to match the computer's own
+graphics driver. Every desktop install has them, but a minimal one may not. If it won't start and
+says `libOpenGL.so.0` or `libEGL.so.1` is missing:
+
+    sudo apt install libopengl0 libegl1
+
+Checked: v0.2.65 starts on a clean Debian 13 with only those two (plus `libgpg-error0`, which every
+desktop has), the backend answers, and the open/save windows are Qt's own (or the desktop
+portal's), so the GTK save-window crash seen in a Debian 13 source build cannot happen.
+
 ## Updates
 
 The release attaches two files: `Sommet-linux-x86_64.AppImage` and its `.zsync`. The AppImage
