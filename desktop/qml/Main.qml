@@ -37,15 +37,41 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl+=", "Ctrl++", "Ctrl+Plus"]; onActivated: Theme.zoomIn() }
     Shortcut { sequences: ["Ctrl+-", "Ctrl+Minus"]; onActivated: Theme.zoomOut() }
     Shortcut { sequences: ["Ctrl+0"]; onActivated: Theme.zoomReset() }
-    // Ctrl+mouse-wheel zoom. acceptedModifiers means it only fires with Ctrl held, so normal
-    // wheel scrolling in lists/pages is untouched; it sits under the content so page handlers win
-    // when Ctrl isn't down.
-    WheelHandler {
-        acceptedModifiers: Qt.ControlModifier
-        onWheel: function (event) {
-            if (event.angleDelta.y > 0) Theme.zoomIn()
-            else if (event.angleDelta.y < 0) Theme.zoomOut()
-            event.accepted = true
+    // Ctrl+wheel and touchpad-pinch zoom, on an item above every page (z) so a scrolling page
+    // can't take the event first; it holds no MouseArea, so clicks and plain scrolling go
+    // through (2026-11-12). One 5 % step per full wheel notch (120): a touchpad sends many
+    // small deltas per gesture, which are added up instead of each counting as a step (the
+    // X230's touchpad jumped straight to 70 % or 140 %).
+    Item {
+        anchors.fill: parent
+        z: 100000
+        property real wheelAcc: 0
+        WheelHandler {
+            acceptedModifiers: Qt.ControlModifier
+            target: null
+            onWheel: function (event) {
+                const p = parent
+                if ((p.wheelAcc > 0) !== (event.angleDelta.y > 0))
+                    p.wheelAcc = 0                  // changed direction: start over
+                p.wheelAcc += event.angleDelta.y
+                while (p.wheelAcc >= 120) { Theme.zoomIn(); p.wheelAcc -= 120 }
+                while (p.wheelAcc <= -120) { Theme.zoomOut(); p.wheelAcc += 120 }
+                event.accepted = true
+            }
+        }
+        // Two-finger pinch on a touchpad (only reaches Qt under Wayland; on X11 the keys and
+        // Ctrl+wheel do it). Touchpad only: a touchscreen pinch stays with the maps and charts.
+        PinchHandler {
+            target: null
+            acceptedDevices: PointerDevice.TouchPad
+            property real startScale: 1.0
+            onActiveChanged: if (active) startScale = Theme.uiScale
+            onActiveScaleChanged: {
+                if (!active) return
+                const s = Math.round(startScale * activeScale * 20) / 20     // 5 % steps
+                if (Math.abs(s - Theme.uiScale) > 0.001)
+                    Theme.setZoom(s)
+            }
         }
     }
 

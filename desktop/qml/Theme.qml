@@ -80,6 +80,9 @@ QtObject {
         // re-lays-out crisply (not a blurry pixel-scale). Ctrl+-/Ctrl+=/Ctrl+0 and Ctrl+wheel set
         // it; persisted per-install. 1.0 = the original design size.
         property real uiScale: 1.0
+        // The zoom the user picked; 0 = automatic (fit the screen). uiScale above is the older
+        // key: a saved value other than 1.0 is taken over once as the user's choice.
+        property real uiScaleChosen: 0
     }
 
     // "map" (cards with a track thumbnail, the original) or "list" (rows, no maps).
@@ -93,16 +96,32 @@ QtObject {
     property alias emberUnlocked: settingsId.emberUnlocked
     property alias emberInstallUrl: settingsId.emberInstallUrl
     property alias emberSyncIntervals: settingsId.emberSyncIntervals
-    property alias uiScale: settingsId.uiScale
+    // The zoom in use: the user's choice, or the automatic one for this screen.
+    readonly property real uiScale: settingsId.uiScaleChosen > 0 ? settingsId.uiScaleChosen : uiScaleAuto
+    readonly property bool uiScaleIsAuto: settingsId.uiScaleChosen <= 0
+    // Automatic size from the screen's height (logical pixels), so a small laptop screen like the
+    // X230's (768 px) fits more without anyone zooming (2026-11-12).
+    readonly property real uiScaleAuto: {
+        const scr = Qt.application.screens.length ? Qt.application.screens[0] : null
+        const h = scr ? scr.height : 1080
+        return h <= 768 ? 0.85 : h <= 900 ? 0.9 : h >= 1440 ? 1.1 : 1.0
+    }
+    Component.onCompleted: {
+        if (settingsId.uiScaleChosen <= 0 && Math.abs(settingsId.uiScale - 1.0) > 0.001)
+            settingsId.uiScaleChosen = settingsId.uiScale
+    }
 
     // UI zoom controls (bound to Ctrl+-/Ctrl+=/Ctrl+0 and Ctrl+wheel in Main.qml). Clamped so the
     // layout never collapses or blows up; 5 % steps. reset() returns to the design size.
     readonly property real uiScaleMin: 0.70
     readonly property real uiScaleMax: 1.40
     function _clampScale(s) { return Math.max(uiScaleMin, Math.min(uiScaleMax, Math.round(s * 100) / 100)) }
-    function zoomIn() { uiScale = _clampScale(uiScale + 0.05) }
-    function zoomOut() { uiScale = _clampScale(uiScale - 0.05) }
-    function zoomReset() { uiScale = 1.0 }
+    function zoomIn() { settingsId.uiScaleChosen = _clampScale(uiScale + 0.05) }
+    function zoomOut() { settingsId.uiScaleChosen = _clampScale(uiScale - 0.05) }
+    // Back to the automatic size for this screen.
+    function zoomFit() { settingsId.uiScaleChosen = 0 }
+    function setZoom(v) { settingsId.uiScaleChosen = _clampScale(v) }
+    function zoomReset() { zoomFit() }
 
     // Convenience: the column keys as a real array, and a setter that writes them back as CSV.
     function activityColumnList() {

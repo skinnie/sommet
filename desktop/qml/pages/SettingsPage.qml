@@ -427,7 +427,7 @@ PageFlickable {
                     font.bold: true; font.pixelSize: Theme.fontSizeBody; color: Theme.text
                 }
                 Text {
-                    text: qsTr("Shrink or enlarge the whole interface. Also Ctrl+- / Ctrl+= / Ctrl+0, or Ctrl+mouse wheel.")
+                    text: (Theme.uiScaleIsAuto ? qsTr("Automatic for this screen. ") : "") + qsTr("Shrink or enlarge the whole interface. Also Ctrl+- / Ctrl+= / Ctrl+0 (fit to screen), Ctrl+mouse wheel, or a touchpad pinch.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeCaption
                     width: parent.width
@@ -443,7 +443,7 @@ PageFlickable {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     RoundedButton { text: "+"; enabled: Theme.uiScale < Theme.uiScaleMax; onClicked: Theme.zoomIn() }
-                    RoundedButton { text: qsTr("Reset"); enabled: Theme.uiScale !== 1.0; onClicked: Theme.zoomReset() }
+                    RoundedButton { text: qsTr("Fit to screen"); enabled: !Theme.uiScaleIsAuto; onClicked: Theme.zoomFit() }
                 }
             }
         }
