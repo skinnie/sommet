@@ -16,7 +16,7 @@ Traverse	Jabiru
 Traverse Alpha	Loon	
 Kailash	Hoopoe	
 
-This is a 2015 black and white watch, with very simple hardware capabilities.It doesn't have whirst heart rate sensor, having only temperature sensor, barometer, altimeter, compass. Athlete info is inputed via suunto link and described in steps_welness_data_andre.md
+This is a 2015 black and white watch, with very simple hardware capabilities.It doesn't have whirst heart rate sensor, having only temperature sensor, barometer, altimeter, compass. Athlete info is inputed via suunto link
 
 Giving this information prioritize searching for pre made made formulas/know sports theories than complex calculations
 

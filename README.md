@@ -13,7 +13,7 @@ The aim is to provide the same features on Android, Linux, macOS and Windows. Ea
 
 
 All features that are visible in the app are available by USB/USB-OTG, and some are also available/being tested by bluetooth.
-Bluetooth is still an experimental feature, which can be enabled in settings. On the desktop (Ambit3 family) it now holds: the link reconnects by itself after the watch sleeps, a sync starts when the watch asks for one, and activities, POIs, routes, the clock, sport modes, apps, workouts, the Training Program and the watch profile go over it. On Linux, pairing asks for your password once (see "Linux: pairing a watch over Bluetooth" below, and [Keep a Bluetooth watch paired on Linux](docs/how-to/bluetooth-pairing-on-linux.md)).
+Bluetooth is still an experimental feature, which can be enabled in settings. On the desktop it is experimental: tested on Linux with mixed results, depending on the computer's Bluetooth hardware, and not tested on macOS or Windows. On Linux (Ambit3 family) it holds: the link reconnects by itself after the watch sleeps, a sync starts when the watch asks for one, and activities, POIs, routes, the clock, sport modes, apps, workouts, the Training Program and the watch profile go over it. On Linux, pairing asks for your password once (see "Linux: pairing a watch over Bluetooth" below, and [Keep a Bluetooth watch paired on Linux](docs/how-to/bluetooth-pairing-on-linux.md)).
 Within the features we have:
 - Sync time with watch: from the current time of the device or another timezone
 - Update orbital data: gps and glonass (for the glonass devices)
@@ -149,7 +149,7 @@ Second because I have an old Panasonic Thoughpad windows tablet that I can get a
 
 There are two apps in this repo: a **desktop** app (Qt 6 / QML, for Linux / macOS /
 Windows) and an **Android** app (React Native). Both talk to a watch over USB; the Android app
-also over Bluetooth, and the desktop has experimental Bluetooth (Ambit3 family, Linux). Start by cloning:
+also over Bluetooth, and the desktop has experimental Bluetooth (Ambit3 family; tested on Linux with mixed results, not on macOS or Windows). Start by cloning:
 
 ```
 git clone https://github.com/skinnie/sommet.git sommet

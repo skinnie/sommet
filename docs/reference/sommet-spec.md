@@ -6,8 +6,7 @@
 > React Native `opensportsync` fork referenced in `HANDOFF.md` as the mobile base app. That
 > Qt/QML codebase itself is not present in this repo/session - this file is the spec only,
 > kept for context if/when that project's work intersects with this one (e.g. the open
-> Sport Modes questions in `unresolved_questions_for_devs.md`, or the CustomModes/format
-> findings in `custom_modes_andre.md`).
+> Sport Modes questions in `unresolved_questions_for_devs.md`).
 
 ## Mission
 

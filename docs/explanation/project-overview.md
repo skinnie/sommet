@@ -25,8 +25,9 @@ independently created software to exchange data with a device its owner already 
 - It **redistributes no manufacturer software, firmware, schema file, catalogue or captured
   data**. Nothing of that kind is in this repository, and nothing of that kind is accepted
   into it (see *What this repository does not contain*).
-- It **does not modify firmware**. The firmware-update path is documented but deliberately
-  not implemented; firmware updates remain the manufacturer's own tool's job.
+- It **does not modify firmware**. It can reinstall Suunto's own, unmodified firmware, downloaded
+  from Suunto's update service and written exactly as SuuntoLink writes it, for extreme cases
+  where SuuntoLink is not available. Normal firmware updates remain the job of Suunto's own tool.
 - It **does not impersonate, replace or interfere with any online service**, and it holds no
   credentials.
 - Work of this kind is expressly permitted for interoperability purposes under, among

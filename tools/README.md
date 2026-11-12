@@ -91,7 +91,7 @@ hardware, and they carry the watch serial number.
 | `workout.py` | generates App Zone source for a structured workout, compiles it via the live community compiler; portable, no OS/GUI dependency |
 | `workout_gui.py` | local browser GUI (wanarun.net-style step builder) on top of `workout.py`; packaged as a standalone desktop app, see `packaging/README.md` |
 | `suuntolink_catalog.py` | finds and safely appends to SuuntoLink's own `suunto-apps/index.json`, the documented real install path (`forum.suunto.com/topic/7592`) |
-| `workout_install.py` | EXPERIMENTAL, CLI-only - this project's own Apps/CustomModes flash writer; byte-exact encoding proven, but installed apps show an unresolved real "app error" on hardware, paused (`training_program_andre.md` Finding 19) |
+| `workout_install.py` | EXPERIMENTAL, CLI-only - this project's own Apps/CustomModes flash writer; byte-exact encoding proven, but installed apps show an unresolved real "app error" on hardware, paused |
 | `selftest.py` | chains everything over the whole corpus |
 
 ### Writing to the watch
@@ -230,7 +230,7 @@ real hardware here for that reason, not because the endpoint doesn't work.
 `0x0b15` (`gps_orbit_head`, printed by `sgee` on a live run) is a 9-byte status decoded from a
 real before/after: `[u8 valid][u16 LE year][u8 month][u8 day][u32 LE seconds-since-midnight
 UTC]` - confirmed 2026-08-05 by writing fresh data and reading back the exact embedded
-timestamp of the source file. Full derivation: `sgee_andre.md`.
+timestamp of the source file.
 
 Frame encoding is verified by round trip: the 4724 outgoing messages of the 9 captures,
 that is 47117 reports of 64 bytes, are re-encoded identically. Established along the way:
@@ -386,7 +386,7 @@ What the descriptor adds, beyond navigation:
   fields directly by schema path, but some real settings are GROUPs packing more than one
   value into a single entry rather than a plain scalar leaf - Kailash's own `HomeLocation`
   (`Latitude`/`Longitude` packed into one 8-byte entry) is the first curated example,
-  found 2026-08-08 - see `custom_modes_andre.md`'s "Kailash Home Location" section.
+  found 2026-08-08.
   `settings_write.py`'s `_group_containing()`/`_field_offset_in_group()` resolve a GROUP
   member to its parent entry + byte offset generically, not special-cased to just this one
   field.

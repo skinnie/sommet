@@ -20,7 +20,8 @@ reverse-engineering here would have been possible, or would have taken far longe
 - **[opensportsync](https://github.com/guiguoz/opensportsync)** and its author - the React
   Native base this project's own Android app (`android/` in this repo - imported via a real
   `git subtree` merge of the upstream history, 2026-08-08, after living as an unversioned
-  sibling folder for most of this project's life) was forked from.
+  sibling folder for most of this project's life) was forked from. MIT, as its README states; the licence text is kept in
+  [`android/LICENSE-opensportsync`](../../android/LICENSE-opensportsync).
 
 - **[marguslt](https://github.com/marguslt)** - several independent, real contributions cited
   throughout this project: the firmware-download-link recipe
