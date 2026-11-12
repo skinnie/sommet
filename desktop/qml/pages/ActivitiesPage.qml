@@ -350,12 +350,14 @@ Item {
     }
 
     // "Export all" (a user's request, 2026-11-12): writes the activities shown into a folder,
-    // one file each. Sits at the right end of the view dropdown's line.
+    // one file each. On the view dropdown's line: at its right end in map view; in list view the
+    // column titles fill that end, so it sits just right of the dropdown instead.
     Text {
         id: exportAllLink
         z: 3
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.spacingLarge + Theme.spacingMedium
+        x: Theme.activitiesView === "list"
+           ? activitiesViewToggle.x + activitiesViewToggle.width + Theme.spacingLarge
+           : parent.width - width - (Theme.spacingLarge + Theme.spacingMedium)
         anchors.verticalCenter: activitiesViewToggle.verticalCenter
         visible: root.selectedActivity === null && root.sortedActivities.length > 0
         text: qsTr("Export all…")
