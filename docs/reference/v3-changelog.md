@@ -7,7 +7,7 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
-## 2026-11-12: Export all activities, remembered export folder, Debian 13 fixes (0.2.66)
+## 2026-11-12: Export all activities, remembered export folder, Debian 13 fixes, the AmbitApp name gone (0.2.66)
 
 From a user's report (Ambit3 Peak, building from source on Debian 13):
 
@@ -24,11 +24,36 @@ From a user's report (Ambit3 Peak, building from source on Debian 13):
    named "YYYY-MM-DD HHmm <name>". Never overwrites. Checked on a copy of a 4,601-activity
    database: 3,695 GPX, all valid XML, point counts equal to the stored tracks. **Android**: a
    download icon on the Activities screen saves them into Downloads/Sommet export <date>/ (the
-   current sport filter applies); built by CI only, not yet tried on a phone.
+   current sport filter applies). Checked on the tablet: 25 GPX files, byte-identical to the
+   originals. In the list view, "Export all..." sits next to the List/Map menu.
 5. The report's crash when saving a GPX (`Gtk:ERROR gtkpathbar.c`) is GTK's own save window, which
-   a source build uses through Qt's gtk3 plugin. The AppImage doesn't ship that plugin, so it uses
-   Qt's own window or the desktop portal. Not tested on Debian 13 yet (the reporter will try the
-   AppImage).
+   a source build uses through Qt's gtk3 plugin. The AppImage doesn't ship that plugin; checked on
+   a clean Debian 13: v0.2.65's AppImage starts (with `libopengl0` + `libegl1`), and its file
+   windows are Qt's own. `build-desktop.sh` now checks Qt and the Debian/Ubuntu packages first and
+   prints the `apt install` line for anything missing (`qt6-svg-plugins`, or icons stay blank).
+
+Also in this release:
+
+6. **The old name AmbitApp is gone everywhere.** Your folders move to the new names by themselves on
+   the first start: `~/AmbitAppBackups` -> `~/SommetBackups`, `~/AmbitAppPlans` -> `~/SommetPlans`,
+   and the config and cache folders. If a new folder already exists, items are moved in one by one
+   and anything with the same name stays in the old folder; nothing is overwritten or deleted. The
+   phone app moves its saved settings the same way. Checked on André's computer: every folder moved,
+   nothing left behind. The Android app ID stays `com.ambitsyncmodern`, so phones update in place.
+7. **Activity originals on the NAS** (Sommet Sync): each activity's FIT is also copied to your server.
+   Settings > Database > Original files: "On this device and the server" (default) or "Only on the
+   server", which drops local FITs older than 30 days once the server has them. Opening an activity
+   looks locally, then on the server, then on intervals.icu. Tested against a copy of a real
+   database; opening an activity from the server copy not yet clicked in the app.
+8. **intervals.icu pruning is capped**: one import never deletes more than 20 activities; more is
+   skipped and logged.
+9. **Every recording shows**: activities under 2 minutes and 100 m were hidden (desktop) or deleted
+   (Android) as test recordings. That was for the developer's own tests; now every recording is
+   kept, like the Suunto app. Ones an earlier Android build already removed stay hidden.
+10. **Old CPUs**: numpy is pinned below 2.4, whose builds need a newer CPU (x86-64-v2) and failed
+    to load on a Core 2 Quad. `tools/release_smoke.sh` checks each release on such a machine.
+11. **Linux USB access**: AppImage users need a udev rule once (the README has the two commands);
+    without it the app sees the watch but can't open it.
 
 ---
 
