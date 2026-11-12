@@ -429,8 +429,62 @@ Item {
         _setZoomFromChart([na, nb])
     }
 
+    // Short screens (720p / 768p laptops): map on the left at full height, the data scrolling on
+    // the right, so opening an activity no longer means scrolling past the map into the middle
+    // of the numbers (2026-11-12, X230). Taller windows keep the stacked layout. Same map item in
+    // both layouts (reparented), so its links to the chart keep working.
+    readonly property bool _split: height < 900 && width >= 1000 && root._center !== null
+
+    Row {
+        id: detailHeader
+        width: parent.width
+        bottomPadding: Theme.spacingMedium
+        spacing: Theme.spacingSmall
+        leftPadding: Theme.spacingLarge
+        topPadding: Theme.spacingLarge
+        Icon {
+            glyph: Icons.arrowBack
+            size: 20
+            anchors.verticalCenter: parent.verticalCenter
+            TapHandler { onTapped: root.back() }
+        }
+        // Same per-sport badge as the grid/list views (see ActivityCard.qml).
+        ActivityBadge {
+            activityId: root._sportId
+            size: 24
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: activity ? (ActivityTypes.displayName(activity.name, activity.sportTypeRaw) || qsTr("Untitled activity")) : ""
+            font.pixelSize: Theme.fontSizeTitle
+            font.bold: true
+            color: Theme.text
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            visible: root._stLoading
+            text: qsTr("reading the activity file…")
+            color: Theme.mutedText
+            font.pixelSize: Theme.fontSizeLabel
+            anchors.verticalCenter: parent.verticalCenter
+        }
+    }
+
+    Item {
+        id: splitHost
+        visible: root._split
+        x: Theme.spacingLarge
+        y: detailHeader.y + detailHeader.height
+        width: Math.round((root.width - Theme.spacingLarge * 3) * 0.45)
+        height: root.height - y - Theme.spacingLarge
+    }
+
     PageFlickable {
-        anchors.fill: parent
+        anchors.top: detailHeader.bottom
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.left: parent.left
+        anchors.leftMargin: root._split ? splitHost.x + splitHost.width : 0
         contentHeight: body.height + Theme.spacingLarge * 2
         clip: true
 
@@ -439,43 +493,17 @@ Item {
             width: parent.width
             spacing: Theme.spacingMedium
 
-            Row {
-                width: parent.width
-                spacing: Theme.spacingSmall
-                leftPadding: Theme.spacingLarge
-                topPadding: Theme.spacingLarge
-                Icon {
-                    glyph: Icons.arrowBack
-                    size: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    TapHandler { onTapped: root.back() }
-                }
-                // Same per-sport badge as the grid/list views (see ActivityCard.qml).
-                ActivityBadge {
-                    activityId: root._sportId
-                    size: 24
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: activity ? (ActivityTypes.displayName(activity.name, activity.sportTypeRaw) || qsTr("Untitled activity")) : ""
-                    font.pixelSize: Theme.fontSizeTitle
-                    font.bold: true
-                    color: Theme.text
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    visible: root._stLoading
-                    text: qsTr("reading the activity file…")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeLabel
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
             Item {
+                id: stackHost
+                visible: !root._split
                 width: parent.width - Theme.spacingLarge * 2
                 x: Theme.spacingLarge
-                height: root._center !== null ? 300 : 36
+                height: root._split ? 0 : (root._center !== null ? 300 : 36)
+            }
+            Item {
+                id: mapBox
+                parent: root._split ? splitHost : stackHost
+                anchors.fill: parent
                 MapView {
                     id: map
                     anchors.fill: parent
