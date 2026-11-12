@@ -98,8 +98,8 @@ class Store:
                     if cur is not None:
                         continue
                     ua = now
-                if cur is not None and int(cur[0]) > ua:
-                    continue  # we hold a newer copy
+                if cur is not None and int(cur[0]) >= ua:
+                    continue  # we hold this copy or a newer one (devices re-push every record)
                 meta = {k: v for k, v in r.items() if k not in ("uid", "updated_at")}
                 db.execute(
                     "INSERT INTO records (collection, uid, updated_at, deleted, json, srv) VALUES (?,?,?,?,?,?) "

@@ -171,8 +171,10 @@ if ($method === 'POST') {
                 if (isset($data['records'][$uid])) continue;
                 $ua = $now;
             }
-            // last-writer-wins: keep ours if it is newer; a tombstone of the same uid also blocks.
-            if (isset($data['records'][$uid]) && (int)$data['records'][$uid]['updated_at'] > $ua) continue;
+            // last-writer-wins: keep ours if it is the same edit or newer (devices re-push every
+            // record on every sync; re-accepting an unchanged one would give it a new `srv` and
+            // send the whole collection to every device again). A tombstone also blocks.
+            if (isset($data['records'][$uid]) && (int)$data['records'][$uid]['updated_at'] >= $ua) continue;
             if (isset($data['deleted'][$uid]) && (int)$data['deleted'][$uid] >= $ua) continue;
             $rec = $r;
             unset($rec['uid'], $rec['srv']);
