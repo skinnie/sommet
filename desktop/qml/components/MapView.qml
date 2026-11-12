@@ -78,9 +78,12 @@ Item {
     property var highlightCoords: []
     property bool zoomAtCursor: false
     signal viewportChanged()
+    // The lat/lon box on screen. latAtY/lonAtX take VIEW coordinates (they add the origin
+    // themselves); passing origin+height here counted the origin twice, so the box landed far
+    // off the route and the chart never followed the map (2026-11-12).
     function visibleBounds() {
-        return { minLat: latAtY(originY + height), maxLat: latAtY(originY),
-                 minLon: lonAtX(originX), maxLon: lonAtX(originX + width) }
+        return { minLat: latAtY(height), maxLat: latAtY(0),
+                 minLon: lonAtX(0), maxLon: lonAtX(width) }
     }
     // Zoom by whole steps keeping the point at (px, py) in view coordinates where it is.
     function zoomAt(steps, px, py) {
