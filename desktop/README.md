@@ -34,7 +34,9 @@ and the Python backend, runs on old distros and old CPUs like the Core 2 Quad Q9
 `../run-desktop.sh`, which starts the Python backend *and* the app — a bare `Sommet` binary with
 no backend boots with Settings and every backend-fed page **blank** (see `src/services/backendprocess.cpp`).
 
-**Building on Debian 13 / Ubuntu 24.04 or newer** (their own Qt is 6.8, no `aqtinstall` needed).
+**Building on Debian 13, Ubuntu 25.04 or newer** (their own Qt is 6.8, no `aqtinstall` needed;
+`build-desktop.sh` checks these packages and prints what's missing). Ubuntu 24.04 and Mint 22
+have Qt 6.4: use the AppImage, or Qt from `aqtinstall` only.
 Checked on Debian 13 (Qt 6.8.2), 2026-11-12:
 
     sudo apt install build-essential cmake ca-certificates qt6-base-dev qt6-declarative-dev \

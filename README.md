@@ -186,11 +186,17 @@ app → Open → Open; on Windows click "More info" → "Run anyway".
 > new and **not yet confirmed against a real watch on Mac/Windows** — if a download misbehaves,
 > building from source with `run-desktop.sh` (below) is the proven path.
 
-To build it yourself (the only path on Linux):
+To build it yourself (on Linux the AppImage above is easier; building is for developers):
 
 The desktop app is Qt 6 / QML with a small stdlib-only Python backend that does the actual
 USB work. Prerequisites (all three platforms):
-- **Qt 6.5+** and **CMake** (3.21+) with a C++ compiler
+- **Qt 6.5+** and **CMake** (3.21+) with a C++ compiler. On **Debian 13 / Ubuntu 25.04+** the
+  system Qt is new enough: `./build-desktop.sh` checks the packages and prints the
+  `sudo apt install` line for anything missing (the full list is in `desktop/README.md`).
+  **Ubuntu 24.04 / Mint 22** ship Qt 6.4: install Qt with `aqtinstall` and build with
+  `CMAKE_PREFIX_PATH=~/Qt/6.8.3/gcc_64 ./build-desktop.sh`, without the system `qt6-*`
+  packages (two Qt copies in one build give errors like "Cannot assign object of type
+  Core.Settings").
 - **Python 3.8+** on `PATH` (runs the backend)
 - **USB access to the watch** (Linux): the `hid` module and a udev rule, or the watch is never
   found. On Mint/Ubuntu: `sudo apt install python3-hid libhidapi-hidraw0`, then
