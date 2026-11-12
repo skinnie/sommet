@@ -53,6 +53,34 @@ class MoveOldFolders(unittest.TestCase):
         load(self.t).move_old_folders()
         self.assertFalse((self.t / "SommetBackups").exists())
 
+    def test_symlinked_old_folder_stays_a_link(self):
+        target = self.t / "external" / "backups"
+        target.mkdir(parents=True)
+        (target / "k").write_text("key")
+        os.symlink(target, self.t / "AmbitAppBackups")
+        sp = load(self.t)
+        sp.move_old_folders()
+        new = self.t / "SommetBackups"
+        self.assertTrue(new.is_symlink())
+        self.assertEqual((new / "k").read_text(), "key")
+        self.assertFalse((self.t / "AmbitAppBackups").exists())
+
+    def test_refused_rename_links_the_new_name(self):
+        self.put("AmbitAppPlans/a.json", "plan")
+        sp = load(self.t)
+        real_rename = sp.os.rename
+        def refuse(*a, **k):
+            raise OSError(18, "Invalid cross-device link")
+        sp.os.rename = refuse
+        try:
+            sp.move_old_folders()
+        finally:
+            sp.os.rename = real_rename
+        new = self.t / "SommetPlans"
+        self.assertTrue(new.is_symlink())
+        self.assertEqual((new / "a.json").read_text(), "plan")
+        self.assertTrue((self.t / "AmbitAppPlans" / "a.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

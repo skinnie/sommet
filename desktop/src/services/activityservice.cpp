@@ -3534,22 +3534,39 @@ void ActivityService::trimLocalOriginals()
         return;
     // Recent moves keep their FIT here: the exports to intervals.icu / Garmin read it locally.
     const QString cutoff = QDateTime::currentDateTime().addDays(-30).toString(Qt::ISODate).left(16);
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE activities SET fit_base64 = NULL "
-        "WHERE fit_base64 IS NOT NULL AND fit_base64 <> '' AND substr(start_time,1,16) < ? "
-        "AND (COALESCE(device,'') || '|' || substr(start_time,1,16)) IN (SELECT uid FROM sommet_fit_pushed)"));
-    q.addBindValue(cutoff);
-    if (q.exec() && q.numRowsAffected() > 0) {
-        qInfo().noquote() << "[sommet] originals: dropped" << q.numRowsAffected()
-                          << "local FITs the NAS holds";
-        for (int i = 0; i < m_activities.size(); ++i) {
-            QVariantMap a = m_activities.at(i).toMap();
-            if (a.value(QStringLiteral("fitBase64")).toString().isEmpty()
-                    || a.value(QStringLiteral("startTime")).toString().left(16) >= cutoff)
-                continue;
-            a.remove(QStringLiteral("fitBase64"));
-            m_activities[i] = a;
-        }
+    // Only rows whose sync uid (device|start minute) is theirs alone: two moves started in the
+    // same minute share a uid, the NAS holds just one of their FITs, and trimming both would lose
+    // the other for good. Picked first, then cleared row by row (by idx + device).
+    QSqlQuery pick(m_db);
+    pick.prepare(QStringLiteral(
+        "SELECT a.idx, COALESCE(a.device,'') FROM activities a "
+        "WHERE a.fit_base64 IS NOT NULL AND a.fit_base64 <> '' AND substr(a.start_time,1,16) < ? "
+        "AND (COALESCE(a.device,'') || '|' || substr(a.start_time,1,16)) IN (SELECT uid FROM sommet_fit_pushed) "
+        "AND (SELECT COUNT(*) FROM activities b WHERE COALESCE(b.device,'') = COALESCE(a.device,'') "
+        "     AND substr(b.start_time,1,16) = substr(a.start_time,1,16)) = 1"));
+    pick.addBindValue(cutoff);
+    if (!pick.exec())
+        return;
+    QSet<QString> trimmed;   // "idx|device"
+    QSqlQuery clear(m_db);
+    clear.prepare(QStringLiteral(
+        "UPDATE activities SET fit_base64 = NULL WHERE idx = ? AND COALESCE(device,'') = ?"));
+    while (pick.next()) {
+        clear.addBindValue(pick.value(0).toInt());
+        clear.addBindValue(pick.value(1).toString());
+        if (clear.exec())
+            trimmed.insert(pick.value(0).toString() + QLatin1Char('|') + pick.value(1).toString());
+    }
+    if (trimmed.isEmpty())
+        return;
+    qInfo().noquote() << "[sommet] originals: dropped" << trimmed.size() << "local FITs the NAS holds";
+    for (int i = 0; i < m_activities.size(); ++i) {
+        QVariantMap a = m_activities.at(i).toMap();
+        const QString key = a.value(QStringLiteral("index")).toString() + QLatin1Char('|')
+                            + a.value(QStringLiteral("device")).toString();
+        if (!trimmed.contains(key))
+            continue;
+        a.remove(QStringLiteral("fitBase64"));
+        m_activities[i] = a;
     }
 }

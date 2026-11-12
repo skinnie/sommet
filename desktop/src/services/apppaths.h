@@ -59,7 +59,8 @@ inline void mergeFolder(const QString &oldPath, const QString &newPath)
 
 // Up to 0.2.66 the app's folders carried its old name (AmbitApp). Moves them to the new names
 // once; called at start-up before the backend starts (tools/sommet_paths.py does the same for a
-// backend or tool run on its own). Never fails: if a move doesn't work, the old folder stays.
+// backend or tool run on its own). Never fails: an old symlink is renamed as a link, and if a
+// rename is refused the new name becomes a link to the old folder, so nothing goes missing.
 inline void moveOldFolders()
 {
     const QString home = QDir::homePath();
@@ -72,12 +73,17 @@ inline void moveOldFolders()
     };
     for (const auto &m : moves) {
         const QFileInfo oldInfo(m.first);
-        if (!oldInfo.isDir() || oldInfo.isSymLink())
+        if (!oldInfo.isDir())                    // also true for a symlink to a folder
             continue;
-        if (!QFileInfo::exists(m.second)) {
-            QDir().mkpath(QFileInfo(m.second).absolutePath());
-            QDir().rename(m.first, m.second);
-        } else if (QFileInfo(m.second).isDir()) {
+        const QFileInfo newInfo(m.second);
+        if (!newInfo.exists() && !newInfo.isSymLink()) {
+            QDir().mkpath(newInfo.absolutePath());
+            // A symlink is renamed as a link and keeps pointing at the same place (backups kept
+            // on another drive). If the rename is refused (a mount point, say), the new name
+            // becomes a link to the old folder, so the data stays where the app looks for it.
+            if (!QDir().rename(m.first, m.second))
+                QFile::link(m.first, m.second);
+        } else if (newInfo.isDir() && !oldInfo.isSymLink()) {
             mergeFolder(m.first, m.second);
         }
     }

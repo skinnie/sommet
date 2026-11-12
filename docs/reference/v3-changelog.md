@@ -37,14 +37,18 @@ Also in this release:
 6. **The old name AmbitApp is gone everywhere.** Your folders move to the new names by themselves on
    the first start: `~/AmbitAppBackups` -> `~/SommetBackups`, `~/AmbitAppPlans` -> `~/SommetPlans`,
    and the config and cache folders. If a new folder already exists, items are moved in one by one
-   and anything with the same name stays in the old folder; nothing is overwritten or deleted. The
+   and anything with the same name stays in the old folder; nothing is overwritten or deleted. A
+   folder that is a symlink (backups kept on another drive) is renamed as a link and keeps pointing
+   at the same place; if a folder can't be moved (a mount point), the new name links to it. The
    phone app moves its saved settings the same way. Checked on André's computer: every folder moved,
    nothing left behind. The Android app ID stays `com.ambitsyncmodern`, so phones update in place.
 7. **Activity originals on the NAS** (Sommet Sync): each activity's FIT is also copied to your server.
    Settings > Database > Original files: "On this device and the server" (default) or "Only on the
    server", which drops local FITs older than 30 days once the server has them. Opening an activity
    looks locally, then on the server, then on intervals.icu. Tested against a copy of a real
-   database; opening an activity from the server copy not yet clicked in the app.
+   database; opening an activity from the server copy not yet clicked in the app. Two moves started in
+   the same minute keep their local FITs (the server can only hold one of them). Export all writes
+   only the FITs kept on this computer.
 8. **intervals.icu pruning is capped**: one import never deletes more than 20 activities; more is
    skipped and logged.
 9. **Every recording shows**: activities under 2 minutes and 100 m were hidden (desktop) or deleted

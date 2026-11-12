@@ -31,7 +31,7 @@ cmake --build desktop/build --parallel
 
 echo "== 2/5  Freeze the Python backend (PyInstaller) =="
 python3 -m pip install --upgrade pip
-python3 -m pip install pyinstaller bleak hid
+python3 -m pip install -r tools/packaging/backend-requirements.txt   # same list as the release workflow
 pyinstaller tools/packaging/sommet_backend.spec \
     --distpath dist/backend --workpath build/pyi
 
