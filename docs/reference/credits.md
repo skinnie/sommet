@@ -66,6 +66,10 @@ reverse-engineering here would have been possible, or would have taken far longe
   and used by `tools/gps_track_pod.py` to read the pod tracks the T6/X6HR heart-rate logs are
   merged with into a mapped activity.
 
+- **[BoltOn](https://gitlab.com/Hague/bolton)** (MIT) - the open-source Wahoo ELEMNT companion
+  app; Sommet's Bluetooth file channel to the ELEMNT (`tools/wahoo_ble_files.py`) follows how it
+  sends, lists and fetches files.
+
 - **[intervals.icu](https://intervals.icu)** (David Tinker) - the training-analysis platform
   this app integrates with: activity upload and the Gear tracker's two-way sync of
   bikes / shoes / components / service reminders both talk to its API.
