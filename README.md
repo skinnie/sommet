@@ -19,6 +19,7 @@ Within the features we have:
 - Update orbital data: gps and glonass (for the glonass devices)
 - Device manual: download them in pdf format
 - Activities: download from the watch, view on a map, export them in gpx, fit, to local, cloud or 3rd party services (strava, runalyze, intervals.icu, others to come)
+- Activity details: tiles chosen per sport, a "compared with your usual" line (same sport, similar distance, last 12 months), time in heart-rate and power zones, one chart with the lines you pick (pace, heart rate, altitude...), and the track coloured by zone on the chart and the map
 - Routes: Import/send a gpx route to the watch (with its distance, climb and altitude graph), remove a route from the watch, export the routes on the watch to gpx format. Sending or removing a route keeps your POIs; a copy of them is saved first in `~/SommetBackups/POIs/`
 - POIs: Import/send a POI to the watch (via a map search, or coordinates), remove a POI, export the POIs on the map to gpx
 - Calendar: visual calendar with days where activities were done
@@ -32,7 +33,8 @@ Within the features we have:
 - Watch settings: edit the watch's settings (Ambit1/2 and Ambit3 families)
 - Race Plan: plan a brevet / long ride from a GPX or roadbook: controls, stops, weather, climbs
 - Bluetooth scale: Etekcity FIT 8S weigh-ins with a body-fat estimate, sent to intervals.icu if you want (desktop and Android)
-- Health, Weight, Coach: wellness and training load from intervals.icu, HRV from R-R, readiness and an optional chat coach (bring your own API key)
+- Health: this week's activity, steps per weekday, the watch's own activity calories and recovery time, each compared with the 7 days before; wellness from intervals.icu and HRV from R-R
+- Weight, Coach: weigh-ins, training load and readiness, and an optional chat coach (bring your own API key)
 - Gear: bikes, shoes and parts with service reminders, synced with intervals.icu
 - Cloud backup: Dropbox, Google Drive, OneDrive
 - Garmin Connect: activity, weight and health sync
