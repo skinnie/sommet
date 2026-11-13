@@ -366,7 +366,10 @@ typedef struct ambit_log_sample_s {
             uint16_t heading;                   /* degrees, scale: 0.01, 0 <= heading <= 360 */
             uint32_t ehpe;                      /* meters scale: 0.01 */
             uint8_t  noofsatellites;            /* */
-            uint8_t  hdop;                      /* ? scale: 0.2 */
+            /* Mean signal (dB-Hz) of the five strongest satellites. openambit called this byte
+             * "hdop ? scale: 0.2"; the Traverse 2.0.22 program and every record of real Traverse
+             * and Ambit3 logs say otherwise (tools/test_gps_base_signal.py). */
+            uint8_t  snr_top5_mean;
             uint8_t  satellites_count;
             ambit_log_gps_satellite_t *satellites;
         } gps_base;

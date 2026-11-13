@@ -369,7 +369,11 @@ def parse_sample(data, offset, periodic_spec_ref, samples, time_compensators):
             s["altitude"] = struct.unpack_from("<i", data, c.offset)[0]; c.skip(4)
             s["speed"] = c.u16(); s["heading"] = c.u16()
             s["ehpe"] = c.u32()
-            s["noofsatellites"] = c.u8(); s["hdop"] = c.u8()
+            # The byte after the satellite count is the mean signal (dB-Hz) of the five strongest
+            # satellites, not an HDOP as openambit guessed ("hdop ?"): the Traverse 2.0.22 program
+            # computes it that way, and every gps_base record of a real Traverse (2,543) and of
+            # Ambit3 Peak logs (627) agrees (tools/test_gps_base_signal.py).
+            s["noofsatellites"] = c.u8(); s["snr_top5_mean"] = c.u8()
             sat_count = (sample_len - 40) // 4
             sats = []
             for _ in range(sat_count):

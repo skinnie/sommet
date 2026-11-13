@@ -931,7 +931,7 @@ static int parse_sample(uint8_t *buf, size_t offset, uint8_t **spec, ambit_log_e
             log_entry->samples[*sample_count].u.gps_base.heading = read16inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.gps_base.ehpe = read32inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.gps_base.noofsatellites = read8inc(buf, &int_offset);
-            log_entry->samples[*sample_count].u.gps_base.hdop = read8inc(buf, &int_offset);
+            log_entry->samples[*sample_count].u.gps_base.snr_top5_mean = read8inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.gps_base.satellites = calloc((sample_len - 40)/4, sizeof(ambit_log_gps_satellite_t));
             for (i=0; i<(sample_len - 40)/4; i++) {
                 log_entry->samples[*sample_count].u.gps_base.satellites[i].sv = read8inc(buf, &int_offset);

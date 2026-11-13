@@ -45,8 +45,8 @@ int main(int argc, char **argv)
     if (argc != 4) return 2;
     FILE *f = fopen(argv[1], "rb");
     if (f == NULL) return 2;
-    g_region = malloc(1 << 20);
-    g_region_len = fread(g_region, 1, 1 << 20, f);
+    g_region = malloc(8 << 20);
+    g_region_len = fread(g_region, 1, 8 << 20, f);
     fclose(f);
     g_mem_start = (uint32_t)strtoul(argv[2], NULL, 16);
 
