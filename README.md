@@ -9,7 +9,7 @@ The aim is to provide the same features on Android, Linux, macOS and Windows. Ea
 - **Suunto legacy (experimental):** T6 / T6c / T6d, X6HR, GPS Track Pod
 - **Sensors:** Suunto Smart Sensor (HR belt); Polar Verity Sense (sleep, experimental)
 - **GPS:** Garmin eTrex 10 / 20 / 20x / 30 / 30x
-- **Bike computers:** Bryton Aero 60 (activities, routes, workouts, profile), Magene C406 (activities, workouts), Garmin Edge (activity import + data-screen editor, over USB) and Hammerhead Karoo (activity import), Wahoo ELEMNT (rides, routes, workouts, data pages, device settings, rider profile and OpenStreetMap maps, over USB or Bluetooth; desktop, rides also on Android)
+- **Bike computers:** Bryton Aero 60 (activities, routes, workouts, profile), Magene C406 Pro (activities, workouts), Garmin Edge (activity import + data-screen editor, over USB) and Hammerhead Karoo 3 (activity import), Wahoo ELEMNT (the original) and ELEMNT BOLT (rides, routes, workouts, data pages, device settings, rider profile and OpenStreetMap maps, over USB or Bluetooth; desktop, rides also on Android)
 
 
 All features that are visible in the app are available by USB/USB-OTG, and some are also available/being tested by bluetooth.
