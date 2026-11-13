@@ -58,3 +58,34 @@ export async function exportAllToDownloads(
   }
   return res;
 }
+
+// "Export all" on Routes (a user's request, 2026-11-13; desktop parity with RouteLibraryView):
+// every route of the source shown (the watch's or the Library's), one GPX each, into a new folder
+// in Downloads named after the route. gpx() reads one route; a failed one is listed, not fatal.
+export interface RouteToExport { name: string; gpx: () => Promise<string>; }
+export interface ExportRoutesResult { folder: string; saved: number; failed: string[]; }
+
+export async function exportRoutesToDownloads(
+  routes: RouteToExport[],
+  onProgress: (done: number, total: number) => void,
+  shouldStop: () => boolean = () => false,
+): Promise<ExportRoutesResult> {
+  const folder = `Sommet routes ${stampOf(new Date())}`;
+  const res: ExportRoutesResult = { folder, saved: 0, failed: [] };
+  for (let i = 0; i < routes.length; i++) {
+    if (shouldStop()) break;
+    const r = routes[i];
+    try {
+      const name = `${(r.name || 'route').replace(/[\\/:*?"<>|]/g, '_')}.gpx`;
+      const path = `${RNFS.CachesDirectoryPath}/export-route-${i}.gpx`;
+      await RNFS.writeFile(path, await r.gpx(), 'utf8');
+      await saveToDownloadsIn(path, folder, name, 'application/gpx+xml');
+      await RNFS.unlink(path).catch(() => {});
+      res.saved++;
+    } catch {
+      res.failed.push(r.name || '?');
+    }
+    onProgress(i + 1, routes.length);
+  }
+  return res;
+}

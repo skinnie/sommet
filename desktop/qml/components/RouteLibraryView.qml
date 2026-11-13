@@ -125,28 +125,88 @@ PageFlickable {
             root.pendingWatch = null
             root.busyKey = ""
             const gpx = RouteService.exportedGpx
-            if (!gpx || gpx.length === 0) { root.msg = RouteService.exportError || qsTr("Couldn't read that route from the watch."); return }
-            if (p.export) root.saveGpx(p.name, gpx)
+            if (!gpx || gpx.length === 0) {
+                const err = RouteService.exportError || qsTr("Couldn't read that route from the watch.")
+                p.fail ? p.fail(err) : root.msg = err
+                return
+            }
+            if (p.ok) p.ok(p.name, gpx)
+            else if (p.export) root.saveGpx(p.name, gpx)
             else root.openRequested(p.name, gpx, "")
         }
     }
-    function fetchGpx(item, cb) {
+    // The GPX of one item, from wherever it lives. fail(error) is optional; without it the error
+    // shows under the list. The watch's goes through RouteService (a USB read, one at a time).
+    function fetchGpx(item, cb, fail) {
+        const bad = fail || (err => root.msg = err)
         root.busyKey = item.key
-        if (item.src === "saved" || (item.src === "magene" && item.libraryId)) {
+        if (item.src === "watch") {
+            root.pendingWatch = { index: item.index, name: item.name, ok: cb, fail: bad }
+            RouteService.exportRoute(item.index)
+        } else if (item.src === "saved" || (item.src === "magene" && item.libraryId)) {
             root.api("POST", "/api/library/get", { id: item.id || item.libraryId }, r => {
                 root.busyKey = ""
-                r.ok ? cb(r.name, r.gpx) : root.msg = r.error || qsTr("Couldn't open it.")
+                r.ok ? cb(r.name, r.gpx) : bad(r.error || qsTr("Couldn't open it."))
             })
         } else if (item.src === "bryton") {
             root.api("POST", "/api/bryton/tracks/gpx", { name: item.name }, r => {
                 root.busyKey = ""
-                r.ok ? cb(item.name, r.gpx) : root.msg = r.error || qsTr("Couldn't read it from the Bryton.")
+                r.ok ? cb(item.name, r.gpx) : bad(r.error || qsTr("Couldn't read it from the Bryton."))
             })
         } else if (item.src === "etrex") {
             root.busyKey = ""
-            cb(item.name, item.gpxText)
+            item.gpxText ? cb(item.name, item.gpxText) : bad(qsTr("Couldn't read it from the eTrex."))
+        } else {
+            root.busyKey = ""
+            bad(qsTr("This route can't be read back."))
         }
     }
+
+    // ---- Export all (a user's request, 2026-11-13): every route of the source shown, one GPX
+    // each, into a folder you pick (it starts in the last export folder). One at a time, so the
+    // watch's USB reads never overlap.
+    property var exportQueue: []
+    property url exportAllTarget
+    property int exportAllDone: 0
+    property int exportAllTotal: 0
+    property int exportAllSaved: 0
+    property var exportAllFailed: []
+    property bool exportAllRunning: false
+    property bool exportAllStop: false
+    property string exportAllResult: ""
+    function startExportAll(folder) {
+        LocalFileService.rememberExportFolder(folder)
+        root.exportAllTarget = folder
+        root.exportQueue = root.sorted(root.sourceItems)
+        root.exportAllTotal = root.exportQueue.length
+        root.exportAllDone = 0; root.exportAllSaved = 0; root.exportAllFailed = []
+        root.exportAllResult = ""; root.exportAllStop = false; root.exportAllRunning = true
+        root.exportNext()
+    }
+    function exportNext() {
+        if (root.exportAllStop || root.exportAllDone >= root.exportAllTotal) {
+            root.exportAllRunning = false
+            let m = root.exportAllSaved === 1 ? qsTr("Saved 1 GPX file.") : qsTr("Saved %1 GPX files.").arg(root.exportAllSaved)
+            if (root.exportAllFailed.length)
+                m += " " + qsTr("Not saved: %1.").arg(root.exportAllFailed.join(", "))
+            if (root.exportAllStop && root.exportAllDone < root.exportAllTotal)
+                m += " " + qsTr("Stopped.")
+            root.exportAllResult = m
+            return
+        }
+        const item = root.exportQueue[root.exportAllDone]
+        const next = () => { root.exportAllDone++; exportNextTimer.restart() }
+        root.fetchGpx(item, (name, gpx) => {
+            const err = LocalFileService.saveTextInFolder(root.exportAllTarget,
+                                                          (name || item.name || "route") + ".gpx", gpx)
+            if (err.length) root.exportAllFailed = root.exportAllFailed.concat([(item.name || "?") + " (" + err + ")"])
+            else root.exportAllSaved++
+            next()
+        }, err => { root.exportAllFailed = root.exportAllFailed.concat([item.name || "?"]); next() })
+    }
+    // Next item from the event loop, not from inside the previous one's callback.
+    Timer { id: exportNextTimer; interval: 0; onTriggered: root.exportNext() }
+
     function openItem(item) {
         if (item.src === "watch") {
             root.busyKey = item.key
@@ -177,6 +237,66 @@ PageFlickable {
         onAccepted: {
             const err = LocalFileService.saveText(selectedFile, gpx)
             root.msg = err.length ? qsTr("Couldn't save: %1").arg(err) : ""
+        }
+    }
+    FolderDialog {
+        id: exportAllFolder
+        title: qsTr("Choose a folder for the GPX files")
+        currentFolder: LocalFileService.exportFolder
+        onAccepted: root.startExportAll(selectedFolder)
+    }
+    ThemedDialog {
+        id: exportAllDialog
+        title: qsTr("Export all routes")
+        standardButtons: Dialog.NoButton
+        width: 430
+        onOpened: { if (!root.exportAllRunning) root.exportAllResult = "" }
+        contentItem: Column {
+            spacing: Theme.spacingLarge
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.mutedText
+                font.pixelSize: Theme.fontSizeBody
+                text: (root.sourceItems.length === 1
+                       ? qsTr("Saves the route in the list")
+                       : qsTr("Saves the %1 routes in the list").arg(root.sourceItems.length))
+                      + " " + qsTr("into a folder you pick, one GPX file each, named after the route. "
+                                   + "Nothing is overwritten.")
+            }
+            Text {
+                visible: root.exportAllRunning || root.exportAllResult !== ""
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontSizeBody
+                text: root.exportAllRunning
+                      ? qsTr("Saving %1 of %2…").arg(Math.min(root.exportAllDone + 1, root.exportAllTotal)).arg(root.exportAllTotal)
+                      : root.exportAllResult
+            }
+            Item {
+                width: parent.width
+                height: 36
+                Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: root.exportAllRunning ? qsTr("Stop") : qsTr("Close")
+                        onClicked: root.exportAllRunning ? root.exportAllStop = true : exportAllDialog.close()
+                    }
+                    RoundedButton {
+                        visible: !root.exportAllRunning && root.exportAllResult !== ""
+                        text: qsTr("Open folder")
+                        onClicked: LocalFileService.openFolder(root.exportAllTarget)
+                    }
+                    RoundedButton {
+                        visible: !root.exportAllRunning && root.exportAllResult === ""
+                        text: qsTr("Choose folder…")
+                        onClicked: exportAllFolder.open()
+                    }
+                }
+            }
         }
     }
     function saveGpx(name, gpx) {
@@ -677,6 +797,16 @@ PageFlickable {
                         visible: root.source !== "watch" || !root.legacyWatch
                         mode: Theme.routesView
                         onChosen: (m) => Theme.routesView = m
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.sourceItems.length > 0 && !(root.source === "watch" && root.legacyWatch)
+                        text: qsTr("Export all…")
+                        color: exportAllHover.hovered ? Theme.primary : Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        font.bold: true
+                        TapHandler { onTapped: exportAllDialog.open() }
+                        HoverHandler { id: exportAllHover; cursorShape: Qt.PointingHandCursor }
                     }
                 }
                 Row {

@@ -56,6 +56,10 @@ public:
     // about as user-facing as it gets, unlike a watch/network error - no separate
     // technical-detail log needed the way DeviceService's setLastError() has.
     Q_INVOKABLE QString saveText(const QUrl &fileUrl, const QString &text);
+    // Writes text as fileName inside folderUrl, never overwriting: "a.gpx" is taken, so it
+    // becomes "a (2).gpx" (freefilename.h). For "Export all" on Routes. "" on success, else the
+    // error.
+    Q_INVOKABLE QString saveTextInFolder(const QUrl &folderUrl, const QString &fileName, const QString &text);
     Q_INVOKABLE QString saveBase64(const QUrl &fileUrl, const QString &base64);
 
     // Read a local text file (e.g. a GPX the user picked for the Plan page's weather + climb).

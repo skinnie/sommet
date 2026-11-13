@@ -9,7 +9,8 @@ import {
 import {
   LibraryRoute, listLibrary, saveToLibrary, getLibraryGpx, renameLibraryRoute, deleteLibraryRoute, pointsToGpx,
 } from '../services/RouteLibrary';
-import { WatchRoute } from '../services/RouteReader';
+import { WatchRoute, navigationToGpx } from '../services/RouteReader';
+import { exportRoutesToDownloads } from '../services/ExportAll';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
@@ -305,6 +306,34 @@ export default function RouteScreen() {
     }
   }
 
+  // Export all (desktop parity, 2026-11-13): every route of the source shown, one GPX each, into
+  // a new folder in Downloads. The watch's routes are already read; the Library's are read here.
+  const [exportAllMsg, setExportAllMsg] = useState<{ text: string; tone: 'working' | 'success' | 'error' } | null>(null);
+  const stopExportAll = useRef(false);
+  const exportAllBusy = exportAllMsg?.tone === 'working';
+  async function runExportAll() {
+    const items = source === 1
+      ? library.map(r => ({ name: r.name, gpx: () => getLibraryGpx(r.id) }))
+      : (sortedOnWatch ?? []).map(r => ({ name: r.name, gpx: async () => navigationToGpx({ routes: [r], waypoints: [] }) }));
+    if (!items.length) return;
+    stopExportAll.current = false;
+    setExportAllMsg({ text: `Saving 0 of ${items.length}…`, tone: 'working' });
+    const res = await exportRoutesToDownloads(items,
+      (done, total) => setExportAllMsg({ text: `Saving ${done} of ${total}…`, tone: 'working' }),
+      () => stopExportAll.current);
+    let text = `Saved ${res.saved === 1 ? '1 GPX file' : `${res.saved} GPX files`} in Downloads/${res.folder}.`;
+    if (res.failed.length) text += ` Not saved: ${res.failed.join(', ')}.`;
+    if (stopExportAll.current && res.saved + res.failed.length < items.length) text += ' Stopped.';
+    setExportAllMsg({ text, tone: res.failed.length ? 'error' : 'success' });
+  }
+  function askExportAll() {
+    if (exportAllBusy) { stopExportAll.current = true; return; }
+    const n = source === 1 ? library.length : (sortedOnWatch?.length ?? 0);
+    Alert.alert('Export all routes',
+      `Saves the ${n === 1 ? 'route' : `${n} routes`} listed into a new folder in Downloads, one GPX file each, named after the route.`,
+      [{ text: t.cancel, style: 'cancel' }, { text: 'Export', onPress: runExportAll }]);
+  }
+
   return (
     <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content}>
 
@@ -401,7 +430,13 @@ export default function RouteScreen() {
           {(source === 1 ? library.length > 0 : (!onWatchLoading && sortedOnWatch && sortedOnWatch.length > 0)) && (
             <ViewModeToggle mode={viewMode} onChange={changeViewMode} />
           )}
+          {(source === 1 ? library.length > 0 : (!onWatchLoading && sortedOnWatch && sortedOnWatch.length > 0)) && (
+            <TouchableOpacity onPress={askExportAll} hitSlop={8} accessibilityLabel="Export all routes">
+              <Text style={styles.exportAllLink}>{exportAllBusy ? 'Stop' : 'Export all…'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        {exportAllMsg && <StatusNote text={exportAllMsg.text} tone={exportAllMsg.tone} />}
 
         {source === 1 && library.length === 0 && (
           <EmptyState icon="route" title={t.routeLibraryEmptyTitle} text={t.routeLibraryEmptyText}
@@ -527,6 +562,7 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small },
   itemName: { fontSize: v3Type.bodyLarge, fontWeight: '700', color: t.text },
   itemStats: { fontSize: v3Type.label, color: t.mutedText, marginTop: 2 },
+  exportAllLink: { fontSize: v3Type.label, color: t.mutedText, fontWeight: '700' },
   onWatchItem: { marginTop: v3Spacing.large, paddingTop: v3Spacing.medium, borderTopWidth: 1, borderTopColor: t.mutedText + '22', gap: v3Spacing.small },
   exportBtn: {
     paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,

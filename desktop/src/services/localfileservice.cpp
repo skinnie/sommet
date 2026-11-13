@@ -1,4 +1,5 @@
 #include "localfileservice.h"
+#include "freefilename.h"
 #include "apppaths.h"
 
 #include <QDateTime>
@@ -203,6 +204,14 @@ QString LocalFileService::saveText(const QUrl &fileUrl, const QString &text)
     if (err.isEmpty())
         rememberExportFolder(QUrl::fromLocalFile(QFileInfo(fileUrl.toLocalFile()).absolutePath()));
     return err;
+}
+
+QString LocalFileService::saveTextInFolder(const QUrl &folderUrl, const QString &fileName, const QString &text)
+{
+    const QString dir = folderUrl.toLocalFile();
+    if (dir.isEmpty() || !QFileInfo(dir).isDir())
+        return QStringLiteral("The folder %1 doesn't exist").arg(dir);
+    return writeFile(QUrl::fromLocalFile(freeFileName(dir, fileName)), text.toUtf8());
 }
 
 QString LocalFileService::saveBase64(const QUrl &fileUrl, const QString &base64)
