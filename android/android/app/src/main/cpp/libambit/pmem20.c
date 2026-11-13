@@ -580,6 +580,17 @@ int libambit_pmem20_log_parse_header(uint8_t *data, size_t datalen, ambit_log_he
         offset += 24;
     }
 
+    // Traverse / Traverse Alpha firmware 2.0.22 writes a header 12 bytes longer (1509) than the
+    // Ambit3 2.4.17 and the Traverse 1.0.4 (1497); the new bytes start with the number of counted
+    // shots. Twin of tools/exercise_log.py (SHOT_HEADER_LEN, SHOT_COUNT_OFFSET): read from the
+    // Alpha 2.0.22 program and seen in the PC emulator on 2026-11-13, no real Alpha log yet.
+    log_header->has_shots = 0;
+    log_header->shots = 0;
+    if (datalen >= 1509) {
+        log_header->has_shots = 1;
+        log_header->shots = read16(data, 0xD9);
+    }
+
     return 0;
 }
 
@@ -1003,6 +1014,21 @@ static int parse_sample(uint8_t *buf, size_t offset, uint8_t **spec, ambit_log_e
             log_entry->samples[*sample_count].u.fwinfo.build_date.minute = read8inc(buf, &int_offset);
             log_entry->samples[*sample_count].u.fwinfo.build_date.msec = read16inc(buf, &int_offset);
             break;
+          case 0x20:
+            // A shot the Traverse Alpha counted during a Hunting recording (not in openambit):
+            // where the watch was, latitude then longitude, 0x7FFFFFFF for "no position".
+            // Twin of tools/exercise_log.py. Any other length stays an unknown sample.
+            if (sample_len == 14) {
+                int32_t shot_lat = (int32_t)read32inc(buf, &int_offset);
+                int32_t shot_lon = (int32_t)read32inc(buf, &int_offset);
+                log_entry->samples[*sample_count].type = ambit_log_sample_type_shot;
+                log_entry->samples[*sample_count].u.shot.has_position =
+                    (shot_lat != 0x7FFFFFFF && shot_lon != 0x7FFFFFFF) ? 1 : 0;
+                log_entry->samples[*sample_count].u.shot.latitude = shot_lat;
+                log_entry->samples[*sample_count].u.shot.longitude = shot_lon;
+                break;
+            }
+            // fall through
           default:
             LOG_WARNING("Found unknown episodic sample type (0x%02x): len: %d", episodic_type, sample_len);
             log_entry->samples[*sample_count].type = ambit_log_sample_type_unknown;

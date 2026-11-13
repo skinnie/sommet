@@ -60,6 +60,115 @@ QtObject {
     // keep theirs in the legacy waypoint region, which this does not write.
     property bool supportsNavRemove: !_isKailash && !_isLegacy
 
+    // ---- POI types: the list the connected watch knows -------------------------------------
+    // The type byte of a POI is the icon the watch draws. The Ambit3 family has 18 (0-17, Lars's
+    // "Types of Poi.md"; tools/ambit_format.py WAYPOINT_TYPES). The Traverse and Traverse Alpha
+    // have their own 48 (0-47, read from the 2.0.22 watch program and seen in its own picker in
+    // the PC emulator; ambit_format.TRAVERSE_WAYPOINT_TYPES), numbered differently: 2 is "Camp"
+    // on an Ambit3 and "Car" on a Traverse. `set` is the watch's own grouping: the "hunting" and
+    // "fishing" types are the ones it offers during a Hunting or Fishing recording. Ten Traverse
+    // types have an icon of their own (tools/subset_material_symbols.py TRAVERSE_POI_GLYPHS); the
+    // others draw the Ambit icon of their kind, as on the watch. Listed as the picker shows them:
+    // the plain type first, then by name. tools/test_poi_types_parity.py compares both lists
+    // with ambit_format.py and with the Android copy (android/src/services/PoiTypes.ts).
+    readonly property bool traversePoiTypes: DeviceService.model === "Jabiru" || DeviceService.model === "Loon"
+    readonly property var ambitPoiTypes: [
+        { id: 0, name: qsTr("Building"), set: "general", glyph: "\uea40" },
+        { id: 1, name: qsTr("Cave"), set: "general", glyph: "\uf6e7" },
+        { id: 2, name: qsTr("Camp"), set: "general", glyph: "\uea68" },
+        { id: 3, name: qsTr("Car"), set: "general", glyph: "\ue531" },
+        { id: 4, name: qsTr("Crossroads"), set: "general", glyph: "\uebac" },
+        { id: 5, name: qsTr("Beginning"), set: "general", glyph: "\ue57b" },
+        { id: 6, name: qsTr("End"), set: "general", glyph: "\uf06e" },
+        { id: 7, name: qsTr("Food"), set: "general", glyph: "\ue56c" },
+        { id: 8, name: qsTr("Forest"), set: "general", glyph: "\uea99" },
+        { id: 9, name: qsTr("Geocache"), set: "general", glyph: "\ue87a" },
+        { id: 10, name: qsTr("Lodging"), set: "general", glyph: "\ue53a" },
+        { id: 11, name: qsTr("Meadow"), set: "general", glyph: "\uf205" },
+        { id: 12, name: qsTr("Mountain"), set: "general", glyph: "\ue3f7" },
+        { id: 13, name: qsTr("Sight"), set: "general", glyph: "\ue3b0" },
+        { id: 14, name: qsTr("Road"), set: "general", glyph: "\ueacd" },
+        { id: 15, name: qsTr("Rock"), set: "general", glyph: "\ue3df" },
+        { id: 16, name: qsTr("Water"), set: "general", glyph: "\ue798" },
+        { id: 17, name: qsTr("Waypoint"), set: "general", glyph: "\ue0c8" },
+    ]
+    readonly property var traversePoiTypeList: [
+        { id: 26, name: qsTr("POI"), set: "general", glyph: "\ue0c8" },
+        { id: 37, name: qsTr("Bedding"), set: "hunting", glyph: "\ue0c8" },
+        { id: 23, name: qsTr("Begin"), set: "general", glyph: "\ue57b" },
+        { id: 43, name: qsTr("Big game"), set: "hunting", glyph: "\ue71a" },
+        { id: 45, name: qsTr("Bird"), set: "hunting", glyph: "\uf555" },
+        { id: 0, name: qsTr("Building"), set: "general", glyph: "\uea40" },
+        { id: 8, name: qsTr("Cafe"), set: "general", glyph: "\ue56c" },
+        { id: 4, name: qsTr("Camp"), set: "general", glyph: "\uea68" },
+        { id: 5, name: qsTr("Camping"), set: "general", glyph: "\uea68" },
+        { id: 2, name: qsTr("Car"), set: "general", glyph: "\ue531" },
+        { id: 31, name: qsTr("Cave"), set: "general", glyph: "\uf6e7" },
+        { id: 19, name: qsTr("Cliff"), set: "general", glyph: "\ue3f7" },
+        { id: 15, name: qsTr("Coast"), set: "general", glyph: "\ue798" },
+        { id: 21, name: qsTr("Crossroad"), set: "general", glyph: "\uebac" },
+        { id: 32, name: qsTr("Emergency"), set: "general", glyph: "\uf2c3" },
+        { id: 24, name: qsTr("End"), set: "general", glyph: "\uf06e" },
+        { id: 47, name: qsTr("Fish"), set: "fishing", glyph: "\uf1ea" },
+        { id: 36, name: qsTr("Fishing spot"), set: "fishing", glyph: "\uead7" },
+        { id: 6, name: qsTr("Food"), set: "general", glyph: "\ue56c" },
+        { id: 20, name: qsTr("Forest"), set: "general", glyph: "\uea99" },
+        { id: 25, name: qsTr("Geocache"), set: "general", glyph: "\ue87a" },
+        { id: 17, name: qsTr("Hill"), set: "general", glyph: "\ue3f7" },
+        { id: 1, name: qsTr("Home"), set: "general", glyph: "\uea40" },
+        { id: 10, name: qsTr("Hostel"), set: "general", glyph: "\ue53a" },
+        { id: 11, name: qsTr("Hotel"), set: "general", glyph: "\ue53a" },
+        { id: 33, name: qsTr("Info"), set: "general", glyph: "\ue88e" },
+        { id: 14, name: qsTr("Lake"), set: "general", glyph: "\ue798" },
+        { id: 9, name: qsTr("Lodging"), set: "general", glyph: "\ue53a" },
+        { id: 30, name: qsTr("Meadow"), set: "general", glyph: "\uf205" },
+        { id: 16, name: qsTr("Mountain"), set: "general", glyph: "\ue3f7" },
+        { id: 3, name: qsTr("Parking"), set: "general", glyph: "\ue531" },
+        { id: 34, name: qsTr("Peak"), set: "general", glyph: "\ue3f7" },
+        { id: 38, name: qsTr("Prints"), set: "hunting", glyph: "\ue91d" },
+        { id: 7, name: qsTr("Restaurant"), set: "general", glyph: "\ue56c" },
+        { id: 13, name: qsTr("River"), set: "fishing", glyph: "\ue798" },
+        { id: 27, name: qsTr("Road"), set: "general", glyph: "\ueacd" },
+        { id: 29, name: qsTr("Rock"), set: "fishing", glyph: "\ue3df" },
+        { id: 39, name: qsTr("Rub"), set: "hunting", glyph: "\uea99" },
+        { id: 40, name: qsTr("Scrape"), set: "hunting", glyph: "\uea99" },
+        { id: 46, name: qsTr("Shot"), set: "hunting", glyph: "\ue719" },
+        { id: 22, name: qsTr("Sight"), set: "general", glyph: "\ue3b0" },
+        { id: 44, name: qsTr("Small game"), set: "hunting", glyph: "\ue799" },
+        { id: 41, name: qsTr("Stand"), set: "hunting", glyph: "\ue2cb" },
+        { id: 28, name: qsTr("Trail"), set: "general", glyph: "\ueacd" },
+        { id: 42, name: qsTr("Trail cam"), set: "hunting", glyph: "\ue3b0" },
+        { id: 18, name: qsTr("Valley"), set: "general", glyph: "\ue3f7" },
+        { id: 12, name: qsTr("Water"), set: "fishing", glyph: "\ue798" },
+        { id: 35, name: qsTr("Waterfall"), set: "fishing", glyph: "\ue798" },
+    ]
+    // What the Add-a-POI picker offers, and the type a new POI gets when none is picked
+    // ("Waypoint" 17; on a Traverse its plain "POI" 26).
+    readonly property var poiTypes: traversePoiTypes ? traversePoiTypeList : ambitPoiTypes
+    readonly property int poiTypeDefault: traversePoiTypes ? 26 : 17
+    // The Ambit1/2 store the older Movescount numbers, which are the Traverse's 0-31 (openambit's
+    // movescount_waypoint_type list; an Ambit2 was seen with 26, "POI"): a POI READ from one is
+    // named from that list too.
+    readonly property var _readPoiTypes: (traversePoiTypes || _isLegacy) ? traversePoiTypeList : ambitPoiTypes
+    function poiTypeIndex(id) {
+        for (let i = 0; i < poiTypes.length; i++)
+            if (poiTypes[i].id === id) return i
+        return poiTypeIndex(poiTypeDefault)
+    }
+    // The entry for a type byte read off the watch; an unknown number reads as the plain type.
+    function poiTypeOf(id) {
+        const list = _readPoiTypes
+        let plain = list[0]
+        const plainId = list === traversePoiTypeList ? 26 : 17
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].id === id) return list[i]
+            if (list[i].id === plainId) plain = list[i]
+        }
+        return plain
+    }
+    function poiTypeGlyph(id) { return poiTypeOf(id).glyph }
+    function poiTypeName(id) { return poiTypeOf(id).name }
+
     // Backup & Restore is write_nav.py's nav --save/restore over the SBEM flash regions.
     // BackupPage used to read supportsRoutes for this, which was fine while the two were the
     // same predicate; they are separated because excluding Kailash from Routes would

@@ -7,6 +7,75 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-13: Traverse Alpha shots, POIs on a Traverse (0.2.67)
+
+**Checked without a watch.** No Traverse or Traverse Alpha was on hand. The watch side comes from
+Suunto's Traverse Alpha 2.0.22 firmware file running in the PC emulator, and from what André's
+own Traverse left on disk before it went: its field lists on firmware 1.0.4 and 2.0.22 (the
+capture of its update) and the 37 moves it held, which all read as before. The desktop app was looked at in Testing mode as a Traverse Alpha. The mobile app
+was built and looked at on the test tablet: two test Hunting moves put into its local data (one is
+the emulated watch's own log) and Testing mode as a Traverse Alpha. The iPhone part was written
+without a Mac: not built.
+
+1. **Shots of a Hunting activity (Traverse Alpha).** The watch counts shots from the recoil and
+   stores each one in the activity with the place where it was. Sommet now reads them: the
+   activity page of a Hunting move shows **Shots** next to distance and duration, the map has a
+   pin at each shot (hover or tap: its number and time), the Activities list has a **Shots**
+   column, the GPX carries the count and one waypoint per shot, and the FIT marks each shot with
+   a user-marker event. Both apps read the same thing; the mobile app's own log reader was run on
+   the PC against the same two emulated logs.
+2. **POIs on a Traverse or Traverse Alpha could not be listed or added, and a route write could
+   lose them.** These watches send a POI in another entry than the Ambit3 (0x53 on firmware
+   2.0.22, 0x52 on 1.0.4, against 0x55) and add an altitude to the record. Sommet knew only the
+   Ambit3's. Reading, adding, removing and putting the POIs back after a route write now use the
+   watch's own form. The emulated Traverse Alpha keeps a POI sent this way and lists it on its
+   own POI screen.
+3. **The Traverse's own 48 POI types.** Its type numbers are not the Ambit3's 18: number 2 is
+   "Camp" on an Ambit3 and "Car" on a Traverse. With a Traverse connected, the Add a POI picker
+   offers its 48 types, the hunting and fishing ones included (Big game, Small game, Bird,
+   Prints, Rub, Scrape, Stand, Trail cam, Bedding, Shot, Fish, Fishing spot), and each POI on
+   the watch shows the name and icon of its type. Ten icons were added to the app's icon font.
+4. **Every POI in the desktop's "On the watch" list drew the plain icon**: the type was never
+   read from the list. It is now, for every watch.
+5. **Copy to watch between an Ambit3 and a Traverse** carried a POI's type number over as it
+   was, so a "Camp" arrived as a "Car". The type now goes over by its icon; a Traverse type the
+   Ambit3 has no icon for (Big game, Shot ...) becomes a plain Waypoint.
+6. **Route waypoints and direction pins on a Traverse** were written with the Ambit3's plain
+   type, which a Traverse draws as "Hill". They now get the Traverse's plain flag.
+7. **A POI added over Bluetooth from the desktop** always got the plain icon: the picked type
+   was dropped on the way. It is sent now, and a Traverse is recognised over Bluetooth too.
+8. **A POI imported from a GPX keeps its elevation on a Traverse.** SuuntoLink hands the watch
+   a POI's altitude, and a Traverse stores it (metres); an Ambit3 POI has none. Imported POIs
+   also get the watch's plain type instead of the other family's number.
+9. **Testing mode in the mobile app now has sample moves and sample POIs**, the desktop's own.
+   Adding and removing a POI there works on a list in memory. A sample Traverse Alpha has a
+   Hunting move with three shots in both apps, so the Shots tile, column and map markers can
+   be looked at without that watch. The sample POIs got fitting types (mountain, water, start).
+10. **Mobile app, Add POI: the chosen type's icon was an empty box.** The selected chip asked for
+   a bold icon font, which does not exist, so Android drew a placeholder. Seen and fixed on the
+   tablet. In Testing mode the type list follows the sample watch, as on the desktop.
+
+Also in this release (desktop, seen on a 1366×768 screen unless said otherwise):
+
+9. **Export all routes** (a user's request): "Export all..." next to the Map/List menu on Routes
+   saves every route of the source shown (the watch, eTrex, Bryton, Magene or the Library) into a
+   folder you pick, one GPX each, named after the route. The window opens in the last export
+   folder. Never overwrites: a second "Tour du Lac" becomes "Tour du Lac (2).gpx". Checked with
+   the Library in a test copy; the watch, eTrex and Bryton were not plugged in with routes on
+   them. **Android**: the same link for the watch and the Library, into Downloads/Sommet routes
+   <date>/. Built, not yet seen on the tablet.
+10. **The window opens maximized**, then the way you left it: maximized, or the size you gave it,
+    never bigger than the screen. It used to open at 1200×800, taller than a 768-pixel screen.
+11. **The zoom fits the screen by itself**: 85 % on a screen 768 pixels high or less, 90 % up to
+    900, 110 % from 1440, until you pick a size yourself. Settings > Appearance has "Fit to
+    screen". Ctrl+wheel takes one 5 % step per wheel notch over any page (a touchpad's many small
+    steps are added up), and a touchpad pinch zooms too.
+12. **Activity page on a short screen** (under 900 pixels high, with a map): the map on the left,
+    the data on the right, so both are visible without scrolling.
+13. **"Linked to chart" works again**: zooming the map zooms the chart to the stretch on screen.
+    The map worked out its visible area wrongly, so the chart never followed it.
+14. **Click and drag to move the activity map**; the chart follows, as with the wheel.
+
 ## 2026-11-12: Export all activities, remembered export folder, Debian 13 fixes, the AmbitApp name gone (0.2.66)
 
 From a user's report (Ambit3 Peak, building from source on Debian 13):

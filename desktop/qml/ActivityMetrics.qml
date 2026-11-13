@@ -32,6 +32,7 @@ QtObject {
         { key: "peakTe",      label: qsTr("Peak TE"),     w: 76 },
         { key: "maxAltitude", label: qsTr("Max alt."),    w: 88 },
         { key: "poolLengths", label: qsTr("Lengths"),     w: 80 },
+        { key: "shots",       label: qsTr("Shots"),       w: 72 },
     ]
 
     function _def(key) {
@@ -63,6 +64,7 @@ QtObject {
         case "peakTe":      return a.peakTrainingEffect || 0
         case "maxAltitude": return a.maxAltitudeMeters || 0
         case "poolLengths": return a.poolLengths || 0
+        case "shots":       return a.shots || 0
         }
         return 0
     }
@@ -87,6 +89,7 @@ QtObject {
         case "peakTe":      return (a.peakTrainingEffect / 10).toFixed(1)
         case "maxAltitude": return WatchUnits.altitude(a.maxAltitudeMeters)
         case "poolLengths": return String(a.poolLengths)
+        case "shots":       return String(a.shots)
         }
         return ""
     }

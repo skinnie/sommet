@@ -45,6 +45,16 @@ POI_GLYPHS = {
     15: "filter_hdr", 16: "water_drop", 17: "place",
 }
 
+# The Traverse / Traverse Alpha has 48 POI types (ambit_format.TRAVERSE_WAYPOINT_TYPES). 38 of
+# them draw one of the 18 Ambit icons above; these 10 have an icon of their own on the watch
+# (cross, i, hook, fish, paw, stand, deer, rabbit, bird, crosshair). Traverse type id -> the
+# nearest Material Symbol: there is no deer (a trophy stands for Big game) and no hunting stand
+# (a ladder, as in "ladder stand").
+TRAVERSE_POI_GLYPHS = {
+    32: "health_cross", 33: "info", 36: "phishing", 38: "pets", 41: "tools_ladder",
+    43: "trophy", 44: "cruelty_free", 45: "raven", 46: "target", 47: "set_meal",
+}
+
 # One-off icons that aren't POI-indexed - name -> Material Symbol glyph name. Coach (2026-08-21,
 # the v2 training-coach nav entry) needed a chat-bubble glyph, nothing existing in the subset
 # fit ("forum" - a conversation bubble, matches the chat half of the Coach screen).
@@ -80,6 +90,14 @@ def main():
         print("ERROR - glyph names not in the font:", missing)
         return 1
 
+    traverse_cp, missing_traverse = {}, []
+    for tid, gname in TRAVERSE_POI_GLYPHS.items():
+        cp = name_to_cp.get(gname)
+        (traverse_cp.__setitem__(tid, cp) if cp is not None else missing_traverse.append((tid, gname)))
+    if missing_traverse:
+        print("ERROR - glyph names not in the font:", missing_traverse)
+        return 1
+
     extra_cp, missing_extra = {}, []
     for key, gname in EXTRA_GLYPHS.items():
         cp = name_to_cp.get(gname)
@@ -89,7 +107,7 @@ def main():
         return 1
 
     keep = existing_codepoints(DESKTOP_TTF) if os.path.exists(DESKTOP_TTF) else set()
-    unicodes = sorted(keep | set(poi_cp.values()) | set(extra_cp.values()))
+    unicodes = sorted(keep | set(poi_cp.values()) | set(traverse_cp.values()) | set(extra_cp.values()))
 
     static = instancer.instantiateVariableFont(
         full, {"wght": 400, "FILL": 0, "GRAD": 0, "opsz": 24}, inplace=False)
@@ -108,6 +126,9 @@ def main():
     print("\nPOI type -> glyph -> codepoint (source for Icons.qml + PoiScreen POI_TYPE_GLYPHS):")
     for tid in sorted(POI_GLYPHS):
         print(f"  {tid:2d}  {POI_GLYPHS[tid]:16}  U+{poi_cp[tid]:04X}  \\u{poi_cp[tid]:04x}")
+    print("\nTraverse-only POI type -> glyph -> codepoint (Icons.qml traversePoiGlyphs, PoiTypes.ts):")
+    for tid in sorted(TRAVERSE_POI_GLYPHS):
+        print(f"  {tid:2d}  {TRAVERSE_POI_GLYPHS[tid]:16}  U+{traverse_cp[tid]:04X}  \\u{traverse_cp[tid]:04x}")
     if extra_cp:
         print("\nExtra one-off icons (source for Icons.qml):")
         for key in sorted(extra_cp):

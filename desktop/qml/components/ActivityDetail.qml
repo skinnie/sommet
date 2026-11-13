@@ -116,8 +116,21 @@ Item {
             avg_speed: a.avgSpeedMh ? a.avgSpeedMh / 3600 : null, max_speed: a.maxSpeedMh ? a.maxSpeedMh / 3600 : null,
             kcal: a.energyKcal, recovery_s: a.recoverySeconds,
             pte: a.peakTrainingEffect ? a.peakTrainingEffect / 10 : null,
-            pool_lengths: a.poolLengths, max_alt: a.maxAltitudeMeters
+            pool_lengths: a.poolLengths, shots: a.shots, max_alt: a.maxAltitudeMeters
         }
+    }
+    // One pin per shot a Traverse Alpha counted where it had a GPS position (hover: its number
+    // and the time of day).
+    readonly property var _shotMarkers: {
+        const pts = (activity && activity.shotPoints) || []
+        const out = []
+        for (let i = 0; i < pts.length; i++) {
+            const t = pts[i].time ? new Date(pts[i].time) : null
+            const clock = t && !isNaN(t.getTime()) ? " · " + Qt.formatTime(t, "HH:mm:ss") : ""
+            out.push({ lat: pts[i].lat, lon: pts[i].lon, label: qsTr("Shot %1").arg(i + 1) + clock,
+                       glyph: Icons.shot, color: Theme.hard })
+        }
+        return out
     }
 
     // "Compared with your usual" (pool swims: longest non-stop vs earlier swims instead).
@@ -519,6 +532,7 @@ Item {
                     coloredSegments: root._coloredSegments
                     cursorPoint: root._cursorPoint
                     highlightCoords: root._highlight
+                    markers: root._shotMarkers
                     onViewportChanged: root._chartFromMap()
                     // Click and drag to pan (the chart follows, like with the wheel). It takes
                     // the drag from the page's Flickable so a drag on the map moves the map.

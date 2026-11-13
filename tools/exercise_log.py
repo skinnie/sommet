@@ -273,8 +273,20 @@ def parse_log_header(data, offset, datalen, unknown2_padding_48=FLAGS_UNKNOWN2_P
     h["battery_end"] = c.u8()
     c.skip(4)  # unknown5
     h["distance_before_calib"] = c.u32()
+    if datalen >= SHOT_HEADER_LEN:
+        h["shots"] = read16(data, offset + SHOT_COUNT_OFFSET)
     return h
 
+
+# Traverse / Traverse Alpha firmware 2.0.22 writes a header 12 bytes longer (1509) than the
+# Ambit3 2.4.17 and the Traverse 1.0.4 (1497, real logs of both). The 12 new bytes sit just
+# before the second copy of the activity name and start with the number of counted shots (u16).
+# Read from the Alpha 2.0.22 program and seen in the emulator on 2026-11-13: a Hunting recording
+# with two counted shots saved 2 there and showed "Shot 2" in its summary. No real Alpha log
+# has been read yet.
+SHOT_HEADER_LEN = 1509
+SHOT_COUNT_OFFSET = 0xD9
+NO_POSITION = 0x7FFFFFFF           # latitude/longitude of a shot counted without a GPS fix
 
 # A swimming_turn's time compensation above this is not a compensation (see parse_sample).
 SWIM_TURN_MAX_COMP_MS = 120_000
@@ -420,6 +432,17 @@ def parse_sample(data, offset, periodic_spec_ref, samples, time_compensators):
             s["version"] = c.bytes(4)
             s["build_year"] = c.u16(); s["build_month"] = c.u8(); s["build_day"] = c.u8()
             s["build_hour"] = c.u8(); s["build_minute"] = c.u8(); s["build_msec"] = c.u16()
+        elif episodic_type == 0x20 and sample_len == 14:
+            # A shot the Traverse Alpha counted during a Hunting recording (not in openambit):
+            # where the watch was, latitude then longitude (i32, 1e-7 degrees like gps_base).
+            # Same source and date as SHOT_HEADER_LEN above: seen with the "no position" value
+            # and, with the emulated GPS chip reporting a position, with that position.
+            s["type"] = "shot"
+            lat, lon = struct.unpack_from("<ii", data, c.offset)
+            c.skip(8)
+            has_position = lat != NO_POSITION and lon != NO_POSITION
+            s["latitude"] = lat if has_position else None
+            s["longitude"] = lon if has_position else None
         elif episodic_type == 0x1e and sample_len >= 26:
             # A native guided workout entering a step (not in openambit). Read off André's
             # pool swim of 2026-10-04 (Ambit3 Sport, fw 2.4.17), which ran three workouts whose
@@ -797,6 +820,18 @@ def to_gpx(header, samples):
         if ortho_drop is not None:
             hrv_lines.append(f'      <hrv_ortho_drop>{ortho_drop}</hrv_ortho_drop>')
 
+    # Shots a Traverse Alpha counted while hunting (see parse_sample, episodic 0x20): one
+    # waypoint each, before the track as GPX wants. No <name> on purpose: the desktop's GPX
+    # reader takes any <name> as the move's name. A shot counted without a GPS fix has no
+    # place and is only in the <shots> count below.
+    shot_lines = []
+    for s in samples:
+        if s.get("type") == "shot" and s.get("latitude") is not None:
+            when = f'<time>{_iso_utc(s["utc_time"])}</time>' if "utc_time" in s else ""
+            shot_lines.append(
+                f'  <wpt lat="{s["latitude"] / 1e7:.7f}" lon="{s["longitude"] / 1e7:.7f}">'
+                f'{when}<sym>Shot</sym><type>shot</type></wpt>')
+
     meta_time = (_iso_utc(header["utc_start"]) if "utc_start" in header else
                  f'{header["year"]:04d}-{header["month"]:02d}-{header["day"]:02d}'
                  f'T{header["hour"]:02d}:{header["minute"]:02d}:{header["msec"]//1000:02d}Z')
@@ -806,6 +841,7 @@ def to_gpx(header, samples):
         '<gpx version="1.1" creator="Sommet exercise_log.py"'
         ' xmlns="http://www.topografix.com/GPX/1/1">',
         f'  <metadata><time>{meta_time}</time></metadata>',
+        *shot_lines,
         f'  <trk><name>{header["activity_name"]}</name>',
         '    <extensions>',
         f'      <duration>{header["duration_ms"] // 1000}</duration>',
@@ -839,6 +875,7 @@ def to_gpx(header, samples):
         f'      <pool_lengths>{header["swimming_pool_lengths"]}</pool_lengths>',
         f'      <max_altitude>{header["altitude_max"]}</max_altitude>',
         *hrv_lines,
+        *([f'      <shots>{header["shots"]}</shots>'] if "shots" in header else []),
         '    </extensions>',
         '  <trkseg>',
     ]
@@ -1129,6 +1166,7 @@ def to_fit(header, samples, rule_labels=None, rule_stream_map=None):
     _u8(data, 1)
 
     _write_workout_steps(data, extract_workout_steps(header, samples))
+    _write_shots(data, extract_shots(header, samples))
 
     # Developer-data declarations for the logged Suunto App outputs (FIT dev fields). One
     # developer_data_id (our fixed app UUID) plus one field_description per present slot; the
@@ -1320,6 +1358,28 @@ def _write_workout_steps(data, steps):
         _u8(data, _STEP_TO_FIT_INTENSITY.get(st["step"], 0xFF))
         _u8(data, 9); _u32(data, t_g); _u8(data, 4); _u8(data, 0); _u32(data, index)
         index += 1
+
+
+def extract_shots(header, samples):
+    """The shots a Traverse Alpha counted during the move, in order: [{time}], a UTC datetime."""
+    start = datetime.datetime(
+        header["year"], header["month"], header["day"],
+        header["hour"], header["minute"], header["msec"] // 1000,
+        tzinfo=datetime.timezone.utc)
+    return [{"time": s.get("utc_time") or (start + datetime.timedelta(milliseconds=s["time"]))}
+            for s in samples if s["type"] == "shot"]
+
+
+def _write_shots(data, shots):
+    """Each counted shot as a FIT `event` (global 21): event 32 (user_marker), type 3 (marker),
+    data = the shot's number in the move. FIT has no shot message of its own; where the shot
+    was is the record at that time."""
+    if not shots:
+        return
+    _write_def(data, 9, 21, [(253, 4, _U32), (0, 1, _E), (1, 1, _E), (3, 4, _U32)])
+    for number, shot in enumerate(shots, 1):
+        _u8(data, 9); _u32(data, int(shot["time"].timestamp()) - GARMIN_EPOCH)
+        _u8(data, 32); _u8(data, 3); _u32(data, number)
 
 
 # One beat interval the belt can really have produced, ms (200 down to 30 bpm). Outside it the
@@ -1547,6 +1607,7 @@ def _to_fit_no_gps(header, samples, rule_labels=None, rule_stream_map=None):
         _write_pool_lengths(data, lengths)
 
     _write_workout_steps(data, extract_workout_steps(header, samples))
+    _write_shots(data, extract_shots(header, samples))
 
     # Developer-data declarations for logged Suunto App outputs - identical to the GPS path.
     if rule_slots:

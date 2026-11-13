@@ -13,8 +13,16 @@ import { t } from '../i18n';
 // [u8 id][u8 len | 0xff + u32 LE len][len bytes]. Entry 0x55 is a POI: three
 // NUL-terminated strings (name, route_name, stamp), five u8, then lat/lon as
 // i32 LE x 1e7.
+//
+// 0x55 is the Ambit3's entry. From SuuntoLink's own descriptors a Traverse / Traverse Alpha
+// sends its POIs in entry 0x53 (firmware 2.0.22) or 0x52 (1.0.4), with an int16 altitude after
+// the longitude; the Traverse Alpha 2.0.22 program answers that way in the PC emulator
+// (2026-11-13). A 0x0b24 reply holds POI entries only, so all three numbers are read, and a
+// list written back keeps the number each entry came in. Twin of tools/ambit_format.py
+// POI_ENTRIES. Not seen on a real Traverse.
 
 const POI_ENTRY_ID = 0x55;
+const POI_ENTRY_IDS = [POI_ENTRY_ID, 0x53, 0x52];
 
 function decodeUtf8(bytes: Uint8Array, start: number, end: number): string {
   let out = '';
@@ -66,6 +74,10 @@ export interface WatchPoi {
   name: string;
   latitude: number;
   longitude: number;
+  /** The type byte (the watch's icon), in the watch's own numbering (see PoiTypes.ts). */
+  type?: number;
+  /** Elevation in metres of a POI imported from a GPX; a Traverse keeps it, an Ambit3 cannot. */
+  elevation?: number;
 }
 
 /** Reads and decodes the watch's current POI list. Read-only, no risk to the watch. */
@@ -94,6 +106,7 @@ export async function readPoisFromWatch(): Promise<WatchPoi[]> {
           name: w.name || 'POI',
           latitude: w.lat_e7 / 1e7,
           longitude: w.lon_e7 / 1e7,
+          ...(typeof w.type === 'number' ? { type: w.type } : {}),
         }));
     }
   } catch { /* not a legacy watch, or detection failed - fall through to the SBEM read */ }
@@ -105,7 +118,7 @@ export async function readPoisFromWatch(): Promise<WatchPoi[]> {
 
 /** A 0x55 entry of a raw POI read, and the POI it holds: null for an empty entry (`55 00`, a
  * name the watch could not keep) or one this decoder does not understand. */
-export interface PoiEntry { start: number; end: number; poi: WatchPoi | null }
+export interface PoiEntry { start: number; end: number; poi: WatchPoi | null; id?: number }
 
 function decodePoi(bytes: Uint8Array, entry: SbemEntry): WatchPoi | null {
   let p = entry.start;
@@ -121,28 +134,30 @@ function decodePoi(bytes: Uint8Array, entry: SbemEntry): WatchPoi | null {
   p = routeNameEnd + 1;
   const stampEnd = nulAt(p);
   p = stampEnd + 1;
-  p += 5; // route_index, type, sub_type, type_index, flags — not needed for a GPX export
+  const type = p + 1 < entry.end ? bytes[p + 1] : undefined;
+  p += 5; // route_index, type, sub_type, type_index, flags
   if (p + 8 > entry.end) return null; // malformed entry, skip rather than throw
   const lat = (new DataView(bytes.buffer, bytes.byteOffset + p, 4)).getInt32(0, true) / 1e7;
   const lon = (new DataView(bytes.buffer, bytes.byteOffset + p + 4, 4)).getInt32(0, true) / 1e7;
-  return { name: name || 'POI', latitude: lat, longitude: lon };
+  return { name: name || 'POI', latitude: lat, longitude: lon, type };
 }
 
 export function poiEntries(bytes: Uint8Array): PoiEntry[] {
   return sbemEntries(bytes)
-    .filter(e => e.id === POI_ENTRY_ID)
-    .map(e => ({ start: e.start, end: e.end, poi: decodePoi(bytes, e) }));
+    .filter(e => POI_ENTRY_IDS.includes(e.id))
+    .map(e => ({ start: e.start, end: e.end, poi: decodePoi(bytes, e), id: e.id }));
 }
 
 /** A raw POI list shaped like a 0x0b24 read (`read`'s 14-byte header, then `keep`'s entries,
  * byte for byte, in that order): what setPoiListRaw takes. Empty when nothing is kept. */
-export function buildPoiList(read: Uint8Array, keep: { start: number; end: number }[]): Uint8Array {
+export function buildPoiList(read: Uint8Array, keep: { start: number; end: number; id?: number }[]): Uint8Array {
   if (keep.length === 0) return new Uint8Array(0);
   const out: number[] = Array.from(read.subarray(0, 14));
   for (const e of keep) {
     const len = e.end - e.start;
-    if (len < 0xff) out.push(POI_ENTRY_ID, len);
-    else out.push(POI_ENTRY_ID, 0xff, len & 0xff, (len >> 8) & 0xff, (len >> 16) & 0xff, (len >>> 24) & 0xff);
+    const id = e.id ?? POI_ENTRY_ID;      // the entry number it was read in (a Traverse's differs)
+    if (len < 0xff) out.push(id, len);
+    else out.push(id, 0xff, len & 0xff, (len >> 8) & 0xff, (len >> 16) & 0xff, (len >>> 24) & 0xff);
     for (let i = e.start; i < e.end; i++) out.push(read[i]);
   }
   return Uint8Array.from(out);
@@ -249,6 +264,15 @@ export async function exportPoisToGpx(onState: (s: ExportPoiState) => void): Pro
   }
 }
 
+/** The altitude sent with a POI: metres, or 30000 for "none" (what the watch itself writes for a
+ * POI defined by hand). Twin of tools/ambit_format.py poi_altitude(). Only a Traverse stores it. */
+export const POI_ALTITUDE_NONE = 30000;
+export function poiAltitude(elevationM: number | null | undefined): number {
+  if (elevationM === null || elevationM === undefined || !Number.isFinite(elevationM)) return POI_ALTITUDE_NONE;
+  const m = Math.round(elevationM);
+  return m >= -500 && m <= 9000 ? m : POI_ALTITUDE_NONE;
+}
+
 export interface AddPoiState {
   phase: 'idle' | 'connecting' | 'writing' | 'done' | 'error';
   error?: string;
@@ -262,7 +286,11 @@ export interface AddPoiState {
 export async function addPoiToWatch(
   name: string, lat: number, lon: number,
   onState: (s: AddPoiState) => void,
-  type: number = 17,  // Ambit POI type byte 0-17 (icon); default 17 = Waypoint
+  // The POI type byte (icon) in the watch's own numbering (PoiTypes.ts). -1 = that watch's
+  // plain type: the native add writes 17 ("Waypoint") on an Ambit3 and 26 ("POI") on a Traverse.
+  type: number = -1,
+  // Elevation in metres (a GPX waypoint's <ele>), undefined when there is none.
+  elevation?: number,
 ): Promise<void> {
   onState({ phase: 'connecting' });
   try {
@@ -274,7 +302,7 @@ export async function addPoiToWatch(
 
   onState({ phase: 'writing' });
   try {
-    await addPoi(name, lat, lon, type);
+    await addPoi(name, lat, lon, type, poiAltitude(elevation));
     await clearPoiCache(); // real watch state just changed - see below
     onState({ phase: 'done' });
   } catch (e: any) {
@@ -296,6 +324,18 @@ export async function addPoiToWatch(
 // header comment): a persisted last-known snapshot for an instant "On the watch" list, kept
 // fresh by a real watch read in the background, not a scheme for skipping that read.
 const POI_CACHE_KEY = 'sommet:cachedPois';
+// The watch the cached list was read from, by the name it gives itself ("Emu", "Jabiru",
+// "Loon"): the POI screen offers that watch's own type list (PoiTypes.ts) before any read.
+const POI_WATCH_MODEL_KEY = 'sommet:cachedPoisWatchModel';
+
+/** The model of the watch the POI list was last read from, '' when never read. */
+export async function getCachedPoiWatchModel(): Promise<string> {
+  try {
+    return (await AsyncStorage.getItem(POI_WATCH_MODEL_KEY)) ?? '';
+  } catch {
+    return '';
+  }
+}
 
 /** The locally persisted copy of the watch's POIs, if any. */
 export async function getCachedPois(): Promise<WatchPoi[] | null> {
@@ -319,6 +359,10 @@ export async function readOnWatchPois(): Promise<WatchPoi[]> {
   try {
     const data = await readPoisFromWatch();
     await AsyncStorage.setItem(POI_CACHE_KEY, JSON.stringify(data)).catch(() => {});
+    try {
+      const info: any = await getDeviceInfo();
+      await AsyncStorage.setItem(POI_WATCH_MODEL_KEY, String(info?.model || info?.name || ''));
+    } catch { /* the list is still good; the type names fall back to the Ambit3 list */ }
     return data;
   } finally {
     await disconnect().catch(() => {});
@@ -350,5 +394,6 @@ export async function pickAndParseWaypoints(): Promise<WatchPoi[] | null> {
   const xml = await RNFS.readFile(gpxPath, 'utf8');
   const waypoints = parseGpxWaypoints(xml);
   if (waypoints.length === 0) throw new Error('No waypoints (<wpt>) found in this GPX');
-  return waypoints.map(w => ({ name: w.name, latitude: w.latitude, longitude: w.longitude }));
+  return waypoints.map(w => ({ name: w.name, latitude: w.latitude, longitude: w.longitude,
+                               ...(w.elevation !== undefined ? { elevation: w.elevation } : {}) }));
 }

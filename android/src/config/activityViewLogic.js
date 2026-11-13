@@ -9,7 +9,7 @@
 //   facts    one activity's summary numbers, normalised by each app's small adapter:
 //            {sport_id, dist_m, duration_s, moving_s, elapsed_s, ascent_m, descent_m, avg_hr,
 //             max_hr, avg_cad, max_cad, avg_speed, max_speed (m/s), kcal, recovery_s, pte,
-//             pool_lengths, max_alt, min_alt, start (ISO)}
+//             pool_lengths, shots, max_alt, min_alt, start (ISO)}
 //   st       tools/activity_streams.py output (or the Android twin) - may be null until loaded
 //   units    {imperialDistance, imperialAltitude, imperialTemperature} (desktop: watch setting)
 
@@ -180,6 +180,7 @@ function metricRaw(cfg, key, sport, facts, st, zoneGroups) {
         var swum = st && st.lengths ? st.lengths.filter(function (l) { return l.active; }).length : 0;
         return first(swum || null, f.pool_lengths);
     case "pool_length": return first(sm.pool_length_m);
+    case "shots": return first(f.shots);
     case "strokes_per_length":
         if (!st || !st.lengths || !st.lengths.length) return null;
         return median(st.lengths.filter(function (l) { return l.active; }).map(function (l) { return l.strokes; }));

@@ -102,6 +102,14 @@ _Avoid_: track (a track is what was recorded), course
 One saved point on a watch, with a name.
 _Avoid_: waypoint (the word for a point inside a Route), favourite, location
 
+**POI type**:
+The kind of a POI, which decides the icon the watch draws for it (Camp, Water, Big game ...). Each watch family has its own list and its own numbers: 18 on an Ambit3, 48 on a Traverse.
+_Avoid_: POI icon (the icon follows from the type), category
+
+**Shot**:
+A gunshot a Suunto Traverse Alpha counted from the recoil during a Hunting Activity. It is part of the Activity, with the place where the watch was. A POI of type "Shot" is something else: a point the hunter saves by hand.
+_Avoid_: shot POI, shot detection (the watch's setting, not the counted event)
+
 **Direction pin**:
 A point Sommet adds to a Route at a turn or crossing, so that a watch or an eTrex announces it.
 _Avoid_: turn waypoint, cue, direction waypoint

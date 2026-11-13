@@ -173,7 +173,7 @@ Two points worth stating plainly:
 
 ## Feature matrix — Android app (USB-OTG + Bluetooth LE)
 
-Mobile app version 0.2.60 (desktop app 0.2.66). `U` = over USB-OTG, `B` = over Bluetooth LE.
+Mobile app version 0.2.67 (desktop app 0.2.67). `U` = over USB-OTG, `B` = over Bluetooth LE.
 
 | Feature | Ambit 1 | Ambit2 family | Ambit3 family | Traverse / Alpha | Kailash |
 |---|---|---|---|---|---|

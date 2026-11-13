@@ -25,6 +25,8 @@ export interface RoutePoint extends LatLon {
 
 export interface RouteWaypoint extends LatLon {
   name: string;
+  /** The waypoint's <ele> in metres, when the file has one. */
+  elevation?: number;
 }
 
 export interface ParsedRoute {
@@ -127,7 +129,8 @@ export function parseGpxWaypoints(gpxXml: string): RouteWaypoint[] {
     const pt = parsePoint(raw);
     if (!pt) continue;
     const name = raw.name ? String(raw.name) : `POI ${out.length + 1}`;
-    out.push({ latitude: pt.latitude, longitude: pt.longitude, name });
+    out.push({ latitude: pt.latitude, longitude: pt.longitude, name,
+               ...(pt.elevation !== null && pt.elevation !== undefined ? { elevation: pt.elevation } : {}) });
   }
   return out;
 }

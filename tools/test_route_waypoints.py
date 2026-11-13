@@ -65,6 +65,22 @@ def test_traverse_altitude():
     assert int.from_bytes(raw, "little") == F.ALTITUDE_NONE   # what SuuntoLink writes for none
 
 
+def test_waypoint_type_is_the_plain_one_of_each_watch():
+    """A route waypoint's type byte is read against the same list as a POI's: on a Traverse the
+    one routine that draws a point (FUN_000190f6 of the 2.0.22 program, record byte 0x32) serves
+    the route-waypoint list and the POI list alike, through its 48-type table. There 17 is
+    "Hill" (a mountain icon); the plain flag is 26 ("POI"). On an Ambit3 it is 17 ("Waypoint")."""
+    route = _route_with_pins()
+    for size, plain in ((52, F.WAYPOINT_TYPE_DEFAULT), (54, F.TRAVERSE_WAYPOINT_TYPE_DEFAULT)):
+        flash, _ = serialize([route], size)
+        count = F.WaypointHeader.parse(flash.read(F.WAYPOINT_BASE, 6)).count
+        assert count >= 2
+        types = {F.WaypointTail.parse(F.WaypointDescriptor.parse(
+            flash.read(F.WAYPOINT_DESC + size * i, size)).tail).type for i in range(count)}
+        assert types == {plain}, (size, types)
+    assert (F.WAYPOINT_TYPE_DEFAULT, F.TRAVERSE_WAYPOINT_TYPE_DEFAULT) == (17, 26)
+
+
 def test_reset_and_size_choice():
     assert write_nav.build_reset(54)[1][0][2] == bytes.fromhex("36030000ffff")
     assert write_nav.build_reset()[1][0][2] == F.WAYPOINT_HEADER_RESET

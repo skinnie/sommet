@@ -1152,7 +1152,37 @@ static int date_time_set(ambit_object_t *object, struct tm *tm)
 #define AMBIT3_CMD_POI_WRITE  0x0b25
 #define AMBIT3_CMD_NAV_COMMIT 0x0b04 /* == ambit_command_nav_memory_delete in protocol.h; that name is wrong, the value isn't */
 
-#define AMBIT3_POI_ENTRY_ID   0x55
+/* The SBEM entry a POI ("WayPoint") travels in, from SuuntoLink's own descriptors: 0x55 on the
+ * Ambit3 (Peak/Sport/Run 2.4.17, Vertical 1.1.22), 0x53 on the Traverse / Traverse Alpha 2.0.22
+ * and 0x52 on the Traverse 1.0.4. On the Traverse the record also ends with an int16 altitude and
+ * its type byte is one of the Traverse's own 48 (0-47, plain "POI" = 26), not the Ambit's 18.
+ * The Traverse Alpha 2.0.22 program in the PC emulator answers 0x0b24 with 0x53 entries and does
+ * not keep a 0x55 record (2026-11-13). Twin of tools/ambit_format.py poi_entry_for_product().
+ * Not seen on a real Traverse. */
+#define AMBIT3_POI_ENTRY_ID          0x55
+#define TRAVERSE_POI_ENTRY_ID        0x53
+#define TRAVERSE_FW1_POI_ENTRY_ID    0x52
+#define TRAVERSE_POI_TYPE_MAX        47
+#define TRAVERSE_POI_TYPE_DEFAULT    26
+#define AMBIT3_POI_ALTITUDE_NONE     30000
+
+static int ambit3_is_traverse(const ambit_object_t *object)
+{
+    return object->driver_data->fw_gen == TRAVERSE_FW_GEN1 || object->driver_data->fw_gen == TRAVERSE_FW_GEN2;
+}
+
+static uint8_t ambit3_poi_entry_id(const ambit_object_t *object)
+{
+    if (object->driver_data->fw_gen == TRAVERSE_FW_GEN2) return TRAVERSE_POI_ENTRY_ID;
+    if (object->driver_data->fw_gen == TRAVERSE_FW_GEN1) return TRAVERSE_FW1_POI_ENTRY_ID;
+    return AMBIT3_POI_ENTRY_ID;
+}
+
+/* A 0x0b24 reply holds POI entries only; which number they carry depends on the watch. */
+static int ambit3_is_poi_entry_id(uint8_t id)
+{
+    return id == AMBIT3_POI_ENTRY_ID || id == TRAVERSE_POI_ENTRY_ID || id == TRAVERSE_FW1_POI_ENTRY_ID;
+}
 
 /* [u32 0][u8 0x01][u8 0x01]["SBEM0102"] -- the fixed 14-byte prefix every
  * SBEM0102-framed write (not just POIs) uses. Confirmed byte for byte
@@ -1319,7 +1349,7 @@ static int ambit3_parse_poi_entries(const uint8_t *buf, size_t len,
         libambit_sbem0102_data_reset(&poi_entries);
 
         while (libambit_sbem0102_data_next(&poi_entries) == 0) {
-            if (libambit_sbem0102_data_id(&poi_entries) == AMBIT3_POI_ENTRY_ID) {
+            if (ambit3_is_poi_entry_id(libambit_sbem0102_data_id(&poi_entries))) {
                 if (entry_count == max_entries) {
                     /* Refuse rather than return a cut list: a route write would put back
                      * only the first max_entries and lose the rest. */
@@ -1354,6 +1384,7 @@ static int ambit3_read_poi_entries(ambit_object_t *object,
  * there is nothing to write at all. Caller frees the returned buffer.
  */
 static uint8_t *ambit3_build_poi_write_payload(
+    uint8_t entry_id,
     const uint8_t *const *bodies, const uint32_t *body_lens, size_t entry_count,
     const uint8_t *new_record, size_t new_record_len,
     size_t *out_len)
@@ -1378,7 +1409,7 @@ static uint8_t *ambit3_build_poi_write_payload(
     uint8_t *p = payload;
     memcpy(p, AMBIT3_SBEM_WRITE_PREFIX, sizeof(AMBIT3_SBEM_WRITE_PREFIX));
     p += sizeof(AMBIT3_SBEM_WRITE_PREFIX);
-    *p++ = AMBIT3_POI_ENTRY_ID;
+    *p++ = entry_id;
     *p++ = (uint8_t)total_body_len;
     if (new_record != NULL) {
         memcpy(p, new_record, new_record_len);
@@ -1425,7 +1456,7 @@ static int ambit3_write_poi_bodies(ambit_object_t *object,
             return -1;
         }
         memcpy(buf, AMBIT3_SBEM_WRITE_PREFIX, sizeof(AMBIT3_SBEM_WRITE_PREFIX));
-        buf[sizeof(AMBIT3_SBEM_WRITE_PREFIX)] = AMBIT3_POI_ENTRY_ID;
+        buf[sizeof(AMBIT3_SBEM_WRITE_PREFIX)] = ambit3_poi_entry_id(object);
         buf[sizeof(AMBIT3_SBEM_WRITE_PREFIX) + 1] = (uint8_t)used;
         if (libambit_protocol_command(object, AMBIT3_CMD_POI_WRITE, buf, head + used, NULL, NULL, 0) != 0) {
             LOG_ERROR("ambit3_write_poi_bodies: a POI write (0x0b25) failed");
@@ -1461,17 +1492,26 @@ static size_t ambit3_poi_name_len(const char *name)
  * after a 0x0b04, which empties the store (assets/pcap/ambit3poiimport). Checked by the
  * count (0x0b02) going up by exactly one. Never touches the Waypoints/Routes regions.
  * Byte layout ported from sommet/tools/ambit_format.py's build_poi_record().
- * `name` must be non-empty. Returns 0 on success, -1 on failure.
+ * `name` must be non-empty. `altitude` is in metres (30000 = none) and is stored by a Traverse
+ * only: SuuntoLink's own POI code hands the watch the cloud POI's altitude (poi.js), and an
+ * Ambit3 record has no such field. Returns 0 on success, -1 on failure.
  */
-int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat, double lon, int type)
+int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat, double lon, int type,
+                            int altitude)
 {
     if (object == NULL || object->driver_data == NULL || name == NULL || name[0] == '\0') {
         LOG_ERROR("ambit3_add_poi_to_watch: invalid arguments");
         return -1;
     }
-    /* POI type byte 0-17 (the icon the watch shows). Out of range -> 17 ("Waypoint"),
-     * what the watch itself uses, so a bad value never corrupts the record. */
-    if (type < 0 || type > 17) type = 17;
+    /* POI type byte (the icon the watch shows): 0-17 on an Ambit3, 0-47 on a Traverse (its own
+     * list). Out of range -> the watch's plain type (17 "Waypoint", 26 "POI" on a Traverse),
+     * so a bad value never corrupts the record. */
+    const int traverse = ambit3_is_traverse(object);
+    if (traverse) {
+        if (type < 0 || type > TRAVERSE_POI_TYPE_MAX) type = TRAVERSE_POI_TYPE_DEFAULT;
+    } else if (type < 0 || type > 17) {
+        type = 17;
+    }
 
     int count_before = ambit3_poi_count(object);
     if (count_before < 0) {
@@ -1508,7 +1548,10 @@ int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat
      * watch-made POI rather than an imported one. */
     size_t name_len = ambit3_poi_name_len(name);
     size_t stamp_len = strlen(stamp);
-    size_t record_len = name_len + 1 + 1 /* empty route_name + its NUL */ + stamp_len + 1 + 5 + 8;
+    /* A Traverse record ends with an int16 altitude; 30000 = not known, what the watch itself
+     * writes for a POI defined by hand. */
+    size_t record_len = name_len + 1 + 1 /* empty route_name + its NUL */ + stamp_len + 1 + 5 + 8
+                        + (traverse ? 2 : 0);
     uint8_t *record = (uint8_t*)malloc(record_len);
     int ret = -1;
     if (record == NULL) {
@@ -1530,9 +1573,16 @@ int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat
     uint32_t lon_le = htole32((uint32_t)lon_i);
     memcpy(p, &lat_le, 4); p += 4;
     memcpy(p, &lon_le, 4); p += 4;
+    if (traverse) {
+        /* Metres (int16), 30000 = none. Only a height on Earth is written. */
+        if (altitude < -500 || altitude > 9000) altitude = AMBIT3_POI_ALTITUDE_NONE;
+        *p++ = (uint8_t)((uint16_t)(int16_t)altitude & 0xff);
+        *p++ = (uint8_t)((uint16_t)(int16_t)altitude >> 8);
+    }
 
     size_t payload_len = 0;
-    uint8_t *payload = ambit3_build_poi_write_payload(NULL, NULL, 0, record, record_len, &payload_len);
+    uint8_t *payload = ambit3_build_poi_write_payload(ambit3_poi_entry_id(object), NULL, NULL, 0,
+                                                      record, record_len, &payload_len);
     if (payload == NULL) {
         LOG_ERROR("ambit3_add_poi_to_watch: failed to build the POI write payload");
     } else if (libambit_protocol_command(object, AMBIT3_CMD_POI_WRITE, payload, payload_len, NULL, NULL, 0) != 0) {

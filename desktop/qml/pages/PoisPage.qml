@@ -111,18 +111,17 @@ PageFlickable {
     property real poiLat: WeatherService.latitude
     property real poiLon: WeatherService.longitude
 
-    // POI type (the icon the watch shows). The 18 Ambit type bytes, from Lars's
-    // "Types of Poi.md" (assets/Lars) - the single source is tools/ambit_format.py's
-    // WAYPOINT_TYPES; index in this list == the type id 0-17. Default "Waypoint" (17), what
-    // the watch itself uses. The watch renders a distinct icon per type; the app shows the
-    // name (the font is subsetted, so no per-type glyph here).
-    property int poiType: 17
-    readonly property var poiTypeNames: [
-        qsTr("Building"), qsTr("Cave"), qsTr("Camp"), qsTr("Car"), qsTr("Crossroads"),
-        qsTr("Beginning"), qsTr("End"), qsTr("Food"), qsTr("Forest"), qsTr("Geocache"),
-        qsTr("Lodging"), qsTr("Meadow"), qsTr("Mountain"), qsTr("Sight"), qsTr("Road"),
-        qsTr("Rock"), qsTr("Water"), qsTr("Waypoint")
-    ]
+    // POI type (the icon the watch shows): the type BYTE written to the watch, one of the
+    // connected watch's own list (DeviceCapabilities.poiTypes: the Ambit3's 18, or the 48 of a
+    // Traverse / Traverse Alpha, which are numbered differently). Starts at that watch's plain
+    // type ("Waypoint" 17, "POI" 26 on a Traverse), what the watch itself uses.
+    property int poiType: DeviceCapabilities.poiTypeDefault
+    // Another kind of watch selected: a number picked from the other list means something else
+    // there, so the picker goes back to the plain type.
+    Connections {
+        target: DeviceCapabilities
+        function onTraversePoiTypesChanged() { root.poiType = DeviceCapabilities.poiTypeDefault }
+    }
 
     Column {
         id: column
@@ -200,9 +199,10 @@ PageFlickable {
                         focusPolicy: Qt.ClickFocus
                         leftPadding: Theme.spacingSmall
                         rightPadding: indicator.width + Theme.spacingSmall
-                        model: root.poiTypeNames
-                        currentIndex: root.poiType
-                        onActivated: (i) => root.poiType = i
+                        model: DeviceCapabilities.poiTypes
+                        textRole: "name"
+                        currentIndex: DeviceCapabilities.poiTypeIndex(root.poiType)
+                        onActivated: (i) => root.poiType = DeviceCapabilities.poiTypes[i].id
                         // Open the list just below the box instead of on top of it. Overlapping,
                         // the popup's rounded rectangle sat over the box's own rounded rectangle
                         // and the two borders doubled up at the top corners (André, 2026-08-13:
@@ -222,7 +222,7 @@ PageFlickable {
                                 spacing: Theme.spacingSmall
                                 Icon {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    glyph: Icons.poiTypeGlyphs[poiTypeBox.currentIndex]
+                                    glyph: DeviceCapabilities.poiTypeGlyph(root.poiType)
                                     size: 22
                                     color: Theme.text
                                 }
@@ -238,7 +238,7 @@ PageFlickable {
                         // Per-row icon in the dropdown popup too, not just the selected box: the
                         // shared RoundedComboBox delegate is text-only, so override it here so every
                         // type in the list carries its own watch glyph (André: "we miss the icons of
-                        // type of poi"). index is the type id (0-17), matching poiTypeNames order.
+                        // type of poi"). Each row is one entry of DeviceCapabilities.poiTypes.
                         delegate: ItemDelegate {
                             width: poiTypeBox.width
                             height: 34
@@ -247,13 +247,13 @@ PageFlickable {
                                 spacing: Theme.spacingSmall
                                 Icon {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    glyph: Icons.poiTypeGlyph(index)
+                                    glyph: modelData.glyph
                                     size: 20
                                     color: Theme.text
                                 }
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData
+                                    text: modelData.name
                                     color: Theme.text
                                     font.pixelSize: Theme.fontSizeBody
                                     elide: Text.ElideRight
@@ -539,7 +539,11 @@ PageFlickable {
                                         "Waypoints_" + safeName + ".gpx",
                                         PoiService.buildWaypointGpx(modelData.name, modelData.lat, modelData.lon))
                                 } else {
-                                    PoiService.addPoi(modelData.name, modelData.lat, modelData.lon)
+                                    // The watch's plain type (a number from the other family's
+                                    // list would draw another icon), and the file's elevation.
+                                    PoiService.addPoi(modelData.name, modelData.lat, modelData.lon,
+                                                      DeviceCapabilities.poiTypeDefault,
+                                                      modelData.ele !== undefined ? modelData.ele : NaN)
                                 }
                             }
                         }
@@ -653,7 +657,11 @@ PageFlickable {
                                 font.family: Icons.fontFamily
                                 font.pixelSize: Theme.fontSizeBody + 3
                                 color: Theme.primary
-                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                                text: DeviceCapabilities.poiTypeGlyph(modelData.type)
+                                // Hover: the type's name in the watch's own list.
+                                HoverHandler { id: poiTypeHover }
+                                ToolTip.visible: poiTypeHover.hovered
+                                ToolTip.text: DeviceCapabilities.poiTypeName(modelData.type)
                             }
                             Text { anchors.verticalCenter: parent.verticalCenter; color: Theme.text; font.bold: true; text: modelData.name }
                         }
@@ -769,18 +777,31 @@ PageFlickable {
                                 font.family: Icons.fontFamily
                                 font.pixelSize: Theme.fontSizeBody + 3
                                 color: Theme.primary
-                                text: Icons.poiTypeGlyph(modelData.type !== undefined ? modelData.type : 17)
+                                text: DeviceCapabilities.poiTypeGlyph(modelData.type)
+                                // Hover: the type's name in the watch's own list.
+                                HoverHandler { id: poiTypeHover }
+                                ToolTip.visible: poiTypeHover.hovered
+                                ToolTip.text: DeviceCapabilities.poiTypeName(modelData.type)
                             }
                             Text {
-                                width: parent.width - onWatchPoiGlyph.width - poiExportButton.width
+                                width: parent.width - onWatchPoiGlyph.width - onWatchPoiType.width
+                                       - poiExportButton.width
                                        - (poiRemoveButton.visible ? poiRemoveButton.width + Theme.spacingSmall : 0)
-                                       - Theme.spacingSmall * 2
+                                       - Theme.spacingSmall * 3
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
                                 text: modelData.name
                                 color: Theme.text
                                 font.pixelSize: Theme.fontSizeBody
                                 font.bold: true
+                            }
+                            // The type's name in the watch's own list ("Big game", "Camp" ...).
+                            Text {
+                                id: onWatchPoiType
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: DeviceCapabilities.poiTypeName(modelData.type)
+                                color: Theme.mutedText
+                                font.pixelSize: Theme.fontSizeCaption
                             }
 
                             RoundedButton {

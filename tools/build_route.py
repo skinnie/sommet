@@ -138,8 +138,12 @@ def serialize(routes, wpt_size=F.WAYPOINT_SIZE):
 
         month, day, hour, minute, second, seconds = route.stamp
         index_rows.append((number, seconds, len(route.waypoints)))
+        # The type byte is read against the watch's own POI type list: the plain flag is 17
+        # ("Waypoint") on an Ambit3 and 26 ("POI") on a Traverse, where 17 would draw "Hill".
+        wtype = (F.TRAVERSE_WAYPOINT_TYPE_DEFAULT if wpt_size == F.WAYPOINT_SIZE_ALT
+                 else F.WAYPOINT_TYPE_DEFAULT)
         for rank, (lat, lon, wname, point_index) in enumerate(route.waypoints):
-            tail = F.WaypointTail(month, day, hour, minute, second, rank).build()
+            tail = F.WaypointTail(month, day, hour, minute, second, rank, wtype).build()
             alt = route.points[point_index][2] if 0 <= point_index < len(route.points) else None
             waypoint_rows.append((
                 F.WaypointDescriptor(round(lat * 1e7), round(lon * 1e7), wname,

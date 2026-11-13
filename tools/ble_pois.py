@@ -19,8 +19,9 @@ import contextlib
 import io
 import sys
 
+import ambit_format as F
 from write_nav import (
-    CMD_POI_WRITE, POI_ENTRY, build_poi_record, poi_count, poi_write_payload_add, read_pois,
+    CMD_POI_WRITE, _pid, build_poi_record, poi_count, poi_format, poi_write_payload_add, read_pois,
     remove_pois, show_entries,
 )
 
@@ -33,19 +34,28 @@ def read_pois_summary(link):
     reply = read_pois(link)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        show_entries(reply, (POI_ENTRY,))
+        show_entries(reply, F.POI_ENTRIES)
     return buf.getvalue()
 
 
-def add_poi(link, name, lat, lon):
+def add_poi(link, name, lat, lon, type_=None, elevation=None):
     """The BLE path for POST /api/pois - same algorithm as `write_nav.run_addpoi()`: send
     only the new record (0x0b25 appends) and check the count (0x0b02) went up by one.
     Never touches Waypoints/Routes flash and needs no commit."""
     before = poi_count(link)
-    record = build_poi_record(name, lat, lon)
+    # The entry number, the plain type and the altitude field are the watch's own (a Traverse
+    # differs from an Ambit3, see write_nav.poi_format).
+    # `type_` is the picked POI type (number or name) in that watch's list; None = its plain one.
+    entry, with_altitude = poi_format(link)
+    try:
+        poi_type = F.waypoint_type_id(type_, _pid(link))
+    except ValueError as exc:
+        return {"ok": False, "dry_run": link.dry_run, "error": str(exc)}
+    record = build_poi_record(name, lat, lon, type_=poi_type,
+                              altitude=F.poi_altitude(elevation) if with_altitude else None)
     # Only the new record: 0x0b25 appends (see write_nav.poi_write_payload_add), and acks
     # even when it stored nothing, so the count decides.
-    link.command(CMD_POI_WRITE, poi_write_payload_add(b"", record))
+    link.command(CMD_POI_WRITE, poi_write_payload_add(b"", record, entry))
     after = poi_count(link)
     if before is not None and after != before + 1:
         return {"ok": False, "dry_run": link.dry_run,

@@ -124,7 +124,7 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
       ascent_m: activity.d_plus, descent_m: m?.descentM, avg_hr: m?.avgHr, max_hr: m?.maxHr,
       avg_cad: m?.avgCadence ? m.avgCadence * (foot ? 2 : 1) : null, max_cad: m?.maxCadence ? m.maxCadence * (foot ? 2 : 1) : null,
       avg_speed: m?.avgSpeedMh ? m.avgSpeedMh / 3600 : null, max_speed: m?.maxSpeedMh ? m.maxSpeedMh / 3600 : null,
-      kcal: m?.energyKcal, recovery_s: m?.recoveryS, pte: m?.peakTe ? m.peakTe / 10 : null, pool_lengths: m?.poolLengths,
+      kcal: m?.energyKcal, recovery_s: m?.recoveryS, pte: m?.peakTe ? m.peakTe / 10 : null, pool_lengths: m?.poolLengths, shots: m?.shots,
     };
   }, [activity, meta]);   // eslint-disable-line react-hooks/exhaustive-deps
 

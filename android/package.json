@@ -1,6 +1,6 @@
 {
   "name": "sommet",
-  "version": "0.2.60",
+  "version": "0.2.67",
   "private": true,
   "scripts": {
     "postinstall": "patch-package && node scripts/sync-version.js",

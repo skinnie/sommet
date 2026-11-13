@@ -37,7 +37,8 @@
     "rest_time":         {"label": "Rest at the wall",    "fmt": "duration"},
     "time_swimming":     {"label": "Time swimming",       "fmt": "duration"},
     "longest_nonstop":   {"label": "Longest non-stop",    "fmt": "meters",  "info": "longest_nonstop"},
-    "water_temp":        {"label": "Water temperature (approx.)", "fmt": "temp_range", "info": "water_temp"}
+    "water_temp":        {"label": "Water temperature (approx.)", "fmt": "temp_range", "info": "water_temp"},
+    "shots":             {"label": "Shots",               "fmt": "int",     "info": "shots"}
   },
 
   "info": {
@@ -50,7 +51,8 @@
     "recovery":       "How long the watch suggests you rest before another hard session.",
     "swolf":          "Seconds plus strokes for one length. Lower means more efficient; compare it only with your own swims in the same pool.",
     "longest_nonstop":"The longest distance you swam without resting at the wall. For a newer swimmer it's the number that should grow first.",
-    "water_temp":     "Measured by the watch's sensor. In the pool it sits in the water, so it roughly follows the water temperature."
+    "water_temp":     "Measured by the watch's sensor. In the pool it sits in the water, so it roughly follows the water temperature.",
+    "shots":          "Shots the watch counted from the recoil while you were hunting (Suunto Traverse Alpha). Each one is marked on the map where the watch had a GPS position."
   },
 
   "sports": {
@@ -128,6 +130,15 @@
       "zones": ["hr"],
       "chart": {"channels": ["hr", "pw", "cad"], "on": ["hr"], "x": "time"},
       "colour": []
+    },
+    "hunt": {
+      "ids": [98],
+      "headline":  ["distance", "duration", "shots", "avg_hr"],
+      "secondary": ["max_hr", "elevation_gain", "energy"],
+      "more":      ["max_speed", "elevation_loss", "max_altitude"],
+      "zones": ["hr"],
+      "chart": {"channels": ["hr", "speed", "alt", "pw", "cad"], "on": ["hr", "speed"], "x": "time"},
+      "colour": ["hrz"]
     },
     "other": {
       "ids": [],

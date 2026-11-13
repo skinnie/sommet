@@ -1,10 +1,13 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   addPoiToWatch, AddPoiState, readOnWatchPois, getCachedPois, exportSinglePoiToGpx, pickAndParseWaypoints,
-  WatchPoi, removePoisFromWatch,
+  WatchPoi, removePoisFromWatch, getCachedPoiWatchModel,
 } from '../services/PoiService';
+import { poiTypesFor, poiTypeDefaultFor, poiTypeOf, isTraverseWatch } from '../services/PoiTypes';
+import { useDemo } from '../config/DemoContext';
+import { demoPois, demoAddPoi, demoRemovePoi } from '../services/DemoData';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
@@ -24,20 +27,9 @@ import { ViewModeToggle } from '../components/ui/ViewModeToggle';
 // separate tap-through "Map" button/TrackMapScreen this screen briefly had was removed -
 // the preview already IS the map, immediately, matching desktop's own PoisPage.qml (a live
 // MapView per item, no tap-through screen at all).
-// The 18 Ambit POI type bytes (the icon the watch shows), from Lars's "Types of Poi.md"
-// (assets/Lars) - the single source is tools/ambit_format.py's WAYPOINT_TYPES; array index ==
-// the type id 0-17. Default "Waypoint" (17), what the watch itself uses.
-const POI_TYPE_NAMES = [
-  'Building', 'Cave', 'Camp', 'Car', 'Crossroads', 'Beginning', 'End', 'Food', 'Forest',
-  'Geocache', 'Lodging', 'Meadow', 'Mountain', 'Sight', 'Road', 'Rock', 'Water', 'Waypoint',
-];
-// Material Symbols glyph per POI type (the icon the watch shows), same index. Codepoints from
-// tools/subset_material_symbols.py, rendered with the bundled MaterialSymbolsRounded font
-// (android/app/src/main/assets/fonts/). Cave/Rock use elevation / filter_hdr (no exact glyph).
-const POI_TYPE_GLYPHS = [
-  '\uea40', '\uf6e7', '\uea68', '\ue531', '\uebac', '\ue57b', '\uf06e', '\ue56c', '\uea99', '\ue87a', '\ue53a', '\uf205', '\ue3f7', '\ue3b0', '\ueacd', '\ue3df', '\ue798', '\ue0c8',
-];
-
+// POI types (the icon the watch shows) come from services/PoiTypes.ts: the Ambit3's 18, or the
+// 48 of a Traverse / Traverse Alpha, which are numbered differently. The list offered is the one
+// of the watch the POI list was last read from.
 export default function PoiScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
@@ -45,7 +37,17 @@ export default function PoiScreen() {
   const [poiName, setPoiName] = useState('');
   const [poiLat, setPoiLat]   = useState('');
   const [poiLon, setPoiLon]   = useState('');
-  const [poiType, setPoiType] = useState(17);  // Ambit POI type byte 0-17 (icon)
+  // The watch the POI list was last read from ("Emu", "Jabiru", "Loon" ...): it decides which
+  // type list is offered and how a type byte read off the watch is named.
+  // In Testing mode it is the sample watch picked there, as on the desktop.
+  const demo = useDemo();
+  const [readModel, setWatchModel] = useState('');
+  const watchModel = demo.enabled ? demo.variant : readModel;
+  const traverse = isTraverseWatch(watchModel);
+  // The type BYTE written to the watch; starts at that watch's plain type (17, or 26 on a Traverse).
+  const [poiType, setPoiType] = useState(17);
+  // Another kind of watch: a number picked from the other list means something else there.
+  useEffect(() => { setPoiType(poiTypeDefaultFor(watchModel)); }, [traverse]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [poiState, setPoiState] = useState<AddPoiState>({ phase: 'idle' });
   const [infoOpen, setInfoOpen] = useState(false);  // the little "i" POI-note dialog
   const poiBusy = poiState.phase === 'connecting' || poiState.phase === 'writing';
@@ -70,7 +72,15 @@ export default function PoiScreen() {
   // same real local-first pattern as RouteScreen.tsx's own loadOnWatch(): the persisted
   // cache renders instantly, a real watch read refreshes it silently in the background.
   const loadOnWatch = useCallback(async () => {
+    // Testing mode: the sample watch's POIs (in memory), never a real watch.
+    if (demo.enabled) {
+      setOnWatchError(undefined);
+      setOnWatchLoading(false);
+      setOnWatch(demoPois(demo.variant));
+      return;
+    }
     const cached = await getCachedPois();
+    setWatchModel(await getCachedPoiWatchModel());
     if (cached) {
       setOnWatch(cached);
     } else {
@@ -79,6 +89,7 @@ export default function PoiScreen() {
     setOnWatchError(undefined);
     try {
       setOnWatch(await readOnWatchPois());
+      setWatchModel(await getCachedPoiWatchModel());
     } catch (e: any) {
       // Say so even with a cached list on screen: it used to stay up silently, so a
       // watch whose POIs were gone kept showing them (Peak, 2026-10-24).
@@ -86,7 +97,7 @@ export default function PoiScreen() {
     } finally {
       setOnWatchLoading(false);
     }
-  }, []);
+  }, [demo.enabled, demo.variant]);
 
   useFocusEffect(useCallback(() => { loadOnWatch(); }, [loadOnWatch]));
 
@@ -103,6 +114,11 @@ export default function PoiScreen() {
     }
     if (!hasValidCoords) {
       Alert.alert(t.poiInvalid, t.poiCoordsInvalid);
+      return;
+    }
+    if (demo.enabled) {
+      setOnWatch(demoAddPoi(demo.variant, { name: poiName.trim(), latitude: parsedLat, longitude: parsedLon, type: poiType }));
+      setPoiName(''); setPoiLat(''); setPoiLon('');
       return;
     }
     try {
@@ -139,15 +155,21 @@ export default function PoiScreen() {
 
   async function handleAddImported(wp: WatchPoi, index: number) {
     if (addingIndex !== null) return;
+    if (demo.enabled) {
+      setOnWatch(demoAddPoi(demo.variant, { ...wp, type: poiTypeDefaultFor(watchModel) }));
+      setImported(list => (list ? list.filter((_, k) => k !== index) : list));
+      return;
+    }
     setAddingIndex(index);
     try {
       // addPoiToWatch reports a failure through its state callback, it does not throw. This
       // used to pass a no-op, so a POI the watch never got still left the list as if added
       // (8 of them on 2026-10-24, after the watch had closed Bluetooth).
       let failure: string | undefined;
+      // The watch's plain type (-1) and, for a Traverse, the file's elevation.
       await addPoiToWatch(wp.name, wp.latitude, wp.longitude, st => {
         if (st.phase === 'error') failure = st.error ?? t.unknownError;
-      });
+      }, -1, wp.elevation);
       if (failure) {
         Alert.alert(t.error, failure);
         return;
@@ -166,6 +188,7 @@ export default function PoiScreen() {
     Alert.alert(t.poiRemoveTitle, t.poiRemoveConfirm(poi.name), [
       { text: t.cancel, style: 'cancel' },
       { text: t.poiItemRemoveBtn, style: 'destructive', onPress: async () => {
+        if (demo.enabled) { setOnWatch(demoRemovePoi(demo.variant, poi)); return; }
         setRemovingIndex(index);
         try {
           const r = await removePoisFromWatch([poi]);
@@ -235,11 +258,11 @@ export default function PoiScreen() {
         <Text style={styles.typeLabel}>{t.poiType}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: v3Spacing.small, paddingVertical: 2 }}>
-          {POI_TYPE_NAMES.map((name, i) => (
-            <TouchableOpacity key={i} disabled={poiBusy} onPress={() => setPoiType(i)}
-              style={[styles.typeChipRow, poiType === i && styles.typeChipSel]}>
-              <Text style={[styles.typeGlyph, poiType === i && styles.typeChipTextSel]}>{POI_TYPE_GLYPHS[i]}</Text>
-              <Text style={[styles.typeChipText, poiType === i && styles.typeChipTextSel]}>{name}</Text>
+          {poiTypesFor(watchModel).map(pt => (
+            <TouchableOpacity key={pt.id} disabled={poiBusy} onPress={() => setPoiType(pt.id)}
+              style={[styles.typeChipRow, poiType === pt.id && styles.typeChipSel]}>
+              <Text style={[styles.typeGlyph, poiType === pt.id && styles.typeGlyphSel]}>{pt.glyph}</Text>
+              <Text style={[styles.typeChipText, poiType === pt.id && styles.typeChipTextSel]}>{pt.name}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -297,9 +320,11 @@ export default function PoiScreen() {
           <View key={`${poi.name}-${i}`} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
             {viewMode === 'map' && <TrackPreview points={[{ lat: poi.latitude, lon: poi.longitude }]} markerOnly height={90} />}
             <View style={styles.row}>
+              {/* The POI's own watch icon and the name of its type in that watch's list. */}
+              <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeOf(poi.type, watchModel).glyph}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName} numberOfLines={1}>{poi.name}</Text>
-                <Text style={styles.itemStats}>{t.poiCoords(poi.latitude, poi.longitude)}</Text>
+                <Text style={styles.itemStats}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
               </View>
               <TouchableOpacity style={styles.exportBtn} disabled={exportingIndex !== null} onPress={() => handleExportItem(poi, i)}>
                 <Text style={styles.exportBtnText}>{exportingIndex === i ? '…' : t.poiItemExportBtn}</Text>
@@ -344,6 +369,9 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
     borderWidth: 1, borderColor: t.mutedText + '55',
   },
   typeGlyph: { fontFamily: 'MaterialSymbolsRounded', fontSize: 16, color: t.text },
+  // The selected chip's icon: the colour only. The icon font has one weight, and asking for bold
+  // made Android fall back to another font, which drew an empty box (seen on the tablet 2026-11-13).
+  typeGlyphSel: { color: t.background },
   typeChipSel: { backgroundColor: t.primary, borderColor: t.primary },
   typeChipText: { color: t.text, fontSize: v3Type.label },
   typeChipTextSel: { color: t.background, fontWeight: '700' },

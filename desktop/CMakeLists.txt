@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Sommet VERSION 0.2.66 LANGUAGES CXX)
+project(Sommet VERSION 0.2.67 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

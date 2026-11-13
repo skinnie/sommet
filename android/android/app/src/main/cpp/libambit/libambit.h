@@ -193,6 +193,7 @@ typedef enum ambit_log_sample_type_e {
     ambit_log_sample_type_cadence_source = 0x031a,
     ambit_log_sample_type_position = 0x031b,
     ambit_log_sample_type_fwinfo = 0x031c,
+    ambit_log_sample_type_shot = 0x0320,        /* Traverse Alpha: a counted shot (Hunting) */
     ambit_log_sample_type_unknown = 0xf000
 } ambit_log_sample_type_t;
 
@@ -418,6 +419,11 @@ typedef struct ambit_log_sample_s {
             ambit_date_time_t build_date;
         } fwinfo;
         struct {
+            int32_t  latitude;                  /* degree, scale: 0.0000001 */
+            int32_t  longitude;                 /* degree, scale: 0.0000001 */
+            uint8_t  has_position;              /* 0 = counted without a GPS fix */
+        } shot;
+        struct {
             size_t datalen;
             uint8_t *data;
         } unknown;
@@ -469,6 +475,8 @@ typedef struct ambit_log_header_s {
     uint32_t swimming_pool_length;  /* m */
     uint8_t  unknown5[4];
     uint8_t  unknown6[24];
+    uint8_t  has_shots;             /* 1 = this header carries a shot count (Traverse 2.0.22) */
+    uint16_t shots;                 /* shots a Traverse Alpha counted (Hunting) */
 } ambit_log_header_t;
 
 typedef struct ambit_log_entry_s {

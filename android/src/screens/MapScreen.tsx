@@ -93,6 +93,19 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
     });
   };
 
+  // Shots a Traverse Alpha counted while hunting (RN injects them once the GPX is read, via
+  // window.showShots): a red ring with a centre dot where each one was counted.
+  var shotLayer = L.layerGroup().addTo(map);
+  window.showShots = function(list) {
+    shotLayer.clearLayers();
+    (list || []).forEach(function(p) {
+      var icon = L.divIcon({ className: '',
+        html: '<div style="width:18px;height:18px;box-sizing:border-box;border:3px solid #e53935;border-radius:50%;background:radial-gradient(circle,#e53935 0 3px,#fff 3.5px);box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
+        iconAnchor: [9, 9] });
+      L.marker([p.lat, p.lon], { icon: icon, zIndexOffset: 500 }).bindPopup(p.label).addTo(shotLayer);
+    });
+  };
+
   var line = null;
   var startMarker = null;
   var endMarker = null;
@@ -386,6 +399,20 @@ export default function MapScreen() {
   }, [activity.gpx_path]);
 
   const stats = useMemo(() => computeElevationStats(points), [points]);
+
+  // Shots on the map: once the map page is up and the GPX is read (either can come first).
+  useEffect(() => {
+    if (!isReady || !meta || !meta.shotPoints || meta.shotPoints.length === 0) return;
+    const list = meta.shotPoints.map((p, i) => {
+      const d = p.time ? new Date(p.time) : null;
+      // 24-hour HH:MM:SS, as the desktop writes it ("Shot 2 · 07:00:30").
+      const two = (n: number) => String(n).padStart(2, '0');
+      const clock = d && !isNaN(d.getTime())
+        ? ` · ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}` : '';
+      return { lat: p.latitude, lon: p.longitude, label: `Shot ${i + 1}${clock}` };
+    });
+    webViewRef.current?.injectJavaScript(`window.showShots && window.showShots(${JSON.stringify(list)}); true;`);
+  }, [isReady, meta]);
 
   // The weather it was done in (André, 2026-09-27) - same line as the desktop's ActivityWeather.qml.
   const [weather, setWeather] = useState<ActivityWeather | null>(null);

@@ -29,6 +29,9 @@
 #define ROUTE_HEADER_MAGIC    0x340c  /* Ambit2: 0x3008 */
 #define WAYPOINT_TAIL_MAGIC   0x0771
 #define WAYPOINT_TYPE_DEFAULT 17      /* "Waypoint" on the Ambit enum side */
+/* A Traverse / Traverse Alpha reads the type byte against its own 48-type list, where 17 is
+ * "Hill" and the plain flag is 26 ("POI"). Twin of tools/build_route.py serialize(). */
+#define WAYPOINT_TYPE_DEFAULT_TRAVERSE 26
 #define ROUTE_INDEX_CONST     415
 
 static void put16(uint8_t *p, uint16_t v)
@@ -209,7 +212,8 @@ static void write_waypoint_descriptor(uint8_t *dst,
     dst[45] = route->minute;
     dst[46] = route->second;
     dst[47] = rank;
-    dst[48] = WAYPOINT_TYPE_DEFAULT;
+    dst[48] = (len == AMBIT3_WAYPOINT_DESC_LEN_ALT) ? WAYPOINT_TYPE_DEFAULT_TRAVERSE
+                                                    : WAYPOINT_TYPE_DEFAULT;
 }
 
 static void add_write(ambit3_nav_plan_t *plan, uint32_t address,

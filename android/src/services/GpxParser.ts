@@ -43,6 +43,29 @@ export interface GpxMetadata {
   poolLengths: number;
   maxAltM: number;
   paceSecPerKm: number;   // derived
+  // Shots a Suunto Traverse Alpha counted while hunting: the watch's own count, and where each
+  // shot that had a GPS position was counted (a <wpt> of <type>shot</type>). 0 / [] = none.
+  shots: number;
+  shotPoints: ShotPoint[];
+}
+
+export interface ShotPoint {
+  latitude: number;
+  longitude: number;
+  time: string;      // ISO 8601, '' when the waypoint has none
+}
+
+/** The shot waypoints of a move's GPX (see GpxMetadata.shotPoints). */
+export function extractShotPoints(gpxXml: string): ShotPoint[] {
+  const out: ShotPoint[] = [];
+  const re = /<wpt\s+lat="(-?\d+(?:\.\d+)?)"\s+lon="(-?\d+(?:\.\d+)?)"\s*>([\s\S]*?)<\/wpt>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(gpxXml)) !== null) {
+    if (!/<type>shot<\/type>/.test(m[3])) continue;
+    const t = m[3].match(/<time>([^<]+)<\/time>/);
+    out.push({ latitude: parseFloat(m[1]), longitude: parseFloat(m[2]), time: t ? t[1] : '' });
+  }
+  return out;
 }
 
 /** Read a numeric <tag>value</tag> summary extension from the raw GPX. Regex (not the XML
@@ -213,6 +236,8 @@ export function extractGpxMetadata(gpxXml: string): GpxMetadata {
     recoveryS:   extTag(gpxXml, 'recovery_time'),
     peakTe:      extTag(gpxXml, 'peak_training_effect'),
     poolLengths: extTag(gpxXml, 'pool_lengths'),
+    shots:       extTag(gpxXml, 'shots'),
+    shotPoints:  extractShotPoints(gpxXml),
     maxAltM:     extTag(gpxXml, 'max_altitude'),
     paceSecPerKm: (() => {
       const distM = stats?.totalDistance ?? 0;

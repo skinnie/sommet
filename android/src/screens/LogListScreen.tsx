@@ -34,6 +34,8 @@ import { deleteIntervalsIcuActivity } from '../services/ApiIntervalsIcu';
 import { EmptyState, PulseDots, SkeletonList } from '../components/ui/primitives';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { exportAllToDownloads } from '../services/ExportAll';
+import { useDemo } from '../config/DemoContext';
+import { demoMoves, isDemoActivity } from '../services/DemoData';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'LogList'>;
 
@@ -60,6 +62,7 @@ function buildMetrics(a: ActivityRecord, gpx?: GpxMetadata): MetricValues {
     recoveryS: gpx?.recoveryS || 0,
     peakTe: gpx?.peakTe || 0,
     poolLengths: gpx?.poolLengths || 0,
+    shots: gpx?.shots || 0,
     maxAltM: gpx?.maxAltM || 0,
     // Pace only means something on foot (André, 2026-10-03: "There is no 'pace' on bike, but avg
     // speed km/h") - same rule as the desktop's activity screen. 0 = the card skips it.
@@ -79,6 +82,7 @@ async function cacheGpxMetrics(a: ActivityRecord): Promise<GpxMetadata | undefin
       avgCadence: gpx.avgCadence || 0, maxCadence: gpx.maxCadence || 0, avgSpeed: gpx.avgSpeedMh || 0,
       maxSpeed: gpx.maxSpeedMh || 0, recovery: gpx.recoveryS || 0, peakTe: gpx.peakTe || 0,
       maxAltitude: gpx.maxAltM || 0, poolLengths: gpx.poolLengths || 0, pace: gpx.paceSecPerKm || 0,
+      shots: gpx.shots || 0,
     };
     await saveActivityMetrics(a.id, a.synced_at, JSON.stringify(gpx), v).catch(() => {});
     return gpx;
@@ -213,6 +217,18 @@ export default function LogListScreen() {
     }));
   }
 
+  // Testing mode: the sample watch's moves, on top of the list (see services/DemoData.ts). They
+  // are not in the database, so they take no part in sorting, totals, exports or any sync.
+  const demo = useDemo();
+  async function sampleRows(): Promise<EnrichedActivity[]> {
+    if (!demo.enabled) return [];
+    try {
+      return (await demoMoves(demo.variant, filterArg)).map(m => ({ ...m.activity, metrics: buildMetrics(m.activity, m.gpx) }));
+    } catch {
+      return [];
+    }
+  }
+
   async function loadPage(reset: boolean) {
     if (!reset && (busyRef.current || !hasMore)) return;
     const req = reset ? ++reqRef.current : reqRef.current;
@@ -221,7 +237,7 @@ export default function LogListScreen() {
     try {
       const offset = reset ? 0 : activities.length;
       const rows = await getActivityPage({ type: filterArg, sortKey, desc: sortDesc, offset });
-      const enriched = await enrich(rows);
+      const enriched = (reset ? await sampleRows() : []).concat(await enrich(rows));
       if (req !== reqRef.current) return;                  // filter/sort changed meanwhile
       setActivities(prev => {
         if (reset) return enriched;
@@ -253,12 +269,18 @@ export default function LogListScreen() {
   useEffect(() => { listRef.current?.scrollToOffset({ offset: 0, animated: false }); }, [filterArg, sortKey, sortDesc]);
 
   const load = useCallback(async () => {
-    getActivityTypes().then(setTypes).catch(() => {});
+    getActivityTypes().then(async dbTypes => {
+      // the sample moves' sports get a filter chip too
+      // (one chip per sport: "Trail Running" of a sample joins the user's own "Trail running")
+      const extra = demo.enabled ? (await demoMoves(demo.variant).catch(() => [])).map(m => m.activity.activity_type) : [];
+      const have = new Set(dbTypes.map(x => x.toLowerCase()));
+      setTypes(dbTypes.concat(Array.from(new Set(extra)).filter(x => !have.has(x.toLowerCase()))).sort());
+    }).catch(() => {});
     await prepareGpxSort(sortKey);
     await loadPage(true);
     adoptOrphanGpx().then(n => { if (n > 0) { getActivityTypes().then(setTypes).catch(() => {}); loadPage(true); } })
       .catch(() => {});
-  }, [filterArg, sortKey, sortDesc]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterArg, sortKey, sortDesc, demo.enabled, demo.variant]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -269,6 +291,7 @@ export default function LogListScreen() {
   }
 
   function confirmDelete(item: ActivityRecord) {
+    if (isDemoActivity(item.id)) return;       // a sample move of Testing mode: nothing to delete
     // Say plainly when the delete also removes the remote copy - it is irreversible, so the
     // confirm must not imply this only hides it locally.
     const alsoRemote = item.id.startsWith('icu:');

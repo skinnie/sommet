@@ -68,7 +68,11 @@ public:
     // `type` is the Ambit POI type byte 0-17 (the icon the watch shows); default 17
     // ("Waypoint"). The default keeps the GPX-reimport callers (which have no Ambit type)
     // working unchanged - only the manual add-POI form passes a chosen type.
-    Q_INVOKABLE void addPoi(const QString &name, double lat, double lon, int type = 17);
+    // `type` is the POI type byte in the connected watch's own list (DeviceCapabilities.qml).
+    // `ele` is the elevation in metres of a POI imported from a GPX, NaN when there is none:
+    // a Traverse / Traverse Alpha keeps it, an Ambit3 POI has no altitude.
+    Q_INVOKABLE void addPoi(const QString &name, double lat, double lon, int type = 17,
+                            double ele = qQNaN());
     Q_INVOKABLE void importGpxFile(const QUrl &fileUrl);
     // `lat`/`lon` exactly as onWatchPois lists them: the backend matches the stored values.
     Q_INVOKABLE void removePoi(const QString &name, double lat, double lon);

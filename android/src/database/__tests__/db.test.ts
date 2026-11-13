@@ -7,6 +7,10 @@ const mockColumns: Record<string, string[]> = {
   gear_reminder: ['id', 'distance_m', 'time_s', 'days', 'activities', 'percent_used', 'snoozed_until',
                   'remote_id', 'starting_distance_m', 'starting_time_s', 'starting_activities', 'last_reset'],
   activity_gear: ['activity_id', 'distance_m', 'time_s', 'activity_date'],
+  // a metrics cache made before the Shots column (Traverse Alpha, 2026-11-13)
+  activity_metrics: ['id', 'synced_at', 'json', 'descent', 'calories', 'avgHr', 'maxHr', 'avgCadence',
+                     'maxCadence', 'avgSpeed', 'maxSpeed', 'recovery', 'peakTe', 'maxAltitude',
+                     'poolLengths', 'pace'],
 };
 const mockOpen = jest.fn(async () => ({
   executeSql: jest.fn(async (sql: string) => {
@@ -34,7 +38,8 @@ test('callers at start-up share one open and one setup', async () => {
   expect(mockOpen).toHaveBeenCalledTimes(1);
 });
 
-test('only the missing column is added', () => {
+test('only the missing columns are added', () => {
   const alters = mockSql.filter(s => s.startsWith('ALTER TABLE'));
-  expect(alters).toEqual(['ALTER TABLE activities ADD COLUMN energy_kcal INTEGER NOT NULL DEFAULT 0']);
+  expect(alters).toEqual(['ALTER TABLE activities ADD COLUMN energy_kcal INTEGER NOT NULL DEFAULT 0',
+                          'ALTER TABLE activity_metrics ADD COLUMN shots REAL']);
 });

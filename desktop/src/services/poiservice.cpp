@@ -30,8 +30,11 @@ void PoiService::setLoading(bool value)
 QVariantList PoiService::parseOnWatchPois(const QString &rawOutput)
 {
     QVariantList pois;
+    // Type = the POI's type byte (its icon), in the watch's own numbering: the Ambit3's 18 or
+    // the Traverse's 48 (DeviceCapabilities.qml names it). It was not read before 2026-11-13, so
+    // every POI in this list drew the plain icon. \b keeps "SubType=" from matching.
     static const QRegularExpression re(
-        QStringLiteral(R"(Name='([^']*)'.*?Location\.Latitude=(-?\d+)\s+)"
+        QStringLiteral(R"(Name='([^']*)'[^\n]*?\bType=(\d+)[^\n]*?Location\.Latitude=(-?\d+)\s+)"
                         R"(Location\.Longitude=(-?\d+))"));
 
     auto it = re.globalMatch(rawOutput);
@@ -39,8 +42,9 @@ QVariantList PoiService::parseOnWatchPois(const QString &rawOutput)
         const auto m = it.next();
         QVariantMap poi;
         poi[QStringLiteral("name")] = m.captured(1);
-        poi[QStringLiteral("lat")] = m.captured(2).toDouble() / 1e7;
-        poi[QStringLiteral("lon")] = m.captured(3).toDouble() / 1e7;
+        poi[QStringLiteral("type")] = m.captured(2).toInt();
+        poi[QStringLiteral("lat")] = m.captured(3).toDouble() / 1e7;
+        poi[QStringLiteral("lon")] = m.captured(4).toDouble() / 1e7;
         pois.append(poi);
     }
     return pois;
@@ -86,13 +90,15 @@ void PoiService::refresh()
     });
 }
 
-void PoiService::addPoi(const QString &name, double lat, double lon, int type)
+void PoiService::addPoi(const QString &name, double lat, double lon, int type, double ele)
 {
     QJsonObject body;
     body[QStringLiteral("name")] = name;
     body[QStringLiteral("lat")] = lat;
     body[QStringLiteral("lon")] = lon;
     body[QStringLiteral("type")] = type;
+    if (!qIsNaN(ele))
+        body[QStringLiteral("ele")] = ele;
 
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/pois")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -181,7 +187,7 @@ void PoiService::importGpxFile(const QUrl &fileUrl)
     // every real-world GPX file actually has, no assumptions beyond that.
     QXmlStreamReader xml(&file);
     bool inWpt = false;
-    QString currentTag, pendingLat, pendingLon, pendingName;
+    QString currentTag, pendingLat, pendingLon, pendingName, pendingEle;
     while (!xml.atEnd()) {
         const auto token = xml.readNext();
         if (token == QXmlStreamReader::StartElement) {
@@ -191,6 +197,7 @@ void PoiService::importGpxFile(const QUrl &fileUrl)
                 pendingLat = xml.attributes().value(QStringLiteral("lat")).toString();
                 pendingLon = xml.attributes().value(QStringLiteral("lon")).toString();
                 pendingName.clear();
+                pendingEle.clear();
             }
         } else if (token == QXmlStreamReader::EndElement) {
             if (xml.name() == QStringLiteral("wpt") && inWpt) {
@@ -199,6 +206,11 @@ void PoiService::importGpxFile(const QUrl &fileUrl)
                     pendingName.isEmpty() ? QStringLiteral("Unnamed") : pendingName;
                 poi[QStringLiteral("lat")] = pendingLat.toDouble();
                 poi[QStringLiteral("lon")] = pendingLon.toDouble();
+                // <ele> in metres, when the file has one: a Traverse keeps a POI's altitude.
+                bool eleOk = false;
+                const double ele = pendingEle.toDouble(&eleOk);
+                if (eleOk)
+                    poi[QStringLiteral("ele")] = ele;
                 m_importedPois.append(poi);
                 inWpt = false;
             }
@@ -206,6 +218,8 @@ void PoiService::importGpxFile(const QUrl &fileUrl)
         } else if (token == QXmlStreamReader::Characters && !xml.isWhitespace()) {
             if (inWpt && currentTag == QStringLiteral("name"))
                 pendingName = xml.text().toString();
+            else if (inWpt && currentTag == QStringLiteral("ele"))
+                pendingEle = xml.text().toString();
         }
     }
 

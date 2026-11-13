@@ -256,6 +256,17 @@ class Schema:
         return None
 
 
+def waypoint_entry(schema):
+    """(entry number, has altitude) of the POI records ("WayPoint") in a watch's descriptor,
+    None when it has none. The entry is the group that starts with the field sml+WayPoint.Name;
+    the Traverse's also ends with sml.WayPoint.Altitude."""
+    for gid, fids in schema.groups.items():
+        paths = [schema.fields[f].path for f in fids if f in schema.fields]
+        if paths and paths[0] == "sml+WayPoint.Name":
+            return gid, any(p == "sml.WayPoint.Altitude" for p in paths)
+    return None
+
+
 def entries(buf):
     """Walks the `[u8 id][u8 len][data]` entries of an SBEM0102 payload, a `len` of
     0xff introducing a u32 length. An id byte of 0xff introduces a u16 id, for the fields

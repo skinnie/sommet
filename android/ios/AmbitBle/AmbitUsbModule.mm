@@ -51,7 +51,7 @@ ambit_object_t *ambit_ios_active_device(void);
 // ambit3_* raw ops (defined in device_driver_ambit3.c) — same forward
 // declarations jni_bridge.cpp uses.
 int ambit3_write_route_to_watch(ambit_object_t *object, const ambit3_nav_route_t *routes, size_t route_count);
-int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat, double lon, int type);
+int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat, double lon, int type, int altitude);
 int ambit3_read_flash_region(ambit_object_t *object, uint32_t address, uint32_t length, uint8_t *out_buffer);
 int ambit3_read_poi_list_raw(ambit_object_t *object, uint8_t **out, size_t *out_len);
 int ambit3_read_memory_map_raw(ambit_object_t *object, uint8_t **out, size_t *out_len);
@@ -124,14 +124,42 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry) {
         << "<gpx version=\"1.1\" creator=\"Sommet\""
         << " xmlns=\"http://www.topografix.com/GPX/1/1\""
         << " xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v1\">\n"
-        << "  <metadata><time>" << date_buf << "</time></metadata>\n"
-        << "  <trk><name>" << (act_ok ? act_raw : "") << "</name>\n"
+        << "  <metadata><time>" << date_buf << "</time></metadata>\n";
+    // Shots a Traverse Alpha counted while hunting: one waypoint per shot that has a position,
+    // before the track as GPX wants, and the count in the extensions below. Twin of the
+    // Android writer (jni_bridge.cpp convertEntryToGpx) and of tools/exercise_log.py to_gpx.
+    // Written 2026-11-13 without an iPhone build: not compiled, not seen running.
+    {
+        struct tm shot_tm = {};
+        shot_tm.tm_year = entry->header.date_time.year  - 1900;
+        shot_tm.tm_mon  = entry->header.date_time.month - 1;
+        shot_tm.tm_mday = entry->header.date_time.day;
+        shot_tm.tm_hour = entry->header.date_time.hour;
+        shot_tm.tm_min  = entry->header.date_time.minute;
+        shot_tm.tm_sec  = (int)(entry->header.date_time.msec / 1000);
+        time_t shot_start = mktime(&shot_tm);
+        for (uint32_t i = 0; i < entry->samples_count; i++) {
+            const ambit_log_sample_t &s = entry->samples[i];
+            if (s.type != ambit_log_sample_type_shot || !s.u.shot.has_position) continue;
+            time_t shot_epoch = shot_start + (time_t)(s.time / 1000);
+            char shot_time[32];
+            strftime(shot_time, sizeof(shot_time), "%Y-%m-%dT%H:%M:%SZ", gmtime(&shot_epoch));
+            gpx << std::fixed << std::setprecision(7)
+                << "  <wpt lat=\"" << s.u.shot.latitude / 1e7 << "\" lon=\"" << s.u.shot.longitude / 1e7 << "\">"
+                << "<time>" << shot_time << "</time><sym>Shot</sym><type>shot</type></wpt>\n";
+        }
+        gpx.unsetf(std::ios_base::floatfield);
+        gpx << std::setprecision(6);
+    }
+    gpx << "  <trk><name>" << (act_ok ? act_raw : "") << "</name>\n"
         << "    <extensions>\n"
         << "      <duration>" << entry->header.duration / 1000 << "</duration>\n"
         << "      <distance>" << entry->header.distance << "</distance>\n"
         << "      <ascent>" << entry->header.ascent << "</ascent>\n"
-        << "      <sport_type>" << (int)act_type << "</sport_type>\n"
-        << "    </extensions>\n"
+        << "      <sport_type>" << (int)act_type << "</sport_type>\n";
+    if (entry->header.has_shots)
+        gpx << "      <shots>" << entry->header.shots << "</shots>\n";
+    gpx << "    </extensions>\n"
         << "  <trkseg>\n";
 
     double cur_lat = 0.0, cur_lon = 0.0, cur_ele = 0.0;
@@ -880,10 +908,11 @@ RCT_EXPORT_METHOD(writeRoutes:(NSArray *)routes resolver:(RCTPromiseResolveBlock
 }
 
 RCT_EXPORT_METHOD(addPoi:(NSString *)name lat:(double)lat lon:(double)lon type:(NSInteger)type
+                  altitude:(NSInteger)altitude
                   resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
     ambit_object_t *dev = ambit_ios_active_device();
     if (!dev) { reject(@"NOT_CONNECTED", @"Watch not connected", nil); return; }
-    if (ambit3_add_poi_to_watch(dev, [name UTF8String], lat, lon, (int)type) == 0) resolve(@YES);
+    if (ambit3_add_poi_to_watch(dev, [name UTF8String], lat, lon, (int)type, (int)altitude) == 0) resolve(@YES);
     else reject(@"ADD_POI_FAILED", @"ambit3_add_poi_to_watch failed", nil);
 }
 

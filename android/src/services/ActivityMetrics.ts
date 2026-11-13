@@ -27,6 +27,7 @@ export interface MetricValues {
   poolLengths: number;
   maxAltM: number;
   paceSecPerKm: number;
+  shots?: number;      // Traverse Alpha: shots counted while hunting
 }
 
 export interface MetricDef {
@@ -52,6 +53,7 @@ export const ALL_METRICS: MetricDef[] = [
   { key: 'peakTe',      label: 'Peak TE' },
   { key: 'maxAltitude', label: 'Max alt.' },
   { key: 'poolLengths', label: 'Lengths' },
+  { key: 'shots',       label: 'Shots' },
 ];
 
 export function metricLabel(key: string): string {
@@ -77,6 +79,7 @@ export function metricRaw(m: MetricValues, key: string): number {
     case 'peakTe':      return m.peakTe || 0;
     case 'maxAltitude': return m.maxAltM || 0;
     case 'poolLengths': return m.poolLengths || 0;
+    case 'shots':       return m.shots || 0;
     default:            return 0;
   }
 }
@@ -117,6 +120,7 @@ export function metricValue(m: MetricValues, key: string): string {
     case 'peakTe':      return (m.peakTe / 10).toFixed(1);
     case 'maxAltitude': return `${Math.round(m.maxAltM)} m`;
     case 'poolLengths': return String(m.poolLengths);
+    case 'shots':       return String(m.shots);
     default:            return '';
   }
 }

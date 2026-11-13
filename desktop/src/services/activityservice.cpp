@@ -132,6 +132,9 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
     result[QStringLiteral("peakTrainingEffect")] = 0;   // value*10 (35 -> 3.5)
     result[QStringLiteral("poolLengths")] = 0;
     result[QStringLiteral("maxAltitudeMeters")] = 0;
+    // Shots a Suunto Traverse Alpha counted while hunting (exercise_log.py: <shots> in the
+    // extensions, one <wpt> of <type>shot</type> per shot that has a position). 0 = none.
+    result[QStringLiteral("shots")] = 0;
     // HRV (rMSSD, ms) computed by exercise_log.py from this move's raw R-R (needs a Smart
     // Sensor belt); 0 = none recorded. hrvResting flags a lie-still HRV test (a 5+5 or similar)
     // vs a workout that merely logged R-R - only resting ones feed the Health HRV series.
@@ -141,10 +144,13 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
     result[QStringLiteral("hrvOrthoDrop")] = 0;
 
     QVariantList track;
+    QVariantList shotPoints;          // [{lat, lon, time}] - where each shot was counted
     QXmlStreamReader xml(gpxText);
     QString currentTag;
     QString pendingLat, pendingLon, pendingEle;
+    QString wptLat, wptLon, wptTime, wptType;
     bool inExtensions = false;
+    bool inWpt = false;
 
     while (!xml.atEnd()) {
         const auto token = xml.readNext();
@@ -156,6 +162,12 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
                 pendingLat = xml.attributes().value(QStringLiteral("lat")).toString();
                 pendingLon = xml.attributes().value(QStringLiteral("lon")).toString();
                 pendingEle.clear();
+            } else if (tag == QStringLiteral("wpt")) {
+                inWpt = true;
+                wptLat = xml.attributes().value(QStringLiteral("lat")).toString();
+                wptLon = xml.attributes().value(QStringLiteral("lon")).toString();
+                wptTime.clear();
+                wptType.clear();
             }
             currentTag = tag;
         } else if (token == QXmlStreamReader::EndElement) {
@@ -169,10 +181,27 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
                 point[QStringLiteral("ele")] = pendingEle.toDouble();
                 track.append(point);
             }
+            if (tag == QStringLiteral("wpt")) {
+                inWpt = false;
+                if (wptType == QStringLiteral("shot")) {
+                    QVariantMap shot;
+                    shot[QStringLiteral("lat")] = wptLat.toDouble();
+                    shot[QStringLiteral("lon")] = wptLon.toDouble();
+                    shot[QStringLiteral("time")] = wptTime;
+                    shotPoints.append(shot);
+                }
+            }
             currentTag.clear();
         } else if (token == QXmlStreamReader::Characters && !xml.isWhitespace()) {
             const QString text = xml.text().toString();
-            if (currentTag == QStringLiteral("name")) {
+            if (inWpt) {
+                // A waypoint's own name, time and type stay with the waypoint: they are not the
+                // move's name or start time.
+                if (currentTag == QStringLiteral("time"))
+                    wptTime = text;
+                else if (currentTag == QStringLiteral("type"))
+                    wptType = text;
+            } else if (currentTag == QStringLiteral("name")) {
                 result[QStringLiteral("name")] = text;
             } else if (currentTag == QStringLiteral("ele")) {
                 pendingEle = text;
@@ -209,6 +238,8 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
                 result[QStringLiteral("peakTrainingEffect")] = text.toInt();
             } else if (inExtensions && currentTag == QStringLiteral("pool_lengths")) {
                 result[QStringLiteral("poolLengths")] = text.toInt();
+            } else if (inExtensions && currentTag == QStringLiteral("shots")) {
+                result[QStringLiteral("shots")] = text.toInt();
             } else if (inExtensions && currentTag == QStringLiteral("max_altitude")) {
                 result[QStringLiteral("maxAltitudeMeters")] = text.toDouble();
             } else if (inExtensions && currentTag == QStringLiteral("hrv_rmssd")) {
@@ -240,6 +271,7 @@ QVariantMap ActivityService::parseGpx(const QString &gpxText)
         result[QStringLiteral("avgSpeedMh")] = distM / (durS / 3600.0);
 
     result[QStringLiteral("track")] = track;
+    result[QStringLiteral("shotPoints")] = shotPoints;
     return result;
 }
 
@@ -980,7 +1012,8 @@ bool ActivityService::dbLoadAll()
                      QStringLiteral("peakTrainingEffect"), QStringLiteral("poolLengths"),
                      QStringLiteral("maxAltitudeMeters"), QStringLiteral("paceSecPerKm"),
                      QStringLiteral("hrvRmssd"), QStringLiteral("hrvResting"),
-                     QStringLiteral("hrvOrthoDrop") }) {
+                     QStringLiteral("hrvOrthoDrop"),
+                     QStringLiteral("shots"), QStringLiteral("shotPoints") }) {
                 parsed[key] = extra.value(key);
             }
         }

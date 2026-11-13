@@ -93,7 +93,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
         ptLat: DoubleArray, ptLon: DoubleArray, ptAlt: IntArray,
         wptLat: DoubleArray, wptLon: DoubleArray, wptName: Array<String>, wptPointIndex: IntArray
     ): Boolean
-    private external fun nativeAmbitAddPoi(name: String, lat: Double, lon: Double, type: Int): Boolean
+    private external fun nativeAmbitAddPoi(name: String, lat: Double, lon: Double, type: Int, altitude: Int): Boolean
     private external fun nativeAmbitReadRegion(address: Long, length: Long): String?
     private external fun nativeAmbitReadPoiListRaw(): String?
     private external fun nativeAmbitSetPoiList(expected: ByteArray, newList: ByteArray): Int
@@ -633,7 +633,7 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
     // `type` is the Ambit POI type byte 0-17 (the icon the watch shows); React Native passes
     // JS numbers as Double, so it arrives as Double and is narrowed to Int for the JNI call.
     @ReactMethod
-    fun addPoi(name: String, lat: Double, lon: Double, type: Double, promise: Promise) {
+    fun addPoi(name: String, lat: Double, lon: Double, type: Double, altitude: Double, promise: Promise) {
         if (!jniLoaded) {
             promise.reject("JNI_NOT_LOADED", "Native library unavailable")
             return
@@ -644,7 +644,8 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
         }
         executor.execute {
             try {
-                val ok = nativeAmbitAddPoi(name.trim(), lat, lon, type.toInt())
+                // altitude: metres, 30000 = none; only a Traverse stores it.
+                val ok = nativeAmbitAddPoi(name.trim(), lat, lon, type.toInt(), altitude.toInt())
                 if (ok) promise.resolve(true)
                 else promise.reject("POI_ADD_FAILED", "Failed to add POI (see logcat AmbitJNI)")
             } catch (e: Exception) {

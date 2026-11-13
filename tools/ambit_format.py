@@ -149,23 +149,172 @@ WAYPOINT_TYPES = {
 }
 
 
-def waypoint_type_name(type_id):
-    """POI type byte -> human name, falling back to 'Waypoint' for anything unexpected."""
+# Traverse and Traverse Alpha (one firmware file, 2.0.22): the type byte is NOT the Ambit's 18
+# icon groups above. The watch program keeps its own list of 48 types (table at 0x7A144, read
+# with assets/Firmware/re-out/traverse_poi_types.py; names are the watch's own English texts).
+# type byte -> (name, set, Ambit icon group or None). The set is the watch's own: "fishing" and
+# "hunting" types are the ones it offers during a fishing or hunting activity. Icon group = the
+# Ambit type whose icon the Traverse draws for it; None = one of the Traverse's 10 extra icons
+# (Emergency, Info, Fishing spot, Fish, Prints, Stand, Big game, Small game, Bird, Shot).
+# Read from the firmware only: no Traverse POI capture exists and no Traverse was on hand
+# (tracker ticket traverse-alpha-vertical/02, 2026-11-12).
+TRAVERSE_WAYPOINT_TYPES = {
+     0: ("Building",     "general", 0),
+     1: ("Home",         "general", 0),
+     2: ("Car",          "general", 3),
+     3: ("Parking",      "general", 3),
+     4: ("Camp",         "general", 2),
+     5: ("Camping",      "general", 2),
+     6: ("Food",         "general", 7),
+     7: ("Restaurant",   "general", 7),
+     8: ("Cafe",         "general", 7),
+     9: ("Lodging",      "general", 10),
+    10: ("Hostel",       "general", 10),
+    11: ("Hotel",        "general", 10),
+    12: ("Water",        "fishing", 16),
+    13: ("River",        "fishing", 16),
+    14: ("Lake",         "general", 16),
+    15: ("Coast",        "general", 16),
+    16: ("Mountain",     "general", 12),
+    17: ("Hill",         "general", 12),
+    18: ("Valley",       "general", 12),
+    19: ("Cliff",        "general", 12),
+    20: ("Forest",       "general", 8),
+    21: ("Crossroad",    "general", 4),
+    22: ("Sight",        "general", 13),
+    23: ("Begin",        "general", 5),
+    24: ("End",          "general", 6),
+    25: ("Geocache",     "general", 9),
+    26: ("POI",          "general", 17),
+    27: ("Road",         "general", 14),
+    28: ("Trail",        "general", 14),
+    29: ("Rock",         "fishing", 15),
+    30: ("Meadow",       "general", 11),
+    31: ("Cave",         "general", 1),
+    32: ("Emergency",    "general", None),
+    33: ("Info",         "general", None),
+    34: ("Peak",         "general", 12),
+    35: ("Waterfall",    "fishing", 16),
+    36: ("Fishing spot", "fishing", None),
+    37: ("Bedding",      "hunting", 17),
+    38: ("Prints",       "hunting", None),
+    39: ("Rub",          "hunting", 8),
+    40: ("Scrape",       "hunting", 8),
+    41: ("Stand",        "hunting", None),
+    42: ("Trail cam",    "hunting", 13),
+    43: ("Big game",     "hunting", None),
+    44: ("Small game",   "hunting", None),
+    45: ("Bird",         "hunting", None),
+    46: ("Shot",         "hunting", None),
+    47: ("Fish",         "fishing", None),
+}
+TRAVERSE_WAYPOINT_TYPE_DEFAULT = 26    # "POI", the Traverse's plain flag
+
+# The Traverse type that draws the same icon as each Ambit type (a POI picked from the 18-type
+# list keeps its icon when it is sent to a Traverse).
+AMBIT_TO_TRAVERSE_WAYPOINT_TYPE = {
+    0: 0, 1: 31, 2: 4, 3: 2, 4: 21, 5: 23, 6: 24, 7: 6, 8: 20, 9: 25, 10: 9, 11: 30,
+    12: 16, 13: 22, 14: 27, 15: 29, 16: 12, 17: 26,
+}
+
+
+# Watches by the name they give themselves, grouped by the POI type numbers they use. The
+# Ambit1/2 store the older Movescount numbers, which are the Traverse's 0 to 31 (openambit's
+# movescount_waypoint_type list equals the Traverse table there; an Ambit2 was seen with 26).
+TRAVERSE_NUMBERED_MODELS = {"Jabiru", "Loon", "Bluebird", "Duck", "Colibri", "Greentit"}
+
+
+def waypoint_type_between(type_id, from_model, to_model):
+    """The type byte for a POI copied from one watch to another ("Emu", "Loon" ...): unchanged
+    inside a family, else the type that draws the same icon on the other one. A Traverse type
+    with an icon the Ambit3 lacks, or a number neither list has, becomes the plain type."""
+    from_traverse = from_model in TRAVERSE_NUMBERED_MODELS
+    to_traverse = to_model in TRAVERSE_NUMBERED_MODELS
+    plain = TRAVERSE_WAYPOINT_TYPE_DEFAULT if to_traverse else WAYPOINT_TYPE_DEFAULT
+    try:
+        type_id = int(type_id)
+    except (TypeError, ValueError):
+        return plain
+    if from_traverse == to_traverse:
+        return type_id if type_id in (TRAVERSE_WAYPOINT_TYPES if to_traverse else WAYPOINT_TYPES) else plain
+    if to_traverse:
+        return AMBIT_TO_TRAVERSE_WAYPOINT_TYPE.get(type_id, plain)
+    group = TRAVERSE_WAYPOINT_TYPES.get(type_id, (None, None, None))[2]
+    return plain if group is None else group
+
+
+def waypoint_types_for(product_id):
+    """{type byte: name} of the POI types a watch knows: the Traverse's 48 or the Ambit's 18."""
+    if product_id in WAYPOINT_ALT_PRODUCT_IDS:
+        return {t: v[0] for t, v in TRAVERSE_WAYPOINT_TYPES.items()}
+    return dict(WAYPOINT_TYPES)
+
+
+def waypoint_type_name(type_id, product_id=None):
+    """POI type byte -> human name, falling back to 'Waypoint' for anything unexpected. With a
+    Traverse's product id the byte is read against the Traverse's own list."""
+    if product_id in WAYPOINT_ALT_PRODUCT_IDS:
+        return TRAVERSE_WAYPOINT_TYPES.get(
+            type_id, TRAVERSE_WAYPOINT_TYPES[TRAVERSE_WAYPOINT_TYPE_DEFAULT])[0]
     return WAYPOINT_TYPES.get(type_id, WAYPOINT_TYPES[WAYPOINT_TYPE_DEFAULT])
 
 
-def waypoint_type_id(value):
-    """Resolve a POI type given either its numeric id or its (case-insensitive) name.
-    Raises ValueError on an unknown name so a CLI/API surfaces it rather than writing 17."""
-    if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+def waypoint_type_id(value, product_id=None):
+    """Resolve a POI type given either its numeric id or its (case-insensitive) name, in the
+    list of the watch it is for (the Traverse's 48 types with its product id, else the Ambit's
+    18). None or "" gives that watch's plain type. Raises ValueError on an unknown name or id
+    so a CLI/API surfaces it rather than writing the default."""
+    types = waypoint_types_for(product_id)
+    if value in (None, ""):
+        return (TRAVERSE_WAYPOINT_TYPE_DEFAULT if product_id in WAYPOINT_ALT_PRODUCT_IDS
+                else WAYPOINT_TYPE_DEFAULT)
+    if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
         tid = int(value)
-        if tid not in WAYPOINT_TYPES:
-            raise ValueError(f"POI type id {tid} out of range 0-17")
+        if tid not in types:
+            raise ValueError(f"POI type id {tid} out of range 0-{max(types)}")
         return tid
-    for tid, name in WAYPOINT_TYPES.items():
+    for tid, name in types.items():
         if name.lower() == str(value).strip().lower():
             return tid
-    raise ValueError(f"unknown POI type {value!r}; choose from {list(WAYPOINT_TYPES.values())}")
+    raise ValueError(f"unknown POI type {value!r}; choose from {list(types.values())}")
+
+
+# The SBEM entry a POI ("WayPoint") travels in over the link (0x0b24 read, 0x0b25 write), and
+# whether its record ends with an int16 altitude. From SuuntoLink's own descriptors: 0x55 on the
+# Ambit3 Peak/Sport/Run 2.4.17 (and the Vertical 1.1.22, rebuilt from its firmware), 0x53 with an
+# altitude on the Traverse / Traverse Alpha 2.0.22, 0x52 with an altitude on the Traverse 1.0.4.
+# The two Traverse lists are the ones André's real Traverse sent itself, first on 1.0.4 and then
+# on 2.0.22 (0x1104 replies in assets/pcap/traverseoldfirmwaretonew, 2026-08-12: byte for byte
+# the stored descriptor files). The Traverse Alpha 2.0.22 program in the PC emulator answers
+# 0x0b24 with 0x53 entries and does not keep a 0x55 record (2026-11-13). No POI was ever read
+# from or written to a real Traverse: that watch held none and is no longer on hand.
+POI_ENTRY = 0x55
+POI_ENTRY_TRAVERSE = 0x53
+POI_ENTRY_TRAVERSE_FW1 = 0x52
+POI_ENTRIES = (POI_ENTRY, POI_ENTRY_TRAVERSE, POI_ENTRY_TRAVERSE_FW1)
+POI_ENTRIES_WITH_ALTITUDE = (POI_ENTRY_TRAVERSE, POI_ENTRY_TRAVERSE_FW1)
+
+
+def poi_altitude(elevation_m):
+    """The int16 altitude of a Traverse POI for an elevation in metres (a GPX waypoint's <ele>),
+    ALTITUDE_NONE when there is none or it is not a height on Earth. SuuntoLink's own POI code
+    hands the watch the cloud POI's altitude (poi.js: 'altitude': point.z); a POI the watch
+    makes carries its own current altitude in metres."""
+    try:
+        metres = round(float(elevation_m))
+    except (TypeError, ValueError):
+        return ALTITUDE_NONE
+    return metres if -500 <= metres <= 9000 else ALTITUDE_NONE
+
+
+def poi_entry_for_product(product_id, firmware=None):
+    """(entry number, has altitude) of a watch's POI records. `firmware` ("2.0.22") only matters
+    on a Traverse, whose 1.x firmware used another entry number."""
+    if product_id in WAYPOINT_ALT_PRODUCT_IDS:
+        if firmware and str(firmware).split(".")[0] == "1":
+            return POI_ENTRY_TRAVERSE_FW1, True
+        return POI_ENTRY_TRAVERSE, True
+    return POI_ENTRY, False
 ROUTE_INDEX_CONST = 415       # field @8, constant across the 7 observed entries
 
 # The route timestamp (index @4, in seconds) shares its clock with the date in the

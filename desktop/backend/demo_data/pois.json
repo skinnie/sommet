@@ -1,4 +1,4 @@
 {
  "ok": true,
- "raw_output": "POI 0: Name='Summit Cairn' Type=17 Location.Latitude=506560000 Location.Longitude=31000000\nPOI 1: Name='Water Spring' Type=6 Location.Latitude=506100000 Location.Longitude=30500000\nPOI 2: Name='Trailhead' Type=12 Location.Latitude=506800000 Location.Longitude=30800000\n"
+ "raw_output": "POI 0: Name='Summit Cairn' Type=12 Location.Latitude=506560000 Location.Longitude=31000000\nPOI 1: Name='Water Spring' Type=16 Location.Latitude=506100000 Location.Longitude=30500000\nPOI 2: Name='Trailhead' Type=5 Location.Latitude=506800000 Location.Longitude=30800000\n"
 }

@@ -57,7 +57,8 @@ extern "C" int ambit3_write_route_to_watch(ambit_object_t *object,
 
 // ambit3_add_poi_to_watch() est déclarée dans device_driver_ambit3.c
 extern "C" int ambit3_add_poi_to_watch(ambit_object_t *object,
-                                        const char *name, double lat, double lon, int type);
+                                        const char *name, double lat, double lon, int type,
+                                        int altitude);
 
 extern "C" int ambit3_set_poi_list(ambit_object_t *object, const uint8_t *expected, size_t expected_len,
                                    const uint8_t *new_list, size_t new_len);
@@ -256,8 +257,34 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
         << "<gpx version=\"1.1\" creator=\"AmbitSyncModern\""
         << " xmlns=\"http://www.topografix.com/GPX/1/1\""
         << " xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v1\">\n"
-        << "  <metadata><time>" << date_buf << "</time></metadata>\n"
-        << "  <trk><name>" << (act_ok ? act_raw : "") << "</name>\n"
+        << "  <metadata><time>" << date_buf << "</time></metadata>\n";
+    // Shots a Traverse Alpha counted while hunting, as the desktop writes them
+    // (tools/exercise_log.py to_gpx): one waypoint per shot that has a position, before the
+    // track as GPX wants. No <name>: the app's GPX readers take a <name> as the move's name.
+    // A shot counted without a GPS fix is only in the <shots> count below.
+    {
+        struct tm shot_tm = {};
+        shot_tm.tm_year = entry->header.date_time.year  - 1900;
+        shot_tm.tm_mon  = entry->header.date_time.month - 1;
+        shot_tm.tm_mday = entry->header.date_time.day;
+        shot_tm.tm_hour = entry->header.date_time.hour;
+        shot_tm.tm_min  = entry->header.date_time.minute;
+        shot_tm.tm_sec  = (int)(entry->header.date_time.msec / 1000);
+        time_t shot_start = mktime(&shot_tm);
+        for (uint32_t i = 0; i < entry->samples_count; i++) {
+            const ambit_log_sample_t &s = entry->samples[i];
+            if (s.type != ambit_log_sample_type_shot || !s.u.shot.has_position) continue;
+            time_t shot_epoch = shot_start + (time_t)(s.time / 1000);
+            char shot_time[32];
+            strftime(shot_time, sizeof(shot_time), "%Y-%m-%dT%H:%M:%SZ", gmtime(&shot_epoch));
+            gpx << std::fixed << std::setprecision(7)
+                << "  <wpt lat=\"" << s.u.shot.latitude / 1e7 << "\" lon=\"" << s.u.shot.longitude / 1e7 << "\">"
+                << "<time>" << shot_time << "</time><sym>Shot</sym><type>shot</type></wpt>\n";
+        }
+        gpx.unsetf(std::ios_base::floatfield);
+        gpx << std::setprecision(6);
+    }
+    gpx << "  <trk><name>" << (act_ok ? act_raw : "") << "</name>\n"
         << "    <extensions>\n"
         << "      <duration>"    << entry->header.duration / 1000 << "</duration>\n"
         << "      <distance>"    << entry->header.distance         << "</distance>\n"
@@ -286,6 +313,8 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
             << "      <max_altitude>" << h.altitude_max                   << "</max_altitude>\n";
         if (h.swimming_pool_lengths > 0)
             gpx << "      <pool_lengths>" << h.swimming_pool_lengths << "</pool_lengths>\n";
+        if (h.has_shots)
+            gpx << "      <shots>" << h.shots << "</shots>\n";
     }
     gpx << "    </extensions>\n"
         << "  <trkseg>\n";
@@ -1244,13 +1273,14 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteRoutes(
 JNIEXPORT jboolean JNICALL
 Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitAddPoi(
         JNIEnv *env, jobject /* thiz */,
-        jstring name, jdouble lat, jdouble lon, jint type)
+        jstring name, jdouble lat, jdouble lon, jint type, jint altitude)
 {
     if (!g_device) { LOGE("nativeAmbitAddPoi: Not connected"); return JNI_FALSE; }
 
     const char *name_utf8 = env->GetStringUTFChars(name, nullptr);
     LOGI("nativeAmbitAddPoi: adding '%s' (type %d)", name_utf8, (int)type);
-    int ret = ambit3_add_poi_to_watch(g_device, name_utf8, (double)lat, (double)lon, (int)type);
+    int ret = ambit3_add_poi_to_watch(g_device, name_utf8, (double)lat, (double)lon, (int)type,
+                                      (int)altitude);
     env->ReleaseStringUTFChars(name, name_utf8);
 
     if (ret != 0) { LOGE("ambit3_add_poi_to_watch failed: %d", ret); return JNI_FALSE; }

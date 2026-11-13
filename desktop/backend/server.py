@@ -734,18 +734,20 @@ def _sync_diff_settings(src, tgt):
 # .Longitude), so the non-greedy spans stay within one record.
 _POI_RE = re.compile(
     r"\bName='([^']*)'\s+RouteName='([^']*)'.*?\bType=(\d+).*?"
-    r"Location\.Latitude=(-?\d+)\s+Location\.Longitude=(-?\d+)", re.S)
+    r"Location\.Latitude=(-?\d+)\s+Location\.Longitude=(-?\d+)(?:[ \t]+Altitude=(-?\d+))?", re.S)
 
 
 def _sync_parse_pois(raw):
     """Standalone POIs as [{name, type, lat, lon}] from write_nav.py's `pois` text output."""
     pois = []
     for m in _POI_RE.finditer(raw or ""):
-        name, route_name, typ, lat, lon = m.groups()
+        name, route_name, typ, lat, lon, altitude = m.groups()
         if route_name:            # a route turn-point, not a standalone POI
             continue
-        pois.append({"name": name, "type": int(typ),
-                     "lat": int(lat) / 1e7, "lon": int(lon) / 1e7})
+        poi = {"name": name, "type": int(typ), "lat": int(lat) / 1e7, "lon": int(lon) / 1e7}
+        if altitude is not None:  # a Traverse POI carries an altitude (metres, 30000 = none)
+            poi["altitude"] = int(altitude)
+        pois.append(poi)
     return pois
 
 
@@ -764,6 +766,11 @@ def _sync_diff_pois(src, tgt):
     s_items = ((src.get("categories") or {}).get("pois") or {}).get("items") or []
     t_items = ((tgt.get("categories") or {}).get("pois") or {}).get("items") or []
     have = {_sync_poi_key(p) for p in t_items}
+    # The POI type is a number in the SOURCE watch's own list. An Ambit3 and a Traverse number
+    # their types differently (2 is "Camp" on one, "Car" on the other), so the type is carried
+    # over by its icon (tools/ambit_format.py waypoint_type_between).
+    sys.path.insert(0, str(TOOLS_DIR))
+    import ambit_format                                      # noqa: PLC0415
     changes = []
     for p in s_items:
         if _sync_poi_key(p) in have:
@@ -772,7 +779,9 @@ def _sync_diff_pois(src, tgt):
             "key": "poi:" + "|".join(str(x) for x in _sync_poi_key(p)),
             "label": p.get("name") or "(unnamed POI)",
             "poi": {"name": p.get("name"), "lat": p.get("lat"), "lon": p.get("lon"),
-                    "type": p.get("type", 0)},
+                    "type": ambit_format.waypoint_type_between(
+                        p.get("type", 0), src.get("model"), tgt.get("model")),
+                    **({"altitude": p["altitude"]} if "altitude" in p else {})},
             "from": None, "to": p.get("name"),
             "fromText": "—",  # em dash: not present on the target
             "toText": "%.5f, %.5f" % (float(p.get("lat", 0.0)), float(p.get("lon", 0.0))),
@@ -2136,7 +2145,16 @@ class Handler(BaseHTTPRequestHandler):
         if demo_ambit():
             # Tagged "demo" so the app keeps these sample moves apart from real ones (and hides
             # them outside Testing mode) - untagged they were saved with no device, 14 times over.
-            self._send_json(200, {**demo_json("activities.json"), "device": "demo"})
+            sample = demo_json("activities.json")
+            if DEMO["variant"] == "Loon":
+                # A sample Traverse Alpha also has a Hunting move with counted shots (a made-up
+                # loop, demo_data/hunting_traverse_alpha.gpx), so the Shots tile, column and
+                # map pins can be looked at without that watch.
+                moves = list(sample.get("activities", []))
+                moves.append({"index": len(moves), "fit_base64": None,
+                              "gpx": (DEMO_DIR / "hunting_traverse_alpha.gpx").read_text()})
+                sample = {**sample, "activities": moves, "total_entries": len(moves)}
+            self._send_json(200, {**sample, "device": "demo"})
             return
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         known_count = query.get("known_count", ["0"])[0]
@@ -3941,7 +3959,19 @@ class Handler(BaseHTTPRequestHandler):
         silently showing wrong data - same reasoning as /api/nav, applied honestly rather
         than skipped."""
         if demo_ambit():
-            self._send_json(200, demo_json("pois.json"))
+            sample = demo_json("pois.json")
+            if DEMO["variant"] in ("Jabiru", "Loon"):
+                # The sample POIs carry Ambit3 type numbers. A Traverse numbers its types
+                # differently (tools/ambit_format.py), so a sample Traverse shows each one as
+                # the Traverse type with the same icon.
+                sys.path.insert(0, str(TOOLS_DIR))
+                import ambit_format                              # noqa: PLC0415
+                to_traverse = ambit_format.AMBIT_TO_TRAVERSE_WAYPOINT_TYPE
+                sample["raw_output"] = re.sub(
+                    r"\bType=(\d+)",
+                    lambda m: "Type=%d" % to_traverse.get(int(m.group(1)), int(m.group(1))),
+                    sample.get("raw_output", ""))
+            self._send_json(200, sample)
             return
         if use_ble():
             self._handle_pois_read_ble()
@@ -4436,7 +4466,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if use_ble():
-            self._handle_poi_add_ble(name, lat, lon)
+            self._handle_poi_add_ble(name, lat, lon, body.get("type"), body.get("ele"))
             return
 
         if selected_is_legacy():
@@ -4460,6 +4490,12 @@ class Handler(BaseHTTPRequestHandler):
         poi_type = body.get("type")
         if poi_type not in (None, ""):
             args += ["--type", str(poi_type)]
+        # "ele": the elevation of a POI imported from a GPX (metres); a Traverse keeps it.
+        try:
+            if body.get("ele") is not None:
+                args += ["--ele", str(float(body.get("ele")))]
+        except (TypeError, ValueError):
+            pass
         code, out, err = run_tool("write_nav.py", args)
         if code != 0:
             self._send_json(502, {"ok": False, "error": (err or out or "").strip()
@@ -4467,7 +4503,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "raw_output": out})
 
-    def _handle_poi_add_ble(self, name, lat, lon):
+    def _handle_poi_add_ble(self, name, lat, lon, poi_type=None, elevation=None):
         """The BLE path for POST /api/pois - tools/ble_pois.py's add_poi(). Same gap as
         the read side (found live 2026-08-13): never ported despite routes/settings/
         activities all having their own BLE write paths already."""
@@ -4475,7 +4511,10 @@ class Handler(BaseHTTPRequestHandler):
         import ble_pois                                      # noqa: PLC0415
         try:
             ble_bridge.bridge.set_dry_run(False)
-            result = ble_pois.add_poi(ble_bridge.bridge, name, lat, lon)
+            # The picked type goes too (it was dropped until 2026-11-13: a POI added over
+            # Bluetooth always got the plain icon).
+            result = ble_pois.add_poi(ble_bridge.bridge, name, lat, lon,
+                                      None if poi_type in (None, "") else poi_type, elevation)
         except ble_bridge.BleBridgeError as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return

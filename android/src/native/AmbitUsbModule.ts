@@ -241,8 +241,10 @@ export function writeRoutes(routes: NativeRoute[]): Promise<boolean> {
  */
 // `type` is the Ambit POI type byte 0-17 (the icon the watch shows); default 17 ("Waypoint"),
 // what the watch itself uses. GPX re-imports (which have no Ambit type) rely on that default.
-export function addPoi(name: string, lat: number, lon: number, type: number = 17): Promise<boolean> {
-  return NativeAmbit.addPoi(name, lat, lon, type);
+// `altitude` (metres, 30000 = none) is stored by a Traverse / Traverse Alpha only.
+export function addPoi(name: string, lat: number, lon: number, type: number = 17,
+                       altitude: number = 30000): Promise<boolean> {
+  return NativeAmbit.addPoi(name, lat, lon, type, altitude);
 }
 
 /** Replaces the watch's POI list (Ambit3 family). `expectedB64` is the raw read

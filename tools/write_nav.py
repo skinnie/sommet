@@ -145,11 +145,11 @@ LOGBOOK_REQUEST = (bytes.fromhex("00000000") + (1).to_bytes(2, "little")
 # when --all is not given.
 QUERIES = {
     "settings": (CMD_SETTINGS_READ, b"\0\0\0\0", (0x41, 0x43)),
-    "pois": (CMD_POI_READ, b"\0\0\0\0", (0x55,)),
+    "pois": (CMD_POI_READ, b"\0\0\0\0", F.POI_ENTRIES),
     "logbook": (CMD_LOG_HEADERS, LOGBOOK_REQUEST, (0x59, 0x5A, 0x8A)),
 }
 
-POI_ENTRY = 0x55
+POI_ENTRY = F.POI_ENTRY    # the Ambit3's; a Traverse uses another one (F.poi_entry_for_product)
 # Most bytes in one 0x55 entry written to the watch: its length stays one byte, since 0xFF
 # announces the extended header, which corrupted the POI store when written (2026-08-30).
 POI_ENTRY_MAX = 0xFE
@@ -977,9 +977,61 @@ def check_poi_count(link, expected):
     return False
 
 
-def poi_entry_payloads(records):
-    """POI record bodies as the 0x0b25 payloads that append them: packed in order into 0x55
-    entries of at most POI_ENTRY_MAX bytes, one 0x0b25 each. SuuntoLink's poiimport writes one
+def poi_entry_of(reply):
+    """The entry number the POIs of a 0x0b24 reply came in: the watch's own (0x55 on an Ambit3,
+    0x53 on a Traverse 2.0.22). POI_ENTRY when the reply holds none."""
+    if reply and F.SBEM_MAGIC in reply:
+        for entry_id, _ in F.sbem_entries(reply):
+            if entry_id in F.POI_ENTRIES:
+                return entry_id
+    return POI_ENTRY
+
+
+# The Traverses by the name they give themselves in the device-info reply -> USB product id.
+TRAVERSE_MODEL_PRODUCT_IDS = {"Jabiru": 0x002B, "Loon": 0x002D}
+
+
+def _pid(link):
+    """The product id of the watch `link` is open on (or was asked for), None when unknown.
+    A Bluetooth link has no USB product id: there a Traverse is recognised by the model name
+    in its device-info reply, so its POIs get the Traverse form over Bluetooth too."""
+    pid = getattr(link, "opened_product_id", None) or getattr(link, "product_id", None)
+    if pid or getattr(link, "dry_run", True):
+        return pid
+    try:
+        info = link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
+    except Exception:          # each transport raises its own type; unknown model = Ambit3 form
+        return None
+    model = bytes(info[:16]).split(b"\0")[0].decode("ascii", "replace")
+    return TRAVERSE_MODEL_PRODUCT_IDS.get(model)
+
+
+def poi_format(link):
+    """(entry number, has altitude) of the POI records of the watch `link` is open on. An Ambit3
+    is 0x55 without asking. A Traverse is asked for its own field list (the entry number changed
+    between its firmware 1.0.4 and 2.0.22); if that cannot be read, its firmware version decides."""
+    pid = _pid(link)
+    if pid not in F.WAYPOINT_ALT_PRODUCT_IDS:
+        return F.poi_entry_for_product(pid)
+    firmware = None
+    if not link.dry_run:
+        import sbem_schema
+        try:
+            found = sbem_schema.waypoint_entry(sbem_schema.load(sbem_schema.for_link(link)))
+            if found:
+                return found
+        except Exception:      # hid backends and short replies each raise their own type
+            pass
+        try:
+            firmware = sbem_schema.watch_identity(link)[1]
+        except Exception:
+            pass
+    return F.poi_entry_for_product(pid, firmware)
+
+
+def poi_entry_payloads(records, entry=POI_ENTRY):
+    """POI record bodies as the 0x0b25 payloads that append them: packed in order into `entry`
+    (0x55 on an Ambit3) entries of at most POI_ENTRY_MAX bytes, one 0x0b25 each. SuuntoLink's poiimport writes one
     such entry (single-byte length, its 5 POIs in 249 bytes) and never the extended header
     (0x55 0xFF + u32); that form is only what the watch sends on a read, and writing it
     corrupted the POI store (2026-08-30). 0x0b25 appends (Ambit3 firmware FUN_0004da50), so
@@ -992,7 +1044,7 @@ def poi_entry_payloads(records):
         nonlocal chunk
         if chunk:
             payloads.append(SBEM_WRITE_PREFIX + F.SBEM_MAGIC
-                            + bytes([POI_ENTRY, len(chunk)]) + chunk)
+                            + bytes([entry, len(chunk)]) + chunk)
             chunk = b""
 
     for rec in records:
@@ -1022,15 +1074,15 @@ def poi_restore_payloads(reply):
     if not reply or F.SBEM_MAGIC not in reply:
         return []  # no watch to ask and no capture to borrow from, as in a bare dry-run
     records = [data for entry_id, data in F.sbem_entries(reply)
-               if entry_id == POI_ENTRY]
-    return poi_entry_payloads(list(reversed(records)))
+               if entry_id in F.POI_ENTRIES]
+    return poi_entry_payloads(list(reversed(records)), poi_entry_of(reply))
 
 
 def poi_restore_count(reply):
     """How many POIs poi_restore_payloads(reply) puts back (empty entries have no data)."""
     if not reply or F.SBEM_MAGIC not in reply:
         return 0
-    return sum(1 for entry_id, data in F.sbem_entries(reply) if entry_id == POI_ENTRY and data)
+    return sum(1 for entry_id, data in F.sbem_entries(reply) if entry_id in F.POI_ENTRIES and data)
 
 
 def put_pois_back(link, reply):
@@ -1046,24 +1098,63 @@ def put_pois_back(link, reply):
     return expected if check_poi_count(link, expected) else None
 
 
-def poi_write_payload_add(reply, new_record):
+def poi_write_payload_add(reply, new_record, entry=POI_ENTRY):
     """The 0x0b25 for `new_record` followed by the POIs in `reply`, new record first as in
     `poiimport`. For ADDING one POI pass reply=b"": 0x0b25 appends what it is given to the
     store (Ambit3 firmware FUN_0004da50, no implicit clear), so sending "new + existing"
     doubled every POI on each add. `poiimport` sends the whole list only because SuuntoLink
     empties the store with 0x0b04 first (assets/pcap/ambit3poiimport)."""
     records = ([data for entry_id, data in F.sbem_entries(reply)
-                if entry_id == POI_ENTRY]
+                if entry_id in F.POI_ENTRIES]
                if reply and F.SBEM_MAGIC in reply else [])
     body = new_record + b"".join(records)
     if len(body) > POI_ENTRY_MAX:
         # Never the extended header (see poi_entry_payloads); an add sends one record anyway.
-        raise ValueError(f"{len(body)} bytes of POIs do not fit one 0x55 entry")
-    return SBEM_WRITE_PREFIX + F.SBEM_MAGIC + bytes([POI_ENTRY, len(body)]) + body
+        raise ValueError(f"{len(body)} bytes of POIs do not fit one 0x{entry:02x} entry")
+    return SBEM_WRITE_PREFIX + F.SBEM_MAGIC + bytes([entry, len(body)]) + body
 
 
-def build_poi_record(name, lat, lon, stamp=None, type_=F.WAYPOINT_TYPE_DEFAULT):
+def pois_of_reply(reply):
+    """The POIs of a 0x0b24 reply (or of a 0x0b25 payload), in the order they come:
+    [{name, route_name, timestamp, type, lat, lon, altitude}], lat/lon in 1e-7 degrees, altitude
+    None on a watch whose records have none (see F.poi_entry_for_product). An entry can hold
+    several records; an empty or cut one ends that entry."""
+    out = []
+    if not reply or F.SBEM_MAGIC not in reply:
+        return out
+    for entry_id, data in F.sbem_entries(reply):
+        if entry_id not in F.POI_ENTRIES:
+            continue
+        with_altitude = entry_id in F.POI_ENTRIES_WITH_ALTITUDE
+        off = 0
+        while off < len(data):
+            texts = []
+            for _ in range(3):                   # name, route name, timestamp, each NUL-ended
+                end = data.find(b"\0", off)
+                if end < 0:
+                    break
+                texts.append(data[off:end].decode("utf-8", "replace"))
+                off = end + 1
+            tail = 13 + (2 if with_altitude else 0)
+            if len(texts) < 3 or off + tail > len(data):
+                break
+            poi = {"name": texts[0], "route_name": texts[1], "timestamp": texts[2],
+                   "type": data[off + 1],
+                   "lat": int.from_bytes(data[off + 5:off + 9], "little", signed=True),
+                   "lon": int.from_bytes(data[off + 9:off + 13], "little", signed=True),
+                   "altitude": (int.from_bytes(data[off + 13:off + 15], "little", signed=True)
+                                if with_altitude else None)}
+            out.append(poi)
+            off += tail
+    return out
+
+
+def build_poi_record(name, lat, lon, stamp=None, type_=F.WAYPOINT_TYPE_DEFAULT, altitude=None):
     """One POI as the SBEM entry-0x55 body the watch stores, for poi_write_payload_add().
+
+    `altitude` (metres, F.ALTITUDE_NONE for "not known") is for a Traverse only: its record
+    ends with an int16 altitude and its `type_` is one of its own 48 (F.TRAVERSE_WAYPOINT_TYPES).
+    None, the default, gives the Ambit3 record, byte for byte what it was.
 
     `type_` is the Ambit POI type byte (0-17, see F.WAYPOINT_TYPES) - the icon the watch
     shows for this POI. Defaults to 17 ("Waypoint"), what the watch writes for a POI it
@@ -1093,21 +1184,29 @@ def build_poi_record(name, lat, lon, stamp=None, type_=F.WAYPOINT_TYPE_DEFAULT):
     record += bytes([0, type_, 0, 0, 1])
     record += int(round(lat * 1e7)).to_bytes(4, "little", signed=True)
     record += int(round(lon * 1e7)).to_bytes(4, "little", signed=True)
+    if altitude is not None:
+        record += int(altitude).to_bytes(2, "little", signed=True)
     return record
 
 
-def build_set_pois_payloads(pois):
+def build_set_pois_payloads(pois, product_id=None, fmt=None):
     """The 0x0b25 payloads that SET the watch's POI list to exactly `pois` (each
     {name,lat,lon,type?}), for the clear-then-set flow (a preceding nav 0x0b04 commit clears the
     region). [] for an empty list, so the caller sends no 0x0b25 and the commit's clear stands
     (all POIs removed). Packed by poi_entry_payloads(): entries of at most 254 bytes, one
     0x0b25 each, never the extended header."""
+    # `fmt` = poi_format(link) of the watch written to; without it the product id decides.
+    # A numeric type is written as it is (a list read off a watch goes back unchanged, even a
+    # number this app has no name for); a name is looked up in that watch's own list.
+    entry, with_altitude = fmt or F.poi_entry_for_product(product_id)
     records = []
     for p in pois:
         t = p.get("type")
-        t = F.WAYPOINT_TYPE_DEFAULT if t in (None, "") else int(t)
-        records.append(build_poi_record(p["name"], float(p["lat"]), float(p["lon"]), type_=t))
-    return poi_entry_payloads(records)
+        t = int(t) if isinstance(t, int) or str(t).strip().isdigit() else F.waypoint_type_id(t, product_id)
+        # "altitude" (metres) is what a Traverse POI was read with: it goes back as it was.
+        records.append(build_poi_record(p["name"], float(p["lat"]), float(p["lon"]), type_=t,
+                                        altitude=F.poi_altitude(p.get("altitude")) if with_altitude else None))
+    return poi_entry_payloads(records, entry)
 
 
 def run_addpoi(args):
@@ -1124,12 +1223,6 @@ def run_addpoi(args):
         raise SystemExit("addpoi: --lat and --lon are required")
     if not (-90.0 <= args.lat <= 90.0) or not (-180.0 <= args.lon <= 180.0):
         raise SystemExit(f"addpoi: {args.lat}, {args.lon} is not a coordinate on Earth")
-    try:
-        poi_type = (F.waypoint_type_id(args.type) if args.type is not None
-                    else F.WAYPOINT_TYPE_DEFAULT)
-    except ValueError as e:
-        raise SystemExit(f"addpoi: {e}")
-
     link = Link(dry_run=not args.write, verbose=args.verbose, product_id=args.product_id)
     if args.write:
         print("!! REAL WRITE requested")
@@ -1138,17 +1231,27 @@ def run_addpoi(args):
         print("dry-run mode: not a byte will be emitted")
 
     link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
+    # The type is one of the watch's own (a Traverse has 48, numbered differently), and so are
+    # the entry number and the altitude field of the record (poi_format).
+    pid = _pid(link)
+    try:
+        poi_type = F.waypoint_type_id(args.type, pid)
+    except ValueError as e:
+        raise SystemExit(f"addpoi: {e}")
+    entry, with_altitude = poi_format(link)
     before = poi_count(link)
-    record = build_poi_record(args.name.strip(), args.lat, args.lon, type_=poi_type)
+    # --ele (metres) reaches a Traverse only: an Ambit3 POI has no altitude.
+    record = build_poi_record(args.name.strip(), args.lat, args.lon, type_=poi_type,
+                              altitude=F.poi_altitude(args.ele) if with_altitude else None)
     # Only the new record: 0x0b25 appends (see poi_write_payload_add). It also acks when it
     # stored nothing, so the count is what says the POI is there.
-    link.command(CMD_POI_WRITE, poi_write_payload_add(b"", record))
+    link.command(CMD_POI_WRITE, poi_write_payload_add(b"", record, entry))
     after = poi_count(link)
     if before is not None and after != before + 1:
         print(f"!! the watch did not keep the POI ({before} -> {after} POIs)")
         return 1
     print(f"POI {args.name.strip()!r} ({args.lat:.6f}, {args.lon:.6f}) "
-          f"type={F.waypoint_type_name(poi_type)} "
+          f"type={F.waypoint_type_name(poi_type, pid)} "
           f"{'written' if args.write else 'would be written'}"
           + (f", {before} -> {after} POIs" if before is not None else ""))
     return 0
@@ -1184,7 +1287,7 @@ def poi_records_to_keep(reply, targets):
     watch stores them) not already taken, so of two identical POIs one stays. Empty entries go
     too: nothing in them can be written back. Returns (keep, empty_count); raises LookupError
     naming a target that is not there. Same rule as the Android app's poisToKeep()."""
-    records = ([data for entry_id, data in F.sbem_entries(reply) if entry_id == POI_ENTRY]
+    records = ([data for entry_id, data in F.sbem_entries(reply) if entry_id in F.POI_ENTRIES]
                if reply and F.SBEM_MAGIC in reply else [])
     places = [poi_place(r) if r else None for r in records]
     taken = set()
@@ -1216,8 +1319,9 @@ def save_poi_backup(reply, serial, backup_dir):
     return path
 
 
-def set_poi_records(link, records):
-    """Replaces the watch's POI list with `records` (in the order read): 0x0b04 empties it,
+def set_poi_records(link, records, entry=POI_ENTRY):
+    """Replaces the watch's POI list with `records` (in the order read; `entry` = the entry
+    number they were read in, see poi_entry_of): 0x0b04 empties it,
     the count must then be 0, the records go back reversed in entries of at most 254 bytes
     (poi_entry_payloads, the order that kept André's list in order on 2026-10-25), and the
     count must match. Raises RuntimeError when a step does not hold."""
@@ -1225,7 +1329,7 @@ def set_poi_records(link, records):
     left = poi_count(link)
     if left not in (None, 0):
         raise RuntimeError(f"the watch still holds {left} POIs after emptying the list")
-    for payload in poi_entry_payloads(list(reversed(records))):
+    for payload in poi_entry_payloads(list(reversed(records)), entry):
         link.command(CMD_POI_WRITE, payload)
     if not check_poi_count(link, len(records)):
         raise RuntimeError(f"the watch did not keep the {len(records)} POIs written back")
@@ -1254,7 +1358,7 @@ def poi_records_of(reply):
     """The non-empty POI records of a read_pois() reply, in the order read."""
     if not reply or F.SBEM_MAGIC not in reply:
         return []
-    return [d for i, d in F.sbem_entries(reply) if i == POI_ENTRY and d]
+    return [d for i, d in F.sbem_entries(reply) if i in F.POI_ENTRIES and d]
 
 
 def backup_pois_before_route_write(link, pois, serial, backup_dir=None):
@@ -1280,7 +1384,7 @@ def put_pois_back_safely(link, pois, backup=None):
         first = str(e)
     records = poi_records_of(pois)
     try:
-        set_poi_records(link, records)
+        set_poi_records(link, records, poi_entry_of(pois))
         return len(records), None
     except (RuntimeError, TimeoutError, OSError) as e:
         where = f" A copy of them is saved in {backup}." if backup else ""
@@ -1303,12 +1407,13 @@ def remove_pois(link, targets, backup_dir):
         return {"ok": False, "error": str(e)}
     backup = None if link.dry_run else str(save_poi_backup(
         reply, serial_from_device_info(info) or getattr(link, "opened_serial", None) or "", backup_dir))
+    entry = poi_entry_of(reply)
     try:
-        set_poi_records(link, keep)
+        set_poi_records(link, keep, entry)
     except (RuntimeError, TimeoutError, OSError) as e:
-        records = [d for i, d in F.sbem_entries(reply) if i == POI_ENTRY and d]
+        records = [d for i, d in F.sbem_entries(reply) if i in F.POI_ENTRIES and d]
         try:
-            set_poi_records(link, records)
+            set_poi_records(link, records, entry)
             return {"ok": False, "error": f"Removing failed ({e}). The POIs were put back "
                     "as they were.", "restored": True, "backup": backup}
         except (RuntimeError, TimeoutError, OSError) as e2:
@@ -1878,11 +1983,16 @@ def main():
                         help="addpoi: latitude, decimal degrees")
     parser.add_argument("--lon", type=float, metavar="DEG",
                         help="addpoi: longitude, decimal degrees")
+    parser.add_argument("--ele", type=float, metavar="M", default=None,
+                        help="addpoi: elevation in metres, kept by a Traverse / Traverse "
+                             "Alpha only (an Ambit3 POI has no altitude)")
     parser.add_argument("--type", metavar="ID_OR_NAME", default=None,
                         help="addpoi: POI type - a 0-17 id or a name (Building, Cave, Camp, "
                              "Car, Crossroads, Beginning, End, Food, Forest, Geocache, "
                              "Lodging, Meadow, Mountain, Sight, Road, Rock, Water, Waypoint). "
-                             "Default Waypoint (17), what the watch itself uses.")
+                             "Default Waypoint (17), what the watch itself uses. On a "
+                             "Traverse / Traverse Alpha: one of its own 48 types, by 0-47 id "
+                             "or name (ambit_format.TRAVERSE_WAYPOINT_TYPES), default POI (26).")
     parser.add_argument("--backup-dir", metavar="DIR", default=None,
                         help="delpoi: where the copy of the POI list goes (default "
                              "~/SommetBackups; saved as POIs/<serial>/POIs_pre_<time>.bin)")
@@ -2018,7 +2128,7 @@ def main():
     elif restore_pois_kind == "list":
         # Older backups: the POI list from their -sync.json snapshot.
         pois_from, pois_total = "backup", len(restore_pois)
-        payloads = build_set_pois_payloads(restore_pois)
+        payloads = build_set_pois_payloads(restore_pois, _pid(link), poi_format(link))
         for payload in payloads:
             link.command(CMD_POI_WRITE, payload)
         if payloads and not check_poi_count(link, len(restore_pois)):
@@ -2028,7 +2138,7 @@ def main():
         print(f"  POIs: {pois_total} from the backup")
     elif args.set_pois_json is not None:
         set_list = json.loads(pathlib.Path(args.set_pois_json).read_text())
-        payloads = build_set_pois_payloads(set_list)   # [] for an empty list -> POIs cleared
+        payloads = build_set_pois_payloads(set_list, _pid(link), poi_format(link))   # [] -> POIs cleared
         for payload in payloads:
             link.command(CMD_POI_WRITE, payload)
         if payloads:

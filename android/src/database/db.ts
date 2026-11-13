@@ -220,6 +220,8 @@ async function openAndMigrate(): Promise<SQLiteDatabase> {
       poolLengths  REAL, pace REAL
     )
   `);
+  // Shots (Traverse Alpha, Hunting), added 2026-11-13: an existing table gains the column.
+  await addMissingColumns(db, 'activity_metrics', [['shots', 'REAL']]);
   return db;
 }
 
@@ -232,7 +234,7 @@ export const ACTIVITY_PAGE = 30;
 
 /** Metric columns cached in activity_metrics (the ones that only exist in a GPX). */
 export const GPX_METRIC_COLUMNS = ['descent', 'calories', 'avgHr', 'maxHr', 'avgCadence', 'maxCadence',
-  'avgSpeed', 'maxSpeed', 'recovery', 'peakTe', 'maxAltitude', 'poolLengths', 'pace'] as const;
+  'avgSpeed', 'maxSpeed', 'recovery', 'peakTe', 'maxAltitude', 'poolLengths', 'pace', 'shots'] as const;
 
 export type ActivityPageRow = ActivityRecord & { metrics_json: string | null; metrics_synced_at: number | null };
 
