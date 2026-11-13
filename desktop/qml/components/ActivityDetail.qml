@@ -520,6 +520,28 @@ Item {
                     cursorPoint: root._cursorPoint
                     highlightCoords: root._highlight
                     onViewportChanged: root._chartFromMap()
+                    // Click and drag to pan (the chart follows, like with the wheel). It takes
+                    // the drag from the page's Flickable so a drag on the map moves the map.
+                    DragHandler {
+                        id: mapPanner
+                        target: null
+                        grabPermissions: PointerHandler.CanTakeOverFromAnything
+                        property real lastX: 0
+                        property real lastY: 0
+                        onActiveChanged: if (active) {
+                            lastX = centroid.position.x
+                            lastY = centroid.position.y
+                            map.userControlled = true
+                        }
+                        onCentroidChanged: {
+                            if (!active) return
+                            map.panX -= centroid.position.x - lastX
+                            map.panY -= centroid.position.y - lastY
+                            lastX = centroid.position.x
+                            lastY = centroid.position.y
+                        }
+                    }
+                    HoverHandler { cursorShape: mapPanner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
                 }
                 Rectangle {
                     visible: root._coords.length > 0
