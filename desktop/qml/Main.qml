@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtCore
 import SommetUi
 
 // Step 3: the real navigation shell. Home/Activities/Routes/POIs/Backup/Settings pages are
@@ -7,9 +8,25 @@ import SommetUi
 // selection, layout, and Sport Modes staying hidden until FeatureFlags.sportModes flips.
 ApplicationWindow {
     id: window
-    visible: true
-    width: 1200
-    height: 800
+    // Opens maximized the first time, then the way it was left: maximized, or the size it had
+    // (2026-11-13). Shown from Component.onCompleted, so it doesn't flash at 1200x800 first.
+    // Never bigger than the screen, so it fits even where the window manager ignores the
+    // maximize request.
+    width: Math.min(winState.width, Screen.desktopAvailableWidth || winState.width)
+    height: Math.min(winState.height, Screen.desktopAvailableHeight || winState.height)
+    property QtObject winStateObj: Settings {
+        id: winState
+        category: "window"
+        property bool maximized: true
+        property int width: 1200
+        property int height: 800
+    }
+    Component.onCompleted: winState.maximized ? showMaximized() : show()
+    onClosing: {
+        const big = visibility === Window.Maximized || visibility === Window.FullScreen
+        winState.maximized = big
+        if (!big) { winState.width = width; winState.height = height }
+    }
     title: qsTr("Sommet")
     // Real, 2026-08-10 ("To recall: implement logo on desktop mode") - verified live:
     // ApplicationWindow has no `icon` property in this Qt build (6.12 - confirmed against
