@@ -12,6 +12,7 @@ Technical description: what exists, what it's called, what's confirmed to work.
 - [Changelog (desktop v3)](v3-changelog.md)
 - [Changelog (Android)](android-changelog.md)
 - [Credits](credits.md) - the people and projects this work builds on.
+- [Features and supported devices](features.md) - everything the apps do, device by device.
 
 See also [`android/GARMIN_USB_IMPORT_SPEC.md`](https://github.com/skinnie/sommet/blob/main/android/GARMIN_USB_IMPORT_SPEC.md)
 for the Garmin USB import spec.

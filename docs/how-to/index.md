@@ -3,6 +3,8 @@
 Goal-oriented recipes for getting a specific thing done.
 
 - [Build and run](build-and-run.md) — desktop and Android build/run commands.
+- [Install Sommet](install.md) — the ready-made downloads for Linux, Android, Windows and macOS, the udev rule, and the macOS permission.
+- [Bluetooth on Linux](bluetooth-on-linux.md) — the password prompt when pairing, and a Bluetooth mouse that stops working.
 - [Use the tools](using-the-tools.md) — everyday `tools/` commands and writing to a watch.
 - [Create a structured workout](create-a-structured-workout.md) — interval workouts in the watch's WORKOUT menu, and what to do when one won't install.
 - [Keep a Bluetooth watch paired on Linux](bluetooth-pairing-on-linux.md) — when the watch won't reconnect after sleep, and the one-time privacy fix.

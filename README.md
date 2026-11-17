@@ -1,528 +1,107 @@
 # Sommet
 
-Sommet, french name for Peak, is an application to sync and manage Suunto Ambit 1, Ambit 2, Ambit 3, Traverse, Traverse Alpha and Kailash families/variants + Garmin Etrex 10/20/20x/30/30x GPSr.
-The aim is to provide the same features on Android, Linux, macOS and Windows. Each release has an Android APK, a Linux AppImage, a Windows `.zip` and a macOS `.dmg`.
-
-## Supported devices
-
-- **Suunto watches:** Ambit (1), Ambit2 / 2 S / 2 R, Ambit3 Peak / Sport / Run / Vertical, Traverse, Traverse Alpha, Kailash
-- **Suunto legacy (experimental):** T6 / T6c / T6d, X6HR, GPS Track Pod
-- **Sensors:** Suunto Smart Sensor (HR belt); Polar Verity Sense (sleep, experimental)
-- **GPS:** Garmin eTrex 10 / 20 / 20x / 30 / 30x
-- **Bike computers:** Bryton Aero 60 (activities, routes, workouts, profile), Magene C406 Pro (activities, workouts), Garmin Edge (activity import + data-screen editor, over USB) and Hammerhead Karoo 3 (activity import), Wahoo ELEMNT (the original) and ELEMNT BOLT (rides, routes, workouts, data pages, device settings, rider profile and OpenStreetMap maps, over USB or Bluetooth; desktop, rides also on Android)
-
-
-All features that are visible in the app are available by USB/USB-OTG, and some are also available/being tested by bluetooth.
-Bluetooth is still an experimental feature, which can be enabled in settings. On the desktop it is experimental: tested on Linux with mixed results, depending on the computer's Bluetooth hardware, and not tested on macOS or Windows. On Linux (Ambit3 family) it holds: the link reconnects by itself after the watch sleeps, a sync starts when the watch asks for one, and activities, POIs, routes, the clock, sport modes, apps, workouts, the Training Program and the watch profile go over it. On Linux, pairing asks for your password once (see "Linux: pairing a watch over Bluetooth" below, and [Keep a Bluetooth watch paired on Linux](docs/how-to/bluetooth-pairing-on-linux.md)).
-Within the features we have:
-- Sync time with watch: from the current time of the device or another timezone
-- Update orbital data: gps and glonass (for the glonass devices)
-- Device manual: download them in pdf format
-- Activities: download from the watch, view on a map, export them in gpx, fit, to local, cloud or 3rd party services (strava, runalyze, intervals.icu, others to come)
-- Activity details: tiles chosen per sport, a "compared with your usual" line (same sport, similar distance, last 12 months), time in heart-rate and power zones, one chart with the lines you pick (pace, heart rate, altitude...), and the track coloured by zone on the chart and the map
-- Routes: Import/send a gpx route to the watch (with its distance, climb and altitude graph), remove a route from the watch, export the routes on the watch to gpx format. Sending or removing a route keeps your POIs; a copy of them is saved first in `~/SommetBackups/POIs/`
-- POIs: Import/send a POI to the watch (via a map search, or coordinates), remove a POI, export the POIs on the map to gpx
-- Calendar: visual calendar with days where activities were done
-- Totals: totals of a certain activity
-- Backup: backup routes and POI altogether to a folder. Backup of your watch firmware (these watches firmwares should be matching the hw version)
-- Scheduled workouts (Ambit3): the watch's own WORKOUT menu is back - step screen with target band, step text, melody at each step, optional backlight flash at step change / out of limits. Running, cycling, pool swimming... (the watch shows 5 at a time)
-- Training Program: calendar of dated workouts, imported from intervals.icu (or made in the app) and rotated onto the watch at each sync; also sent to Bryton / Magene bike computers. On the day, pick the workout from the sport's WORKOUT menu (full beeps and melody, and a normal start stays a free run). The optional "Training day on the watch" switch starts the day's workout by itself, but silently on stock firmware
-- Workout Builder: build a workout step by step (time, distance, lap, energy, HR above/below; HR, pace, speed, power targets) and install it straight to the watch
-- Apps: Suunto App Zone apps (app-based workouts for Ambit1/2, or more complex ones on Ambit3), with app logging
-- Copy to watch: copy sport modes and settings from one watch to another
-- Watch settings: edit the watch's settings (Ambit1/2 and Ambit3 families)
-- Race Plan: plan a brevet / long ride from a GPX or roadbook: controls, stops, weather, climbs
-- Bluetooth scale: Etekcity FIT 8S weigh-ins with a body-fat estimate, sent to intervals.icu if you want (desktop and Android)
-- Health: this week's activity, steps per weekday, the watch's own activity calories and recovery time, each compared with the 7 days before; wellness from intervals.icu and HRV from R-R
-- Weight, Coach: weigh-ins, training load and readiness, and an optional chat coach (bring your own API key)
-- Gear: bikes, shoes and parts with service reminders, synced with intervals.icu
-- Cloud backup: Dropbox, Google Drive, OneDrive
-- Garmin Connect: activity, weight and health sync
-- Sports modes: sports mode editor for the watches
-- Firmware: flasher of firmware to the watch
-- Suunto HR Sensor: connection of the sensor, check battery level, firmware version, etc
-- Kailash specific: places visit, countries visited, export activity (categorized by default as walk)
-- Etrex specific: download activities (categorized by default as walk), import/export POIs, import/export routes.
-- GPS Track Pod support: experimental, no device to test. Hidden until you switch it on in **Settings → Show in the sidebar → GPS Track Pod**
-- Suunto T6 / X6HR support: experimental, no device to test. Hidden until you switch it on in **Settings → Show in the sidebar → T6/X6**
-- Offline maps: download the map tiles of an area to use it without internet
-- Sommet Sync: one shared app database between your computers and phone, through your own server (NAS)
-- Route weather: the route planner shows the weather along a route
-- Export all activities: every activity in the list into a folder at once (Activities page, desktop)
-- Connect IQ (Garmin Edge): check which Connect IQ apps on the Edge have an update
-
-
-## Install (Linux desktop)
-
-Download the **AppImage** from the [Releases](https://github.com/skinnie/sommet/releases) page,
-make it executable and run it — one file, no Qt install, no Python, nothing to set up:
-
-```
-chmod +x Sommet-linux-x86_64.AppImage
-./Sommet-linux-x86_64.AppImage
-```
-
-It is built to run on **older distros and older CPUs** (tested target: Linux Mint 22.x on an Intel
-Core 2 Quad Q9550), because an old watch often means an old computer. If your machine has no
-libfuse2, run it with `./Sommet-linux-x86_64.AppImage --appimage-extract-and-run`. Updates are
-delta downloads via `appimageupdatetool`, and the app tells you when a new version is out. Building
-from source is only for developers — see `desktop/README.md` and `desktop/packaging/appimage/README.md`.
-
-To use a watch over USB, Linux also needs a udev rule, once. The AppImage can't add it itself:
-without it the app sees the watch but gets "Permission denied". Install the rule, then unplug
-and replug the watch:
-
-```
-curl -fsSL https://raw.githubusercontent.com/skinnie/sommet/main/desktop/packaging/appimage/99-suunto-sommet.rules | sudo tee /etc/udev/rules.d/99-suunto-sommet.rules
-sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-
-## Screenshots
-
-Shown with the app's built-in sample watch and made-up activities around Chamonix (no real
-person's data).
-
-**Desktop** (Linux; the same app runs on macOS and Windows):
-
-| | | |
-|:---:|:---:|:---:|
-| ![Home](screenshots/desktop-home.png)<br>**Home** - the connected watch, this year, weather | ![Activities](screenshots/desktop-activities.png)<br>**Activities** - map cards | ![Activities list](screenshots/desktop-activities-list.png)<br>**Activities** - list, every sport |
-| ![Activity](screenshots/desktop-activity.png)<br>**An activity** - map, weather on the day, stats | ![Route planner](screenshots/desktop-route-planner.png)<br>**Route planner** - climb colours, direction, weather | ![Totals](screenshots/desktop-totals.png)<br>**Totals** by sport |
-| ![Sport modes](screenshots/desktop-sport-modes.png)<br>**Sport modes** on the watch | ![Sport mode](screenshots/desktop-sport-mode.png)<br>**A sport mode** - HR belt, foot pod, displays | ![Watch settings](screenshots/desktop-watch-settings.png)<br>**Watch settings** |
-| ![Kailash](screenshots/desktop-kailash.png)<br>**Kailash** - travel history | ![Calendar](screenshots/desktop-calendar.png)<br>**Calendar** | ![Portrait](screenshots/desktop-portrait.png)<br>**Upright window** (portrait tablet) |
-
-**Android** (tablet):
-
-| | | |
-|:---:|:---:|:---:|
-| ![Android activities](screenshots/android-activities.png)<br>**Activities** | ![Android activity](screenshots/android-activity.png)<br>**An activity** | ![Android portrait](screenshots/android-portrait.png)<br>**Portrait** |
-
-
-I am not at all responsible for errors, failures, bricked devices, etc. This software is provided as is.
-Currently main features were tested with Ambit 3, Traverse and Kailash in Android and Linux Mint 22, and with an Ambit2 on Windows. Normally most features work with the Ambit 1 too (I don't have one to test). Complications of each feature may require further testing (sports modes, settings, etc)
-
-
-The app was entirely vibe coded with Claude, given my lack of knowledge. It was fueled in stubbornness, coffee and good will to bring some features for these watches for some operative systems.
-The app is free, no login/account and can be used almost fully offline (Orbital data, workout compiling and intervals.icu need internet)
-
-
-
-
-
-## F.A.Q.:
-
-
-- Found something that you think is not correct from a dev perspective, contact me. I have zero experience, but willing to learn.
-- Found a bug? open an issue with logs and screenshots. Easier if you follow up [this](https://claude.ai/code/artifact/c88a8a2b-31cc-4ca1-93ef-b120a48fc1ae)
-- Are the Spartan, Suunto 5,9, and later suuntos be supported: No. Suunto link and suunto app already provide great features for them.
-- Can we get back scheduled workouts, guided workouts and training plans feature back from Movescount? Yes for the Ambit3: scheduled workouts are back in the watch's WORKOUT menu, fed by the Training Program (intervals.icu or made in the app). Ambit1/2 use app-based workouts.
-- Can you implement X,Y,Z feature? Propose, beware that if I don't have the hardware if may be complicated to implement it
-- My watch bugged, what I do now?! Go to mac or windows, connect to suunto link and reset. Your settings will be lost but your watch will be alive.
-- Are you gonna implement translations to X,Y,Z language? For the moment no, but if anyone has envy to do it go ahead.
-- On macOS it asks to "allow receiving keystrokes" / **Input Monitoring**, and is slow without it — why? See [macOS: the "Input Monitoring" permission](#macos-the-input-monitoring-permission).
-
-
-## Why?
-
-
-There are newer watches, "better watches", more accurate watches, more confortable, more everything. And I also enjoy them, but I always enjoyed the Ambit line up.
-Using an Ambit is like driving a classic car, is like home. 
-
-When movescount was closed features were lost, and some were unfortunately not able to be implemented due to complexity/lack of resources/timeline from Suunto. 
-The use of suunto app + suunto link although grateful was far from easy for the average joe, putting these watches to the side. The main of this app is also to bring some easyness to this and so that these devices could be used for more people and not end in the landfill.
-Fortunately we leave wonderful times, and with AI and community work, why not try to get those features back? 
-
-
-## Desktop: Why Linux first?
-First because there was one projects already advanced: openambit.
-Second, because linux is also, on my opinion a great way to "revive" old hardware and make usable again.
-Third: windows and mac users have suunto app which can get them to the functionalities. The app runs on Windows too (tested with an Ambit2) and on macOS (started, but not tested with a watch yet).
-
-
-## Mobile: why android?
-First because there was one projects already advanced: opensportsync.
-Second because I have an old Panasonic Thoughpad windows tablet that I can get android on it, also lots of old android tablets/phones that can be used for this and/or be revived with custom roms.
-
-
-## Building and installing
-
-> **Under testing.** Everything below is a work in progress and is provided for testing
-> only. Use it on your own hardware, at your own risk.
-
-There are two apps in this repo: a **desktop** app (Qt 6 / QML, for Linux / macOS /
-Windows) and an **Android** app (React Native). Both talk to a watch over USB; the Android app
-also over Bluetooth, and the desktop has experimental Bluetooth (Ambit3 family; tested on Linux with mixed results, not on macOS or Windows). Start by cloning:
-
-```
-git clone https://github.com/skinnie/sommet.git sommet
-cd sommet
-```
-
-### Android
-
-**The recommended path is to install the prebuilt APK — you do not need to build anything.**
-
-
-1. On your Android device, open the [latest release](https://github.com/skinnie/sommet/releases/latest)
-   and download `Sommet_vX.Y.Z.apk` (X.Y.Z = the release's version).
-2. Tap the downloaded file to install it. The first time, Android will ask you to allow
-   "Install from unknown sources" for your browser/file manager — allow it, then retry.
-3. To sync over USB you also need a **USB-OTG cable/adapter** between the phone and the
-   watch; Bluetooth needs no cable.
-
-This is a signed, self-contained release build — it runs on its own, with **no Metro
-development server** required.
-
-<details>
-<summary><b>Building the release APK yourself</b></summary>
-
-Prerequisites:
-- **Node** ≥ 22.11 and npm
-- **Java JDK 17** (for Gradle)
-- **Android SDK** with `compileSdk 36`, `minSdk 28`, and **NDK `27.1.12297006`**
-  (Gradle downloads the NDK/CMake automatically if the SDK command-line tools are set up).
-  Set `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) to your SDK path.
-- A **signing config** — a release APK must be signed to install on a device.
-
-```
-cd android && npm install && cd ..
-
-./build-android.sh release      # release APK
-```
-
-The script prints the finished APK's path (under
-`android/android/app/build/outputs/apk/release/`). Install it on a connected device with:
-
-```
-adb install -r <path-to-apk>
-```
-
-</details>
-
-### Desktop (Linux / macOS / Windows)
-
-**Windows and macOS users: you don't need to build anything.** Each GitHub release carries
-a ready-made **Windows `.zip`** (unzip, double-click `Sommet.exe`) and **macOS `.dmg`**
-(open, drag to Applications) built automatically in the cloud — see the
-[latest release](https://github.com/skinnie/sommet/releases/latest). They are unsigned, so
-the first launch shows a one-time "unverified developer" prompt: on macOS right-click the
-app → Open → Open; on Windows click "More info" → "Run anyway".
-
-> **Note:** the watch engine (the Python helper) is bundled inside these downloads and the
-> app starts it automatically, so no separate setup is needed. The Windows `.zip` was checked
-> with a real Ambit2; the macOS `.dmg` is **not yet confirmed against a real watch**. If a
-> download misbehaves, building from source with `run-desktop.sh` (below) is the proven path.
-
-To build it yourself (on Linux the AppImage above is easier; building is for developers):
-
-The desktop app is Qt 6 / QML with a Python backend that does the actual USB work. The
-backend runs on the standard library; some features need extra packages, listed in
-`tools/packaging/backend-requirements.txt` (`bleak` for Bluetooth, `garminconnect` for Garmin
-Connect, `pyserial` for the T6 / X6HR cable, `numpy` for sleep stages). Prerequisites (all three platforms):
-- **Qt 6.5+** and **CMake** (3.21+) with a C++ compiler. On **Debian 13 / Ubuntu 25.04+** the
-  system Qt is new enough: `./build-desktop.sh` checks the packages and prints the
-  `sudo apt install` line for anything missing (the full list is in `desktop/README.md`).
-  **Ubuntu 24.04 / Mint 22** ship Qt 6.4: install Qt with `aqtinstall` and build with
-  `CMAKE_PREFIX_PATH=~/Qt/6.8.3/gcc_64 ./build-desktop.sh`, without the system `qt6-*`
-  packages (two Qt copies in one build give errors like "Cannot assign object of type
-  Core.Settings").
-- **Python 3.9+** on `PATH` (runs the backend)
-- **USB access to the watch** (Linux): the `hid` module and a udev rule, or the watch is never
-  found. On Mint/Ubuntu: `sudo apt install python3-hid libhidapi-hidraw0`, then
-  `echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1493", MODE="0666"' | sudo tee /etc/udev/rules.d/99-suunto.rules`
-  and `sudo udevadm control --reload-rules`, and unplug/replug the watch. Other
-  distributions: `pip install hid` - see [the runbook](docs/tutorials/runbook.md), step 0.3.
-
-That's the whole list — the map is drawn with plain Qt, so there is **no extra native
-library to build** (an earlier MapLibre dependency was removed; see `desktop/CMakeLists.txt`).
-
-Build, then run:
-
-```
-./build-desktop.sh      # = cmake -S desktop -B desktop/build && cmake --build desktop/build
-./run-desktop.sh        # starts the Python backend on :8766, then launches the app
-```
-
-**Run it with `run-desktop.sh`, not the bare binary.** The release downloads start their
-bundled backend by themselves, but a source build has none bundled, so launching
-`desktop/build/Sommet` directly shows "backend not running".
-
-Per-platform build command and output (the two helper scripts are Linux/macOS shell
-scripts; on Windows run the raw `cmake` commands):
-
-| Platform | Command | Output | Status |
-|----------|---------|--------|--------|
-| **Linux** | `./build-desktop.sh` | `desktop/build/Sommet` | ✅ Built and run on real hardware (Linux Mint, Qt 6.12.0); source build also checked on Debian 13 (system Qt 6.8.2) |
-| **macOS** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Sommet.app` | ⚠️ App runs; not tested with a watch yet |
-| **Windows** | `cmake -S desktop -B desktop/build && cmake --build desktop/build` | `desktop/build/Release/Sommet.exe` | ✅ Release `.zip` tested with a real Ambit2 |
-
-On macOS, `run-desktop.sh` starts the backend and opens `Sommet.app`. On Windows, start the
-backend yourself before launching the binary: `cd desktop/backend && python server.py`.
-
-### Linux: pairing a watch over Bluetooth (the password prompt)
-
-**What you'll see.** The first time you pair a Suunto watch with Sommet over Bluetooth on
-Linux (**Pair another device by Bluetooth → Suunto watch**), your system asks for your
-password once, with the usual administrator prompt. A notification says why just before it,
-and the prompt names `sommet-bluetooth-privacy`. Your Bluetooth mouse, keyboard or
-headphones may disconnect for a second, then come back.
-
-**Order matters:** type the password **first**, and only then choose **Pair → Pair with app**
-on the watch, and type the code it shows into Sommet. The watch only offers to pair for a
-short time; if you start it on the watch before the password, it can run out, and you
-choose Pair with app again.
-
-**Why Sommet asks.** When a phone pairs with the watch, it tells the watch its Bluetooth
-identity, and the watch saves the pairing under that address. Linux only does this when its
-Bluetooth *privacy* setting is on, and it is off by default. With privacy off, the watch saves
-the pairing under the address `00:00:00:00:00:00`. Everything works until the link drops
-(the watch sleeps, or goes out of range). From then on the watch refuses the computer, and
-you'd have to pair again every time. Sommet says so with *"The watch no longer accepts this
-computer's pairing"*.
-
-**What Sommet does with your password.** Changing privacy needs administrator rights, so
-Sommet runs one short script as root through `pkexec` (`tools/bt_privacy.py`). It:
-
-1. turns Bluetooth privacy on, unless it already is. This switches Bluetooth off for about
-   a second.
-2. waits while the watch pairs and syncs.
-3. turns privacy off again, the same way, once the watch's link drops by itself. It also
-   turns it off if you stop Bluetooth in Sommet, if Sommet quits, or after 30 minutes at
-   most. If privacy was already on, Sommet leaves it on.
-
-The watch keeps the address it saved while privacy was on, so it reconnects later with
-privacy off: tested on an Ambit3 Peak, through a link drop and a computer restart. Nothing
-in `/etc` is changed, and a restart of the computer or of Bluetooth also resets privacy to
-your setting.
-
-**When Sommet doesn't ask.**
-- A watch is already paired with this computer: that's a reconnect, not a pairing.
-- `pkexec` or `btmgmt` isn't installed (`btmgmt` is in `bluez` on Ubuntu and Debian, and in
-  `bluez-utils` on Arch).
-- You cancel the prompt. The pairing still works, but the watch won't reconnect after the
-  link drops.
-
-**Doing it yourself instead.** If you'd rather not give Sommet your password, turn privacy on
-once in `/etc/bluetooth/main.conf`, or only for the pairing with `btmgmt`. The commands, and
-how to undo them, are in
-[Keep a Bluetooth watch paired on Linux](docs/how-to/bluetooth-pairing-on-linux.md).
-
-**Already paired before this?** A watch paired with privacy off has the `00:00:00:00:00:00`
-pairing. Pair it once more: on the watch **Bluetooth → Unpair → Forget**, in Sommet
-**Forget Bluetooth device**, then pair again as above.
-
-Android phones and iPhones send their identity when pairing (seen in Bluetooth captures of the
-Suunto app), so they aren't affected. macOS and Windows haven't been tested with this yet.
-
-### Linux: a Bluetooth mouse or keyboard stops working while Sommet runs
-
-**What you'll see.** With Sommet open and a Bluetooth scale set up (or a watch connected over
-Bluetooth), a Bluetooth mouse or keyboard stops responding or won't reconnect. It comes back
-when Sommet is closed.
-
-**Why.** To hear the scale and to find the watch, Sommet scans for Bluetooth devices. On older
-Bluetooth chips (seen on a ThinkPad X230 with a Broadcom Bluetooth 4.0 chip, BlueZ 5.72), a
-scan that never stops leaves no room for the mouse to reconnect. Sommet 0.2.53 listened for
-the scale without a break.
-
-**Fixed in 0.2.54.** Sommet now scans in short bursts: about 3 seconds in every 10 for the
-scale, and the same for the watch while it isn't connected (none at all once it is). When the
-scale starts talking, Sommet keeps listening until the weigh-in is stored. Two ways a scan
-could get stuck on are fixed too: while the watch was connecting, Linux's Bluetooth service
-sometimes didn't answer, or refused, Sommet's request to stop scanning, and the scan then ran
-until Sommet quit. Sommet now drops its connection to the Bluetooth service after every scale
-burst, and the watch scan has a connection of its own that Sommet closes and opens again when
-the service stops answering it. Closing the connection is what ends a stuck scan. With both
-running, the same X230 mouse kept working.
-
-**If it still happens:**
-
-1. Turn the scale off while you don't need it: **Settings → Connections → Bluetooth scale →
-   Manage → Stop listening** (Start listening turns it back on; your weigh-ins are kept).
-2. Turn Bluetooth off in Sommet: **Settings → Experimental features → Bluetooth**. The cable
-   still works for the watch.
-3. If the mouse stays dead after closing Sommet, check nothing is still scanning:
-   `bluetoothctl show | grep Discovering` should say `no`. If it says `yes` with Sommet closed,
-   a Sommet backend may still be running: `pkill -x Sommet` and stop `python3 server.py`, or
-   restart Bluetooth (`sudo systemctl restart bluetooth`).
-4. A newer USB Bluetooth adapter (Bluetooth 5) handles scanning and connections side by side
-   far better than a 4.0 chip.
-
-### macOS: the "Input Monitoring" permission
-
-On recent macOS, the first time you sync a watch the system may ask you to **allow the app to
-receive keystrokes**, and until you do, some features may be missing or *very* slow.
-
-**Why macOS needs it:** the Ambit connects as a **USB HID device** — the same class of device a
-keyboard belongs to. macOS requires the **Input Monitoring** permission to read data from *any*
-HID device and can't tell watch reads apart from keyboard reads, so it asks for the same
-permission for both. There's no way around it — it's how macOS gates all HID access. To grant
-it: **System Settings → Privacy & Security → Input Monitoring** → enable the app (and its
-backend/`python3` if listed), then relaunch.
-
-**Why it's slow:** macOS hands over the watch's USB data one small 64-byte chunk at a time,
-roughly every 100 ms, versus about 1 ms on Linux. That pacing is built into Apple's USB stack,
-so large reads (e.g. flashing) are inherently slower on Mac — it's a platform limitation, not a
-bug in the app. Without the permission granted, the reads are throttled further, which is the
-"very slow / unavailable" behaviour some users see.
-
-### Interval Workout Builder (optional companion)
-
-The **Apps** page has an **Open Workout Builder** button for building a structured interval
-workout and installing it as a native guided workout in the watch's WORKOUT menu (Ambit3
-family). That feature is powered by a **separate little tool**, the *Workout Builder* — it
-opens in your web browser as its own local app, not inside the main window.
-
-Two things worth knowing:
-
-- **In the ready-made downloads it just works** — the Workout Builder is bundled inside the
-  app, so the "Open Workout Builder" button launches it with nothing extra to install.
-- **It also runs completely standalone** — you can use the Workout Builder on its own, with
-  or without the main desktop app.
-
-To run it standalone from source:
-
-```
-python3 tools/workout_gui.py      # opens http://127.0.0.1:8765 in your browser
-```
-
-To turn it into a double-click app instead (no Python needed to *use* it afterwards), build
-it with the per-OS packaging scripts — run each on its own OS, they don't cross-compile:
-
-```
-./tools/packaging/build_linux.sh      # -> dist/linux/Ambit3 Workout Builder
-./tools/packaging/build_mac.sh        # -> dist/mac/Ambit3 Workout Builder.app   (run on a Mac)
-tools\packaging\build_windows.bat     # -> dist\windows\Ambit3 Workout Builder.exe (run on Windows)
-```
-
-Full details — what it does, offline use, and getting compiled workouts into SuuntoLink — are
-in [`docs/tutorials/packaging.md`](docs/tutorials/packaging.md).
-
-### Firmware flashing — urgency only
-
-Flashing watch firmware from the app **is possible and has been verified on real hardware**
-(an Ambit3 Peak was flashed and recovered end to end over USB). Even so, **we only recommend
-it in an emergency** — when a watch needs firmware and no computer with SuuntoLink is
-available. For a normal firmware update, use SuuntoLink; the in-app flasher is a fallback,
-not the default path.
-
-This is **especially true on Android**, where flashing goes over a USB-OTG cable: OTG cables
-and adapters may be unreliable, and USB power delivery during the flash can be marginal. A
-failure mid-flash can leave the watch in bootloader mode.
-
-Whenever you do flash — desktop or Android — make sure the **phone/computer, the watch, and
-(on Android) everything on the OTG chain are fully charged** before you start, and don't
-interrupt it.
-
-
-## How can I contribute to this project?
-Donations are welcome, paypal, mbway, bank transfer, but also captures of watches I don't have as explained [here](https://claude.ai/code/artifact/c88a8a2b-31cc-4ca1-93ef-b120a48fc1ae).
-Also with your time and skills to correct bugs/implement features.
-To share it, so more people put these devices to use and not on the landfill
-
-
-## I loved so much my watch but it has:
-- Dead battery: amazon, aliexpress and youtube are your friends
-- Strap is broken: suunto still sells them new, also amazon, aliexpress, etc
-- Connect to moveslink icon: try to charge it overnight, connect and disconnect on suunto link and reset firmware
-
-
-## Legal & licenses
-Independent, unofficial software — **not affiliated with, endorsed by, or supported by Suunto or
-Garmin.** Suunto, Ambit, Traverse, Kailash, T6 Garmin and eTrex are trademarks of their respective
-owners, used here only to describe compatibility.
-
-This software is provided **as is, without warranty of any kind** — you are responsible for
-anything that happens to your device.
-
-Licensed under the **[GNU GPLv3](LICENSE)** — the same license as
-[openambit](https://github.com/openambitproject/openambit), whose `libambit` this project's
-protocol work is checked against throughout. Because it is GPLv3, the full source is this
-repository; you may use, study, modify and redistribute it under the same license.
-
-- **Desktop** links **Qt 6** under the **LGPLv3** (dynamically linked — you may relink it against
-  your own build of Qt).
-- **Android** uses **React Native** and its ecosystem (**MIT**).
+Sommet keeps Suunto's Ambit, Traverse and Kailash watches in use after Movescount. Send routes
+and POIs, edit sport modes and settings, and download your activities on Linux, Windows, macOS,
+or Android, over USB or Bluetooth. It's free, needs no account and works offline.
+
+**[Download the latest release](https://github.com/skinnie/sommet/releases/latest)**
+
+| Desktop | Android |
+|:---:|:---:|
+| ![Sommet on the desktop: the connected watch, this year's totals and the weather](screenshots/desktop-home.png) | ![Sommet on an Android tablet: an activity with its map and stats](screenshots/android-activity.png) |
+
+## Your Suunto
+
+| Watch | Connects over |
+|---|---|
+| Ambit (the first one) | USB |
+| Ambit2, Ambit2 S, Ambit2 R | USB |
+| Ambit3 Peak, Sport, Run, Vertical | USB, Bluetooth |
+| Traverse, Traverse Alpha | USB, Bluetooth |
+| Kailash | USB, Bluetooth |
+
+## What it does
+
+- **Routes:** send a GPX route with its map and climb, remove routes, and export the ones on the
+  watch.
+- **POIs:** add them from a map search or coordinates, remove them, export them. A Traverse gets
+  its own 48 POI types.
+- **Sport modes and settings:** edit modes, data screens, apps, and the watch's settings, and
+  copy them from one watch to another.
+- **Activities:** download them and see the map, charts, and heart-rate zones. Export GPX or FIT,
+  or send them to Strava, Runalyze, intervals.icu or Garmin Connect.
+- **Workouts:** the Ambit3's own WORKOUT menu is back, fed by a Training Program from
+  intervals.icu or made in the app. The Ambit 1 and 2 get App Zone apps.
+- **Keeping it working:** GPS orbit data, the clock, backups and restore, and a firmware flasher
+  for emergencies.
+- **Kailash:** the travel log, with the countries and places you visited.
+
+[All features](docs/reference/features.md) · [Screenshots](docs/screenshots.md)
+
+## Also works with
+
+- **Garmin eTrex** 10, 20, 20x, 30, 30x: activities, POIs and routes
+- **Bike computers:** Bryton Aero 60, Magene C406 Pro, Wahoo ELEMNT and ELEMNT BOLT, Garmin
+  Edge, Hammerhead Karoo 3
+- **Sensors:** Suunto Smart Sensor, Etekcity FIT 8S scale, Polar Verity Sense (sleep,
+  experimental)
+- **Experimental, with no device to test:** Suunto T6, T6c, T6d, X6HR and the GPS Track Pod
+
+## Get it
+
+From the [Releases](https://github.com/skinnie/sommet/releases) page:
+
+- **Linux:** one AppImage file. USB needs a udev rule, once.
+- **Android:** the APK. Use a USB-OTG cable or Bluetooth.
+- **Windows:** the `.zip`. **macOS:** the `.dmg`, not yet tested with a watch.
+
+Step by step, with the udev rule: [Install Sommet](docs/how-to/install.md). To build it
+yourself: [BUILDING.md](BUILDING.md).
+
+Bluetooth is switched on in Settings. It works on Android; on the desktop it's experimental,
+tested on Linux with mixed results and not on macOS or Windows.
+
+## More
+
+[F.A.Q.](docs/faq.md) · [Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md) ·
+[Why Sommet](docs/explanation/why-sommet.md) · [Contributing](CONTRIBUTING.md) ·
+[Changelog](docs/reference/v3-changelog.md) · [Documentation](docs/index.md)
 
 ## Credits
 
-Built on the real work of others:
+Built on the work of [openambit](https://github.com/openambitproject/openambit) (`libambit`, by
+Emil Ljungdahl), opensportsync, marguslt, Pavel Samokha,
+[openScale](https://github.com/oliexdev/openScale),
+[etekcity_esf551_ble](https://github.com/ronnnnnnnnnnnnn/etekcity_esf551_ble), sebchastang,
+[openmoves](https://github.com/bwaldvogel/openmoves),
+[gps_track_pod](https://github.com/iwanders/gps_track_pod),
+[suunto-t6-sync](https://github.com/evelbulgroz/suunto-t6-sync), the App Zone examples of
+[claha](https://github.com/claha/suunto),
+[follesoe](https://github.com/follesoe/suunto-ambit-intervals),
+[hefler](https://github.com/hefler/SuuntoApps),
+[AdamHodgson](https://github.com/AdamHodgson/Suunto-Interval-Training) and
+[Httqm](https://github.com/Httqm/Suunto), [goambit](https://github.com/ruvido/goambit),
+[ambit2gpx](https://github.com/AlexLBraits/ambit2gpx),
+[x6hr-python](https://github.com/nabeka/x6hr-python),
+[suunto_x6hr_erl](https://github.com/larshesel/suunto_x6hr_erl),
+[OpenBikeCompanion](https://github.com/Taxom/OpenBikeCompanion),
+[C406pro_Hack](https://github.com/WSTRN/C406pro_Hack),
+[Activity-Profile-Editor](https://github.com/fullcarbonbike/Activity-Profile-Editor),
+[suunto-mcp](https://github.com/googlarz/suunto-mcp),
+[openathlete](https://github.com/openathleteorg/openathlete),
+[train-libre](https://github.com/rfivesix/train-libre) and
+[suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model), with the Suunto forum
+community and wanarun.net. At runtime it uses
+[python-garminconnect](https://github.com/cyberjunky/python-garminconnect),
+[intervals.icu](https://intervals.icu/),
+[wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp), Open Food Facts, USDA FoodData
+Central, [ZXing-C++](https://github.com/zxing-cpp/zxing-cpp),
+[react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit), the
+optional Anthropic Claude API, Qt, and React Native. Maps © OpenStreetMap contributors (CyclOSM,
+IGN Géoplateforme), weather by Open-Meteo, icons from Google Material Symbols, mobile maps with
+Leaflet, route POIs from PitStopper. Who did what, and under which licence:
+[CREDITS.md](CREDITS.md).
 
-- **[openambit](https://github.com/openambitproject/openambit)** — `libambit`, the reference the
-  USB/BLE protocol work is checked against (GPLv3).
-- **opensportsync** — the starting point for the Android app.
-- **marguslt** — firmware-download recipe, gists, Movescount knowledge.
-- **Pavel Samokha** — the community App Zone / workout compiler every scheduled workout is compiled on, and the SuuntoLink app-catalogue method (Suunto forum).
-- **Emil Ljungdahl** — original author of `libambit`.
-- **[openScale](https://github.com/oliexdev/openScale)** (GPLv3) and
-  **[etekcity_esf551_ble](https://github.com/ronnnnnnnnnnnnn/etekcity_esf551_ble)** — Etekcity
-  scale broadcast layout, and a cross-check of the published Sun et al. (2003) body-fat equations.
-- **sebchastang** — published Suunto App Zone interval-training scripts.
-- **[bwaldvogel/openmoves](https://github.com/bwaldvogel/openmoves)** — Openmoves.
-- **[iwanders/gps_track_pod](https://github.com/iwanders/gps_track_pod)** — Suunto GPS Track Pod
-  support (MIT), vendored in `tools/vendor/gpspod/`.
-- **[evelbulgroz/suunto-t6-sync](https://github.com/evelbulgroz/suunto-t6-sync)** — Suunto
-  T6/T6c/T6d read support (MIT), vendored in `tools/vendor/suunto_t6_sync/`; basis for the
-  experimental T6 heart-rate export and GPS-Track-Pod merge.
-- **App Zone workout examples** — real published App-Zone interval scripts the workout findings
-  were checked against: [claha/suunto](https://github.com/claha/suunto) (its `Suunto.mod(STEP,N)`
-  repeat encoding), [follesoe/suunto-ambit-intervals](https://github.com/follesoe/suunto-ambit-intervals),
-  [hefler/SuuntoApps](https://github.com/hefler/SuuntoApps),
-  [AdamHodgson/Suunto-Interval-Training](https://github.com/AdamHodgson/Suunto-Interval-Training),
-  [Httqm/Suunto](https://github.com/Httqm/Suunto).
-- **[ruvido/goambit](https://github.com/ruvido/goambit)** & **[AlexLBraits/ambit2gpx](https://github.com/AlexLBraits/ambit2gpx)**
-  — independent implementations of the same cloud-free USB paths (route upload / activity read),
-  confirming they're real.
-- **tomoya kamata ([nabeka/x6hr-python](https://github.com/nabeka/x6hr-python))** — Suunto X6HR protocol (GPLv3), with
-  [larshesel/suunto_x6hr_erl](https://github.com/larshesel/suunto_x6hr_erl) and the terre-adelie wiki.
-- **[Taxom/OpenBikeCompanion](https://github.com/Taxom/OpenBikeCompanion)** — Magene C406 BLE protocol notes (GPLv3);
-  **[WSTRN/C406pro_Hack](https://github.com/WSTRN/C406pro_Hack)** — C406 Pro hardware reference.
-- **[fullcarbonbike/Activity-Profile-Editor](https://github.com/fullcarbonbike/Activity-Profile-Editor)** (MIT)
-  — the Garmin Edge built-in data-field id→name map and the data-screen arrangement (A/B) survey behind the
-  Edge data-screen editor (`tools/garmin_edge_screens.py`); cross-verified on a real Edge 1040 Solar.
-- **[googlarz/suunto-mcp](https://github.com/googlarz/suunto-mcp)** — workout-guide format for the Coach's Suunto sink.
-- **Eric Banister, Dr. Andrew Coggan, Hunter Allen** — the CTL / ATL / TSB training-load model behind the Coach.
-- **[openathleteorg/openathlete](https://github.com/openathleteorg/openathlete)** (AGPLv3) — the idea of an
-  on-device HR load (Banister TRIMP) when no cloud load is available, and weather history on each
-  activity; ideas and formula only, no code copied.
-- **[rfivesix/train-libre](https://github.com/rfivesix/train-libre)** (GPLv3) — its Sleep Health Score engine,
-  ported for the sleep score.
-- **Suunto Apps Developer Manual** (2015) — watch variables and activity ids, checked against.
-- **[mihaildemidoff/suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model)** —
-  a JAXB model of Suunto's SML format, a reference for the exercise-log work.
-- the **Suunto forum community** and **wanarun.net**.
-
-Services and libraries the app talks to at runtime:
-
-- **[cyberjunky/python-garminconnect](https://github.com/cyberjunky/python-garminconnect)** (MIT) —
-  the Garmin Connect client behind activity, weight and health sync (`tools/garmin_sync.py`,
-  `tools/garmin_weight.py`).
-- **[intervals.icu](https://intervals.icu/)** — its public API backs activity/gear import and
-  export, the wellness and weight feeds, and the profile/activity-level writes to the watch.
-- **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** — the Wahoo SYSTM
-  workout catalogue the Coach can read from (its offline sample ships as `desktop/assets/coach/systm-sample.json`).
-- **[Open Food Facts](https://world.openfoodfacts.org/)** (database under ODbL) and **[USDA FoodData Central](https://fdc.nal.usda.gov/)**
-  (public domain) — the food search behind Ember's meal logging. The idea came from
-  [SparkyFitness](https://github.com/CodeWithCJ/SparkyFitness); none of its code is used (its
-  licence is non-commercial, incompatible with GPL-3.0).
-- **[ZXing-C++](https://github.com/zxing-cpp/zxing-cpp)** (Apache-2.0) — reads food barcodes from the
-  webcam in Ember (desktop); built from source, its licence ships inside the app. Camera capture
-  via **Qt Multimedia** (LGPLv3).
-- **[react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit)** (MIT) — the phone camera
-  barcode scan in Ember (Android: CameraX + Google ML Kit barcode scanning, bundled model; iOS: AVFoundation).
-- **[Anthropic Claude API](https://www.anthropic.com/api)** — optional, powers the Coach chat
-  when you supply your own API key. The app works fully without it.
-- **[Qt](https://www.qt.io/)** (LGPLv3) — the desktop app's UI framework; **React Native** for
-  the Android app.
-
-
-## Data & assets:
-
-- Map data © **OpenStreetMap** contributors, under the **Open Database License (ODbL)**. Tiles:
-  **CyclOSM** / OpenStreetMap France, standard OSM, and **IGN Géoplateforme** (France).
-- Weather by **[Open-Meteo](https://open-meteo.com/)** (CC BY 4.0).
-- Icons: **Google Material Symbols** (Apache License 2.0); 7 activity icons are Suunto's own (see credits).
-- Mobile maps: **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause).
-- POIs along a route: exported from **[PitStopper](https://pitstopper.net)**.
-
-Full list with details: [`docs/reference/credits.md`](docs/reference/credits.md).
+Licensed under the [GNU GPLv3](LICENSE). Provided as is, without warranty. Not affiliated with
+or endorsed by Suunto, Garmin or the other makers named here; their names are trademarks of
+their owners.
