@@ -32,7 +32,17 @@ async function gearHttp(url: string, token: string, method: 'GET' | 'POST',
 
 export interface GearSyncResult { pulled: number; pushed: number; ok: boolean; }
 
-export async function runSommetGearSync(): Promise<GearSyncResult> {
+// One run at a time: the sync on opening the app and the one after a watch read can start
+// together, and two overlapping runs would push and pull the same rows twice.
+let runSommetGearSyncInFlight: Promise<GearSyncResult> | null = null;
+export function runSommetGearSync(): Promise<GearSyncResult> {
+  if (!runSommetGearSyncInFlight) {
+    runSommetGearSyncInFlight = runSommetGearSyncOnce().finally(() => { runSommetGearSyncInFlight = null; });
+  }
+  return runSommetGearSyncInFlight;
+}
+
+async function runSommetGearSyncOnce(): Promise<GearSyncResult> {
   const cfg = await getSommetSyncCfg();
   if (!cfg) return { pulled: 0, pushed: 0, ok: false };
   const { url, token } = cfg;

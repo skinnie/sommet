@@ -51,6 +51,7 @@ import { ActivityRecord } from './src/database/db';
 import { handleOAuthCallback as handleStravaCallback } from './src/services/ApiStrava';
 import { t, dateLocale, fmtDate } from './src/i18n';
 import { migrateOldStorageKeys } from './src/services/StorageKeyMigration';
+import { startSommetSyncOnOpen } from './src/services/SommetSyncOnOpen';
 
 // ─── Types de navigation ──────────────────────────────────────────────────────
 
@@ -174,6 +175,10 @@ function AppShell() {
     Linking.getInitialURL().then(processOAuthUrl);
     return () => sub.remove();
   }, []);
+
+  // Pull from (and push to) the user's Sommet Sync store on opening and on coming back to the
+  // front, like the desktop does on launch. No-op when Sommet Sync isn't set up.
+  useEffect(() => startSommetSyncOnOpen(), []);
 
   return (
     <SafeAreaProvider>

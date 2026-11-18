@@ -103,7 +103,17 @@ async function pushBlob(url: string, token: string, uid: string, gpx: string): P
  * Two-way sync against the shared store. Pull first (so we don't re-push what we just received),
  * then push all local rows + tombstones. Best-effort; returns a summary for the UI Alert.
  */
-export async function runSommetSync(): Promise<SommetSyncResult> {
+// One run at a time: the sync on opening the app and the one after a watch read can start
+// together, and two overlapping runs would push and pull the same rows twice.
+let runSommetSyncInFlight: Promise<SommetSyncResult> | null = null;
+export function runSommetSync(): Promise<SommetSyncResult> {
+  if (!runSommetSyncInFlight) {
+    runSommetSyncInFlight = runSommetSyncOnce().finally(() => { runSommetSyncInFlight = null; });
+  }
+  return runSommetSyncInFlight;
+}
+
+async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   const cfg = await getSommetSyncCfg();
   if (!cfg) return { pulled: 0, pushed: 0, ok: false };
   const { url, token } = cfg;
