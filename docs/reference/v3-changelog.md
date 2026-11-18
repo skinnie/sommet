@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-18: Desktop: one move's numbers no longer land on other moves (sync/07)
+
+- On desktop a move is (number, device), and moves from different watches share numbers, as did
+  Edge, Karoo and C406 rides imported before 2026-11-07. Five statements went by the number
+  alone: the Sommet Sync pull update, the two intervals.icu "uploaded" marks and delete. A pull
+  of one move wrote its duration, distance, ascent, kcal, name and sport onto every move with
+  the same number. The bulk upload's mark could flag a ride as uploaded that never was, and
+  deleting a move could delete others. Each one now also matches the device.
+- `tools/test_activity_row_key.py` (run by `tools/check.sh`) fails on any new statement that
+  picks a move by number alone.
+
 ## 2026-11-18: The move page: no IGN, no replay, a sport picture without a track
 
 - The IGN (France) map is gone from desktop and Android: it only covers France, so moves

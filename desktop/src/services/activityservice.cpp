@@ -1827,15 +1827,19 @@ void ActivityService::deleteActivity(const QVariantMap &activity)
         openDatabase();
 
     const int idx = activity.value(QStringLiteral("index"), -1).toInt();
+    const QString shownDevice = activity.value(QStringLiteral("device")).toString();
 
-    // Resolve the row's real identity from the DB - the QML activity map carries `index` but not
-    // external_id/source, and idx is the primary key, so this reads the one exact row.
+    // Resolve the row's real identity from the DB - the QML activity map carries `index` and
+    // `device` but not external_id/source. A move is (idx, device): moves from different watches,
+    // and old bike imports, share an idx, so reading by idx alone could pick another move (sync/07).
     QString source, extId, start, name, device;
     {
         QSqlQuery sel(m_db);
         sel.prepare(QStringLiteral(
-            "SELECT source, external_id, start_time, name, device FROM activities WHERE idx = ?"));
+            "SELECT source, external_id, start_time, name, device FROM activities "
+            "WHERE idx = ? AND COALESCE(device, '') = ?"));
         sel.addBindValue(idx);
+        sel.addBindValue(shownDevice);
         if (sel.exec() && sel.next()) {
             source = sel.value(0).toString();
             extId = sel.value(1).toString();
@@ -1845,7 +1849,7 @@ void ActivityService::deleteActivity(const QVariantMap &activity)
         }
     }
     if (device.isEmpty())
-        device = activity.value(QStringLiteral("device")).toString();
+        device = shownDevice;
     // Fall back to the map's own fields if the row isn't in the DB (e.g. the shown copy was a
     // deduped winner from a source whose row is gone) - the tombstone still needs a real key.
     if (start.isEmpty())
@@ -1890,12 +1894,14 @@ void ActivityService::deleteActivity(const QVariantMap &activity)
         }
     }
 
-    // 2) Remove the local row(s) - by idx AND by the shared key, so a deduped duplicate from
-    //    another source goes too (deleting the whole activity, not just the copy on screen).
+    // 2) Remove the local row(s) - by (idx, device) AND by the shared key, so a deduped duplicate
+    //    from another source goes too (deleting the whole activity, not just the copy on screen).
     QSqlQuery del(m_db);
     del.prepare(QStringLiteral(
-        "DELETE FROM activities WHERE idx = ? OR (start_time = ? AND name = ?)"));
+        "DELETE FROM activities WHERE (idx = ? AND COALESCE(device, '') = ?) "
+        "OR (start_time = ? AND name = ?)"));
     del.addBindValue(idx);
+    del.addBindValue(shownDevice);
     del.addBindValue(start);
     del.addBindValue(name);
     del.exec();
@@ -2890,16 +2896,17 @@ void ActivityService::exportToIntervals()
     // Rows that came FROM a cloud -
     // source='intervals' (this very service) or 'garmin' - are never pushed back; whitelisting
     // the push-able sources (rather than excluding intervals) keeps that safe by construction.
-    QList<QPair<int, QByteArray>> items;
+    struct Item { int idx; QString device; QByteArray fit; };
+    QList<Item> items;
     QSqlQuery q(QStringLiteral(
-        "SELECT idx, fit_base64 FROM activities "
+        "SELECT idx, COALESCE(device, ''), fit_base64 FROM activities "
         "WHERE (source IS NULL OR source IN ('watch','edge','karoo','c406','bryton','wahoo')) "
         "AND fit_base64 IS NOT NULL AND fit_base64 <> '' "
         "AND (exported IS NULL OR exported = 0)"), m_db);
     while (q.next()) {
-        const QByteArray fit = QByteArray::fromBase64(q.value(1).toString().toLatin1());
+        const QByteArray fit = QByteArray::fromBase64(q.value(2).toString().toLatin1());
         if (!fit.isEmpty())
-            items.append({q.value(0).toInt(), fit});
+            items.append({q.value(0).toInt(), q.value(1).toString(), fit});
     }
     if (items.isEmpty()) {
         emit exportFinished(0, 0);  // nothing new to push
@@ -2909,11 +2916,11 @@ void ActivityService::exportToIntervals()
     m_exportPending = items.size();
     m_exportUploaded = 0;
     m_exportFailed = 0;
-    for (const auto &item : items)
-        uploadOneToIntervals(item.first, item.second, athlete, key);
+    for (const Item &item : items)
+        uploadOneToIntervals(item.idx, item.device, item.fit, athlete, key);
 }
 
-void ActivityService::uploadOneToIntervals(int idx, const QByteArray &fit,
+void ActivityService::uploadOneToIntervals(int idx, const QString &device, const QByteArray &fit,
                                            const QString &athlete, const QString &key)
 {
     QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
@@ -2933,7 +2940,7 @@ void ActivityService::uploadOneToIntervals(int idx, const QByteArray &fit,
 
     QNetworkReply *reply = m_network.post(req, multiPart);
     multiPart->setParent(reply);  // freed with the reply
-    connect(reply, &QNetworkReply::finished, this, [this, reply, idx]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device]() {
         reply->deleteLater();
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -2942,8 +2949,10 @@ void ActivityService::uploadOneToIntervals(int idx, const QByteArray &fit,
         if (ok) {
             ++m_exportUploaded;
             QSqlQuery up(m_db);
-            up.prepare(QStringLiteral("UPDATE activities SET exported = 1 WHERE idx = ?"));
+            up.prepare(QStringLiteral(
+                "UPDATE activities SET exported = 1 WHERE idx = ? AND COALESCE(device, '') = ?"));
             up.addBindValue(idx);
+            up.addBindValue(device);
             up.exec();
         } else {
             ++m_exportFailed;
@@ -2992,10 +3001,10 @@ void ActivityService::exportActivityToIntervals(const QString &name, const QStri
     m_exportUploaded = 0;
     m_exportFailed = 0;
     if (!fit.isEmpty()) {
-        uploadFileToIntervals(-1, fit, QStringLiteral("application/fit"),
+        uploadFileToIntervals(-1, QString(), fit, QStringLiteral("application/fit"),
                               base + QStringLiteral(".fit"), athlete, key);
     } else if (!gpxText.isEmpty()) {
-        uploadFileToIntervals(-1, gpxText.toUtf8(), QStringLiteral("application/gpx+xml"),
+        uploadFileToIntervals(-1, QString(), gpxText.toUtf8(), QStringLiteral("application/gpx+xml"),
                               base + QStringLiteral(".gpx"), athlete, key);
     } else {
         setLoading(false);
@@ -3104,7 +3113,7 @@ void ActivityService::exportActivitiesToIntervals(const QVariantList &activities
     // These are handheld (eTrex) tracks: filed as hikes, not as the "Run" intervals.icu gives a
     // sport-less GPX (André, 2026-10-04).
     for (const Item &it : items)
-        uploadFileToIntervals(-1, it.data, it.contentType, it.filename, athlete, key,
+        uploadFileToIntervals(-1, QString(), it.data, it.contentType, it.filename, athlete, key,
                               QStringLiteral("Hike"));
 }
 
@@ -3234,7 +3243,7 @@ void ActivityService::exportActivitiesToGarmin(const QVariantList &activities)
         uploadToGarmin(it.data, it.isFit);
 }
 
-void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
+void ActivityService::uploadFileToIntervals(int idx, const QString &device, const QByteArray &data,
                                             const QString &contentType, const QString &filename,
                                             const QString &athlete, const QString &key,
                                             const QString &setType)
@@ -3256,7 +3265,7 @@ void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
 
     QNetworkReply *reply = m_network.post(req, multiPart);
     multiPart->setParent(reply);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, setType, basic]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, idx, device, setType, basic]() {
         reply->deleteLater();
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -3288,8 +3297,10 @@ void ActivityService::uploadFileToIntervals(int idx, const QByteArray &data,
             ++m_exportUploaded;
             if (idx >= 0 && m_db.isOpen()) {
                 QSqlQuery up(m_db);
-                up.prepare(QStringLiteral("UPDATE activities SET exported = 1 WHERE idx = ?"));
+                up.prepare(QStringLiteral(
+                    "UPDATE activities SET exported = 1 WHERE idx = ? AND COALESCE(device, '') = ?"));
                 up.addBindValue(idx);
+                up.addBindValue(device);
                 up.exec();
             }
         } else {
@@ -3505,7 +3516,8 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.prepare(QStringLiteral(
             "UPDATE activities SET name=?, duration_s=?, distance_m=?, ascent_m=?, energy_kcal=?, "
             "sport_type_raw=?, source=?, external_id=?, rule_outputs_json=?, updated_at=?, "
-            "start_utc=COALESCE(?, start_utc), moving_s=COALESCE(?, moving_s) WHERE idx=?"));
+            "start_utc=COALESCE(?, start_utc), moving_s=COALESCE(?, moving_s) "
+            "WHERE idx=? AND COALESCE(device, '')=?"));
         up.addBindValue(rec.value(QStringLiteral("name")).toString());
         up.addBindValue(rec.value(QStringLiteral("duration_s")).toInteger());
         up.addBindValue(rec.value(QStringLiteral("distance_m")).toDouble());
@@ -3519,6 +3531,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.addBindValue(remoteUtc);
         up.addBindValue(remoteMoving);
         up.addBindValue(existingIdx);
+        up.addBindValue(device);   // a move is (idx, device): idx alone hit other moves (sync/07)
         up.exec();
     } else {
         // New row. Preserve a watch move's real (idx, device) so a later local read of the same

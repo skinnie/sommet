@@ -367,13 +367,13 @@ private:
     void importActivitiesInto(const QJsonArray &activities);
     void importGarminActivitiesInto(const QJsonArray &activities);
     bool importBikeActivitiesInto(const QJsonArray &activities);   // false = a ride failed to save
-    void uploadOneToIntervals(int idx, const QByteArray &fit,
+    void uploadOneToIntervals(int idx, const QString &device, const QByteArray &fit,
                               const QString &athlete, const QString &key);
     // Generic single-file uploader used by the per-activity export (FIT or GPX). idx<0 means
     // "not a DB row" - success isn't recorded against any activity.
     // `setType`: an intervals.icu activity type to give the upload afterwards ("Hike" for eTrex
     // tracks - a GPX has no sport, and intervals.icu files such a file as a "Run").
-    void uploadFileToIntervals(int idx, const QByteArray &data, const QString &contentType,
+    void uploadFileToIntervals(int idx, const QString &device, const QByteArray &data, const QString &contentType,
                                const QString &filename, const QString &athlete,
                                const QString &key, const QString &setType = QString());
     // Upload one activity to Garmin via the backend; counts into the m_export* tally.
