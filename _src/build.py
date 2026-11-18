@@ -28,12 +28,13 @@ from PIL import Image
 
 SRC = Path(__file__).resolve().parent / "sommet.html"
 OUT = Path(__file__).resolve().parent.parent
+DRAFTS = Path(__file__).resolve().parent / "pages"
 BASE = "https://skinnie.github.io/sommet/"
 
 # slug -> title, description, breadcrumb name. Order = sitemap order.
 PAGES = {
     "home": dict(
-        title="Sommet — Suunto Ambit, Traverse & Kailash sync app without Movescount",
+        title="Sommet — desktop & Android app for Suunto Ambit, Traverse and Kailash",
         desc=None,  # keep the description written in the source
         crumb="Home",
     ),
@@ -52,7 +53,7 @@ PAGES = {
         crumb="Software",
     ),
     "faq": dict(
-        title="FAQ: using a Suunto Ambit without Movescount or the Suunto app — Sommet",
+        title="Sommet FAQ — the app for Suunto Ambit, Traverse and Kailash watches",
         desc="Answers about Sommet: can a Suunto Ambit still be used without Movescount, is a phone or an "
              "account needed, which watches are supported, and what to do if something goes wrong.",
         crumb="FAQ",
@@ -103,6 +104,10 @@ def text_of(html):
 
 
 def main():
+    global OUT
+    if "--out" in sys.argv:
+        OUT = Path(sys.argv[sys.argv.index("--out") + 1]).resolve()
+        OUT.mkdir(parents=True, exist_ok=True)
     src = SRC.read_text(encoding="utf-8")
     head = src[: src.index("</head>")]
     body_start = src.index('<div id="app">')
@@ -118,6 +123,14 @@ def main():
         end = marks[i + 1].start() if i + 1 < len(marks) else main_close
         chunk = re.sub(r"\s*<!-- =+ [A-Z &]+ =+ -->\s*$", "\n", src[m.start():end])
         sections[m.group(1)] = re.sub(r'^<div class="page[^"]*"', '<div class="page active"', chunk)
+    if "--drafts" in sys.argv:  # extra pages kept as fragments in _src/pages/, not published by default
+        for f in sorted(DRAFTS.glob("*.html")):
+            raw = f.read_text(encoding="utf-8")
+            meta, body = raw.split("-->", 1)
+            meta = json.loads(meta.replace("<!--", "", 1))
+            PAGES[meta["slug"]] = meta
+            ROUTES[meta["slug"]] = (meta["slug"], None)
+            sections[meta["slug"]] = '<div class="page active">\n' + body.strip() + "\n</div>\n"
     missing = set(PAGES) - set(sections)
     if missing:
         sys.exit(f"source has no section for: {sorted(missing)}")
@@ -239,7 +252,7 @@ def main():
 </html>
 """
         target = OUT / "index.html" if home else OUT / slug / "index.html"
-        target.parent.mkdir(exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(page, encoding="utf-8")
         sitemap.append(url)
         print(f"{slug:11s} {len(page.encode()) / 1024:7.1f} KB  {title}")
