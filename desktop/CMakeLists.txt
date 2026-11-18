@@ -201,6 +201,7 @@ qt_add_qml_module(sommet_app
         qml/ActivityViewLogic.js
         qml/ActivityChartDraw.js
         qml/SwimWorkout.js
+        qml/SportPicture.js
         qml/components/Card.qml
         qml/components/SommetMark.qml
         qml/components/PageFlickable.qml
@@ -256,6 +257,7 @@ qt_add_qml_module(sommet_app
         qml/components/SkeletonList.qml
         qml/components/SettingsSection.qml
         qml/components/ActivityBadge.qml
+        qml/components/SportPicture.qml
         qml/components/WatchFacePreview.qml
         qml/components/DataPickerDialog.qml
         qml/components/NavItem.qml

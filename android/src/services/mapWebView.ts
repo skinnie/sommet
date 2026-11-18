@@ -1,7 +1,7 @@
 import RNFS from 'react-native-fs';
 import { Platform } from 'react-native';
 
-// Shared plumbing for every Leaflet map WebView in the app (activity replay, POI picker, route
+// Shared plumbing for every Leaflet map WebView in the app (activity map, POI picker, route
 // weather, offline-maps manager). Two jobs:
 //  1. Load the page from a file:// URL under the caches dir instead of inline HTML, so the
 //     WebView — WKWebView included — is allowed to read cached tiles off disk (the only setup

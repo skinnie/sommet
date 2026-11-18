@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { readGpxFile } from '../services/GpxService';
 import { parseTrackPoints } from '../services/GpxParser';
 import { TrackPreview } from './TrackPreview';
+import { SportPicture } from './SportPicture';
 
 // v3.0 UI port (2026-08-09, "re do activities... to match entirely desktop") - desktop's
 // ActivitiesPage.qml shows a live embedded map per card, real request "activities... just a
@@ -16,7 +17,11 @@ import { TrackPreview } from './TrackPreview';
 // and this data never changes for an already-synced activity.
 const cache = new Map<string, { lat: number; lon: number }[]>();
 
-export function ActivityThumbnail({ gpxPath, height = 90 }: { gpxPath: string; height?: number }) {
+// A move whose file holds no positions (pool swim, indoor ride) shows its sport instead
+// (move-page/03, SportPicture.tsx).
+export function ActivityThumbnail({ gpxPath, height = 90, sport, seed }: {
+  gpxPath: string; height?: number; sport?: string | null; seed?: string;
+}) {
   const [points, setPoints] = useState<{ lat: number; lon: number }[] | null>(cache.get(gpxPath) ?? null);
 
   useEffect(() => {
@@ -33,5 +38,6 @@ export function ActivityThumbnail({ gpxPath, height = 90 }: { gpxPath: string; h
   }, [gpxPath]);
 
   if (points === null) return null;
+  if (points.length === 0) return <SportPicture sport={sport} seed={seed ?? gpxPath} height={height} />;
   return <TrackPreview points={points} height={height} />;
 }

@@ -74,16 +74,13 @@ Card {
             // TapHandler above for no benefit.
             MouseArea { anchors.fill: parent; onClicked: root.opened() }
 
-            Rectangle {
+            // No track: the sport, drawn like a quiet map (move-page/03).
+            SportPicture {
                 visible: root._center === null
                 anchors.fill: parent
-                color: Theme.background
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("No GPS track")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeLabel
-                }
+                activityId: ActivityTypes.displayId(activity.name, activity.sportTypeRaw)
+                name: ActivityTypes.displayName(activity.name, activity.sportTypeRaw)
+                seed: activity.startTime || ""
             }
         }
 

@@ -19,6 +19,7 @@ import RNFS from 'react-native-fs';
 import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
 import { ActivityThumbnail } from '../components/ActivityThumbnail';
+import { SportPicture } from '../components/SportPicture';
 import Icon, { IconName } from '../components/ui/Icon';
 import { activityIconName } from '../services/ActivityColors';
 import { isFootSport } from '../services/SportNames';
@@ -471,9 +472,11 @@ export default function LogListScreen() {
             onLongPress={() => confirmDelete(item)}
             activeOpacity={0.75}
           >
-            {viewMode === 'map' && !!item.gpx_path && (
+            {viewMode === 'map' && (
               <View style={styles.cardThumb}>
-                <ActivityThumbnail gpxPath={item.gpx_path} height={160} />
+                {item.gpx_path
+                  ? <ActivityThumbnail gpxPath={item.gpx_path} height={160} sport={item.activity_type} seed={item.date} />
+                  : <SportPicture sport={item.activity_type} seed={item.date} height={160} />}
               </View>
             )}
             <View style={styles.cardRow}>

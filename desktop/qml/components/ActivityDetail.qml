@@ -543,7 +543,7 @@ Item {
                 visible: !root._split
                 width: parent.width - Theme.spacingLarge * 2
                 x: Theme.spacingLarge
-                height: root._split ? 0 : (root._center !== null ? 300 : 36)
+                height: root._split ? 0 : (root._center !== null ? 300 : 160)
             }
             Item {
                 id: mapBox
@@ -600,14 +600,14 @@ Item {
                     TapHandler { onTapped: root.linked = !root.linked }
                     HoverHandler { cursorShape: Qt.PointingHandCursor }
                 }
-                Rectangle {
+                // No track: the sport, drawn like a quiet map (move-page/03), the same picture
+                // as the activity list's card.
+                SportPicture {
                     visible: root._center === null
                     anchors.fill: parent
-                    color: "transparent"
-                    radius: Theme.radiusSmall
-                    border.color: Theme.borderStrong
-                    Text { anchors.verticalCenter: parent.verticalCenter; x: 12
-                           text: qsTr("No GPS track on this activity"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
+                    activityId: ActivityTypes.displayId(root.activity.name, root.activity.sportTypeRaw)
+                    name: ActivityTypes.displayName(root.activity.name, root.activity.sportTypeRaw)
+                    seed: root.activity.startTime || ""
                 }
             }
             ColourRow {

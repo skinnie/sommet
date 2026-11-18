@@ -1,0 +1,674 @@
+[
+ {
+  "id": 1,
+  "key": "UnspecifiedSport",
+  "name": "Unspecified sport",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<path d=\"M12 3.2l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 17l-5.3 2.9 1.1-6.1L3.4 9.6l6-.8z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 2,
+  "key": "Multisport",
+  "name": "Multisport",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"5.4\" r=\"2.8\" fill=\"#fff\"/><circle cx=\"5.4\" cy=\"17.2\" r=\"2.8\" fill=\"#fff\"/><circle cx=\"18.6\" cy=\"17.2\" r=\"2.8\" fill=\"#fff\"/><path d=\"M12 8.2 L6.8 14.8 M12 8.2 L17.2 14.8 M8.2 17.2 h7.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\"/>"
+ },
+ {
+  "id": 3,
+  "key": "Running",
+  "name": "Running",
+  "color": "#f3cd06",
+  "style": "glyph",
+  "svg": "<circle cx=\"15.4\" cy=\"4.6\" r=\"2.4\" fill=\"#fff\"/><path d=\"M14.6 8.2 L11 12.4 L12.6 16\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.6 16 L9.2 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11 12.4 L15.6 14.2 L15.2 19.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13.4 9.6 L17.8 10.6 L19.4 8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.2 10.6 L8.4 10.2 L7.2 12.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 4,
+  "key": "Cycling",
+  "name": "Cycling",
+  "color": "#f47830",
+  "style": "glyph",
+  "svg": "<circle cx=\"5.6\" cy=\"15.4\" r=\"4.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/><circle cx=\"18.4\" cy=\"15.4\" r=\"4.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/><path d=\"M5.6 15.4 L9.8 8.4 h4.4 l4.2 7 M9.8 8.4 h5.2 M12.4 15.4 L14.6 8.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 5,
+  "key": "MountainBiking",
+  "name": "Mountain biking",
+  "color": "#f47830",
+  "style": "glyph",
+  "svg": "<circle cx=\"5.6\" cy=\"15.2\" r=\"4.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"3.2\"/><circle cx=\"18.4\" cy=\"15.2\" r=\"4.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"3.2\"/><path d=\"M5.6 15.2 L9.8 8.4 h4.4 l4.2 6.8 M9.8 8.4 h5.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 6,
+  "key": "PoolSwimming",
+  "name": "Pool swimming",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M3.6 9.6c0-1.7 1.5-3 3.4-3s3.4 1.3 3.4 3-1.5 3.1-3.4 3.1-3.4-1.4-3.4-3.1z\" fill=\"#fff\"/><path d=\"M13.6 9.6c0-1.7 1.5-3 3.4-3s3.4 1.3 3.4 3-1.5 3.1-3.4 3.1-3.4-1.4-3.4-3.1z\" fill=\"#fff\"/><path d=\"M10.4 9.6h3.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/><path d=\"M2.5 17.6c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\"/>"
+ },
+ {
+  "id": 8,
+  "key": "RollerSkating",
+  "name": "Roller skating",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M8 4.6h3v7.4h4.6c1.6 0 2.6 1 2.6 2.6v2H8z\" fill=\"#fff\"/><circle cx=\"9.4\" cy=\"18.4\" r=\"1.8\" fill=\"#fff\"/><circle cx=\"16.6\" cy=\"18.4\" r=\"1.8\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 9,
+  "key": "Aerobics",
+  "name": "Aerobics",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"4.4\" r=\"2.4\" fill=\"#fff\"/><path d=\"M12 7 L12 13.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 13.6 L8.6 20.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 13.6 L15.4 20.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5.6 6.6 L12 10 L18.4 6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 10,
+  "key": "YogaPilates",
+  "name": "Yoga / pilates",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"4.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12 7 L12 12.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5 20.4c2.6-3.6 11.4-3.6 14 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5.6 13.4 L12 12.6 L18.4 13.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 11,
+  "key": "Trekking",
+  "name": "Trekking",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<circle cx=\"13\" cy=\"4.2\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12.6 7.4 L11.6 13\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 13 L9 20\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 13 L14.4 16.2 L14.2 20.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.2 9.4 L15.4 11.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8.4 8.6 h3 a1.6 1.6 0 0 1 1.6 1.6 v2.2 h-4.6 z\" fill=\"#fff\"/><path d=\"M16.6 8 L17.6 20.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\"/>"
+ },
+ {
+  "id": 12,
+  "key": "Walking",
+  "name": "Walking",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<circle cx=\"13.4\" cy=\"4.4\" r=\"2.4\" fill=\"#fff\"/><path d=\"M13 7.8 L12 13.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 13.4 L9.6 20.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 13.4 L14.8 16.6 L14.6 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.6 9.6 L15.6 12.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.4 9.8 L9.4 12.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 13,
+  "key": "Sailing",
+  "name": "Sailing",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M12 3.2 L12 15 L4.2 15 Z\" fill=\"#fff\"/><path d=\"M13.4 6.6 L19.6 15 L13.4 15 Z\" fill=\"#fff\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 14,
+  "key": "Kayaking",
+  "name": "Kayaking",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M3.4 9 L20.6 15\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.2 7.4 L5 8.6 L3.2 10.4 Z\" fill=\"#fff\"/><path d=\"M21.8 16.6 L19 15.4 L20.8 13.6 Z\" fill=\"#fff\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 15,
+  "key": "Rowing",
+  "name": "Rowing",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M4 8.4 L20 13.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4 15.4 L20 10.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"12\" cy=\"11.9\" r=\"2.2\" fill=\"#fff\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 16,
+  "key": "Climbing",
+  "name": "Climbing",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<path d=\"M6 21 L8.6 12 L14 8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"15.6\" cy=\"6.2\" r=\"2.4\" fill=\"#fff\"/><path d=\"M14 8 L18.6 11 L18 15.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8.6 12 L12.6 14.4 L12 21\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4 3.4 L4 20\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 17,
+  "key": "IndoorCycling",
+  "name": "Indoor cycling",
+  "color": "#f47830",
+  "style": "glyph",
+  "svg": "<circle cx=\"6\" cy=\"16\" r=\"3.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M6 16 L10 9.6 h4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M14 9.6 L17 16\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M15.4 16h3.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M10.4 9.6h4.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 18,
+  "key": "CircuitTraining",
+  "name": "Circuit training",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"8.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M12 5.6 L12 12 L16.4 14.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M17.6 3.6 L21.6 5 L18.6 8 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 19,
+  "key": "Triathlon",
+  "name": "Triathlon",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<circle cx=\"4.8\" cy=\"12\" r=\"3\" fill=\"#fff\"/><circle cx=\"12\" cy=\"12\" r=\"3\" fill=\"#fff\"/><circle cx=\"19.2\" cy=\"12\" r=\"3\" fill=\"#fff\"/><path d=\"M7.8 12h1.2M15 12h1.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/>"
+ },
+ {
+  "id": 20,
+  "key": "AlpineSkiing",
+  "name": "Alpine skiing",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"15\" cy=\"4.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M14.6 7.6 L11.6 12.4 L14 15.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 12.4 L8 16\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13.6 9.4 L18 11\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3 19.4 L20 15.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.6 21 L21 17.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 21,
+  "key": "Snowboarding",
+  "name": "Snowboarding",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"14\" cy=\"4.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M13.6 7.6 L10.6 12.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M10.6 12.4 L8.6 16.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M10.6 12.4 L14.4 15.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3.6 20.6c4-3.6 12-5.4 17-6.2 -1 3.6-9.6 7.4-17 6.2z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 22,
+  "key": "CrosscountrySkiing",
+  "name": "Cross-country skiing",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"14.6\" cy=\"4.4\" r=\"2.3\" fill=\"#fff\"/><path d=\"M14.2 7.4 L11.6 12.6 L13.4 16.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 12.6 L8.6 17.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13 9.4 L18.4 12.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.6 20.4 L21.4 17.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6 8 L7.6 18\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 23,
+  "key": "WeightTraining",
+  "name": "Weight training",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<path d=\"M3 9.4v5.2M6.2 7v10M17.8 7v10M21 9.4v5.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.2 12h11.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 24,
+  "key": "Basketball",
+  "name": "Basketball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M12 5.4v13.2M5.4 12h13.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M7.4 7.4c2.6 2.6 2.6 6.6 0 9.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M16.6 7.4c-2.6 2.6-2.6 6.6 0 9.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 25,
+  "key": "SoccerFootball",
+  "name": "Soccer / football",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"7\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M12 7.4 L15.6 10.2 L14.2 14.4 L9.8 14.4 L8.4 10.2 Z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 5.2v2.2M17.4 11.6l-1.8-1.4M15.4 17.2l-1.2-2.8M8.6 17.2l1.2-2.8M6.6 11.6l1.8-1.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 26,
+  "key": "IceHockey",
+  "name": "Ice hockey",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M4.6 12.6c0-1.6 3.4-2.8 7.4-2.8s7.4 1.2 7.4 2.8v2c0 1.6-3.4 2.8-7.4 2.8s-7.4-1.2-7.4-2.8z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 27,
+  "key": "Volleyball",
+  "name": "Volleyball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M12 5.4c-2.6 4-2.6 9.2 0 13.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6 9c4 1.4 8 1.4 12 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.6 16c3-2.6 6.6-4 10.8-4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 28,
+  "key": "AmericanFootball",
+  "name": "American football",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M12 5.2c4 0 6.8 3 6.8 6.8s-2.8 6.8-6.8 6.8-6.8-3-6.8-6.8 2.8-6.8 6.8-6.8z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9.4 12h5.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M10.6 10.6v2.8M12 10.2v3.6M13.4 10.6v2.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 29,
+  "key": "Softball",
+  "name": "Softball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M7.6 7.6c2.6 2.4 2.6 6.4 0 8.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M16.4 7.6c-2.6 2.4-2.6 6.4 0 8.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"12\" cy=\"12\" r=\"1\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 30,
+  "key": "Cheerleading",
+  "name": "Cheerleading",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"7.4\" cy=\"8.6\" r=\"3.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/><path d=\"M7.4 11.8 L6 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16.6\" cy=\"8.6\" r=\"3.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"/><path d=\"M16.6 11.8 L18 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5.4 6.4 L4 4.6M9.4 6.4 L10.8 4.6M14.6 6.4 L13.2 4.6M18.6 6.4 L20 4.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 31,
+  "key": "Baseball",
+  "name": "Baseball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"7\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M8 6.8c2 3 2 7.4 0 10.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M16 6.8c-2 3-2 7.4 0 10.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 33,
+  "key": "Tennis",
+  "name": "Tennis",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M8.6 4.6c3 0 5.4 2.6 5.4 5.8s-2.4 5.8-5.4 5.8-5.4-2.6-5.4-5.8 2.4-5.8 5.4-5.8z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5.4 7.6h6.4M5.4 13h6.4M8.6 4.8v11\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.4 14.8 L18.6 20.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"18.4\" cy=\"7\" r=\"2\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 34,
+  "key": "Badminton",
+  "name": "Badminton",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M14.6 4.2 L9.4 9.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13.4 3c1.8-1.2 4.4-1 5.8.4s1.6 4 .4 5.8z\" fill=\"#fff\"/><path d=\"M9.4 9.4 L3.8 15\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3.4 15.4 L2.6 19 L6.2 18.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 35,
+  "key": "TableTennis",
+  "name": "Table tennis",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M9 4.4c3 0 5.4 2.6 5.4 5.6s-2.4 5.6-5.4 5.6-5.4-2.6-5.4-5.6 2.4-5.6 5.4-5.6z\" fill=\"#fff\"/><path d=\"M12.4 14.4 L17.4 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"18.6\" cy=\"7.6\" r=\"1.8\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 36,
+  "key": "RacquetBall",
+  "name": "Racquet ball",
+  "color": "#9b5cff",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM641 645C674 612 715 564 715 522C715 499 703 482 681 461C612 510 519 468 519 376C483 366 438 359 405 376C375 360 310 288 270 241C270 242 236 274 236 275C290 316 362 379 371 410C350 470 373 545 405 609C432 664 468 714 513 714C556 714 607 681 641 645ZM620 449C659 449 689 419 689 380C689 341 658 311 620 311C584 311 552 341 552 380C552 416 581 449 620 449Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 37,
+  "key": "Squash",
+  "name": "Squash",
+  "color": "#9b5cff",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM275 237 236 277C292 323 383 407 430 457C391 529 495 717 583 717C637 717 716 638 716 585C716 548 703 542 671 504C622 539 550 502 550 432C516 423 483 417 457 431C405 382 320 291 275 237ZM631 380C602 380 578 405 578 433C578 461 601 487 631 487C661 487 684 463 684 433C684 405 661 380 631 380Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 38,
+  "key": "MartialArts",
+  "name": "Martial arts",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"4.8\" r=\"2.2\" fill=\"#fff\"/><path d=\"M12 7 L12 12.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 12.4 L8.4 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 12.4 L16.4 15.2 L20 13.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 9.2 L7.6 11.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 39,
+  "key": "Boxing",
+  "name": "Boxing",
+  "color": "#fa1b4f",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM230 610C268 611 289 605 304 598C324 590 341 580 356 580C375 580 397 598 418 618C458 652 501 670 559 670C603 670 643 652 652 613C734 607 777 541 777 449C777 334 717 291 617 291C581 291 540 297 494 308C450 317 404 331 371 346C341 360 310 362 278 363C248 364 216 364 183 373C183 439 206 540 230 610ZM394 542C461 578 543 601 611 593C602 622 584 631 556 631C503 631 438 590 394 542ZM215 400 290 394C309 422 321 460 328 493C331 512 334 531 336 551C318 559 278 577 262 577C252 577 250 571 248 558C237 526 212 420 215 400Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 40,
+  "key": "Floorball",
+  "name": "Floorball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><circle cx=\"9.6\" cy=\"10.4\" r=\"1\" fill=\"#fff\"/><circle cx=\"14.4\" cy=\"10.4\" r=\"1\" fill=\"#fff\"/><circle cx=\"12\" cy=\"14.2\" r=\"1\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 51,
+  "key": "ScubaDiving",
+  "name": "Scuba diving",
+  "color": "#17b5e7",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM424 621C405 629 374 638 361 638C380 666 411 682 448 682V718C403 719 404 785 448 786C448 840 514 840 514 798C583 798 587 705 515 706V682C551 682 582 666 602 638C590 638 568 631 547 623C491 603 476 601 424 621ZM767 474C819 433 691 261 635 281C609 295 590 324 547 416C528 455 502 480 480 481C454 481 433 456 413 416C370 324 351 295 325 281C269 261 141 433 193 474C216 490 216 500 221 536C226 560 234 575 241 585C254 601 261 605 279 605C298 604 323 603 345 600C389 597 452 570 480 570C508 570 571 597 615 600C637 603 662 604 681 605C699 605 706 601 719 585C726 575 734 560 739 536C744 500 744 490 767 474ZM319 338C332 333 348 351 364 378C381 406 408 470 420 508C431 546 415 551 361 559C336 561 315 562 296 562C268 560 260 550 256 518C254 500 253 474 243 471C235 466 225 461 225 451C225 423 237 401 263 376C279 360 301 341 319 338ZM641 338C659 341 681 360 697 376C723 401 735 423 735 451C735 461 725 466 717 471C707 474 706 500 704 518C700 550 692 560 664 562C645 562 624 561 599 559C545 551 529 546 540 508C552 470 579 406 596 378C612 351 628 333 641 338ZM390 510 330 390V525ZM570 510 630 525V390ZM553 316C568 285 590 251 614 232C600 191 563 180 518 180H444C399 180 361 193 348 235C379 262 399 298 411 322C437 376 458 423 481 439C504 424 524 378 553 316Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 52,
+  "key": "FreeDiving",
+  "name": "Free diving",
+  "color": "#17b5e7",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"5\" r=\"2.4\" fill=\"#fff\"/><path d=\"M12 7.4 L12 14 L9 20\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 14 L15 20\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9.4 9.6 L14.6 9.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 53,
+  "key": "Snorkeling",
+  "name": "Snorkeling",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<circle cx=\"9\" cy=\"9.4\" r=\"3.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\"/><path d=\"M12.4 9.4h2.4v6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 54,
+  "key": "Surfing",
+  "name": "Surfing",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<path d=\"M4.6 18.6c4-9.4 10-13 15.4-14.2 -1.4 6.6-6 12.4-15.4 14.2z\" fill=\"#fff\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 55,
+  "key": "SwimRun",
+  "name": "Swimrun",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<circle cx=\"6.6\" cy=\"6.4\" r=\"2.2\" fill=\"#fff\"/><path d=\"M3 12 L7 9.8 L11 11.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"17\" cy=\"6.4\" r=\"2.2\" fill=\"#fff\"/><path d=\"M16.2 9 L14.6 13 L17.4 16\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 56,
+  "key": "Duathlon",
+  "name": "Duathlon",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"5.4\" r=\"2.6\" fill=\"#fff\"/><circle cx=\"6\" cy=\"16.6\" r=\"2.6\" fill=\"#fff\"/><circle cx=\"18\" cy=\"16.6\" r=\"2.6\" fill=\"#fff\"/><path d=\"M12 8 L7.4 14.4M12 8 L16.6 14.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 57,
+  "key": "Aquathlon",
+  "name": "Aquathlon",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"5.4\" r=\"2.6\" fill=\"#fff\"/><circle cx=\"6\" cy=\"16.6\" r=\"2.6\" fill=\"#fff\"/><circle cx=\"18\" cy=\"16.6\" r=\"2.6\" fill=\"#fff\"/><path d=\"M8.6 16.6h6.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 8 L12 13.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 58,
+  "key": "ObstacleRacing",
+  "name": "Obstacle racing",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M3 6h5v5h-5z\" fill=\"#fff\"/><path d=\"M9.6 11h5v5h-5z\" fill=\"#fff\"/><path d=\"M16.2 6h5v5h-5z\" fill=\"#fff\"/><path d=\"M3 20.4h18\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 61,
+  "key": "AdventureRacing",
+  "name": "Adventure racing",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M12 7 L14.6 14.6 L12 13 L9.4 14.6 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 62,
+  "key": "Bowling",
+  "name": "Bowling",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"7.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><circle cx=\"10\" cy=\"9\" r=\"1.1\" fill=\"#fff\"/><circle cx=\"13.6\" cy=\"8.6\" r=\"1.1\" fill=\"#fff\"/><circle cx=\"12\" cy=\"12.4\" r=\"1.1\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 63,
+  "key": "Cricket",
+  "name": "Cricket",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M6.6 3.6h2.6l1 11.4h-4.6z\" fill=\"#fff\"/><path d=\"M8 17.4 L8 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16.6\" cy=\"16.6\" r=\"2.6\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 64,
+  "key": "Crosstrainer",
+  "name": "Crosstrainer",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"5\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12 7.2 L11 12.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11 12.6 L7.6 18.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11 12.6 L14.8 16.4 L14.6 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 9.4 L16.4 7.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.6 20.6h5M14.6 20.6h5\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 65,
+  "key": "Dancing",
+  "name": "Dancing",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"14\" cy=\"4.4\" r=\"2.3\" fill=\"#fff\"/><path d=\"M13.6 7 L12 12.6 L14.6 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 12.6 L7.6 17.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13.2 9.4 L18.4 6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.6 9.6 L8 11.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 66,
+  "key": "Golf",
+  "name": "Golf",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M9 3.6 L9 18.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9.8 4 L17 7 L9.8 10 Z\" fill=\"#fff\"/><path d=\"M5 20.6h11\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 67,
+  "key": "Gymnastics",
+  "name": "Gymnastics",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"4.4\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12 6.8 L12 12.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.6 8.6 L12 8.6 L19.4 8.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 12.6 L8 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 12.6 L16 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 68,
+  "key": "Handball",
+  "name": "Handball",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\"/><path d=\"M9 6.6 L15 17.4M15 6.6 L9 17.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5.6 12h12.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 69,
+  "key": "HorsebackRiding",
+  "name": "Horseback riding",
+  "color": "#19b251",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM791 448C802 443 806 435 804 428C802 413 748 390 715 380C679 369 635 363 592 368C530 376 481 397 456 413C456 378 464 360 483 319C488 311 492 300 490 289C490 277 480 268 458 261C436 254 392 251 361 264C330 276 304 296 285 316C275 327 268 335 262 343C249 347 234 359 226 393C218 423 211 470 216 519C226 619 285 676 387 708C392 720 408 742 443 742C468 742 491 742 503 716C635 705 714 623 730 484C728 480 754 467 791 448ZM661 464 688 471C678 502 665 531 649 560C634 585 618 610 595 635C572 659 545 682 512 699C512 697 498 688 492 685C528 659 555 634 578 609C601 583 617 558 630 537C644 511 655 488 661 464ZM392 686C370 619 372 530 396 464L437 452C410 522 402 600 426 675C419 675 405 680 392 686ZM403 301C420 299 433 298 439 313L409 425L313 357C315 336 334 322 355 313C376 304 397 301 403 301ZM553 353C550 353 586 347 589 349C592 311 567 298 528 304C521 304 507 308 510 309C511 323 505 337 495 350C522 346 555 341 552 351C551 353 551 353 553 353Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 70,
+  "key": "IceSkating",
+  "name": "Ice skating",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<path d=\"M9 3.6h3v9.6h5.4c1.4 0 2.4 1 2.4 2.4v1.8H9z\" fill=\"#fff\"/><path d=\"M4.6 20.4h16.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.6 17.4v3\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 71,
+  "key": "IndoorRowing",
+  "name": "Indoor rowing",
+  "color": "#fa1b4f",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 960C215 960 0 745 0 480C0 215 215 0 480 0C745 0 960 215 960 480C960 745 745 960 480 960ZM452 368 430 389 598 517 578 522 430 410 422 396 404 416C421 447 420 498 400 520C376 548 335 528 310 490C279 445 274 366 321 354C342 350 360 362 378 379L399 355C389 345 377 332 367 326C335 304 304 304 260 333L210 279L183 290L236 344C199 352 183 390 183 430C183 469 196 507 217 537C241 570 275 602 311 598L359 587L405 610L391 614C381 618 383 621 383 655C383 676 407 671 431 670L487 665C502 662 504 651 504 641V614C504 600 502 585 471 593L448 600L409 571C444 555 453 508 445 455C487 486 527 513 551 532L632 513ZM463 614C475 612 481 612 481 622V635C481 643 479 650 470 650C396 660 401 663 401 636C401 626 407 625 431 620ZM760 590C752 568 732 547 708 535L752 486L730 476L682 530C641 523 578 540 551 548C530 555 529 593 541 610C550 620 565 627 583 633C602 640 614 643 628 641C658 637 695 633 721 636C756 638 767 619 760 590ZM360 399 357 395C315 366 295 430 326 472C358 522 405 497 389 444L386 438L351 474L350 411ZM512 244 360 414V450L539 255Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 72,
+  "key": "Canoeing",
+  "name": "Canoeing",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M6 8.6 L15.6 14.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M16.8 15.4 L13.6 14 L15.4 12.2 Z\" fill=\"#fff\"/><path d=\"M4 13.4c2.6 3 11 3 16 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 73,
+  "key": "Motorsports",
+  "name": "Motorsports",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M5 3.6 L5 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.6 4.6h3.6v3.6h-3.6z\" fill=\"#fff\"/><path d=\"M13.8 4.6h3.6v3.6h-3.6z\" fill=\"#fff\"/><path d=\"M10.2 8.2h3.6v3.6h-3.6z\" fill=\"#fff\"/><path d=\"M17.4 8.2h3.2v3.6h-3.2z\" fill=\"#fff\"/><path d=\"M6.6 11.8h3.6v3.6h-3.6z\" fill=\"#fff\"/><path d=\"M13.8 11.8h3.6v3.6h-3.6z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 74,
+  "key": "Mountaineering",
+  "name": "Mountaineering",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<path d=\"M2 20.5 L9 8 L13.2 15 L16 10.4 L22 20.5 Z\" fill=\"#fff\"/><path d=\"M9 8 L11.2 11.8 L7 11.8 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 75,
+  "key": "Orienteering",
+  "name": "Orienteering",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M4.6 4.6h14.8v14.8h-14.8z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.6 19.4 L19.4 4.6 L19.4 19.4 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 76,
+  "key": "Rugby",
+  "name": "Rugby",
+  "color": "#9b5cff",
+  "style": "glyph",
+  "svg": "<path d=\"M12 5c3.8 0 6.6 3.2 6.6 7s-2.8 7-6.6 7-6.6-3.2-6.6-7 2.8-7 6.6-7z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12 8.6v6.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M10.4 10.2h3.2M10.4 12h3.2M10.4 13.8h3.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 78,
+  "key": "SkiTouring",
+  "name": "Ski touring",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"14.6\" cy=\"4.4\" r=\"2.3\" fill=\"#fff\"/><path d=\"M14.2 7.4 L11.2 12.4 L13.6 15.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.2 12.4 L8 15.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4 19.6 L20.6 16.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.6 13.6 L6 8.4 L9.4 13.6 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 79,
+  "key": "Stretching",
+  "name": "Stretching",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<circle cx=\"9\" cy=\"4.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M8.6 7.4 L8 13.6 L4.6 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8 13.6 L13.6 17 L19.4 14.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8.4 9.6 L15 8.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 80,
+  "key": "TelemarkSkiing",
+  "name": "Telemark skiing",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"14.6\" cy=\"4.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M14.2 7.6 L11 12.6 L13.6 15.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11 12.6 L7.4 15.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.8 9.6 L17.6 10.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3 19.8 L21 16.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 81,
+  "key": "TrackAndField",
+  "name": "Track and field",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M6 6.6 L6 17.4M12 6.6 L12 17.4M18 6.6 L18 17.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3 12h18\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 82,
+  "key": "TrailRunning",
+  "name": "Trail running",
+  "color": "#f3cd06",
+  "style": "glyph",
+  "svg": "<circle cx=\"15.4\" cy=\"3.6\" r=\"2.3\" fill=\"#fff\"/><path d=\"M14.6 7 L11.2 11 L12.8 14.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.8 14.4 L9.6 18.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.2 11 L15.6 12.8 L15.4 17.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M13.4 8.4 L17.6 9.4 L19.2 7\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.4 9.4 L8.8 9 L7.6 11.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 21.5 L8 16.5 L11.5 19 L16 14 L21.5 21.5 Z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 83,
+  "key": "OpenwaterSwimming",
+  "name": "Openwater swimming",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<circle cx=\"7.6\" cy=\"7\" r=\"2.4\" fill=\"#fff\"/><path d=\"M3 13.2 L7.4 10.8 L11.6 12.6 L15.6 8.8 L20.6 11.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 18.6c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\"/>"
+ },
+ {
+  "id": 84,
+  "key": "NordicWalking",
+  "name": "Nordic walking",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<circle cx=\"13\" cy=\"4.2\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12.6 7.4 L11.8 13.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.8 13.4 L9.4 20.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.8 13.4 L14.6 16.6 L14.4 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6.6 8.6 L6 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M18 8.6 L18.6 20.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 85,
+  "key": "SnowShoeing",
+  "name": "Snow shoeing",
+  "color": "#2a67e3",
+  "style": "glyph",
+  "svg": "<circle cx=\"12.6\" cy=\"4.4\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12.2 7.4 L11.2 13\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.2 13 L8.8 19.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.2 13 L14 16.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M6 17.6c2.6 0 4.4 1.6 4.4 3.4h-8.8c0-1.8 1.8-3.4 4.4-3.4z\" fill=\"#fff\"/><path d=\"M17 15.6c2.6 0 4.4 1.6 4.4 3.4h-8.8c0-1.8 1.8-3.4 4.4-3.4z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 86,
+  "key": "Windsurfing",
+  "name": "Windsurfing",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M13 3.4 L13 15 L6.6 15 Z\" fill=\"#fff\"/><path d=\"M4 15.6h16\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 87,
+  "key": "Kettlebell",
+  "name": "Kettlebell",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<path d=\"M9 8.6a3 3 0 0 1 6 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9.6 10.4h4.8c2.6 1.6 4 4.2 4 7.2 0 1.6-1 2.8-2.6 2.8h-7.6c-1.6 0-2.6-1.2-2.6-2.8 0-3 1.4-5.6 4-7.2z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 88,
+  "key": "RollerSkiing",
+  "name": "Roller skiing",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M7 4h2.8v7.4h4.4c1.6 0 2.6 1 2.6 2.6v1.6H7z\" fill=\"#fff\"/><circle cx=\"8.6\" cy=\"18.6\" r=\"1.7\" fill=\"#fff\"/><circle cx=\"15.4\" cy=\"18.6\" r=\"1.7\" fill=\"#fff\"/><path d=\"M19.4 4.6 L20.4 17\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 89,
+  "key": "StandupPaddling",
+  "name": "Standup paddling",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"4.8\" r=\"2.2\" fill=\"#fff\"/><path d=\"M12 7 L12 14.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8.4 9.6 L16.4 6.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3.6 16.4h16.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 90,
+  "key": "Crossfit",
+  "name": "Cross training",
+  "color": "#ade539",
+  "style": "glyph",
+  "svg": "<path d=\"M4.6 4.6 L19.4 19.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M19.4 4.6 L4.6 19.4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 91,
+  "key": "KitesurfingKiting",
+  "name": "Kitesurfing / kiting",
+  "color": "#1986e7",
+  "style": "glyph",
+  "svg": "<path d=\"M3.6 8.6c4-4.6 12-4.6 16 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 6.4 L13.6 15\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M8 16.6h10\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M2.5 19.4c2.2-1.8 3.9-1.8 6.1 0s3.9 1.8 6.1 0 3.9-1.8 6.1 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 92,
+  "key": "Paragliding",
+  "name": "Paragliding",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<path d=\"M3 8.6c4-5 14-5 18 0\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M4.4 9.6 L12 15.4 L19.6 9.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"12\" cy=\"17.4\" r=\"2\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 93,
+  "key": "Treadmill",
+  "name": "Treadmill",
+  "color": "#f3cd06",
+  "style": "glyph",
+  "svg": "<path d=\"M3 18.5h18\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5 18.5v-3.5h14v3.5\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"9\" cy=\"7.4\" r=\"2.1\" fill=\"#fff\"/><path d=\"M8.6 10 L11.4 12.6 L15 11\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 94,
+  "key": "Frisbee",
+  "name": "Frisbee",
+  "color": "#9b5cff",
+  "style": "badge",
+  "svg": "<g transform=\"translate(0.000,24.000) scale(0.02500,-0.02500)\"><path d=\"M480 0C745 0 960 215 960 480C960 745 745 960 480 960C215 960 0 745 0 480C0 215 215 0 480 0ZM480 655C610 655 777 590 777 488C777 387 612 320 480 320C350 320 183 387 183 488C183 588 347 655 480 655ZM480 381C588 381 731 422 731 503C731 583 590 640 480 640C372 640 229 583 229 503C229 423 370 381 480 381ZM655 518C655 461 562 427 482 427C404 427 305 460 305 518C305 577 401 610 482 610C560 610 655 577 655 518Z\" fill=\"#fff\"/></g>"
+ },
+ {
+  "id": 95,
+  "key": "IndoorTraining",
+  "name": "Indoor training",
+  "color": "#fa1b4f",
+  "style": "glyph",
+  "svg": "<path d=\"M3 9.4v5.2M6.2 7.2v9.6M17.8 7.2v9.6M21 9.4v5.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><path d=\"M6.2 12h11.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.6\" stroke-linecap=\"round\"/>"
+ },
+ {
+  "id": 96,
+  "key": "Hiking",
+  "name": "Hiking",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<circle cx=\"13\" cy=\"4.2\" r=\"2.3\" fill=\"#fff\"/><path d=\"M12.6 7.4 L11.6 13\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 13 L9 20\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M11.6 13 L14.4 16.2 L14.2 20.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.2 9.4 L15.4 11.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M17 8 L18 20.8\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+ },
+ {
+  "id": 97,
+  "key": "Fishing",
+  "name": "Fishing",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<path d=\"M5 3.6 L5 12c0 4 3.2 6.6 7 6.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M5 3.6 L9.6 6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M12.8 15.4c3 0 5.4 1.4 6.6 3.2-1.2 1.8-3.6 3.2-6.6 3.2z\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 98,
+  "key": "Hunting",
+  "name": "Hunting",
+  "color": "#19b251",
+  "style": "glyph",
+  "svg": "<circle cx=\"12\" cy=\"12\" r=\"7\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.2\"/><path d=\"M12 3.4v4M12 16.6v4M3.4 12h4M16.6 12h4\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"12\" cy=\"12\" r=\"1.8\" fill=\"#fff\"/>"
+ },
+ {
+  "id": 99,
+  "key": "Transition",
+  "name": "Transition",
+  "color": "#9d9d9d",
+  "style": "glyph",
+  "svg": "<path d=\"M3.4 9h12.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M14.6 5.8 L19.6 9 L14.6 12.2 Z\" fill=\"#fff\"/><path d=\"M20.6 15h-12.2\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M9.4 11.8 L4.4 15 L9.4 18.2 Z\" fill=\"#fff\"/>"
+ }
+]

@@ -7,6 +7,19 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-18: The move page: no IGN, no replay, a sport picture without a track
+
+- The IGN (France) map is gone from desktop and Android: it only covers France, so moves
+  elsewhere showed an empty map. A saved IGN choice becomes CyclOSM, and saved IGN offline areas
+  are deleted on Android.
+- Android's replay (play, skip, speed) is gone from the move page. Desktop never had one.
+- A move without a GPS track (pool swim, indoor ride) shows its sport where the map would be:
+  faint contour lines in a map tile's colours and the sport's Ambit badge, in the activity list
+  and on the move page, the same picture on desktop and Android (`shared/sport_picture.js`).
+- Android, move page: the weather line sits above the map, so it no longer covers the map
+  chooser. On a landscape tablet a button switches the map between beside and above the
+  details; the choice is kept.
+
 ## 2026-11-18: Moving time for long rides; a note for two rides in one file
 
 **Checked without a watch or bike computer**, on a copy of real data and on made-up files.

@@ -14,6 +14,7 @@ Two sources, one place to edit:
                                  Canvas and by the Android WebView chart page alike
   shared/swim_workout.js         swimming in the workout builders: what a step can ask for in the
                                  water, the stroke words for the watch, pool lengths
+  shared/sport_picture.js        the picture a move with no GPS track shows where its map would be
   shared/sport_names.json        every source's sport type -> Suunto's sport name (intervals.icu,
                                  Garmin, ...), so one activity reads the same in both apps
 Copies: the desktop embeds desktop/assets/activity_view.json (Qt resource) and imports
@@ -34,6 +35,8 @@ DRAW_SRC = ROOT / "shared" / "activity_chart_draw.js"
 SPORTS_SRC = ROOT / "shared" / "sport_names.json"
 SWIM_SRC = ROOT / "shared" / "swim_workout.js"
 SPLIT_SRC = ROOT / "shared" / "fit_split.js"   # sync/06 "Split here" (twin of tools/fit_split.py)
+PICTURE_SRC = ROOT / "shared" / "sport_picture.js"   # move-page/03: the picture for a move with no track
+TYPES_SRC = ROOT / "assets" / "activity_types.json"  # the sports' Ambit badges, for that picture
 PRAGMA = b".pragma library\n// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 HEADER = b"// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 
@@ -90,6 +93,11 @@ def targets():
              HEADER.replace(b"activity_view_logic.js", b"activity_streams.js") + STREAMS_SRC.read_bytes()),
             (ROOT / "android" / "src" / "config" / "fitSplit.js",
              HEADER.replace(b"activity_view_logic.js", b"fit_split.js") + SPLIT_SRC.read_bytes()),
+            (ROOT / "desktop" / "qml" / "SportPicture.js",
+             PRAGMA.replace(b"activity_view_logic.js", b"sport_picture.js") + PICTURE_SRC.read_bytes()),
+            (ROOT / "android" / "src" / "config" / "sportPicture.js",
+             HEADER.replace(b"activity_view_logic.js", b"sport_picture.js") + PICTURE_SRC.read_bytes()),
+            (ROOT / "android" / "src" / "config" / "activity_types.json", TYPES_SRC.read_bytes()),
             (ROOT / "desktop" / "qml" / "ActivityChartDraw.js",
              PRAGMA.replace(b"activity_view_logic.js", b"activity_chart_draw.js") + DRAW_SRC.read_bytes()),
             (ROOT / "desktop" / "qml" / "SwimWorkout.js",

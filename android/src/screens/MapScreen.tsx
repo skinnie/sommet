@@ -12,7 +12,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { readGpxFile } from '../services/GpxService';
-import { parseTrackPoints, computeElevationStats, extractGpxMetadata, GpxMetadata, TrackPoint } from '../services/GpxParser';
+import { parseTrackPoints, extractGpxMetadata, GpxMetadata, TrackPoint } from '../services/GpxParser';
 import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
 import { getMapProvider, setMapProvider, MapProvider } from '../services/MapProviderService';
@@ -27,6 +27,7 @@ import { weatherLabel } from '../components/WeatherCard';
 import { weatherEmoji } from '../services/WeatherService';
 import { fetchActivityWeather, ActivityWeather } from '../services/ActivityWeather';
 import ActivityPanel from '../components/activity/ActivityPanel';
+import { SportPicture } from '../components/SportPicture';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Landscape tablet: the map beside the panel (default) or above it, like desktop (André,
@@ -36,31 +37,12 @@ const MAP_ABOVE_KEY = 'moveMapAbove';
 type Route = RouteProp<RootStackParamList, 'Map'>;
 type Nav   = NativeStackNavigationProp<RootStackParamList, 'Map'>;
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
-
-function formatDurationMinSec(s: number) {
-  if (isNaN(s) || s < 0) return '--:--';
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  const mStr = m.toString().padStart(2, '0');
-  const sStr = sec.toString().padStart(2, '0');
-  return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
-}
-
-
-function formatDist(m: number) {
-  return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
-}
-
 // ─── Carte Leaflet ────────────────────────────────────────────────────────────
 
 // Real, 2026-08-10 ("choose a better color for the route, one that remains visible but not
 // aggressive, and the trace a bit more thicker") - was a hardcoded, unthemed bright red
-// (#ff2200) with an unrelated hardcoded blue (#3498db) for the replay position marker.
-// desktop's own MapView.qml draws its track in Theme.primary with a white halo underneath
-// (same real fix TrackPreview.tsx's own header comment documents) - reused here for both
-// the track and the replay marker instead of two more one-off hardcoded colors.
+// (#ff2200). Desktop's own MapView.qml draws its track in Theme.primary with a white halo
+// underneath (same real fix TrackPreview.tsx's own header comment documents).
 // Real, 2026-08-10 ("let's go for the offline maps solution") - leaflet.js/leaflet.css
 // (+ its default marker images) are now vendored under android/app/src/main/assets/leaflet/
 // instead of fetched from unpkg.com on every map load: a real offline map needs the map
@@ -122,36 +104,16 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
       iconAnchor: [7, 7] });
   };
   
-  var playerIcon = L.divIcon({ className: '',
-      html: '<div style="width:18px;height:18px;background:${trackColor};border:3px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(0,0,0,.6);"></div>',
-      iconAnchor: [9, 9] });
-
-  window.Replay = {
-    state: {
-      playing: false,
-      speed: 1,
-      currentVal: 0,
-      maxVal: 0,
-      mode: 'time',
-      lastTime: 0,
-      lastTick: 0,
-    },
-    points: [],
-    marker: null,
-
+  // Draws the move's track, its start and end, and fits the map to it. (The replay that used to
+  // live here - a moving dot, play/pause, speed - was dropped 2026-11-18, André: "should ditch
+  // the replay". Desktop never had one.)
+  window.Track = {
     init: function(payload) {
-      window.Replay.points = payload.points;
-      window.Replay.state.mode = payload.mode;
-      window.Replay.state.maxVal = payload.maxVal;
-      window.Replay.state.currentVal = 0;
-      window.Replay.state.playing = false;
+      var lls = payload.points.map(function(p){ return [p.lat, p.lon]; });
 
-      var lls = window.Replay.points.map(function(p){ return [p.lat, p.lon]; });
-      
       if (line) map.removeLayer(line);
       if (startMarker) map.removeLayer(startMarker);
       if (endMarker) map.removeLayer(endMarker);
-      if (window.Replay.marker) map.removeLayer(window.Replay.marker);
 
       if (lls.length > 0) {
         // The map sits in a fixed box laid out after the page loads, and Leaflet may have cached
@@ -169,105 +131,10 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
         window.__progMove = true;
         map.fitBounds(line.getBounds(), { padding: [30, 30] });
 
-        window.Replay.marker = L.marker(lls[0], { icon: playerIcon, zIndexOffset: 1000 }).addTo(map);
         if (ovl.pending) {
           var p = ovl.pending; ovl.pending = null;
           setTimeout(function() { window.ActivityOverlay.setColoured(p[0], p[1]); }, 0);
         }
-      }
-    },
-
-    play: function(speed) {
-      if (window.Replay.state.currentVal >= window.Replay.state.maxVal) {
-        window.Replay.state.currentVal = 0;
-      }
-      window.Replay.state.speed = speed;
-      window.Replay.state.playing = true;
-      window.Replay.state.lastTime = Date.now();
-      requestAnimationFrame(window.Replay.loop);
-    },
-
-    pause: function() {
-      window.Replay.state.playing = false;
-    },
-
-    setSpeed: function(speed) {
-      window.Replay.state.speed = speed;
-    },
-
-    seek: function(val) {
-      window.Replay.state.currentVal = Math.max(0, Math.min(val, window.Replay.state.maxVal));
-      window.Replay.renderCurrent();
-    },
-
-    loop: function() {
-      if (!window.Replay.state.playing) return;
-      
-      var now = Date.now();
-      var dt = (now - window.Replay.state.lastTime) / 1000;
-      window.Replay.state.lastTime = now;
-      
-      window.Replay.state.currentVal += (dt * window.Replay.state.speed);
-      
-      if (window.Replay.state.currentVal >= window.Replay.state.maxVal) {
-         window.Replay.state.currentVal = window.Replay.state.maxVal;
-         window.Replay.renderCurrent();
-         window.Replay.pause();
-         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'REPLAY_END' }));
-         return;
-      }
-      
-      window.Replay.renderCurrent();
-      
-      // Tick to RN (~10 FPS max)
-      if (now - window.Replay.state.lastTick > 100) {
-         window.Replay.state.lastTick = now;
-         window.ReactNativeWebView.postMessage(JSON.stringify({ 
-           type: 'REPLAY_TICK', 
-           payload: { val: window.Replay.state.currentVal, dist: window.Replay.state.currentDist } 
-         }));
-      }
-      
-      requestAnimationFrame(window.Replay.loop);
-    },
-
-    renderCurrent: function() {
-      var pts = window.Replay.points;
-      if (pts.length < 2) return;
-      
-      var val = window.Replay.state.currentVal;
-      var mode = window.Replay.state.mode;
-      
-      // Binary search
-      var low = 0, high = pts.length - 1;
-      while (low <= high) {
-        var mid = (low + high) >> 1;
-        var mVal = mode === 'time' ? pts[mid].t : pts[mid].d;
-        if (mVal < val) low = mid + 1;
-        else if (mVal > val) high = mid - 1;
-        else { low = mid; break; }
-      }
-      
-      var idx = Math.max(0, Math.min(low, pts.length - 1));
-      
-      var p1 = pts[idx > 0 ? idx - 1 : 0];
-      var p2 = pts[idx];
-      var v1 = mode === 'time' ? p1.t : p1.d;
-      var v2 = mode === 'time' ? p2.t : p2.d;
-      
-      var ratio = (v2 > v1) ? (val - v1) / (v2 - v1) : 0;
-      var lat = p1.lat + (p2.lat - p1.lat) * ratio;
-      var lon = p1.lon + (p2.lon - p1.lon) * ratio;
-      
-      // Store currentDistance for RN
-      window.Replay.state.currentDist = p1.d + (p2.d - p1.d) * ratio;
-      
-      var newPos = [lat, lon];
-      window.Replay.marker.setLatLng(newPos);
-      
-      if (!map.getBounds().pad(-0.1).contains(newPos)) {
-        window.__progMove = true;
-        map.panTo(newPos, { animate: true, duration: 0.5 });
       }
     }
   };
@@ -277,8 +144,8 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
   // so the chart can follow the part of the route on screen.
   // Nothing is drawn before the map has a view: Leaflet queues such layers and adds them in the
   // middle of the first fitBounds, before its renderer has bounds -> "reading 'min'" thrown out of
-  // Replay.init (seen on the tablet 2026-09-28: no track, no markers). Colours that arrive early
-  // wait in ovl.pending and are drawn right after Replay.init has fitted the track.
+  // Track.init (seen on the tablet 2026-09-28: no track, no markers). Colours that arrive early
+  // wait in ovl.pending and are drawn right after Track.init has fitted the track.
   var ovl = { segs: null, hl: null, cur: null, pending: null };
   window.ActivityOverlay = {
     setColoured: function(segs, casing) {
@@ -310,7 +177,7 @@ function buildLeafletHtml(provider: MapProvider, trackColor: string): string {
       map.fitBounds(line.getBounds(), { padding: [30, 30] });
     }
   };
-  // The box can still change size after the replay is fitted (layout settling, rotation): follow
+  // The box can still change size after the track is fitted (layout settling, rotation): follow
   // it and fit the route again, unless the user has already moved the map.
   var _userMoved = false;
   window.addEventListener('resize', function() {
@@ -345,7 +212,6 @@ export default function MapScreen() {
   const [showGearPicker, setShowGearPicker] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadRegionProgress | null>(null);
 
-  // ── Replay State
   const webViewRef = useRef<WebView>(null);
   // Activity panel <-> map (desktop parity: chart hover dot, selected stretch, zone colours, and
   // the chart following the part of the route the user pans/zooms to).
@@ -375,16 +241,13 @@ export default function MapScreen() {
   };
   const sideBySide = wideLandscape && !mapAbove;   // tablet landscape: map left, panel right
   
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [replaySpeed, setReplaySpeed] = useState(1);
-  const [currentReplayVal, setCurrentReplayVal] = useState(0);
   const [isReady, setIsReady] = useState(false);
 
   // Real, 2026-08-09 ("no button to change provider, nor in the settings like the desktop
-  // version") - starts on the persisted default (getMapProvider()'s own 'ign' fallback) and
+  // version") - starts on the persisted default (getMapProvider()'s own CyclOSM fallback) and
   // rebuilds once the real stored value loads; picking a different layer inside the map
   // itself (see onMessage's MAP_PROVIDER_CHANGE) writes back to the same storage.
-  const [mapProvider, setMapProviderState] = useState<MapProvider>('ign');
+  const [mapProvider, setMapProviderState] = useState<MapProvider>('cyclosm');
   useEffect(() => { getMapProvider().then(setMapProviderState); }, []);
   // TRACK_COLOR, not theme.primary - see MapTile.ts's own header comment ("it is grey, not
   // very visible" - Android's own primary is a deliberately muted slate grey, wrong for a
@@ -413,7 +276,6 @@ export default function MapScreen() {
       .finally(() => setLoading(false));
   }, [activity.gpx_path]);
 
-  const stats = useMemo(() => computeElevationStats(points), [points]);
 
   // Shots on the map: once the map page is up and the GPX is read (either can come first).
   useEffect(() => {
@@ -441,64 +303,13 @@ export default function MapScreen() {
     return () => { alive = false; };
   }, [points, activity.id, activity.date, activity.duration_s]);
 
-  // Determine mode (time vs distance) based on whether timestamps exist
-  const replayMode = useMemo(() => {
-    if (points.length < 2) return 'time';
-    return points[points.length - 1].cumTime > 0 ? 'time' : 'distance';
-  }, [points]);
-
-  const maxReplayVal = replayMode === 'time' ? activity.duration_s : stats.totalDistance;
-
-  // Initialize Replay when WebView is ready
+  // Draw the track once the map page is ready.
   useEffect(() => {
     if (isReady && points.length > 0) {
-      const lightweightPoints = points.map(p => ({
-        lat: p.latitude,
-        lon: p.longitude,
-        t: p.cumTime,
-        d: p.cumDist,
-      }));
-      const payload = {
-        points: lightweightPoints,
-        mode: replayMode,
-        maxVal: maxReplayVal,
-      };
-      webViewRef.current?.injectJavaScript(`window.Replay.init(${JSON.stringify(payload)}); true;`);
+      const payload = { points: points.map(p => ({ lat: p.latitude, lon: p.longitude })) };
+      webViewRef.current?.injectJavaScript(`window.Track.init(${JSON.stringify(payload)}); true;`);
     }
-  }, [isReady, points, replayMode, maxReplayVal]);
-
-  const togglePlay = () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      webViewRef.current?.injectJavaScript(`window.Replay.pause(); true;`);
-    } else {
-      setIsPlaying(true);
-      webViewRef.current?.injectJavaScript(`window.Replay.play(${replaySpeed}); true;`);
-    }
-  };
-
-  const cycleSpeed = () => {
-    const nextSpeed = replaySpeed === 1 ? 10 : replaySpeed === 10 ? 60 : replaySpeed === 60 ? 120 : 1;
-    setReplaySpeed(nextSpeed);
-    if (isPlaying) {
-      webViewRef.current?.injectJavaScript(`window.Replay.setSpeed(${nextSpeed}); true;`);
-    }
-  };
-
-  const seekRelative = (delta: number) => {
-    let d = delta;
-    if (replayMode === 'distance') {
-      if (activity.duration_s > 0) {
-        const avgSpeedMps = stats.totalDistance / activity.duration_s;
-        d = delta * avgSpeedMps;
-      } else {
-        d = (stats.totalDistance * 0.02) * Math.sign(delta);
-      }
-    }
-    const newVal = Math.max(0, Math.min(currentReplayVal + d, maxReplayVal));
-    setCurrentReplayVal(newVal);
-    webViewRef.current?.injectJavaScript(`window.Replay.seek(${newVal}); true;`);
-  };
+  }, [isReady, points]);
 
   const onWebViewLoad = () => {
     setIsReady(true);
@@ -514,12 +325,7 @@ export default function MapScreen() {
   const onMessage = (event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'REPLAY_TICK') {
-        setCurrentReplayVal(data.payload.val);
-      } else if (data.type === 'REPLAY_END') {
-        setIsPlaying(false);
-        setCurrentReplayVal(maxReplayVal);
-      } else if (data.type === 'MAP_PROVIDER_CHANGE') {
+      if (data.type === 'MAP_PROVIDER_CHANGE') {
         setMapProviderState(data.provider);
         setMapProvider(data.provider);
       } else if (data.type === 'MAP_VIEW') {
@@ -728,8 +534,9 @@ export default function MapScreen() {
       <View style={styles.container}>
         <ScrollView contentContainerStyle={{ paddingBottom: 96 }}>
           <View style={[styles.noGpsContent, { paddingBottom: 0 }]}>
-            {/* Sport and date are the screen's header (App.tsx); only what is new goes here. */}
-            <Text style={styles.noGpsSub}>{t.noTrack}</Text>
+            {/* No track: the sport, drawn like a quiet map, the same picture as the list card
+                and desktop's move page (move-page/03). */}
+            <SportPicture sport={activity.activity_type} seed={activity.date} height={160} />
           </View>
           {/* Overview / Charts / Laps - the same panel as the map view (desktop parity). */}
           <ActivityPanel activity={activity} meta={meta} hasMap={false} mapView={null}
@@ -870,38 +677,6 @@ export default function MapScreen() {
       />
 
       <ScrollView style={sideBySide ? { width: Math.min(560, Math.round(win.width * 0.45)) } : { flex: 1 }}>
-      {/* ── Barre de Replay ── */}
-      <View style={styles.replayBar}>
-        <Text style={styles.replayModeText}>{replayMode === 'time' ? t.replayTime : t.replayDist}</Text>
-        
-        <View style={styles.replayControls}>
-          <TouchableOpacity onPress={() => seekRelative(-15)} style={styles.replayBtn}>
-            <Icon name="skipBack" size={18} color={theme.text} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity onPress={togglePlay} style={styles.replayBtnMain}>
-            <Icon name={isPlaying ? 'pause' : 'play'} size={20} color={theme.card} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity onPress={() => seekRelative(15)} style={styles.replayBtn}>
-            <Icon name="skipForward" size={18} color={theme.text} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.replayRight}>
-          <Text style={styles.replayTimeText}>
-            {replayMode === 'time' 
-              ? `${formatDurationMinSec(currentReplayVal)} / ${formatDurationMinSec(maxReplayVal)}`
-              : `${formatDist(currentReplayVal)} / ${formatDist(maxReplayVal)}`}
-          </Text>
-          <TouchableOpacity onPress={cycleSpeed} style={styles.speedBtn}>
-            <Text style={styles.speedText}>x{replaySpeed}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* (The old altitude profile / replay scrubber is gone, André 2026-09-29: the activity
-          panel's own chart shows altitude now; the replay keeps its play/rewind/forward buttons.) */}
       {/* ── Overview / Charts / Laps ── (desktop parity: ActivityDetail.qml) */}
       <ActivityPanel activity={activity} meta={meta} hasMap mapView={mapView}
         onHover={onPanelHover} onStretch={onPanelStretch} onColoured={onPanelColoured} />
@@ -959,7 +734,6 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     // No-GPS (indoor) detail: a plain summary + the same export controls, instead of a map.
     noGpsContent: { flex: 1, padding: 16, gap: 16 },
     noGpsTitle: { fontSize: 20, fontWeight: '700', color: t.text },
-    noGpsSub: { fontSize: 13, color: t.mutedText, marginTop: 2 },
     noGpsCard: {
       backgroundColor: t.card,
       borderColor: t.mutedText + '33',
@@ -1032,68 +806,5 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     },
     exportItemText: { color: t.text, fontSize: 14 },
 
-    // Replay bar
-    replayBar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: t.card,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderTopWidth: 1,
-      borderTopColor: t.mutedText + '33',
-    },
-    replayModeText: {
-      fontSize: 10,
-      color: t.mutedText,
-      width: 50,
-    },
-    replayControls: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
-    },
-    replayBtn: {
-      padding: 8,
-    },
-    // Real, 2026-08-09 ("change the buttons to match the colors... of our new theme") -
-    // the main play/pause control is the one real primary action on this bar, so it stays a
-    // solid Theme.primary circle (fg Theme.card) rather than blending into the bar with a
-    // plain t.card fill. This is a media control with no desktop counterpart (track replay is
-    // Android-only), so it keeps the solid-primary affordance even though labeled action
-    // buttons (primitives.tsx Button) are bordered to match desktop as of the 2026-08-15
-    // parity audit - a round icon play button reads as its own thing, not an action button.
-    replayBtnMain: {
-      padding: 8,
-      backgroundColor: t.primary,
-      borderRadius: 20,
-    },
-    replayIcon: { fontSize: 16, color: t.text },
-    replayIconMain: { fontSize: 20, color: t.card },
-    replayRight: {
-      alignItems: 'flex-end',
-      width: 80,
-    },
-    replayTimeText: {
-      color: t.text,
-      fontSize: 10,
-      fontWeight: '600',
-    },
-    // Tinted-primary pill, same convention as RouteScreen/PoiScreen's own exportBtn -
-    // a real secondary action (not the main play button, not neutral bar chrome either).
-    speedBtn: {
-      marginTop: 4,
-      backgroundColor: t.primary + '1F',
-      borderWidth: 1,
-      borderColor: t.primary,
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: 4,
-    },
-    speedText: {
-      color: t.primary,
-      fontSize: 10,
-      fontWeight: 'bold',
-    },
   });
 }
