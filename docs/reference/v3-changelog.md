@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-18: Training load from intervals.icu or Sommet; SQLite on the sync server
+
+**Checked without a watch.** The desktop app was looked at in a test window with a copy of real
+settings and moves, against the real intervals.icu account. The mobile app has its tests but was
+not yet looked at on the test tablet (it was off).
+
+1. **Choose where fitness, fatigue and form come from.** Settings → Coach → **Training load from
+   Sommet**. Off (the default) works as before: intervals.icu when it is connected, Sommet's own
+   estimate when it isn't. On, the Coach always uses Sommet's own estimate, worked out from the
+   moves in the app. When intervals.icu is chosen but doesn't answer, the Coach now says it is
+   showing Sommet's estimate for now.
+2. **Compare the two.** On the Coach page, **Compare intervals.icu and Sommet** draws both
+   fitness and fatigue lines over the last 90 days and gives the average gap between them, so you
+   can see how close Sommet's estimate is before you switch.
+3. **Sync server: SQLite as an option.** `sync.php` can now keep its data in one SQLite file
+   instead of one JSON file per collection (`'store' => 'sqlite'`), or run both side by side
+   (`'shadow'`) and log how they compare. JSON stays the default. The deploy now needs
+   `sommet_store.php` next to `sync.php`. See `sync-server/README.md`.
+
 ## 2026-11-13: Traverse Alpha shots, POIs on a Traverse (0.2.67)
 
 **Checked without a watch.** No Traverse or Traverse Alpha was on hand. The watch side comes from

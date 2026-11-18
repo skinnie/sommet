@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -36,6 +37,8 @@ CoachService::CoachService(QObject *parent) : QObject(parent)
     m_chatBackend = m_settings.value(QStringLiteral("chatBackend"), QStringLiteral("canned")).toString();
     m_catalogueSource = m_settings.value(QStringLiteral("catalogueSource"), QStringLiteral("sample")).toString();
     m_systmMcpUrl = m_settings.value(QStringLiteral("systmMcpUrl")).toString();
+    m_loadSource = m_settings.value(QStringLiteral("loadSource"), QStringLiteral("intervals")).toString() == QStringLiteral("sommet")
+                       ? QStringLiteral("sommet") : QStringLiteral("intervals");
     m_settings.endGroup();
 
     openActivitiesDb();
@@ -82,10 +85,22 @@ void CoachService::computeReadiness()
     // intervals.icu stays the first source (André, 2026-09-27: "keep intervals.icu as the
     // first, only when not connected" the local estimate). Its ctl/atl come from real TSS
     // across every device; the local pass only knows what this app has stored.
-    if (intervalsConnected())
+    // Since 2026-11-18 the user can choose Sommet's own estimate instead (sync/05), the first
+    // step toward leaving intervals.icu.
+    if (m_loadSource == QStringLiteral("intervals") && intervalsConnected())
         fetchIntervalsReadiness();
     else
         computeLocalReadiness();
+}
+
+void CoachService::setLoadSource(const QString &v)
+{
+    const QString src = v == QStringLiteral("sommet") ? v : QStringLiteral("intervals");
+    if (m_loadSource == src) return;
+    m_loadSource = src;
+    m_settings.setValue(QStringLiteral("coach/loadSource"), src);
+    emit loadSourceChanged();
+    computeReadiness();
 }
 
 bool CoachService::intervalsConnected() const
@@ -95,7 +110,9 @@ bool CoachService::intervalsConnected() const
         && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
 }
 
-void CoachService::fetchIntervalsReadiness()
+void CoachService::fetchIntervalsLoad(int days, std::function<void(const QVector<QDate> &, const QVector<double> &,
+                                                                     const QVector<double> &, const QVector<double> &,
+                                                                     const QString &)> onDone)
 {
     const QSettings s;
     const QString athlete = s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString();
@@ -104,7 +121,7 @@ void CoachService::fetchIntervalsReadiness()
     QUrl url(QStringLiteral("https://intervals.icu/api/v1/athlete/%1/wellness").arg(athlete));
     QUrlQuery q;
     const QDate today = QDate::currentDate();
-    q.addQueryItem(QStringLiteral("oldest"), today.addDays(-90).toString(Qt::ISODate));
+    q.addQueryItem(QStringLiteral("oldest"), today.addDays(-days).toString(Qt::ISODate));
     q.addQueryItem(QStringLiteral("newest"), today.toString(Qt::ISODate));
     url.setQuery(q);
     QNetworkRequest req(url);
@@ -113,14 +130,11 @@ void CoachService::fetchIntervalsReadiness()
     req.setRawHeader("User-Agent",
                      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
     QNetworkReply *reply = m_net.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, onDone]() {
         reply->deleteLater();
-        // The recently-done names still come from activities.db, whichever source the load is.
-        int hrMoves = 0, durationMoves = 0;
-        localLoadByDay(&hrMoves, &durationMoves);
-
         QVector<QDate> days;
         QVector<double> ctlArr, atlArr, rampArr;
+        QString err;
         if (reply->error() == QNetworkReply::NoError) {
             for (const auto &v : QJsonDocument::fromJson(reply->readAll()).array()) {
                 const auto o = v.toObject();
@@ -134,13 +148,26 @@ void CoachService::fetchIntervalsReadiness()
                 rampArr.append(o.value(QStringLiteral("rampRate")).isDouble()
                                    ? o.value(QStringLiteral("rampRate")).toDouble() : qQNaN());
             }
+        } else {
+            err = backendErrorText(reply);
         }
+        onDone(days, ctlArr, atlArr, rampArr, err);
+    });
+}
+
+void CoachService::fetchIntervalsReadiness()
+{
+    fetchIntervalsLoad(90, [this](const QVector<QDate> &days, const QVector<double> &ctlArr,
+                                  const QVector<double> &atlArr, const QVector<double> &rampArr,
+                                  const QString &err) {
+        // The recently-done names still come from activities.db, whichever source the load is.
+        int hrMoves = 0, durationMoves = 0;
+        localLoadByDay(&hrMoves, &durationMoves);
         if (days.isEmpty()) {
             // Offline, bad key, or no load processed yet - fall back rather than show nothing.
-            setLastError(reply->error() == QNetworkReply::NoError
-                             ? QString()
-                             : QStringLiteral("intervals.icu: %1 - using the local estimate").arg(backendErrorText(reply)));
-            computeLocalReadiness();
+            setLastError(err.isEmpty() ? QString()
+                                       : QStringLiteral("intervals.icu: %1 - using the local estimate").arg(err));
+            computeLocalReadiness(true);
             return;
         }
         // Readiness is the most recent day intervals has filled in (not necessarily today),
@@ -149,6 +176,59 @@ void CoachService::fetchIntervalsReadiness()
         double ramp = rampArr.last();
         if (std::isnan(ramp)) ramp = n > 7 ? ctlArr[n - 1] - ctlArr[n - 8] : 0.0;
         applyReadiness(days, ctlArr, atlArr, ctlArr.last() - atlArr.last(), ramp, QVariantMap{{QStringLiteral("basis"), QStringLiteral("intervals")}});
+    });
+}
+
+void CoachService::compareLoadSources()
+{
+    if (!intervalsConnected()) {
+        m_loadComparison = {{QStringLiteral("state"), QStringLiteral("error")},
+                            {QStringLiteral("error"), tr("Connect intervals.icu to compare.")}};
+        emit loadComparisonChanged();
+        return;
+    }
+    m_loadComparison = {{QStringLiteral("state"), QStringLiteral("loading")}};
+    emit loadComparisonChanged();
+    fetchIntervalsLoad(90, [this](const QVector<QDate> &days, const QVector<double> &ctlArr,
+                                  const QVector<double> &atlArr, const QVector<double> &,
+                                  const QString &err) {
+        if (days.isEmpty()) {
+            m_loadComparison = {{QStringLiteral("state"), QStringLiteral("error")},
+                                {QStringLiteral("error"), err.isEmpty() ? tr("intervals.icu has no training load for the last 90 days.")
+                                                                        : tr("intervals.icu: %1").arg(err)}};
+            emit loadComparisonChanged();
+            return;
+        }
+        const LocalSeries loc = localSeries();
+        QHash<QDate, int> at;
+        for (int i = 0; i < loc.days.size(); ++i) at.insert(loc.days[i], i);
+        QVariantList rows;
+        double gF = 0, gA = 0, gT = 0, bias = 0;
+        int n = 0;
+        for (int i = 0; i < days.size(); ++i) {
+            const int j = at.value(days[i], -1);
+            if (j < 0) continue;   // before the local window (120 days)
+            const double lf = loc.ctl[j], la = loc.atl[j];
+            rows.append(QVariantMap{{QStringLiteral("date"), days[i].toString(Qt::ISODate)},
+                                    {QStringLiteral("icuFitness"), ctlArr[i]}, {QStringLiteral("icuFatigue"), atlArr[i]},
+                                    {QStringLiteral("localFitness"), lf}, {QStringLiteral("localFatigue"), la}});
+            gF += std::abs(ctlArr[i] - lf);
+            gA += std::abs(atlArr[i] - la);
+            gT += std::abs((ctlArr[i] - atlArr[i]) - (lf - la));
+            bias += ctlArr[i] - lf;
+            ++n;
+        }
+        m_loadComparison = {{QStringLiteral("state"), n ? QStringLiteral("ready") : QStringLiteral("error")},
+                            {QStringLiteral("rows"), rows}};
+        if (n) {
+            m_loadComparison.insert(QStringLiteral("fitnessGap"), gF / n);
+            m_loadComparison.insert(QStringLiteral("fatigueGap"), gA / n);
+            m_loadComparison.insert(QStringLiteral("formGap"), gT / n);
+            m_loadComparison.insert(QStringLiteral("fitnessBias"), bias / n);
+        } else {
+            m_loadComparison.insert(QStringLiteral("error"), tr("No days in common yet."));
+        }
+        emit loadComparisonChanged();
     });
 }
 
@@ -274,11 +354,12 @@ QMap<QDate, double> CoachService::localLoadByDay(int *hrMoves, int *durationMove
     return loadByDay;
 }
 
-void CoachService::computeLocalReadiness()
+CoachService::LocalSeries CoachService::localSeries()
 {
+    LocalSeries r;
     const QDate today = QDate::currentDate();
-    int hrMoves = 0, durationMoves = 0;
-    const QMap<QDate, double> loadByDay = localLoadByDay(&hrMoves, &durationMoves);
+    const QMap<QDate, double> loadByDay = localLoadByDay(&r.hrMoves, &r.durationMoves);
+    r.noData = loadByDay.isEmpty();
 
     QDate start = today.addDays(-119);   // cap history depth - bounded, still plenty for a 42d ramp
     if (!loadByDay.isEmpty()) {
@@ -288,29 +369,32 @@ void CoachService::computeLocalReadiness()
         start = today;   // no history at all - a single, flat "day"
     }
 
-    QVector<QDate> days;
-    QVector<double> ctlArr, atlArr;
-    double ctl = 0.0, atl = 0.0, freshness = 0.0;
+    double ctl = 0.0, atl = 0.0;
     const double ac = alphaCtl(), aa = alphaAtl();
     for (QDate d = start; d <= today; d = d.addDays(1)) {
-        days.append(d);
-        freshness = ctl - atl;                 // freshness AS OF THE START of this day
+        r.days.append(d);
+        r.freshness = ctl - atl;               // freshness AS OF THE START of this day
         const double load = loadByDay.value(d, 0.0);
         ctl = ctl * (1 - ac) + load * ac;
         atl = atl * (1 - aa) + load * aa;
-        ctlArr.append(ctl);
-        atlArr.append(atl);
+        r.ctl.append(ctl);
+        r.atl.append(atl);
     }
 
-    const int n = days.size();
-    double rampPerWeek = 0.0;
+    const int n = r.days.size();
     for (int d = n - 1; d >= qMax(7, n - 28); --d)
-        rampPerWeek = qMax(rampPerWeek, ctlArr[d] - ctlArr[d - 7]);
+        r.rampPerWeek = qMax(r.rampPerWeek, r.ctl[d] - r.ctl[d - 7]);
+    return r;
+}
 
-    applyReadiness(days, ctlArr, atlArr, freshness, rampPerWeek, QVariantMap{
+void CoachService::computeLocalReadiness(bool fallback)
+{
+    const LocalSeries r = localSeries();
+    applyReadiness(r.days, r.ctl, r.atl, r.freshness, r.rampPerWeek, QVariantMap{
         {QStringLiteral("basis"), QStringLiteral("local")},
-        {QStringLiteral("hrMoves"), hrMoves}, {QStringLiteral("durationMoves"), durationMoves},
-        {QStringLiteral("noData"), loadByDay.isEmpty()},
+        {QStringLiteral("fallback"), fallback},
+        {QStringLiteral("hrMoves"), r.hrMoves}, {QStringLiteral("durationMoves"), r.durationMoves},
+        {QStringLiteral("noData"), r.noData},
     });
 }
 

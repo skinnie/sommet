@@ -226,6 +226,7 @@ qt_add_qml_module(sommet_app
         qml/FunFacts.qml
         qml/components/TotalsCard.qml
         qml/components/HomeLocationDialog.qml
+        qml/components/LoadCompareDialog.qml
         qml/components/PlaceSearchBar.qml
         qml/pages/TotalsPage.qml
         qml/pages/CalendarPage.qml

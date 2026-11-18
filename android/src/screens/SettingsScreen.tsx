@@ -39,6 +39,7 @@ import {
 import {
   setAnthropicKey, clearAnthropicKey, hasAnthropicKey, getChatBackend, setChatBackend, ChatBackend,
 } from '../services/CoachChat';
+import { getLoadSource, setLoadSource, LoadSource } from '../services/CoachService';
 import {
   isCatalogAvailable, hasCatalog, importCatalog, getEntries, invalidateEntries,
 } from '../services/CatalogService';
@@ -273,6 +274,13 @@ export default function SettingsScreen() {
   const [savingAnthropic, setSavingAnthropic]       = useState(false);
   // Settings -> Coach -> "Chat with a real AI coach" (desktop CoachService.chatBackend).
   const [chatBackend, setChatBackendState]          = useState<ChatBackend>('canned');
+  // Settings -> Coach -> "Training load from Sommet" (sync/05, desktop CoachService.loadSource).
+  const [loadSource, setLoadSourceState] = useState<LoadSource>('intervals');
+  function handleLoadSource(on: boolean) {
+    const v: LoadSource = on ? 'sommet' : 'intervals';
+    setLoadSourceState(v);
+    setLoadSource(v).catch(() => undefined);
+  }
   function handleChatBackend(on: boolean) {
     const v: ChatBackend = on ? 'claude' : 'canned';
     setChatBackendState(v);
@@ -445,6 +453,7 @@ export default function SettingsScreen() {
     // the field - only whether one exists).
     hasAnthropicKey().then(setAnthropicSaved);
     getChatBackend().then(setChatBackendState);
+    getLoadSource().then(setLoadSourceState);
     isEmberUnlocked().then(setEmberOn);
     getEmberSyncCfg().then(c => { if (c) { setEmberSyncUrl(c.url); setEmberSyncToken(c.token); } });
     getUsdaApiKey().then(setUsdaKey);
@@ -1151,7 +1160,7 @@ export default function SettingsScreen() {
         {features.coach && (
         <SettingsSection
           title="Coach"
-          summary={`Replies: ${chatBackend === 'claude' ? 'Claude API' : 'pre-written'} · catalogue: bundled sample`}
+          summary={`Load: ${loadSource === 'sommet' ? 'Sommet' : 'intervals.icu'} · replies: ${chatBackend === 'claude' ? 'Claude API' : 'pre-written'} · catalogue: bundled sample`}
           icon="coach"
           open={isOpen('coach')}
           onToggle={toggleSection('coach')}
@@ -1192,6 +1201,19 @@ export default function SettingsScreen() {
               </View>
             </>
           )}
+          <Text style={[styles.connRowText, { fontWeight: '700', marginTop: 16 }]}>Training load from Sommet</Text>
+          <Text style={[styles.sectionDesc, { fontSize: 11, lineHeight: 16, marginTop: 2 }]}>
+            Off, fitness, fatigue and form come from intervals.icu when it is connected, and from
+            Sommet's own estimate when it isn't. On, always Sommet's estimate, worked out from the
+            moves in this app. Compare the two on the Coach screen.
+          </Text>
+          <SwitchLine
+            value={loadSource === 'sommet'}
+            onValueChange={handleLoadSource}
+            label={loadSource === 'sommet' ? 'Sommet' : 'intervals.icu'}
+            a11yLabel="Training load from Sommet"
+            accent
+          />
           <Text style={[styles.connRowText, { fontWeight: '700', marginTop: 16 }]}>Workout catalogue</Text>
           <Text style={[styles.sectionDesc, { marginTop: 2 }]}>
             Bundled sample ({COACH_SAMPLE_SESSIONS} sessions). The live wahoo-systm-mcp catalogue is on

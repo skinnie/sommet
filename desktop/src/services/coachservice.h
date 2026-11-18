@@ -62,6 +62,14 @@ class CoachService : public QObject
     Q_PROPERTY(QString catalogueSource READ catalogueSource WRITE setCatalogueSource NOTIFY catalogueSourceChanged)
     Q_PROPERTY(bool anthropicKeySet READ anthropicKeySet NOTIFY anthropicKeySetChanged)
     Q_PROPERTY(QString systmMcpUrl READ systmMcpUrl WRITE setSystmMcpUrl NOTIFY systmMcpUrlChanged)
+    // Where fitness/fatigue/form come from: "intervals" (default; the local estimate only when
+    // intervals.icu is not connected or doesn't answer) or "sommet" (always the local estimate).
+    Q_PROPERTY(QString loadSource READ loadSource WRITE setLoadSource NOTIFY loadSourceChanged)
+    // Both sources over the same days, filled by compareLoadSources():
+    // {state: "idle"|"loading"|"ready"|"error", error, rows: [{date, icuFitness, icuFatigue,
+    //  localFitness, localFatigue}], fitnessGap, fatigueGap, formGap (mean |intervals - local|),
+    //  fitnessBias (mean intervals - local)}
+    Q_PROPERTY(QVariantMap loadComparison READ loadComparison NOTIFY loadComparisonChanged)
 
 public:
     explicit CoachService(QObject *parent = nullptr);
@@ -80,6 +88,12 @@ public:
     bool anthropicKeySet() const;
     QString systmMcpUrl() const { return m_systmMcpUrl; }
     void setSystmMcpUrl(const QString &v);
+    QString loadSource() const { return m_loadSource; }
+    void setLoadSource(const QString &v);
+    QVariantMap loadComparison() const { return m_loadComparison; }
+    Q_INVOKABLE bool intervalsConnected() const;
+    // Fetches intervals.icu's last 90 days and lines them up with the local estimate.
+    Q_INVOKABLE void compareLoadSources();
 
     // Recomputes readiness from activities.db — call on page load and after a sync.
     Q_INVOKABLE void refreshReadiness();
@@ -98,6 +112,8 @@ signals:
     void catalogueSourceChanged();
     void anthropicKeySetChanged();
     void systmMcpUrlChanged();
+    void loadSourceChanged();
+    void loadComparisonChanged();
 
 private:
     struct CatalogueRow { QString name; double tss; double intensityFactor; int durationSec; };
@@ -106,9 +122,17 @@ private:
     // intervals.icu first (its own ctl/atl/rampRate, from real TSS across every device); only
     // when it is not connected (or the fetch fails) the local pass over activities.db.
     void computeReadiness();
-    bool intervalsConnected() const;
     void fetchIntervalsReadiness();
-    void computeLocalReadiness();
+    // intervals.icu wellness for the last `days` days; calls back with the days that have
+    // ctl/atl (empty + an error text when the request failed).
+    void fetchIntervalsLoad(int days, std::function<void(const QVector<QDate> &, const QVector<double> &,
+                                                         const QVector<double> &, const QVector<double> &,
+                                                         const QString &)> onDone);
+    // `fallback`: intervals.icu was chosen but didn't answer.
+    void computeLocalReadiness(bool fallback = false);
+    struct LocalSeries { QVector<QDate> days; QVector<double> ctl, atl; double freshness = 0;
+                         double rampPerWeek = 0; int hrMoves = 0, durationMoves = 0; bool noData = true; };
+    LocalSeries localSeries();
     // Per-day local load + the recently-done names; counts how many moves carried HR.
     QMap<QDate, double> localLoadByDay(int *hrMoves, int *durationMoves);
     // Shared tail: light, sentence, chart, picks, greeting. Arrays are aligned with `days`.
@@ -154,4 +178,6 @@ private:
     QString m_catalogueSource = QStringLiteral("sample");
     QString m_systmMcpUrl;
     QList<CatalogueRow> m_liveCatalogue;   // populated when catalogueSource == "live"
+    QString m_loadSource = QStringLiteral("intervals");
+    QVariantMap m_loadComparison{{QStringLiteral("state"), QStringLiteral("idle")}};
 };

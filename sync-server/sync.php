@@ -2,14 +2,15 @@
 /**
  * Sommet Sync — self-hosted shared-app-database endpoint (#SYNC-1).
  *
- * FILE-BASED store (no SQLite): one JSON file per collection, written with an exclusive lock +
- * atomic rename, exactly like the app's proven Ember sync.php on the same NAS. This deliberately
- * avoids PDO-SQLite, which Synology's Web Station PHP profile ships disabled. Every Sommet install
+ * Storage (sommet_store.php, config 'store'): 'json' (default) = one JSON file per collection,
+ * exclusive lock + atomic rename, works on any PHP; 'sqlite' = one SQLite file, needs pdo_sqlite
+ * (Synology's Web Station ships it disabled: tick it in the PHP profile); 'shadow' = served from
+ * JSON while every request is replayed on SQLite and logged to sommet-data/shadow.log. Every Sommet install
  * (Linux/Mac/Windows/phone) talks to it over HTTP with a token and merges the same way Ember does:
  * per-record `uid`, a `deleted` tombstone set, last-writer-wins by `updated_at`.
  * See docs/shared_app_db_design.md.
  *
- * Deploy: drop this file + sommet_sync.config.php into a web folder (e.g. Synology Web Station).
+ * Deploy: drop this file + sommet_store.php + sommet_sync.config.php into a web folder (e.g. Synology Web Station).
  * It creates sommet-data/ (collection JSONs) and sommet-data/blobs/ next to itself on first write.
  * The web user (Synology: `http`) must be able to WRITE this folder.
  *
@@ -21,6 +22,7 @@
  */
 
 header('Content-Type: application/json');
+require __DIR__ . '/sommet_store.php';
 
 // ---- config -------------------------------------------------------------------------------
 $cfgFile = __DIR__ . '/sommet_sync.config.php';
@@ -29,6 +31,8 @@ $TOKEN = isset($CONFIG['token']) ? (string)$CONFIG['token'] : (getenv('SOMMET_SY
 $DATA_DIR = isset($CONFIG['data_dir']) ? (string)$CONFIG['data_dir'] : (__DIR__ . '/sommet-data');
 $BLOB_DIR = $DATA_DIR . '/blobs';
 $MAX_BODY = 32 * 1024 * 1024; // 32 MB — a big FIT/GPX is a few MB; cap abuse.
+$STORE_MODE = isset($CONFIG['store']) ? (string)$CONFIG['store'] : 'json'; // json | sqlite | shadow
+$SQLITE_PATH = isset($CONFIG['sqlite_path']) ? (string)$CONFIG['sqlite_path'] : ($DATA_DIR . '/sommet.db');
 $COLLECTIONS = ['activities', 'gear', 'gear_reminder', 'gear_assignment', 'activity_gear'];
 
 // ---- helpers ------------------------------------------------------------------------------
@@ -53,42 +57,6 @@ function ensure_dir($d) {
     if (!is_dir($d)) @mkdir($d, 0770, true);
     if (!is_dir($d) || !is_writable($d)) fail(500, 'data dir not writable');
 }
-function coll_file($DATA_DIR, $c) { return $DATA_DIR . '/' . $c . '.json'; }
-
-// Read-modify-write a collection under an exclusive lock. $mutator($data) may change $data;
-// return true to persist. $data shape: ['records'=>{uid:rec}, 'deleted'=>{uid:ts}].
-function with_collection($DATA_DIR, $c, $mutator) {
-    ensure_dir($DATA_DIR);
-    $file = coll_file($DATA_DIR, $c);
-    $lock = fopen($file . '.lock', 'c');
-    if (!$lock) fail(500, 'lock failed');
-    flock($lock, LOCK_EX);
-    try {
-        $data = ['records' => new stdClass(), 'deleted' => new stdClass()];
-        if (is_file($file)) {
-            $raw = file_get_contents($file);
-            $j = json_decode($raw, true);
-            if (is_array($j)) {
-                $data['records'] = isset($j['records']) && is_array($j['records']) ? $j['records'] : [];
-                $data['deleted'] = isset($j['deleted']) && is_array($j['deleted']) ? $j['deleted'] : [];
-            }
-        } else {
-            $data['records'] = [];
-            $data['deleted'] = [];
-        }
-        $ret = $mutator($data);
-        if ($ret !== false) {
-            $tmp = $file . '.tmp';
-            if (file_put_contents($tmp, json_encode($data), LOCK_EX) === false) fail(500, 'write failed');
-            if (!rename($tmp, $file)) fail(500, 'commit failed');
-        }
-        return $ret;
-    } finally {
-        flock($lock, LOCK_UN);
-        fclose($lock);
-    }
-}
-
 // ---- routing ------------------------------------------------------------------------------
 require_token($TOKEN);
 $method = $_SERVER['REQUEST_METHOD'];
@@ -123,33 +91,6 @@ $c = isset($_GET['c']) ? $_GET['c'] : '';
 if (!in_array($c, $COLLECTIONS, true)) fail(400, 'unknown collection');
 $now = now_ms();
 
-if ($method === 'GET') {
-    $since = isset($_GET['since']) ? (int)$_GET['since'] : 0;
-    $out = ['records' => [], 'deleted' => [], 'now' => $now];
-    with_collection($DATA_DIR, $c, function ($data) use (&$out, $since) {
-        foreach ($data['records'] as $uid => $rec) {
-            // Filter on when the SERVER received the record (`srv`), not the device's own
-            // `updated_at`: a record another device uploads late carries an old updated_at, and
-            // filtering on that made every device whose cursor was already past it skip it forever
-            // (2026-11-08: ~35 watch moves and 81 eTrex rides on the NAS never reached the ThinkPad).
-            // `>=` so a write landing in the same millisecond as a pull is not lost (re-sending one
-            // is harmless: the client upserts). Records stored before this fix have no `srv`.
-            $srv = isset($rec['srv']) ? (int)$rec['srv'] : (isset($rec['updated_at']) ? (int)$rec['updated_at'] : 0);
-            if ($since <= 0 || $srv >= $since) {
-                unset($rec['srv']);
-                $rec['uid'] = $uid;
-                $out['records'][] = $rec;
-            }
-        }
-        foreach ($data['deleted'] as $uid => $ts) {
-            if ((int)$ts > $since) $out['deleted'][] = (string)$uid;
-        }
-        return false; // read-only, don't rewrite
-    });
-    echo json_encode($out);
-    exit;
-}
-
 if ($method === 'POST') {
     $raw = file_get_contents('php://input', false, null, 0, $MAX_BODY + 1);
     if (strlen($raw) > $MAX_BODY) fail(413, 'body too large');
@@ -157,44 +98,59 @@ if ($method === 'POST') {
     if (!is_array($body)) fail(400, 'bad json');
     $records = isset($body['records']) && is_array($body['records']) ? $body['records'] : [];
     $tombs   = isset($body['deleted']) && is_array($body['deleted']) ? $body['deleted'] : [];
-
-    $applied = with_collection($DATA_DIR, $c, function (&$data) use ($records, $tombs, $now) {
-        $n = 0;
-        foreach ($records as $r) {
-            $uid = isset($r['uid']) ? (string)$r['uid'] : '';
-            if ($uid === '') continue;
-            $ua = isset($r['updated_at']) ? (int)$r['updated_at'] : 0;
-            // updated_at 0 = never edited on the device. A record we already hold stays as it is;
-            // a new one gets the server's clock, so devices pulling with a since-cursor receive it
-            // (stored as 0 it would never pass the `> since` filter and stay invisible).
-            if ($ua <= 0) {
-                if (isset($data['records'][$uid])) continue;
-                $ua = $now;
-            }
-            // last-writer-wins: keep ours if it is the same edit or newer (devices re-push every
-            // record on every sync; re-accepting an unchanged one would give it a new `srv` and
-            // send the whole collection to every device again). A tombstone also blocks.
-            if (isset($data['records'][$uid]) && (int)$data['records'][$uid]['updated_at'] >= $ua) continue;
-            if (isset($data['deleted'][$uid]) && (int)$data['deleted'][$uid] >= $ua) continue;
-            $rec = $r;
-            unset($rec['uid'], $rec['srv']);
-            $rec['updated_at'] = $ua;
-            $rec['srv'] = $now;          // server receive time: what pulls filter on (see GET)
-            $data['records'][$uid] = $rec;
-            $n++;
-        }
-        foreach ($tombs as $uid) {
-            $uid = (string)$uid;
-            if ($uid === '') continue;
-            unset($data['records'][$uid]);   // drop the live row
-            $prev = isset($data['deleted'][$uid]) ? (int)$data['deleted'][$uid] : 0;
-            $data['deleted'][$uid] = max($prev, $now); // bump so it propagates via since-cursor
-            $n++;
-        }
-        return $n;
-    });
-    echo json_encode(['ok' => true, 'now' => $now, 'applied' => $applied]);
-    exit;
+} elseif ($method !== 'GET') {
+    fail(405, 'method');
 }
+$since = isset($_GET['since']) ? (int)$_GET['since'] : 0;
 
-fail(405, 'method');
+// The request against one store: [answer, milliseconds].
+$run = function (SommetStore $st) use ($method, $c, $since, $now, &$records, &$tombs) {
+    $t0 = microtime(true);
+    if ($method === 'GET') {
+        $ans = $st->pull($c, $since, $now);
+    } else {
+        $ans = ['ok' => true, 'now' => $now, 'applied' => $st->push($c, $records, $tombs, $now)];
+    }
+    return [$ans, (microtime(true) - $t0) * 1000];
+};
+
+try {
+    $primary = $STORE_MODE === 'sqlite' ? new SqliteStore($SQLITE_PATH) : new JsonStore($DATA_DIR);
+    [$answer, $ms] = $run($primary);
+} catch (StoreError $e) {
+    fail(500, $e->getMessage());
+}
+echo json_encode($answer);
+
+// Shadow test: the JSON store answered; now replay the same request on SQLite, after the reply
+// has gone out, and log how long each took and whether they agree. Never affects the device.
+if ($STORE_MODE === 'shadow') {
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+    $line = ['t' => $now, 'm' => $method, 'c' => $c, 'since' => $since, 'json_ms' => round($ms, 1)];
+    try {
+        $sh = new SqliteStore($SQLITE_PATH);
+        $imported = $sh->importFromJson($DATA_DIR, $COLLECTIONS);
+        if ($imported >= 0) {
+            $line['imported'] = $imported; // the JSON store already holds this request's changes
+        } else {
+            [$sAns, $sMs] = $run($sh);
+            $line['sqlite_ms'] = round($sMs, 1);
+            if ($method === 'GET') {
+                $line['n'] = count($answer['records']);
+                $line['match'] = sommet_pull_fingerprint($answer) === sommet_pull_fingerprint($sAns);
+                if (!$line['match']) $line['n_sqlite'] = count($sAns['records']);
+            } else {
+                $line['in'] = count($records) + count($tombs);
+                $line['applied'] = $answer['applied'];
+                $line['match'] = $answer['applied'] === $sAns['applied'];
+                if (!$line['match']) $line['applied_sqlite'] = $sAns['applied'];
+            }
+        }
+    } catch (Throwable $e) {
+        $line['error'] = substr($e->getMessage(), 0, 300);
+    }
+    $log = $DATA_DIR . '/shadow.log';
+    if (is_file($log) && filesize($log) > 5 * 1024 * 1024) @rename($log, $log . '.1');
+    @file_put_contents($log, json_encode($line) . "\n", FILE_APPEND | LOCK_EX);
+}
+exit;

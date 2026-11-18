@@ -4,3 +4,4 @@ sommet.db
 sommet.db-wal
 sommet.db-shm
 blobs/
+sommet-data/

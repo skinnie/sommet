@@ -95,6 +95,16 @@ exclusive lock. Same wire protocol below, so clients and the smoke-test are unaf
 Python reference server `tools/sommet_sync_devserver.py` keeps its SQLite storage — API-identical,
 dev-only.)
 
+**Update 2026-11-18: SQLite as an option, tried in shadow first.** The store now sits behind
+`sync-server/sommet_store.php` (`JsonStore` / `SqliteStore`, same merge rules in one place) and
+the config picks `json`, `sqlite` or `shadow`. The PHP 8.3 package on the DS220 does ship
+`pdo_sqlite.so`; it is only unticked in the Web Station profile. Measured on the NAS with a copy
+of the real store (4,869 activities, 1.7 MB): both stores answer a full pull or a 4,827-record
+unchanged re-push in 20-40 ms; an incremental pull takes 2 ms on SQLite against 25 ms on JSON;
+SQLite writes that change something take 200-350 ms (it flushes to disk, the JSON store does not).
+What a device waits for (0.7-1.8 s) is moving the records over Tailscale, because every device
+re-pushes every record on every sync. The live server runs `shadow` from 2026-11-18.
+
 **Deploy gotcha (fixed):** a folder created under Synology `/web` inherits an ACL granting the
 web user `http` only `r-x`. Grant write with
 `synoacltool -add <dir> user:http:allow:rwxpdDaARWcCo:fd--` (or create it "Linux mode" like the

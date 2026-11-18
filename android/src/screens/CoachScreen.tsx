@@ -8,7 +8,11 @@ import { niceTicks } from '../components/chartTicks';
 import { fmtDate } from '../i18n';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useV3Theme, v3Radius, v3Spacing, v3Type } from '../theme/v3';
-import { loadCoachData, CoachData, ReadinessLight, WorkoutPick } from '../services/CoachService';
+import {
+  loadCoachData, CoachData, ReadinessLight, WorkoutPick, compareLoadSources, LoadComparison, LoadCompareRow,
+  getLoadSource, LoadSource,
+} from '../services/CoachService';
+import { getIntervalsIcuCredentials } from '../services/ApiIntervalsIcu';
 import {
   sendCoachMessage, hasAnthropicKey, getChatBackend, ChatMessage, ChatBackend, CoachCard,
   msgUnreachable,
@@ -47,7 +51,28 @@ export default function CoachScreen() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // On every visit, not just the first: coming back from Settings -> Coach after switching the
+  // training-load source shows the other numbers straight away.
+  const [loadSource, setLoadSourceState] = useState<LoadSource>('intervals');
+  const [icuOn, setIcuOn] = useState(false);
+  useFocusEffect(useCallback(() => {
+    refresh();
+    getLoadSource().then(setLoadSourceState);
+    getIntervalsIcuCredentials().then(c => setIcuOn(!!c)).catch(() => setIcuOn(false));
+  }, [refresh]));
+
+  // intervals.icu vs Sommet over the same 90 days (sync/05, desktop LoadCompareDialog).
+  const [cmpOpen, setCmpOpen] = useState(false);
+  const [cmp, setCmp] = useState<LoadComparison | null>(null);
+  const [cmpBusy, setCmpBusy] = useState(false);
+  const [cmpError, setCmpError] = useState('');
+  const toggleCompare = useCallback(async () => {
+    if (cmpOpen) { setCmpOpen(false); return; }
+    setCmpOpen(true); setCmpBusy(true); setCmpError(''); setCmp(null);
+    try { setCmp(await compareLoadSources(90)); }
+    catch (e: any) { setCmpError(String(e?.message ?? e)); }
+    finally { setCmpBusy(false); }
+  }, [cmpOpen]);
 
   // ---- chat ----
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -188,10 +213,66 @@ export default function CoachScreen() {
           <Text style={[styles.caption, { color: t.mutedText }]}>
             {r.basis === 'intervals'
               ? 'Fitness and fatigue come from intervals.icu, computed across every device you use.'
-              : (r.hrMoves ?? 0) > 0
-                ? `Estimated on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration × sport for ${plural(r.durationMoves ?? 0)} without HR. Connect intervals.icu for load from every device.`
-                : 'Estimated on this phone from each move\'s duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.'}
+              : ((r.hrMoves ?? 0) > 0
+                ? `Estimated by Sommet on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration × sport for ${plural(r.durationMoves ?? 0)} without HR.`
+                : 'Estimated by Sommet on this phone from each move\'s duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.')
+                + (r.fallback ? ' intervals.icu didn\'t answer, so this is Sommet\'s own estimate for now.'
+                   : loadSource === 'sommet' ? '' : ' Connect intervals.icu for load from every device.')}
           </Text>
+          {icuOn && (
+            <View style={{ marginBottom: v3Spacing.medium }}>
+              <Button label={cmpOpen ? 'Hide the comparison' : 'Compare intervals.icu and Sommet'}
+                      variant="outline" grow={false} onPress={toggleCompare} />
+            </View>
+          )}
+          {cmpOpen && (
+            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
+              <Text style={[styles.label, { color: t.text }]}>Compare training load</Text>
+              <Text style={[styles.caption, { color: t.mutedText, marginTop: 2 }]}>
+                intervals.icu works out load from every device you sync there. Sommet works it out from
+                the moves in this app (heart rate when it has it, otherwise duration and sport).
+              </Text>
+              {cmpBusy && <Text style={[styles.caption, { color: t.mutedText }]}>Asking intervals.icu…</Text>}
+              {!!cmpError && <Text style={[styles.caption, { color: t.error }]}>{cmpError}</Text>}
+              {cmp && cmp.rows.length > 1 && (
+                <>
+                  <View style={[styles.legend, { flexWrap: 'wrap', marginTop: v3Spacing.small }]}>
+                    {[
+                      { label: 'intervals.icu fitness', c: t.primary, dash: false },
+                      { label: 'Sommet fitness', c: t.hard, dash: false },
+                      { label: 'intervals.icu fatigue', c: t.primary, dash: true },
+                      { label: 'Sommet fatigue', c: t.hard, dash: true },
+                    ].map(l => (
+                      <View key={l.label} style={{ flexDirection: 'row', alignItems: 'center', marginRight: v3Spacing.medium }}>
+                        <View style={[styles.swatch, { backgroundColor: l.c, width: l.dash ? 4 : 12 }]} />
+                        {l.dash && <View style={[styles.swatch, { backgroundColor: l.c, width: 4 }]} />}
+                        <Text style={[styles.tileLabel, { color: t.mutedText }]}>{l.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <CompareChart rows={cmp.rows} icuColor={t.primary} localColor={t.hard} grid={t.border}
+                                labelColor={t.mutedText} />
+                  <View style={[styles.tiles, { marginTop: v3Spacing.small }]}>
+                    {[
+                      { k: 'Fitness gap', v: cmp.fitnessGap },
+                      { k: 'Fatigue gap', v: cmp.fatigueGap },
+                      { k: 'Form gap', v: cmp.formGap },
+                    ].map(m => (
+                      <View key={m.k} style={[styles.tile, { backgroundColor: t.cardNested, borderRadius: v3Radius.small }]}>
+                        <Text style={[styles.tileLabel, { color: t.mutedText }]}>{m.k}</Text>
+                        <Text style={[styles.tileValue, { color: t.text }]}>{m.v.toFixed(1)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={[styles.caption, { color: t.mutedText }]}>
+                    {cmp.fitnessBias >= 0
+                      ? `On average Sommet's fitness reads ${cmp.fitnessBias.toFixed(1)} lower than intervals.icu's, over ${cmp.rows.length} days.`
+                      : `On average Sommet's fitness reads ${(-cmp.fitnessBias).toFixed(1)} higher than intervals.icu's, over ${cmp.rows.length} days.`}
+                  </Text>
+                </>
+              )}
+            </View>
+          )}
         </>
       )}
 
@@ -393,6 +474,45 @@ function FitnessChart({
         <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>{fmtDate(chart[0].date) || chart[0].date}</Text>
         <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>
           {fmtDate(chart[chart.length - 1].date) || chart[chart.length - 1].date}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// Four lines on one scale: green = intervals.icu, orange = Sommet; solid = fitness, dashed = fatigue.
+function CompareChart({
+  rows, icuColor, localColor, grid, labelColor,
+}: { rows: LoadCompareRow[]; icuColor: string; localColor: string; grid: string; labelColor: string }) {
+  const [w, setW] = useState(0);
+  const H = 160, padT = 6, padB = 6, padR = 2;
+  const W = w || 300;
+  const max = Math.max(...rows.flatMap(r => [r.icuFitness, r.icuFatigue, r.localFitness, r.localFatigue])) * 1.1 || 1;
+  const { ticks } = niceTicks(0, max);
+  const padX = 8 + Math.max(1, ...ticks.map(v => String(Math.round(v)).length)) * 6;
+  const x = (i: number) => padX + (W - padX - padR) * (i / (rows.length - 1));
+  const y = (v: number) => padT + (H - padT - padB) * (1 - v / max);
+  const path = (sel: (r: LoadCompareRow) => number) =>
+    rows.map((r, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(sel(r)).toFixed(1)}`).join(' ');
+  return (
+    <View onLayout={e => setW(Math.round(e.nativeEvent.layout.width))} style={{ width: '100%' }}>
+      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+        <Line x1={padX} y1={H - padB} x2={W - padR} y2={H - padB} stroke={grid} strokeWidth={1} />
+        {ticks.filter(v => v > 0).map(v => (
+          <React.Fragment key={v}>
+            <Line x1={padX} y1={y(v)} x2={W - padR} y2={y(v)} stroke={grid} strokeOpacity={0.5} strokeWidth={1} />
+            <SvgText x={padX - 5} y={y(v) + 3} fill={labelColor} fontSize={10} textAnchor="end">{Math.round(v)}</SvgText>
+          </React.Fragment>
+        ))}
+        <Path d={path(r => r.icuFatigue)} stroke={icuColor} strokeWidth={1.2} fill="none" strokeDasharray="4,3" />
+        <Path d={path(r => r.localFatigue)} stroke={localColor} strokeWidth={1.2} fill="none" strokeDasharray="4,3" />
+        <Path d={path(r => r.icuFitness)} stroke={icuColor} strokeWidth={2} fill="none" />
+        <Path d={path(r => r.localFitness)} stroke={localColor} strokeWidth={2} fill="none" />
+      </Svg>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, paddingLeft: padX }}>
+        <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>{fmtDate(rows[0].date) || rows[0].date}</Text>
+        <Text style={{ color: labelColor, fontSize: v3Type.tiny }}>
+          {fmtDate(rows[rows.length - 1].date) || rows[rows.length - 1].date}
         </Text>
       </View>
     </View>

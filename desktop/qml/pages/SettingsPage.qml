@@ -1148,9 +1148,10 @@ PageFlickable {
                     id: coachSection
                     visible: DeviceService.coachEnabled
                     title: qsTr("Coach")
-                    summary: qsTr("Replies: %1 · catalogue: %2")
+                    summary: qsTr("Load: %3 · replies: %1 · catalogue: %2")
                         .arg(CoachService.chatBackend === "claude" ? qsTr("Claude API") : qsTr("pre-written"))
                         .arg(CoachService.catalogueSource === "live" ? qsTr("live") : qsTr("bundled sample"))
+                        .arg(CoachService.loadSource === "sommet" ? qsTr("Sommet") : qsTr("intervals.icu"))
                     glyph: Icons.coach
                     expanded: root.sectionOpen("coach")
                     onToggleRequested: root.setSectionOpen("coach", !expanded)
@@ -1205,6 +1206,35 @@ PageFlickable {
                             text: qsTr("Clear")
                             visible: CoachService.anthropicKeySet
                             onClicked: CoachService.clearAnthropicApiKey()
+                        }
+                    }
+
+                    // sync/05 (André 2026-11-18): choose the training-load source.
+                    Item { width: 1; height: Theme.spacingSmall }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap
+                        text: qsTr("Training load from Sommet")
+                        font.bold: true; font.pixelSize: Theme.fontSizeBody; color: Theme.text
+                    }
+                    Text {
+                        width: parent.width; wrapMode: Text.WordWrap
+                        color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
+                        text: qsTr("Off, fitness, fatigue and form come from intervals.icu when it is connected, " +
+                                   "and from Sommet's own estimate when it isn't. On, always Sommet's estimate, " +
+                                   "worked out from the moves in this app. Compare the two on the Coach page.")
+                    }
+                    Row {
+                        spacing: Theme.spacingSmall
+                        RoundedSwitch {
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: CoachService.loadSource === "sommet"
+                            onToggled: CoachService.loadSource = checked ? "sommet" : "intervals"
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: CoachService.loadSource === "sommet" ? qsTr("Sommet") : qsTr("intervals.icu")
+                            color: CoachService.loadSource === "sommet" ? Theme.primary : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeBody
                         }
                     }
 

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import SommetUi
 
@@ -22,6 +23,8 @@ Item {
         : Theme.error
 
     Component.onCompleted: CoachService.refreshReadiness()
+
+    LoadCompareDialog { id: loadCompare; parent: Overlay.overlay; anchors.centerIn: parent }
 
     RowLayout {
         anchors.fill: parent
@@ -251,16 +254,27 @@ Item {
                     Layout.topMargin: Theme.spacingSmall
                     // Where the numbers come from (André, 2026-09-27: intervals.icu first, the
                     // local estimate only when it isn't connected).
+                    // Since sync/05 (2026-11-18) the user can pick Sommet's estimate in Settings ->
+                    // Coach; then the "connect intervals.icu" hint would be beside the point.
+                    readonly property string hint: root.readiness.fallback
+                        ? qsTr(" intervals.icu didn't answer, so this is Sommet's own estimate for now.")
+                        : CoachService.loadSource === "sommet" ? ""
+                        : qsTr(" Connect intervals.icu for load from every device.")
                     text: root.readiness.basis === "intervals"
                           ? qsTr("Fitness and fatigue from intervals.icu (training load from every device you sync there).")
                           : root.readiness.hrMoves > 0
-                            ? qsTr("Estimated on this computer: heart-rate load for %1, duration × sport for %2 without HR. Connect intervals.icu for load from every device.")
+                            ? qsTr("Estimated by Sommet on this computer: heart-rate load for %1, duration × sport for %2 without HR.")
                                   .arg(root.readiness.hrMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.hrMoves))
-                                  .arg(root.readiness.durationMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.durationMoves))
-                            : qsTr("Estimated on this computer from each move's duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet. Connect intervals.icu for load from every device.")
+                                  .arg(root.readiness.durationMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.durationMoves)) + hint
+                            : qsTr("Estimated by Sommet on this computer from each move's duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.") + hint
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeTiny
                     wrapMode: Text.WordWrap
+                }
+                RoundedButton {
+                    visible: CoachService.intervalsConnected()
+                    text: qsTr("Compare intervals.icu and Sommet")
+                    onClicked: loadCompare.open()
                 }
                 Item { Layout.fillHeight: true }
             }

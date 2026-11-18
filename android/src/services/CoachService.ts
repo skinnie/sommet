@@ -32,6 +32,8 @@ export interface Readiness {
   // Where the numbers come from: intervals.icu first, the on-device estimate (LocalLoad.ts)
   // only when it isn't connected or can't be reached (André, 2026-09-27).
   basis: 'intervals' | 'local';
+  // intervals.icu was chosen but didn't answer, so these are the on-device estimate.
+  fallback?: boolean;
   hrMoves?: number;
   durationMoves?: number;
 }
@@ -170,15 +172,78 @@ async function recentlyDoneNames(days = 7): Promise<Set<string>> {
 // actually has ctl/atl, which is not necessarily today (intervals fills a day in once it has
 // processed it).
 export async function loadCoachData(days = 90): Promise<CoachData> {
-  if (await getIntervalsIcuCredentials()) {
+  // Since sync/05 (2026-11-18) the user can choose Sommet's own estimate instead.
+  const chosen = await getLoadSource();
+  if (chosen === 'intervals' && await getIntervalsIcuCredentials()) {
     try {
       const fromIcu = await loadCoachDataIntervals(days);
       if (fromIcu.readiness) return fromIcu;
     } catch {
       // offline / bad key - fall through to the on-device estimate rather than show nothing
     }
+    const local = await loadCoachDataLocal();
+    if (local.readiness) local.readiness.fallback = true;
+    return local;
   }
   return loadCoachDataLocal();
+}
+
+// Where fitness / fatigue / form come from (Settings -> Coach, desktop CoachService.loadSource):
+// 'intervals' (default; the on-device estimate only when it isn't connected or doesn't answer)
+// or 'sommet' (always the on-device estimate).
+export type LoadSource = 'intervals' | 'sommet';
+const LOAD_SOURCE_KEY = 'coach.loadSource';
+
+export async function getLoadSource(): Promise<LoadSource> {
+  try {
+    return (await AsyncStorage.getItem(LOAD_SOURCE_KEY)) === 'sommet' ? 'sommet' : 'intervals';
+  } catch { return 'intervals'; }
+}
+
+export async function setLoadSource(v: LoadSource): Promise<void> {
+  await AsyncStorage.setItem(LOAD_SOURCE_KEY, v === 'sommet' ? 'sommet' : 'intervals');
+}
+
+export interface LoadCompareRow {
+  date: string; icuFitness: number; icuFatigue: number; localFitness: number; localFatigue: number;
+}
+export interface LoadComparison {
+  rows: LoadCompareRow[];
+  fitnessGap: number;   // mean |intervals - Sommet|
+  fatigueGap: number;
+  formGap: number;
+  fitnessBias: number;  // mean (intervals - Sommet): > 0 = Sommet reads lower
+}
+
+// Lines up intervals.icu's days with the on-device series (pure, for the tests).
+export function compareSeries(icu: LoadDay[], local: { days: string[]; ctl: number[]; atl: number[] }): LoadComparison {
+  const at = new Map(local.days.map((d, i) => [d, i] as const));
+  const rows: LoadCompareRow[] = [];
+  for (const r of icu) {
+    const j = at.get(r.date);
+    if (j === undefined || typeof r.ctl !== 'number' || typeof r.atl !== 'number') continue;
+    rows.push({ date: r.date, icuFitness: r.ctl, icuFatigue: r.atl, localFitness: local.ctl[j], localFatigue: local.atl[j] });
+  }
+  const mean = (f: (r: LoadCompareRow) => number) => rows.length ? rows.reduce((a, r) => a + f(r), 0) / rows.length : 0;
+  return {
+    rows,
+    fitnessGap: mean(r => Math.abs(r.icuFitness - r.localFitness)),
+    fatigueGap: mean(r => Math.abs(r.icuFatigue - r.localFatigue)),
+    formGap: mean(r => Math.abs((r.icuFitness - r.icuFatigue) - (r.localFitness - r.localFatigue))),
+    fitnessBias: mean(r => r.icuFitness - r.localFitness),
+  };
+}
+
+// Both sources over intervals.icu's last 90 days. Throws with a readable message when it can't.
+export async function compareLoadSources(days = 90): Promise<LoadComparison> {
+  if (!(await getIntervalsIcuCredentials())) throw new Error('Connect intervals.icu to compare.');
+  const icu = await fetchWellnessRaw(days);
+  if (!icu.some(r => typeof r.ctl === 'number')) throw new Error('intervals.icu has no training load for the last 90 days.');
+  const { series } = await localSeriesFromActivities();
+  if (!series) throw new Error('No moves in this app yet.');
+  const cmp = compareSeries(icu, series);
+  if (cmp.rows.length === 0) throw new Error('No days in common yet.');
+  return cmp;
 }
 
 async function loadCoachDataIntervals(days: number): Promise<CoachData> {
@@ -231,7 +296,7 @@ async function loadHrProfile(): Promise<HrProfile | null> {
   } catch { return null; }
 }
 
-async function loadCoachDataLocal(): Promise<CoachData> {
+async function localSeriesFromActivities() {
   const profile = await loadHrProfile();
   const recentSince = Date.now() - 120 * 86400 * 1000;
   const doneSince = Date.now() - 7 * 86400 * 1000;
@@ -253,8 +318,12 @@ async function loadCoachDataLocal(): Promise<CoachData> {
                  watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '' });
     if (startMs >= doneSince && a.activity_type) recentDone.add(normalizeName(a.activity_type));
   }
-  if (moves.length === 0) return { readiness: null, chart: [], picks: [] };
-  const s = computeLocalSeries(moves, profile);
+  return { series: moves.length ? computeLocalSeries(moves, profile) : null, recentDone };
+}
+
+async function loadCoachDataLocal(): Promise<CoachData> {
+  const { series: s, recentDone } = await localSeriesFromActivities();
+  if (!s) return { readiness: null, chart: [], picks: [] };
   const n = s.days.length;
   const fitness = s.ctl[n - 1], fatigue = s.atl[n - 1];
   const light = lightFor(s.freshness, s.rampPerWeek);
@@ -275,7 +344,7 @@ async function loadCoachDataLocal(): Promise<CoachData> {
 // WellnessService.fetchWellness() deliberately narrows to the health metrics its two screens
 // need and drops ctl/atl/rampRate. Rather than widen that shared shape for one caller, this
 // reads the same endpoint and keeps the training-load fields instead.
-interface LoadDay { date: string; ctl?: number; atl?: number; rampRate?: number }
+export interface LoadDay { date: string; ctl?: number; atl?: number; rampRate?: number }
 
 async function fetchWellnessRaw(days: number): Promise<LoadDay[]> {
   const creds = await getIntervalsIcuCredentials();
