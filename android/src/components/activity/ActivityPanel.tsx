@@ -121,6 +121,7 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
     const m = meta;
     return {
       sport_id: sportId, start: activity.date, dist_m: activity.distance_m, duration_s: activity.duration_s,
+      moving_s: activity.moving_s && activity.moving_s > 0 ? activity.moving_s : null,
       ascent_m: activity.d_plus, descent_m: m?.descentM, avg_hr: m?.avgHr, max_hr: m?.maxHr,
       avg_cad: m?.avgCadence ? m.avgCadence * (foot ? 2 : 1) : null, max_cad: m?.maxCadence ? m.maxCadence * (foot ? 2 : 1) : null,
       avg_speed: m?.avgSpeedMh ? m.avgSpeedMh / 3600 : null, max_speed: m?.maxSpeedMh ? m.maxSpeedMh / 3600 : null,
@@ -159,6 +160,7 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
   }, [st, activity.id]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const ov = useMemo(() => AVL.overview(CFG, sport, facts, st, { advanced, zoneGroups }), [facts, st, advanced, zoneGroups, sport]);
+  const twoRides = useMemo(() => AVL.twoRidesNote(st), [st]);
   const zoneKinds = useMemo(() => {
     const out: any[] = [];
     for (const k of (sc.zones || [])) {
@@ -329,6 +331,12 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
 
       {tab === 'overview' && (
         <View style={s.card}>
+          {/* sync/06: a long stop with almost nothing on one side; only a note (desktop: ActivityDetail.qml) */}
+          {!!twoRides && (
+            <View style={s.note}>
+              <Text style={s.noteTitle}>{twoRides.title}</Text>
+              <Text style={s.noteBody}>{twoRides.body}</Text>
+            </View>)}
           <View style={s.grid}>{ov.headline.map((m: any) => <Stat key={m.key} m={m} big />)}</View>
           {!!usual && (
             <View style={s.usual}><Text style={s.usualIcon}>{usual.tone === 'best' ? '★' : '↗'}</Text><Text style={s.usualText}>{usual.text}</Text></View>)}
@@ -479,6 +487,10 @@ const styles = (t: V3Colors) => StyleSheet.create({
   tab: { fontSize: 14, color: t.mutedText, marginRight: 18 },
   tabOn: { color: t.primary, fontWeight: '700' },
   card: { backgroundColor: t.card, borderRadius: 16, borderWidth: 1, borderColor: t.border, padding: 14 },
+  // same as desktop's warning note: warning border, 12% warning fill, radius 8, padding 16
+  note: { backgroundColor: t.warning + '1F', borderRadius: 8, borderWidth: 1, borderColor: t.warning, padding: 16, marginBottom: 12 },
+  noteTitle: { fontSize: 13, fontWeight: '700', color: t.text, marginBottom: 8 },
+  noteBody: { fontSize: 12, color: t.text },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
   tile: { flexBasis: '46%', flexGrow: 1, margin: 5, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: t.border, backgroundColor: t.card },
   tileValue: { fontSize: 22, fontWeight: '700', color: t.text },

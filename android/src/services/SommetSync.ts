@@ -152,17 +152,20 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     const sport = canonicalSportName(String(rec.activity_type || rec.name || ''));
     const energy = Math.round(Number(rec.energy_kcal || 0)) || 0;
     const startUtc = Math.round(Number(rec.start_utc || 0)) || 0;   // UTC start, see SameMove.ts
+    const moving = Math.round(Number(rec.moving_s || 0)) || 0;      // moving time, sync/06
     // Junk/test entries (under a minute AND under 100 m) are not kept - same rule as the
     // desktop's import; they reach the shared store from a watch read on the desktop.
     if (isJunkActivity(Number(rec.duration_s || 0), Number(rec.distance_m || 0))) continue;
     if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path) { // ours is newer & has track
       // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
-      const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number } = {};
+      const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number; moving_s?: number } = {};
       if (energy > 0 && !existing.energy_kcal) fix.energy_kcal = energy;
       if (startUtc > 0 && !existing.start_utc) fix.start_utc = startUtc;
+      if (moving > 0 && !existing.moving_s) fix.moving_s = moving;
       if (sport && existing.activity_type !== sport
           && canonicalSportName(existing.activity_type) === sport) fix.activity_type = sport;
-      if (fix.activity_type !== undefined || fix.energy_kcal !== undefined || fix.start_utc !== undefined)
+      if (fix.activity_type !== undefined || fix.energy_kcal !== undefined || fix.start_utc !== undefined
+          || fix.moving_s !== undefined)
         await updateImportedActivity(existing.id, fix);
       continue;
     }
@@ -196,6 +199,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       energy_kcal: energy,
       updated_at: remoteUpdated || Date.now(),
       start_utc: startUtc || existing?.start_utc || 0,
+      moving_s: moving || existing?.moving_s || 0,
     });
     pulled++;
   }
@@ -230,6 +234,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       track_fmt: 'gpx',
       updated_at: a.updated_at || a.synced_at,
       ...(a.start_utc ? { start_utc: a.start_utc } : {}),
+      ...(a.moving_s ? { moving_s: a.moving_s } : {}),
     });
     if (gpx && !pushed.has(uid)) blobsToPush.push({ uid, gpx });
   }

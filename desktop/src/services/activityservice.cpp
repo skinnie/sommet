@@ -770,6 +770,11 @@ void ActivityService::openDatabase()
     // starts in UTC only, so a copy never depends on this computer's time zone. NULL = start_time
     // already carries its zone (watch, FIT, Suunto). Same rule as updated_at: after the re-key.
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN start_utc INTEGER"));
+    // Moving time (s): the FIT's timer time, beside duration_s (its total time) - sync/06,
+    // 2026-11-18. An Edge 500 file held 9 min of riding and a 16 h stop, and the Coach counted
+    // 16.5 h; a brevet's sleep stops aren't training either. NULL = not known (watch moves, rows
+    // from before; a stored FIT is read once to fill it, see backfillMovingTimes()).
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN moving_s INTEGER"));
     // Testing mode's sample moves used to arrive with no device, so the (idx, device) key never
     // matched and each demo sync added them again (3 moves x 14 on André's cache, 2026-09-27),
     // and their tracks never loaded. Only that reply is device-less: keep one copy, tag it "demo".
@@ -831,6 +836,63 @@ void ActivityService::openDatabase()
     dropIndoorImportTracks(m_db);
 
     loadTombstones();
+    // Moving times for rows stored before sync/06; the backend may still be starting.
+    QTimer::singleShot(15000, this, &ActivityService::backfillMovingTimes);
+}
+
+void ActivityService::backfillMovingTimes()
+{
+    if (m_movingBackfillRunning || !m_db.isOpen())
+        return;
+    QJsonArray fits;
+    QVector<QPair<int, QString>> keys;
+    {
+        QSqlQuery q(QStringLiteral(
+            "SELECT idx, COALESCE(device, ''), fit_base64 FROM activities "
+            "WHERE moving_s IS NULL AND fit_base64 IS NOT NULL AND fit_base64 <> '' LIMIT 20"), m_db);
+        while (q.next()) {
+            keys.append({q.value(0).toInt(), q.value(1).toString()});
+            fits.append(q.value(2).toString());
+        }
+    }
+    if (keys.isEmpty())
+        return;
+    m_movingBackfillRunning = true;
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/fit/times")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(60000);
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(QJsonObject{{QStringLiteral("fits"), fits}})
+                                                   .toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, keys]() {
+        reply->deleteLater();
+        m_movingBackfillRunning = false;
+        const QJsonArray times = QJsonDocument::fromJson(reply->readAll()).object()
+                                     .value(QStringLiteral("times")).toArray();
+        if (times.size() != keys.size())
+            return;                               // backend not up yet: try again next start
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        m_db.transaction();
+        for (int i = 0; i < keys.size(); ++i) {
+            // toDouble: the FIT's timer time has milliseconds (QJsonValue::toInt() gives 0 then)
+            const int moving = qRound(times.at(i).toObject().value(QStringLiteral("timer_s")).toDouble());
+            QSqlQuery up(m_db);
+            // A real value moves updated_at so Sommet Sync passes it on; 0 only marks "done".
+            up.prepare(QStringLiteral("UPDATE activities SET moving_s = ?, "
+                                      "updated_at = CASE WHEN ? > 0 THEN ? ELSE updated_at END "
+                                      "WHERE idx = ? AND COALESCE(device, '') = ?"));
+            up.addBindValue(std::max(moving, 0));
+            up.addBindValue(moving);
+            up.addBindValue(now);
+            up.addBindValue(keys.at(i).first);
+            up.addBindValue(keys.at(i).second);
+            up.exec();
+        }
+        m_db.commit();
+        qInfo("[moving-time] filled %lld stored moves from their FIT", static_cast<long long>(keys.size()));
+        dbLoadAll();
+        emit activitiesChanged();
+        QTimer::singleShot(0, this, &ActivityService::backfillMovingTimes);   // the next few
+    });
 }
 
 // Stable identity for a deleted activity - the same start-time|name key dedupeActivities()
@@ -939,7 +1001,8 @@ bool ActivityService::dbLoadAll()
     QSqlQuery q(QStringLiteral(
         "SELECT idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
-        "gpx_text, fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0) "
+        "gpx_text, fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0), "
+        "COALESCE(moving_s, 0) "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -988,6 +1051,7 @@ bool ActivityService::dbLoadAll()
             ? QStringLiteral("watch") : q.value(12).toString();
         parsed[QStringLiteral("device")] = q.value(13).toString();
         parsed[QStringLiteral("startUtc")] = q.value(14).toLongLong();   // 0 = start_time has its zone
+        parsed[QStringLiteral("movingSeconds")] = q.value(15).toInt();   // 0 = not known (sync/06)
         // Logged Suunto App outputs (ruleoutput1..5) - {slot: {label, times, values}} - handed
         // to QML as `ruleOutputs` for the per-app graph. Absent on moves recorded without app
         // logging (older caches too, where the column is NULL): left unset.
@@ -2623,8 +2687,8 @@ bool ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         ins.prepare(QStringLiteral(
             "INSERT INTO activities "
             "(idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-            " start_time, track_json, gpx_text, fit_base64, source, external_id, device) "
-            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)"));
+            " start_time, track_json, gpx_text, fit_base64, source, external_id, device, moving_s) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)"));
         ins.addBindValue(idx--);
         ins.addBindValue(o.value(QStringLiteral("sport")).toString());
         ins.addBindValue(duration);
@@ -2638,6 +2702,10 @@ bool ActivityService::importBikeActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(source);
         ins.addBindValue(extId);
         ins.addBindValue(source);            // device = the source tag (edge/karoo/c406)
+        {   // the FIT's timer time; NULL when the device didn't record one (sync/06)
+            const int moving = o.value(QStringLiteral("movingSeconds")).toInt();
+            ins.addBindValue(moving > 0 ? QVariant(moving) : QVariant(QMetaType(QMetaType::Int)));
+        }
         if (!ins.exec()) {
             qWarning("[bike-import] could not store ride %s: %s",
                      qPrintable(o.value(QStringLiteral("startTime")).toString()),
@@ -3288,6 +3356,9 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
     // UTC start for rows whose start_time has no zone (see samemove.h); absent = unknown.
     const qint64 utcIn = rec.value(QStringLiteral("start_utc")).toInteger();
     const QVariant remoteUtc = utcIn > 0 ? QVariant(utcIn) : QVariant();
+    // Moving time (sync/06); absent = unknown, and a known local value is never cleared.
+    const qint64 movingIn = rec.value(QStringLiteral("moving_s")).toInteger();
+    const QVariant remoteMoving = movingIn > 0 ? QVariant(movingIn) : QVariant();
 
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
@@ -3303,7 +3374,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.prepare(QStringLiteral(
             "UPDATE activities SET name=?, duration_s=?, distance_m=?, ascent_m=?, energy_kcal=?, "
             "sport_type_raw=?, source=?, external_id=?, rule_outputs_json=?, updated_at=?, "
-            "start_utc=COALESCE(?, start_utc) WHERE idx=?"));
+            "start_utc=COALESCE(?, start_utc), moving_s=COALESCE(?, moving_s) WHERE idx=?"));
         up.addBindValue(rec.value(QStringLiteral("name")).toString());
         up.addBindValue(rec.value(QStringLiteral("duration_s")).toInteger());
         up.addBindValue(rec.value(QStringLiteral("distance_m")).toDouble());
@@ -3315,6 +3386,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.addBindValue(ruleJson);
         up.addBindValue(remoteUpdated);
         up.addBindValue(remoteUtc);
+        up.addBindValue(remoteMoving);
         up.addBindValue(existingIdx);
         up.exec();
     } else {
@@ -3336,7 +3408,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
             "INSERT OR REPLACE INTO activities "
             "(idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
             " start_time, track_json, gpx_text, fit_base64, rule_outputs_json, source, external_id, "
-            " updated_at, start_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+            " updated_at, start_utc, moving_s) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
         up.addBindValue(useIdx);
         up.addBindValue(device);
         up.addBindValue(rec.value(QStringLiteral("name")).toString());
@@ -3354,6 +3426,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.addBindValue(extId);
         up.addBindValue(remoteUpdated);
         up.addBindValue(remoteUtc);
+        up.addBindValue(remoteMoving);
         up.exec();
     }
 
@@ -3437,7 +3510,8 @@ void ActivityService::sommetPushAll()
     QSqlQuery q(QStringLiteral(
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text, "
-        "COALESCE(start_utc, 0), (fit_base64 IS NOT NULL AND fit_base64 <> '') FROM activities"),
+        "COALESCE(start_utc, 0), (fit_base64 IS NOT NULL AND fit_base64 <> ''), "
+        "COALESCE(moving_s, 0) FROM activities"),
         m_db);
     while (q.next()) {
         const QString device = q.value(1).toString();
@@ -3467,6 +3541,8 @@ void ActivityService::sommetPushAll()
         rec.insert(QStringLiteral("updated_at"), QJsonValue(q.value(12).toLongLong()));
         if (q.value(14).toLongLong() > 0)
             rec.insert(QStringLiteral("start_utc"), QJsonValue(q.value(14).toLongLong()));
+        if (q.value(16).toInt() > 0)
+            rec.insert(QStringLiteral("moving_s"), q.value(16).toInt());
         const QString gpx = q.value(13).toString();
         rec.insert(QStringLiteral("has_track"), !gpx.isEmpty());
         rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));

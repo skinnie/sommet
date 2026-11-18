@@ -300,6 +300,10 @@ private:
                       std::function<void(const QString &, const QString &)> done);
     void storeFitLocally(int idx, const QString &device, const QString &fit);
     void decodeStreams(int idx, const QString &device, const QString &fitBase64);
+    // sync/06: fill moving_s from each stored FIT's timer time, a few at a time through the
+    // backend (/api/fit/times), until none is left. moving_s = 0 marks "read, no timer time".
+    void backfillMovingTimes();
+    bool m_movingBackfillRunning = false;
     QVariantMap m_viewConfig;
     QVariantList m_zoneGroups;
     QHash<QString, QVariantMap> m_streamsCache;   // "idx|device" -> decoded streams

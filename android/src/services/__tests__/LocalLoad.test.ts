@@ -86,3 +86,34 @@ describe('calibration to intervals.icu scale (2026-09-28)', () => {
     expect(s.ctl[s.ctl.length - 2]).toBeCloseTo(TRIMP_TO_LOAD * banisterTrimp(60, 134, P) * aCtl, 6);
   });
 });
+
+// sync/06 (2026-11-18): load counts moving time, and long brevets stay in.
+describe('moving time and long rides', () => {
+  const now = Date.parse('2026-11-18T12:00:00Z');
+  const start = Date.parse('2026-11-06T15:50:13Z');
+  const atlEnd = (moves: any[]) => { const s = computeLocalSeries(moves, null, now); return s.atl[s.atl.length - 1]; };
+
+  it('two rides in one file (Edge 500, 6 Nov): 844 s of riding counts as 844 s, not 16.5 h', () => {
+    const asRecorded = atlEnd([{ startMs: start, durationS: 59456, movingS: 844, name: 'Cycling' }]);
+    const asMoving = atlEnd([{ startMs: start, durationS: 844, name: 'Cycling' }]);
+    expect(asRecorded).toBeCloseTo(asMoving, 9);
+    expect(asRecorded).toBeLessThan(atlEnd([{ startMs: start, durationS: 59456, name: 'Cycling' }]) / 50);
+  });
+
+  it('a 600 km brevet (36 h total, 24 h moving) counts its 24 h of moving', () => {
+    const brm = atlEnd([{ startMs: start, durationS: 36 * 3600, movingS: 24 * 3600, name: 'Cycling' }]);
+    expect(brm).toBeGreaterThan(0);
+    expect(brm).toBeCloseTo(atlEnd([{ startMs: start, durationS: 24 * 3600, name: 'Cycling' }]), 9);
+  });
+
+  it('a 1200 km brevet (90 h total, 60 h moving) is not dropped; a recording left running for weeks is', () => {
+    expect(atlEnd([{ startMs: start, durationS: 90 * 3600, movingS: 60 * 3600, name: 'Cycling' }])).toBeGreaterThan(0);
+    expect(atlEnd([{ startMs: start, durationS: 90 * 3600, name: 'Cycling' }])).toBeGreaterThan(0);
+    expect(atlEnd([{ startMs: start, durationS: 59841 * 60, name: 'Running' }])).toBe(0);
+  });
+
+  it('a moving time that is not shorter than the total is ignored', () => {
+    expect(atlEnd([{ startMs: start, durationS: 3600, movingS: 7200, name: 'Cycling' }]))
+      .toBeCloseTo(atlEnd([{ startMs: start, durationS: 3600, name: 'Cycling' }]), 9);
+  });
+});

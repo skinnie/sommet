@@ -314,7 +314,7 @@ async function localSeriesFromActivities() {
         avgHr = m ? Number(m[1]) : 0;
       } catch { /* file gone - duration it is */ }
     }
-    moves.push({ startMs, durationS: a.duration_s, avgHr, name: a.activity_type, distanceM: a.distance_m,
+    moves.push({ startMs, durationS: a.duration_s, movingS: a.moving_s, avgHr, name: a.activity_type, distanceM: a.distance_m,
                  watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '' });
     if (startMs >= doneSince && a.activity_type) recentDone.add(normalizeName(a.activity_type));
   }

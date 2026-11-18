@@ -14,7 +14,8 @@ export interface HrProfile { maxHr: number; restHr: number; male: boolean }
 
 export interface LocalMove {
   startMs: number;      // epoch ms
-  durationS: number;
+  durationS: number;    // total time (also what the same-move check compares)
+  movingS?: number;     // moving time, the FIT's timer time (sync/06); 0/undefined = not known
   avgHr?: number;       // 0/undefined = no HR recorded
   name?: string;        // sport / activity name ("Cycling", "Walking", ...) - picks the rate below
   distanceM?: number;   // for the same-move check (SameMove.ts)
@@ -51,7 +52,9 @@ export interface LocalSeries {
   durationMoves: number; // ... and those counted by duration
 }
 
-const MAX_MOVE_S = 48 * 3600;
+// Longer than four days of moving = a recording left running. It was two days: a 1200 km brevet
+// (up to 90 h) has to fit (André, 2026-11-18: BRMs on an Edge 1040). Desktop: kMaxMoveS.
+export const MAX_MOVE_S = 96 * 3600;
 const WINDOW_DAYS = 120;
 
 /** minutes x HRr x 0.64 e^(1.92 HRr) (men) / 0.86 e^(1.67 HRr) (women), HRr = (avg-rest)/(max-rest). */
@@ -96,13 +99,16 @@ export function computeLocalSeries(moves: LocalMove[], profile: HrProfile | null
   const windowStart = now - WINDOW_DAYS * 86400 * 1000;
   const scored: Scored[] = [];
   for (const m of moves) {
-    // Longer than two days = a watch left recording / corrupt header, not training (real,
-    // 2026-09-27: two 59841-min "Running" rows put the desktop's Fitness at 356).
-    if (!(m.durationS > 0) || m.durationS > MAX_MOVE_S || !Number.isFinite(m.startMs)) continue;
-    const minutes = m.durationS / 60;
+    // Load counts the time spent moving (sync/06): a file holding 9 min of riding and a 16 h stop
+    // is 9 min of training, and so are a brevet's sleep stops. Total time when the move doesn't say.
+    const s = m.movingS && m.movingS > 0 && m.movingS < m.durationS ? m.movingS : m.durationS;
+    // Too long = a watch left recording / corrupt header, not training (real, 2026-09-27: two
+    // 59841-min "Running" rows put the desktop's Fitness at 356).
+    if (!(s > 0) || s > MAX_MOVE_S || !Number.isFinite(m.startMs)) continue;
+    const minutes = s / 60;
     const trimp = profile && m.avgHr && m.avgHr > 0 ? banisterTrimp(minutes, m.avgHr, profile) : 0;
     // With HR: TRIMP on intervals' scale; without: the sport's typical load per hour.
-    const load = trimp > 0 ? TRIMP_TO_LOAD * trimp : (m.durationS / 3600) * loadPerHour(m.name);
+    const load = trimp > 0 ? TRIMP_TO_LOAD * trimp : (s / 3600) * loadPerHour(m.name);
     scored.push({ startMs: m.startMs, durationS: m.durationS, load, hr: trimp > 0, distanceM: m.distanceM, watch: m.watch, device: m.device });
   }
   const kept = dedupeMoves(scored);

@@ -1,6 +1,10 @@
-import { listGpxFiles, readGpxFile, activityFileStem } from './GpxService';
+import RNFS from 'react-native-fs';
+import { listGpxFiles, readGpxFile, activityFileStem, fitPathForGpx } from './GpxService';
 import { extractGpxMetadata } from './GpxParser';
-import { getAllSyncedIds, isActivityDeleted, rejectJunkActivity, markActivitySynced } from '../database/db';
+import { decodeFit } from './MageneFit';
+import { base64ToBytes } from './Base64';
+import { getAllSyncedIds, isActivityDeleted, rejectJunkActivity, markActivitySynced,
+  activitiesWithoutMovingTime, setMovingTime } from '../database/db';
 
 // Background upkeep when Activities opens: GPX files the DB doesn't know yet (orphans from an
 // interrupted sync) become rows. Returns how many were added.
@@ -26,9 +30,27 @@ export async function adoptOrphanGpx(): Promise<number> {
       await markActivitySynced({
         id, synced_at: Date.now(), gpx_path: path, date: meta.date, duration_s: meta.durationS,
         distance_m: meta.distanceM, d_plus: meta.dPlus, activity_type: meta.activityType,
+        moving_s: meta.movingS,
       });
       added++;
     } catch (_) {}
   }
   return added;
+}
+
+// sync/06 (2026-11-18): moves stored before the moving time was kept get it from their own FIT
+// (the file's timer time), a few per visit so the list never waits. A move without a FIT, or
+// whose FIT has no timer time, is marked as looked at and keeps using its total time.
+export async function backfillMovingTimes(batch = 25): Promise<number> {
+  let filled = 0;
+  for (const row of await activitiesWithoutMovingTime(batch)) {
+    let moving = 0;
+    try {
+      const fit = await fitPathForGpx(row.gpx_path);
+      if (fit) moving = decodeFit(base64ToBytes(await RNFS.readFile(fit, 'base64'))).movingSeconds || 0;
+    } catch (_) { moving = 0; }
+    await setMovingTime(row.id, moving);
+    if (moving > 0) filled++;
+  }
+  return filled;
 }

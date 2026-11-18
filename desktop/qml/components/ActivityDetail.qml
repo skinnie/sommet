@@ -109,7 +109,7 @@ Item {
         const cadMul = _foot ? 2 : 1
         return {
             sport_id: _sportId, start: a.startTime,
-            dist_m: a.distanceMeters, duration_s: a.durationSeconds,
+            dist_m: a.distanceMeters, duration_s: a.durationSeconds, moving_s: a.movingSeconds || null,
             ascent_m: a.ascentMeters, descent_m: a.descentMeters,
             avg_hr: a.avgHr, max_hr: a.maxHr,
             avg_cad: a.avgCadence ? a.avgCadence * cadMul : null, max_cad: a.maxCadence ? a.maxCadence * cadMul : null,
@@ -620,6 +620,34 @@ Item {
                     width: parent.width
                     visible: root.currentTab === 0
                     spacing: Theme.spacingMedium
+                    // sync/06: a long stop with almost nothing on one side (a device that lost
+                    // power and carried on in the same file). Only a note: the move is kept as
+                    // recorded. A brevet's sleep stops never show it.
+                    Rectangle {
+                        readonly property var note: AVL.twoRidesNote(root._st)
+                        visible: !!note
+                        width: parent.width
+                        implicitHeight: noteCol.implicitHeight + Theme.spacingMedium * 2
+                        radius: Theme.radiusSmall
+                        color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.12)
+                        border.color: Theme.warning
+                        border.width: 1
+                        Column {
+                            id: noteCol
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                            anchors.margins: Theme.spacingMedium
+                            spacing: Theme.spacingSmall
+                            Text {
+                                text: parent.parent.note ? parent.parent.note.title : ""
+                                color: Theme.text; font.bold: true; font.pixelSize: Theme.fontSizeBody
+                            }
+                            Text {
+                                width: parent.width; wrapMode: Text.WordWrap
+                                text: parent.parent.note ? parent.parent.note.body : ""
+                                color: Theme.text; font.pixelSize: Theme.fontSizeLabel
+                            }
+                        }
+                    }
                     ActivityOverview {
                         width: parent.width
                         sport: root.sport

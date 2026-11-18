@@ -13,7 +13,7 @@ import {
   ACTIVITY_PAGE, GPX_METRIC_COLUMNS,
 } from '../database/db';
 import { readGpxFile } from '../services/GpxService';
-import { adoptOrphanGpx } from '../services/OrphanGpx';
+import { adoptOrphanGpx, backfillMovingTimes } from '../services/OrphanGpx';
 import { extractGpxMetadata, GpxMetadata } from '../services/GpxParser';
 import RNFS from 'react-native-fs';
 import { t, fmtDate } from '../i18n';
@@ -279,7 +279,8 @@ export default function LogListScreen() {
     await prepareGpxSort(sortKey);
     await loadPage(true);
     adoptOrphanGpx().then(n => { if (n > 0) { getActivityTypes().then(setTypes).catch(() => {}); loadPage(true); } })
-      .catch(() => {});
+      .catch(() => {})
+      .then(() => backfillMovingTimes()).catch(() => {});   // sync/06, for the Coach's load
   }, [filterArg, sortKey, sortDesc, demo.enabled, demo.variant]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(useCallback(() => { load(); }, [load]));

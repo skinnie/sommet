@@ -266,7 +266,7 @@ Item {
                             ? qsTr("Estimated by Sommet on this computer: heart-rate load for %1, duration × sport for %2 without HR.")
                                   .arg(root.readiness.hrMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.hrMoves))
                                   .arg(root.readiness.durationMoves === 1 ? qsTr("1 move") : qsTr("%1 moves").arg(root.readiness.durationMoves)) + hint
-                            : qsTr("Estimated by Sommet on this computer from each move's duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.") + hint
+                            : qsTr("Estimated by Sommet on this computer from each move's moving time and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.") + hint
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeTiny
                     wrapMode: Text.WordWrap

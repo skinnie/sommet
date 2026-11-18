@@ -215,7 +215,7 @@ export default function CoachScreen() {
               ? 'Fitness and fatigue come from intervals.icu, computed across every device you use.'
               : ((r.hrMoves ?? 0) > 0
                 ? `Estimated by Sommet on this phone: heart-rate load for ${plural(r.hrMoves ?? 0)}, duration × sport for ${plural(r.durationMoves ?? 0)} without HR.`
-                : 'Estimated by Sommet on this phone from each move\'s duration and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.')
+                : 'Estimated by Sommet on this phone from each move\'s moving time and sport — no heart rate in recent moves, or max/rest HR not read from the watch yet.')
                 + (r.fallback ? ' intervals.icu didn\'t answer, so this is Sommet\'s own estimate for now.'
                    : loadSource === 'sommet' ? '' : ' Connect intervals.icu for load from every device.')}
           </Text>
@@ -230,7 +230,7 @@ export default function CoachScreen() {
               <Text style={[styles.label, { color: t.text }]}>Compare training load</Text>
               <Text style={[styles.caption, { color: t.mutedText, marginTop: 2 }]}>
                 intervals.icu works out load from every device you sync there. Sommet works it out from
-                the moves in this app (heart rate when it has it, otherwise duration and sport).
+                the moves in this app (heart rate when it has it, otherwise moving time and sport).
               </Text>
               {cmpBusy && <Text style={[styles.caption, { color: t.mutedText }]}>Asking intervals.icu…</Text>}
               {!!cmpError && <Text style={[styles.caption, { color: t.error }]}>{cmpError}</Text>}

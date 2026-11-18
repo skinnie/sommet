@@ -41,5 +41,6 @@ test('callers at start-up share one open and one setup', async () => {
 test('only the missing columns are added', () => {
   const alters = mockSql.filter(s => s.startsWith('ALTER TABLE'));
   expect(alters).toEqual(['ALTER TABLE activities ADD COLUMN energy_kcal INTEGER NOT NULL DEFAULT 0',
+                          'ALTER TABLE activities ADD COLUMN moving_s INTEGER NOT NULL DEFAULT 0',   // sync/06
                           'ALTER TABLE activity_metrics ADD COLUMN shots REAL']);
 });

@@ -25,7 +25,7 @@ ThemedDialog {
         Text {
             width: parent.width; wrapMode: Text.WordWrap
             text: qsTr("intervals.icu works out load from every device you sync there. Sommet works it out " +
-                       "from the moves in this app (heart rate when it has it, otherwise duration and sport).")
+                       "from the moves in this app (heart rate when it has it, otherwise moving time and sport).")
             color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
         }
 

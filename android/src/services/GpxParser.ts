@@ -23,6 +23,9 @@ export interface ElevationStats {
 export interface GpxMetadata {
   date: string;        // ISO 8601 du premier point
   durationS: number;
+  // Moving time (s), the FIT's timer time - a <moving> extension written by MageneFit.rideToGpx
+  // for bike-computer rides (sync/06). 0 = not in the file.
+  movingS: number;
   distanceM: number;
   dPlus: number;
   activityType: string; // ex: "Orienteering", "Running", "Cycling"…
@@ -220,6 +223,7 @@ export function extractGpxMetadata(gpxXml: string): GpxMetadata {
       return sportTypeName(code);
     })(),
     energyKcal:  extTag(gpxXml, 'energy'),
+    movingS:     Math.round(extTag(gpxXml, 'moving')),
     avgHr:       extTag(gpxXml, 'avg_hr'),
     maxHr:       extTag(gpxXml, 'max_hr'),
     avgCadence:  extTag(gpxXml, 'avg_cadence'),

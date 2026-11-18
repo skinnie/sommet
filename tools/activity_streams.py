@@ -196,6 +196,42 @@ def _interp(ts, vs, max_gap):
             vs[k] = vs[a] + (vs[b] - vs[a]) * f
 
 
+LONG_GAP_S = 6 * 3600     # sync/06: a stop this long inside one file is worth a look
+RIDING_DT_S = 60          # a step up to this counts as riding time (auto-pause makes longer ones)
+
+
+def long_gaps(ts, dist):
+    """Stops of LONG_GAP_S or more between two records, with what was recorded on each side:
+    [{at_s, len_s, before_s, after_s, before_m, after_m}]. at_s = the last record before the
+    stop, in seconds from the start; *_s = riding time (steps <= RIDING_DT_S); *_m = distance.
+    The 2026-11-06 Edge 500 file (9 min, 16 h 17 min stopped, 5 min) gives one entry; a brevet's
+    sleep stop gives one too, with hundreds of km on both sides (the screen decides, see
+    twoRidesHint in shared/activity_view_logic.js)."""
+    out = []
+    n = len(ts)
+    if n < 2:
+        return out
+    ride = [0.0] * n                      # riding seconds up to record k
+    for k in range(1, n):
+        dt = ts[k] - ts[k - 1]
+        ride[k] = ride[k - 1] + (dt if 0 < dt <= RIDING_DT_S else 0)
+    dcum = [None] * n                     # last known distance (km) up to record k
+    last = None
+    for k in range(n):
+        if dist[k] is not None:
+            last = dist[k]
+        dcum[k] = last
+    total_m = (last or 0) * 1000.0
+    for k in range(1, n):
+        dt = ts[k] - ts[k - 1]
+        if dt >= LONG_GAP_S:
+            before_m = (dcum[k - 1] or 0) * 1000.0
+            out.append({"at_s": ts[k - 1], "len_s": dt,
+                        "before_s": ride[k - 1], "after_s": ride[n - 1] - ride[k],
+                        "before_m": _round(before_m, 1), "after_m": _round(max(0.0, total_m - before_m), 1)})
+    return out
+
+
 def _fill_gaps(full):
     """Samples between GPS fixes carry no distance/position (an Ambit3 logs a fix every few
     seconds; Suunto FITs start with distance-less samples). Distance is cumulative, so its gaps
@@ -320,6 +356,7 @@ def streams_from_fit(data: bytes, points: int = 2000) -> dict:
     if "pw" in present:
         np_w = normalized_power(full["t"], full["pw"])
         summary["np_w"] = _round(np_w) if np_w else None
+    summary["long_gaps"] = long_gaps(full["t"], full["dist"])
     temps = [x for x in full["temp"] if x is not None]
     if temps:
         summary["min_temp"] = min(temps)

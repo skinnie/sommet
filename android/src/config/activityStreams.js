@@ -116,6 +116,30 @@ function interp(ts, vs, maxGap) {
     }
 }
 
+// sync/06: stops of LONG_GAP_S or more inside one file, with what was recorded on each side -
+// tools/activity_streams.py long_gaps(), same fields and rounding.
+var LONG_GAP_S = 6 * 3600, RIDING_DT_S = 60;
+function longGaps(ts, dist) {
+    var out = [], n = ts.length;
+    if (n < 2) return out;
+    var ride = [0], dcum = [], last = null, k;
+    for (k = 1; k < n; k++) {
+        var d = ts[k] - ts[k - 1];
+        ride.push(ride[k - 1] + (d > 0 && d <= RIDING_DT_S ? d : 0));
+    }
+    for (k = 0; k < n; k++) { if (dist[k] !== null && dist[k] !== undefined) last = dist[k]; dcum.push(last); }
+    var totalM = (last || 0) * 1000;
+    for (k = 1; k < n; k++) {
+        var dt = ts[k] - ts[k - 1];
+        if (dt >= LONG_GAP_S) {
+            var beforeM = (dcum[k - 1] || 0) * 1000;
+            out.push({ at_s: ts[k - 1], len_s: dt, before_s: ride[k - 1], after_s: ride[n - 1] - ride[k],
+                       before_m: roundTo(beforeM, 1), after_m: roundTo(Math.max(0, totalM - beforeM), 1) });
+        }
+    }
+    return out;
+}
+
 function fillGaps(full) {
     var ts = full.t, dist = full.dist, k;
     var anyD = dist.some(function (v) { return v !== null; });
@@ -227,6 +251,7 @@ function streamsFromFit(bytes, points) {
     };
     if (foot) ["avg_cad", "max_cad"].forEach(function (f) { if (summary[f] !== null) summary[f] = summary[f] * 2; });
     if (present.indexOf("pw") >= 0) { var np = normalizedPower(full.t, full.pw); summary.np_w = np ? Math.round(np) : null; }
+    summary.long_gaps = longGaps(full.t, full.dist);
     var temps = full.temp.filter(function (x) { return x !== null; });
     if (temps.length) {
         summary.min_temp = Math.min.apply(null, temps);

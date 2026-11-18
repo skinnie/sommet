@@ -1792,6 +1792,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_intervals_activity_fit(body)
         elif self.path == "/api/activity/streams":
             self._handle_activity_streams(body)
+        elif self.path == "/api/fit/times":
+            self._handle_fit_times(body)
         elif self.path == "/api/intervals/zones":
             self._handle_intervals_zones(body)
         elif self.path == "/api/intervals/planned":
@@ -2301,6 +2303,7 @@ class Handler(BaseHTTPRequestHandler):
                     "subSportCode": summary.get("subSportCode"),
                     "startTime": summary.get("startTime"),
                     "durationSeconds": summary.get("durationSeconds"),
+                    "movingSeconds": summary.get("movingSeconds"),   # timer time (sync/06)
                     "distanceMeters": summary.get("distanceMeters"),
                     "ascentMeters": summary.get("ascentMeters"),
                     "energyKcal": summary.get("energyKcal"),
@@ -3179,6 +3182,7 @@ class Handler(BaseHTTPRequestHandler):
                 "subSportCode": summary.get("subSportCode"),
                 "startTime": summary.get("startTime"),
                 "durationSeconds": summary.get("durationSeconds"),
+                "movingSeconds": summary.get("movingSeconds"),     # timer time (sync/06)
                 "distanceMeters": summary.get("distanceMeters"),
                 "ascentMeters": summary.get("ascentMeters"),
                 "energyKcal": summary.get("energyKcal"),
@@ -6027,6 +6031,23 @@ class Handler(BaseHTTPRequestHandler):
                                    + (err or out or "")).strip()[:200]})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_fit_times(self, body):
+        """POST /api/fit/times {fits: [base64, ...]} -> {ok, times: [{elapsed_s, timer_s}, ...]},
+        one entry per FIT, in order; null fields for a file that can't be read (sync/06: the
+        desktop fills moving_s of moves stored before it was kept)."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import activity_streams
+        times = []
+        for b64 in (body or {}).get("fits") or []:
+            entry = {"elapsed_s": None, "timer_s": None}
+            try:
+                sm = activity_streams.streams_from_fit(base64.b64decode(b64 or "", validate=False), 100)["summary"]
+                entry = {"elapsed_s": sm.get("elapsed_s"), "timer_s": sm.get("timer_s")}
+            except (ValueError, TypeError, struct.error, IndexError, KeyError):
+                pass
+            times.append(entry)
+        self._send_json(200, {"ok": True, "times": times})
 
     def _handle_activity_streams(self, body):
         """POST /api/activity/streams {fit_base64, points?} -> tools/activity_streams.py output:

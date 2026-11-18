@@ -591,6 +591,40 @@ function defaultChannelsOn(cfg, sportCfg, st) {
     return on;
 }
 
+// sync/06: a long stop inside one file where one side holds almost nothing - a device that lost
+// power mid-ride and carried on in the same file next time (the Edge 500, 2026-11-06: 9 min,
+// 16 h 17 min stopped, 5 min). A brevet's sleep stop has real riding on both sides and never
+// shows the note (André, 2026-11-18: BRMs on an Edge 1040 must stay one move, untouched).
+// Returns {at_s, len_s, before_s, after_s, before_m, after_m} for the first such stop, or null.
+// Only a note: nothing is ever split or changed on its own.
+var TWO_RIDES_SIDE_M = 2000, TWO_RIDES_SIDE_SHARE = 0.10;
+function twoRidesHint(st) {
+    var gaps = st && st.summary && st.summary.long_gaps ? st.summary.long_gaps : [];
+    for (var i = 0; i < gaps.length; i++) {
+        var g = gaps[i], ride = (g.before_s || 0) + (g.after_s || 0);
+        var smallM = Math.min(g.before_m || 0, g.after_m || 0) < TWO_RIDES_SIDE_M;
+        var smallT = ride > 0 && Math.min(g.before_s || 0, g.after_s || 0) < TWO_RIDES_SIDE_SHARE * ride;
+        if (smallM || smallT) return g;
+    }
+    return null;
+}
+
+// The note's words, the same on both apps: {title, body} or null.
+function spanText(sec) {
+    var m = Math.round((sec || 0) / 60), h = Math.floor(m / 60);
+    return h > 0 ? h + " h " + (m % 60) + " min" : Math.max(1, m) + " min";
+}
+function twoRidesNote(st) {
+    var g = twoRidesHint(st);
+    if (!g) return null;
+    return {
+        title: "Two rides in one file?",
+        body: "Recording stopped for " + spanText(g.len_s) + ", with " + spanText(g.before_s) + " of riding before and "
+            + spanText(g.after_s) + " after. The device may have lost power and carried on in the same file. "
+            + "Training load counts only the time spent moving."
+    };
+}
+
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         sportKey: sportKey, isFoot: isFoot, fmtClock: fmtClock, formatValue: formatValue, metricRaw: metricRaw,
@@ -598,6 +632,6 @@ if (typeof module !== "undefined" && module.exports) {
         colourBands: colourBands, bandColour: bandColour, bandShares: bandShares, niceTicks: niceTicks,
         channelScale: channelScale, channelValueText: channelValueText, sectionSummary: sectionSummary,
         longestRun: longestRun, compareUsual: compareUsual, swimBenchmark: swimBenchmark, median: median,
-        paceText: paceText, ftpFrom: ftpFrom, workoutBlocks: workoutBlocks, defaultChannelsOn: defaultChannelsOn, refineSport: refineSport, channelUseful: channelUseful, workoutLines: workoutLines
+        paceText: paceText, ftpFrom: ftpFrom, workoutBlocks: workoutBlocks, defaultChannelsOn: defaultChannelsOn, refineSport: refineSport, channelUseful: channelUseful, workoutLines: workoutLines, twoRidesHint: twoRidesHint, twoRidesNote: twoRidesNote
     };
 }

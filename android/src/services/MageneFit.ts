@@ -143,7 +143,7 @@ export function decodeFit(fit: Uint8Array): FitRide {
 
 export function rideToGpx(r: FitRide, creator = 'Sommet (Magene C406)'): string {
   const ext = [
-    ['duration', r.durationSeconds], ['distance', Math.round(r.distanceMeters)], ['energy', r.energyKcal],
+    ['duration', r.durationSeconds], ['moving', r.movingSeconds], ['distance', Math.round(r.distanceMeters)], ['energy', r.energyKcal],
     ['avg_hr', r.avgHr], ['max_hr', r.maxHr], ['avg_cadence', r.avgCadence], ['max_cadence', r.maxCadence],
     ['descent', r.descentMeters],
   ].filter(([, v]) => (v as number) > 0).map(([k, v]) => `<${k}>${v}</${k}>`).join('');

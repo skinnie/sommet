@@ -41,6 +41,9 @@ export interface ActivityRecord {
   // The true UTC start (epoch s) when `date` is a local time without a zone (intervals.icu's
   // start_date_local). The duplicate check (SameMove.ts) compares starts in UTC only. 0 = unknown.
   start_utc?: number;
+  // Moving time (s): the FIT's timer time, beside duration_s (its total time) - sync/06,
+  // 2026-11-18. The Coach's own load counts this one. 0 = not known.
+  moving_s?: number;
 }
 
 // ─── Singleton DB ─────────────────────────────────────────────────────────────
@@ -105,6 +108,7 @@ async function openAndMigrate(): Promise<SQLiteDatabase> {
     ['updated_at', 'INTEGER NOT NULL DEFAULT 0'],
     ['energy_kcal', 'INTEGER NOT NULL DEFAULT 0'],
     ['start_utc', 'INTEGER NOT NULL DEFAULT 0'],
+    ['moving_s', 'INTEGER NOT NULL DEFAULT 0'],
   ]);
   await tidyImportedActivities(db).catch(() => {});
   // ── Gear tracker (v3) — see gearDb.ts. Local-first, mirrored to intervals.icu. ──
@@ -402,7 +406,7 @@ export async function removeImportedActivity(id: string): Promise<void> {
 }
 
 /** What a later intervals.icu import may correct on a row it already has: sport name, calories. */
-export async function updateImportedActivity(id: string, fields: { activity_type?: string; energy_kcal?: number; start_utc?: number }): Promise<void> {
+export async function updateImportedActivity(id: string, fields: { activity_type?: string; energy_kcal?: number; start_utc?: number; moving_s?: number }): Promise<void> {
   const db = await getDb();
   if (fields.activity_type !== undefined)
     await db.executeSql('UPDATE activities SET activity_type = ? WHERE id = ?', [fields.activity_type, id]);
@@ -410,6 +414,28 @@ export async function updateImportedActivity(id: string, fields: { activity_type
     await db.executeSql('UPDATE activities SET energy_kcal = ? WHERE id = ?', [fields.energy_kcal, id]);
   if (fields.start_utc !== undefined)   // updated_at moves so the shared database passes it on
     await db.executeSql('UPDATE activities SET start_utc = ?, updated_at = ? WHERE id = ?', [fields.start_utc, Date.now(), id]);
+  if (fields.moving_s !== undefined)    // sync/06: moving time arriving for a row that lacked it
+    await db.executeSql('UPDATE activities SET moving_s = ? WHERE id = ? AND moving_s = 0', [fields.moving_s, id]);
+}
+
+/** sync/06: rows whose moving time hasn't been read from their FIT yet (moving_s 0). */
+export async function activitiesWithoutMovingTime(limit: number): Promise<{ id: string; gpx_path: string }[]> {
+  const db = await getDb();
+  const [r] = await db.executeSql(
+    "SELECT id, gpx_path FROM activities WHERE moving_s = 0 AND gpx_path <> '' LIMIT ?", [limit]);
+  const out: { id: string; gpx_path: string }[] = [];
+  for (let i = 0; i < r.rows.length; i++) out.push({ id: r.rows.item(i).id, gpx_path: r.rows.item(i).gpx_path });
+  return out;
+}
+
+/** sync/06: store a moving time read from the FIT; updated_at moves so Sommet Sync passes it on.
+ *  -1 = looked, the file has none (never sent, read as unknown). */
+export async function setMovingTime(id: string, movingS: number): Promise<void> {
+  const db = await getDb();
+  if (movingS > 0)
+    await db.executeSql('UPDATE activities SET moving_s = ?, updated_at = ? WHERE id = ?', [movingS, Date.now(), id]);
+  else
+    await db.executeSql('UPDATE activities SET moving_s = -1 WHERE id = ?', [id]);
 }
 
 /** Enregistre une activité synchronisée dans la base. */
@@ -418,8 +444,8 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
   await db.executeSql(
     `INSERT OR REPLACE INTO activities
        (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device, updated_at,
-        energy_kcal, start_utc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        energy_kcal, start_utc, moving_s)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id,
       record.synced_at,
@@ -433,6 +459,7 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
       record.updated_at ?? record.synced_at,
       Math.round(record.energy_kcal ?? 0) || 0,
       Math.round(record.start_utc ?? 0) || 0,
+      Math.round(record.moving_s ?? 0) || 0,
     ]
   );
 }
@@ -474,20 +501,21 @@ export async function deleteActivitiesByUid(uid: string): Promise<void> {
 /** The local row (updated_at + gpx_path) for a uid, or null if we don't have it. */
 export async function getActivityByUid(
   uid: string
-): Promise<{ id: string; updated_at: number; gpx_path: string; energy_kcal: number; activity_type: string; start_utc: number } | null> {
+): Promise<{ id: string; updated_at: number; gpx_path: string; energy_kcal: number; activity_type: string; start_utc: number; moving_s: number } | null> {
   const bar = uid.indexOf('|');
   if (bar < 0) return null;
   const device = uid.slice(0, bar);
   const minute = uid.slice(bar + 1);
   const db = await getDb();
   const [r] = await db.executeSql(
-    'SELECT id, updated_at, gpx_path, energy_kcal, activity_type, start_utc FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
+    'SELECT id, updated_at, gpx_path, energy_kcal, activity_type, start_utc, moving_s FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
     [device, minute]
   );
   if (r.rows.length === 0) return null;
   const row = r.rows.item(0);
   return { id: row.id, updated_at: Number(row.updated_at || 0), gpx_path: row.gpx_path,
-    energy_kcal: Number(row.energy_kcal || 0), activity_type: String(row.activity_type || ''), start_utc: Number(row.start_utc || 0) };
+    energy_kcal: Number(row.energy_kcal || 0), activity_type: String(row.activity_type || ''), start_utc: Number(row.start_utc || 0),
+    moving_s: Number(row.moving_s || 0) };
 }
 
 /** Retourne toutes les activités triées par date décroissante. */

@@ -250,6 +250,7 @@ static double banisterTrimp(double minutes, double avgHr, double restHr, double 
 // time, rides 72, gravel 71, virtual rides 54, runs 38 (n=14), walks/hikes 9, gym-type 13-16.
 // Swimming had no samples - a generic moderate 40. Same table as android LocalLoad.ts.
 static constexpr double kTrimpToLoad = 0.80;
+static constexpr double kMaxMoveS = 96 * 3600;   // longer = a recording left running (sync/06)
 static double loadPerHour(const QString &name)
 {
     const QString n = name.toLower();
@@ -292,18 +293,24 @@ QMap<QDate, double> CoachService::localLoadByDay(int *hrMoves, int *durationMove
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "SELECT start_time, duration_s, name, "
-        "CASE WHEN start_time >= ? THEN gpx_text END FROM activities "
+        "CASE WHEN start_time >= ? THEN gpx_text END, COALESCE(moving_s, 0) FROM activities "
         "WHERE start_time IS NOT NULL AND start_time != ''"));
     q.addBindValue(loadSince.toString(Qt::ISODate));
     q.exec();
     while (q.next()) {
         const QDateTime dt = QDateTime::fromString(q.value(0).toString(), Qt::ISODate);
         if (!dt.isValid()) continue;
-        const double durationS = q.value(1).toDouble();
-        // A move longer than two days is a watch left recording or a corrupt header, not
-        // training (real, 2026-09-27: two copies of a 59841-min "Running" on 2026-06-21 put
-        // Fitness at 356). The longest real event here, a 600 km BRM, is split into days.
-        if (durationS <= 0 || durationS > 48 * 3600) continue;
+        // Load counts the time spent moving (the FIT's timer time, sync/06): a file holding 9 min
+        // of riding and a 16 h stop is 9 min of training, and so are a brevet's sleep stops.
+        // Total time is what's left when the move doesn't say (watch moves, older rows).
+        const double totalS = q.value(1).toDouble();
+        const double movingS = q.value(4).toDouble();
+        const double durationS = movingS > 0 && movingS < totalS ? movingS : totalS;
+        // A move longer than four days of moving is a watch left recording or a corrupt header,
+        // not training (real, 2026-09-27: two copies of a 59841-min "Running" on 2026-06-21 put
+        // Fitness at 356). It was two days: a 1200 km brevet (up to 90 h) has to fit (André,
+        // 2026-11-18: BRMs on an Edge 1040).
+        if (durationS <= 0 || durationS > kMaxMoveS) continue;
         const double minutes = durationS / 60.0;
         // Without HR: the sport's typical load per hour; with HR: TRIMP on intervals' scale.
         Move m{dt.toSecsSinceEpoch(), durationS, durationS / 3600.0 * loadPerHour(q.value(2).toString()),

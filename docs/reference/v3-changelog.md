@@ -7,6 +7,21 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-18: Moving time for long rides; a note for two rides in one file
+
+**Checked without a watch or bike computer**, on a copy of real data and on made-up files.
+
+- Every move now keeps its moving time (the FIT's timer time) beside its total time, on desktop
+  and Android, and Sommet Sync passes it on. Bike-computer imports (Edge, Karoo, Bryton, Magene)
+  fill it in; moves stored before get it from their own stored FIT.
+- Sommet's own training load counts the moving time. An Edge 500 file of 6 November held 9 min
+  of riding, a 16 h 17 min stop and 5 more minutes; it had counted as 16.5 h of riding.
+- The longest move the load counts went from 2 days to 4 days of moving, so a 1200 km brevet is
+  no longer dropped. Brevets stay one move, as recorded.
+- The move screen shows a note when a file has a stop of 6 h or more with almost nothing on one
+  side (under 2 km, or under 10% of the riding): "Two rides in one file?". A brevet's sleep stop,
+  with real riding on both sides, never shows it. Nothing is split or changed on its own.
+
 ## 2026-11-18: Training load from intervals.icu or Sommet; SQLite on the sync server
 
 **Checked without a watch.** The desktop app was looked at in a test window with a copy of real
