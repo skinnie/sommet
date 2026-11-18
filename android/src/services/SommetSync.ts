@@ -25,6 +25,13 @@ const PUSHED_KEY = 'sommet.sync.blobsPushed';
 export interface SommetSyncCfg { url: string; token: string; }
 export interface SommetSyncResult { pulled: number; pushed: number; ok: boolean; }
 
+/** sync/06: a move's track changed here (Split here), so send it to the shared database again. */
+export async function forgetPushedBlob(uid: string): Promise<void> {
+  const raw = await AsyncStorage.getItem(PUSHED_KEY);
+  const pushed = new Set<string>(raw ? JSON.parse(raw) : []);
+  if (pushed.delete(uid)) await AsyncStorage.setItem(PUSHED_KEY, JSON.stringify(Array.from(pushed)));
+}
+
 export async function getSommetSyncCfg(): Promise<SommetSyncCfg | null> {
   try {
     const raw = await AsyncStorage.getItem(CFG_KEY);

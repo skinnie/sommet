@@ -9,6 +9,9 @@ import { getStreams, getZoneGroups, getPlanned, Streams } from '../../services/A
 import { buildActivityChartHtml } from '../../services/activityChartPage';
 import { useV3Theme, V3Colors } from '../../theme/v3';
 import { useThemeMode } from '../../theme/ThemeModeContext';
+import { useNavigation } from '@react-navigation/native';
+import { Button } from '../ui/primitives';
+import { splitMove } from '../../services/SplitMove';
 // Shared with the desktop (edit shared/, then tools/gen_activity_view.py): what each sport shows
 // and the maths behind it - the same files the desktop's QML runs.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -161,6 +164,23 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
 
   const ov = useMemo(() => AVL.overview(CFG, sport, facts, st, { advanced, zoneGroups }), [facts, st, advanced, zoneGroups, sport]);
   const twoRides = useMemo(() => AVL.twoRidesNote(st), [st]);
+  // sync/06 "Split here": nothing is cut until it's confirmed (desktop: ActivityDetail.qml).
+  const navigation = useNavigation<any>();
+  const [splitting, setSplitting] = useState(false);
+  const [splitError, setSplitError] = useState('');
+  const askSplit = () => {
+    if (!twoRides) return;
+    Alert.alert(twoRides.button, twoRides.confirm, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'OK', onPress: async () => {
+        setSplitError(''); setSplitting(true);
+        const r = await splitMove(activity, twoRides.at_s).catch((e: any) => ({ ok: false, message: e?.message ?? String(e) }));
+        setSplitting(false);
+        if (r.ok) navigation.goBack();          // the list now holds the two moves
+        else setSplitError(r.message ?? '');
+      } },
+    ]);
+  };
   const zoneKinds = useMemo(() => {
     const out: any[] = [];
     for (const k of (sc.zones || [])) {
@@ -336,6 +356,9 @@ export default function ActivityPanel({ activity, meta, hasMap, mapView, onHover
             <View style={s.note}>
               <Text style={s.noteTitle}>{twoRides.title}</Text>
               <Text style={s.noteBody}>{twoRides.body}</Text>
+              <Button label={twoRides.button} onPress={askSplit} busy={splitting} variant="outline" grow={false}
+                      style={{ marginTop: 8, alignSelf: 'flex-start' }} />
+              {!!splitError && <Text style={[s.noteBody, { color: t.error, marginTop: 8 }]}>{splitError}</Text>}
             </View>)}
           <View style={s.grid}>{ov.headline.map((m: any) => <Stat key={m.key} m={m} big />)}</View>
           {!!usual && (

@@ -1794,6 +1794,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_activity_streams(body)
         elif self.path == "/api/fit/times":
             self._handle_fit_times(body)
+        elif self.path == "/api/fit/split":
+            self._handle_fit_split(body)
         elif self.path == "/api/intervals/zones":
             self._handle_intervals_zones(body)
         elif self.path == "/api/intervals/planned":
@@ -6031,6 +6033,53 @@ class Handler(BaseHTTPRequestHandler):
                                    + (err or out or "")).strip()[:200]})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _handle_fit_split(self, body):
+        """POST /api/fit/split {fit_base64, at_s} -> {ok, parts: [{fit, startTime, durationSeconds,
+        movingSeconds, distanceMeters, ascentMeters, energyKcal, sport, gpx}, x2]} - sync/06 "Split
+        here": tools/fit_split.py cuts the file at the long stop starting at_s seconds in, and
+        each half is read like any bike-computer ride (tools/fit_decode.py). The original FIT is
+        not touched; the app keeps it."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import fit_split
+        try:
+            data = base64.b64decode((body or {}).get("fit_base64") or "", validate=False)
+            at_s = body.get("at_s")
+            halves = fit_split.split_fit(data, None if at_s is None else int(at_s))
+        except (ValueError, TypeError, struct.error, IndexError) as e:
+            self._send_json(422, {"ok": False, "error": str(e)})
+            return
+        parts = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for n, half in enumerate(halves, 1):
+                fit_path = os.path.join(tmp, f"part{n}.fit")
+                gpx_path = fit_path + ".gpx"
+                with open(fit_path, "wb") as fh:
+                    fh.write(half)
+                code, out, _err = run_tool("fit_decode.py", [fit_path, "--gpx", gpx_path])
+                try:
+                    summary = json.loads(out.strip().splitlines()[-1]) if code == 0 else {}
+                except (json.JSONDecodeError, IndexError):
+                    summary = {}
+                if not summary.get("ok"):
+                    self._send_json(422, {"ok": False, "error": f"part {n} of the split can't be read back"})
+                    return
+                gpx_text = ""
+                if summary.get("trackPoints") and os.path.exists(gpx_path):
+                    with open(gpx_path) as fh:
+                        gpx_text = fh.read()
+                parts.append({
+                    "fit": base64.b64encode(half).decode("ascii"),
+                    "sport": summary.get("sport"),
+                    "startTime": summary.get("startTime"),
+                    "durationSeconds": summary.get("durationSeconds"),
+                    "movingSeconds": summary.get("movingSeconds"),
+                    "distanceMeters": summary.get("distanceMeters"),
+                    "ascentMeters": summary.get("ascentMeters"),
+                    "energyKcal": summary.get("energyKcal"),
+                    "gpx": gpx_text,
+                })
+        self._send_json(200, {"ok": True, "parts": parts})
 
     def _handle_fit_times(self, body):
         """POST /api/fit/times {fits: [base64, ...]} -> {ok, times: [{elapsed_s, timer_s}, ...]},

@@ -33,6 +33,7 @@ STREAMS_SRC = ROOT / "shared" / "activity_streams.js"
 DRAW_SRC = ROOT / "shared" / "activity_chart_draw.js"
 SPORTS_SRC = ROOT / "shared" / "sport_names.json"
 SWIM_SRC = ROOT / "shared" / "swim_workout.js"
+SPLIT_SRC = ROOT / "shared" / "fit_split.js"   # sync/06 "Split here" (twin of tools/fit_split.py)
 PRAGMA = b".pragma library\n// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 HEADER = b"// GENERATED from shared/activity_view_logic.js by tools/gen_activity_view.py - edit that file.\n"
 
@@ -87,6 +88,8 @@ def targets():
             (ROOT / "android" / "src" / "config" / "activityViewLogic.js", HEADER + logic),
             (ROOT / "android" / "src" / "config" / "activityStreams.js",
              HEADER.replace(b"activity_view_logic.js", b"activity_streams.js") + STREAMS_SRC.read_bytes()),
+            (ROOT / "android" / "src" / "config" / "fitSplit.js",
+             HEADER.replace(b"activity_view_logic.js", b"fit_split.js") + SPLIT_SRC.read_bytes()),
             (ROOT / "desktop" / "qml" / "ActivityChartDraw.js",
              PRAGMA.replace(b"activity_view_logic.js", b"activity_chart_draw.js") + DRAW_SRC.read_bytes()),
             (ROOT / "desktop" / "qml" / "SwimWorkout.js",

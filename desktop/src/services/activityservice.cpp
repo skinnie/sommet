@@ -804,6 +804,10 @@ void ActivityService::openDatabase()
     // "nas" originals mode; a row not in here keeps its FIT until the NAS has it.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_fit_pushed (uid TEXT PRIMARY KEY)"));
+    // sync/06: the file a "Split here" cut, kept as it was recorded.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS split_originals (idx INTEGER, device TEXT, start_time TEXT, "
+        "fit_base64 TEXT, split_at INTEGER, split_on INTEGER)"));
 
     // One-time migration to serial-based watch identity (2026-09-04): watch activities used to
     // be tagged by product-id hex ("0x1b"); they are now tagged by the watch's USB serial so two
@@ -1499,6 +1503,133 @@ void ActivityService::decodeStreams(int idx, const QString &device, const QStrin
         while (m_streamsOrder.size() > 12)
             m_streamsCache.remove(m_streamsOrder.takeFirst());
         emit streamsReady(idx, device, streams, QString());
+    });
+}
+
+void ActivityService::splitMove(int idx, const QString &device, int atS)
+{
+    QString fit, startTime, name, source, extId;
+    int exported = 0;
+    {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT fit_base64, start_time, name, COALESCE(source, ''), "
+                                 "COALESCE(external_id, ''), COALESCE(exported, 0) FROM activities "
+                                 "WHERE idx = ? AND COALESCE(device, '') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (q.exec() && q.next()) {
+            fit = q.value(0).toString(); startTime = q.value(1).toString(); name = q.value(2).toString();
+            source = q.value(3).toString(); extId = q.value(4).toString(); exported = q.value(5).toInt();
+        }
+    }
+    if (fit.isEmpty()) {
+        QTimer::singleShot(0, this, [this, idx, device]() {
+            emit splitDone(idx, device, false, tr("This move has no file on this computer to split."));
+        });
+        return;
+    }
+    QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/fit/split")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(60000);
+    QNetworkReply *reply = m_network.post(req, QJsonDocument(QJsonObject{
+        {QStringLiteral("fit_base64"), fit}, {QStringLiteral("at_s"), atS}}).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, idx, device, fit, startTime, name, source, extId, exported, atS]() {
+        reply->deleteLater();
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonArray parts = o.value(QStringLiteral("parts")).toArray();
+        if (!o.value(QStringLiteral("ok")).toBool() || parts.size() != 2) {
+            const QString err = o.value(QStringLiteral("error")).toString();
+            emit splitDone(idx, device, false, err.isEmpty() ? backendErrorText(reply) : err);
+            return;
+        }
+        auto trackOf = [](const QString &gpx) {
+            if (gpx.isEmpty()) return QString();
+            return QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(
+                parseGpx(gpx).value(QStringLiteral("track")).toList())).toJson(QJsonDocument::Compact));
+        };
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const QJsonObject a = parts.at(0).toObject(), b = parts.at(1).toObject();
+        auto movingOf = [](const QJsonObject &p) {
+            const int m = p.value(QStringLiteral("movingSeconds")).toInt();
+            return m > 0 ? QVariant(m) : QVariant(QMetaType(QMetaType::Int));
+        };
+        m_db.transaction();
+        bool ok = true;
+        {
+            QSqlQuery keep(m_db);
+            keep.prepare(QStringLiteral("INSERT INTO split_originals VALUES (?, ?, ?, ?, ?, ?)"));
+            keep.addBindValue(idx); keep.addBindValue(device); keep.addBindValue(startTime);
+            keep.addBindValue(fit); keep.addBindValue(atS); keep.addBindValue(now);
+            ok = keep.exec() && ok;
+        }
+        {   // the first ride keeps the row: same start, so the same Sommet Sync uid
+            QSqlQuery up(m_db);
+            up.prepare(QStringLiteral(
+                "UPDATE activities SET duration_s = ?, moving_s = ?, distance_m = ?, ascent_m = ?, "
+                "energy_kcal = ?, track_json = ?, gpx_text = ?, fit_base64 = ?, updated_at = ? "
+                "WHERE idx = ? AND COALESCE(device, '') = ?"));
+            up.addBindValue(a.value(QStringLiteral("durationSeconds")).toInt());
+            up.addBindValue(movingOf(a));
+            up.addBindValue(a.value(QStringLiteral("distanceMeters")).toDouble());
+            up.addBindValue(a.value(QStringLiteral("ascentMeters")).toDouble());
+            up.addBindValue(a.value(QStringLiteral("energyKcal")).toInt());
+            up.addBindValue(trackOf(a.value(QStringLiteral("gpx")).toString()));
+            up.addBindValue(a.value(QStringLiteral("gpx")).toString());
+            up.addBindValue(a.value(QStringLiteral("fit")).toString());
+            up.addBindValue(now);
+            up.addBindValue(idx); up.addBindValue(device);
+            ok = up.exec() && ok;
+        }
+        int newIdx = -1;
+        {
+            QSqlQuery mn(QStringLiteral("SELECT MIN(idx) FROM activities"), m_db);
+            if (mn.next()) newIdx = std::min(-1, mn.value(0).toInt() - 1);
+        }
+        {   // the second ride: a new move from the same device
+            QSqlQuery ins(m_db);
+            ins.prepare(QStringLiteral(
+                "INSERT INTO activities (idx, name, duration_s, distance_m, ascent_m, energy_kcal, "
+                "sport_type_raw, start_time, track_json, gpx_text, fit_base64, source, external_id, "
+                "device, exported, updated_at, moving_s) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+            ins.addBindValue(newIdx);
+            ins.addBindValue(name);
+            ins.addBindValue(b.value(QStringLiteral("durationSeconds")).toInt());
+            ins.addBindValue(b.value(QStringLiteral("distanceMeters")).toDouble());
+            ins.addBindValue(b.value(QStringLiteral("ascentMeters")).toDouble());
+            ins.addBindValue(b.value(QStringLiteral("energyKcal")).toInt());
+            ins.addBindValue(b.value(QStringLiteral("startTime")).toString());
+            ins.addBindValue(trackOf(b.value(QStringLiteral("gpx")).toString()));
+            ins.addBindValue(b.value(QStringLiteral("gpx")).toString());
+            ins.addBindValue(b.value(QStringLiteral("fit")).toString());
+            ins.addBindValue(source.isEmpty() ? QVariant() : QVariant(source));
+            ins.addBindValue(extId.isEmpty() ? QVariant() : QVariant(extId + QStringLiteral("#2")));
+            ins.addBindValue(device);
+            // The whole file may already be on intervals.icu; don't upload the halves again.
+            ins.addBindValue(exported);
+            ins.addBindValue(now);
+            ins.addBindValue(movingOf(b));
+            ok = ins.exec() && ok;
+        }
+        if (!ok) {
+            m_db.rollback();
+            emit splitDone(idx, device, false, tr("The two moves couldn't be saved. Nothing was changed."));
+            return;
+        }
+        {   // the first ride's FIT changed: send it to the shared database again
+            QSqlQuery fp(m_db);
+            fp.prepare(QStringLiteral("DELETE FROM sommet_fit_pushed WHERE uid = ?"));
+            fp.addBindValue(sommetUid(device, startTime));
+            fp.exec();
+        }
+        m_db.commit();
+        const QString key = QString::number(idx) + QLatin1Char('|') + device;
+        m_streamsCache.remove(key);
+        m_streamsOrder.removeAll(key);
+        qInfo("[split] move %d|%s split into two at %d s", idx, qPrintable(device), atS);
+        dbLoadAll();
+        emit activitiesChanged();
+        emit splitDone(idx, device, true, QString());
     });
 }
 

@@ -21,6 +21,15 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - The move screen shows a note when a file has a stop of 6 h or more with almost nothing on one
   side (under 2 km, or under 10% of the riding): "Two rides in one file?". A brevet's sleep stop,
   with real riding on both sides, never shows it. Nothing is split or changed on its own.
+- The note has a "Split into two moves" button (asks first). It cuts the FIT itself at the stop
+  into two valid FIT files (tools/fit_split.py on desktop, shared/fit_split.js on Android, the
+  same bytes), each with its own totals and track. The first ride keeps the move, the second is
+  a new one, and the file as recorded is kept (desktop: split_originals; Android: .orig.fit).
+  Tried on desktop with the real 6 Nov file: 9 min / 17 m on 6 Nov and 5 min / 743 m on 7 Nov.
+  Android: tests only so far.
+- Checked against André's 600 km BRM of 6-7 June 2026 (Edge 1040, two files): day 1 is 16 h 54
+  min total, 13 h 15 min moving, 312 km, longest stop 62 min; day 2 15 h 30 min total, 12 h 32
+  min moving, 290 km. Neither shows the note, and neither is near the 4-day limit.
 
 ## 2026-11-18: Training load from intervals.icu or Sommet; SQLite on the sync server
 

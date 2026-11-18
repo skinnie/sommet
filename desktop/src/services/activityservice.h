@@ -99,6 +99,11 @@ public:
     // An intervals.icu import keeps no file, so its FIT is fetched first (and kept on the row,
     // as Export does). A small in-memory cache makes reopening instant.
     Q_INVOKABLE void requestStreams(int idx, const QString &device);
+    // sync/06 "Split here": cut this move's FIT at the long stop starting atS seconds in
+    // (tools/fit_split.py via the backend) and make two moves of it. The first keeps the row
+    // (same start, so the same Sommet Sync uid); the second is a new row. The original FIT is
+    // kept in split_originals. Answers with splitDone.
+    Q_INVOKABLE void splitMove(int idx, const QString &device, int atS);
     // Refresh zoneGroups from intervals.icu (no-op without a connection; the cache stays).
     Q_INVOKABLE void requestZones();
     // Structured workouts planned on intervals.icu for a day ("YYYY-MM-DD") -> plannedReady.
@@ -269,6 +274,7 @@ signals:
     // set when there is nothing to decode or the decode failed).
     void streamsReady(int idx, const QString &device, const QVariantMap &streams,
                       const QString &error);
+    void splitDone(int idx, const QString &device, bool ok, const QString &message);
     void zoneGroupsChanged();
     void plannedReady(const QString &date, const QVariantList &workouts);
     // Sommet Sync (#SYNC-2): test probe result, and a completion/error pair for a syncNow run.

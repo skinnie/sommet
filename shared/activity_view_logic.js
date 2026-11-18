@@ -609,7 +609,8 @@ function twoRidesHint(st) {
     return null;
 }
 
-// The note's words, the same on both apps: {title, body} or null.
+// The note's words, the same on both apps: {title, body, button, confirm, at_s} or null.
+// at_s is where the stop starts, for "Split here" (tools/fit_split.py / shared/fit_split.js).
 function spanText(sec) {
     var m = Math.round((sec || 0) / 60), h = Math.floor(m / 60);
     return h > 0 ? h + " h " + (m % 60) + " min" : Math.max(1, m) + " min";
@@ -621,7 +622,11 @@ function twoRidesNote(st) {
         title: "Two rides in one file?",
         body: "Recording stopped for " + spanText(g.len_s) + ", with " + spanText(g.before_s) + " of riding before and "
             + spanText(g.after_s) + " after. The device may have lost power and carried on in the same file. "
-            + "Training load counts only the time spent moving."
+            + "Training load counts only the time spent moving.",
+        button: "Split into two moves",
+        confirm: "Make two moves of this file? The first keeps the " + spanText(g.before_s) + " before the stop; the second starts "
+            + spanText(g.len_s) + " later with its " + spanText(g.after_s) + ". The file as recorded stays on this device.",
+        at_s: g.at_s
     };
 }
 

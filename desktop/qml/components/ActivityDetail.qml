@@ -290,6 +290,38 @@ Item {
     readonly property var _cursorPoint: _hover >= 0 && _coords[_hover] ? { lat: _coords[_hover][0], lon: _coords[_hover][1] } : null
 
     // ---------------------------------------------------------------- export
+    // sync/06 "Split here": nothing is cut until this is confirmed.
+    property bool _splitting: false
+    property string _splitError: ""
+    readonly property var _twoRides: AVL.twoRidesNote(_st)
+    ThemedDialog {
+        id: splitConfirm
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(520, root.width - Theme.spacingLarge * 2)
+        title: root._twoRides ? root._twoRides.button : ""
+        standardButtons: Dialog.Cancel | Dialog.Ok
+        contentItem: Text {
+            wrapMode: Text.WordWrap
+            text: root._twoRides ? root._twoRides.confirm : ""
+            color: Theme.text; font.pixelSize: Theme.fontSizeBody
+        }
+        onAccepted: {
+            root._splitError = ""
+            root._splitting = true
+            ActivityService.splitMove(root.activity.index, root.activity.device || "", root._twoRides.at_s)
+        }
+    }
+    Connections {
+        target: ActivityService
+        function onSplitDone(idx, device, ok, message) {
+            if (!root.activity || idx !== root.activity.index || device !== (root.activity.device || "")) return
+            root._splitting = false
+            if (ok) root.back()              // the list now holds the two moves
+            else root._splitError = message
+        }
+    }
+
     FileDialog {
         id: gpxExportDialog
         title: qsTr("Export activity as GPX")
@@ -645,6 +677,18 @@ Item {
                                 width: parent.width; wrapMode: Text.WordWrap
                                 text: parent.parent.note ? parent.parent.note.body : ""
                                 color: Theme.text; font.pixelSize: Theme.fontSizeLabel
+                            }
+                            RoundedButton {
+                                text: parent.parent.note ? parent.parent.note.button : ""
+                                busy: root._splitting
+                                enabled: !root._splitting && root._hasFit
+                                onClicked: splitConfirm.open()
+                            }
+                            Text {
+                                visible: root._splitError !== ""
+                                width: parent.width; wrapMode: Text.WordWrap
+                                text: root._splitError
+                                color: Theme.error; font.pixelSize: Theme.fontSizeLabel
                             }
                         }
                     }
