@@ -765,6 +765,15 @@ export default function MapScreen() {
       {/* Loaded from a caches-dir file:// page (mapWebView.ts) with Leaflet bundled inline — no
           more android_asset dependency, so this renders on iOS too, and cached tiles read off
           disk for offline use (mapWebViewFileProps grants the read access per platform). */}
+      {/* ── Weather ── a strip above the map, not on it: on the map it covered Leaflet's map
+          chooser (André, 2026-11-18). Desktop shows the same line outside its map too. */}
+      {weather && (
+        <View style={styles.weatherBar}>
+          <Text style={styles.weatherLine} numberOfLines={2}>
+            {weatherLine(weather)}
+          </Text>
+        </View>
+      )}
       {mapUri && (
       <WebView
         ref={webViewRef}
@@ -780,15 +789,6 @@ export default function MapScreen() {
         onLoad={onWebViewLoad}
         onMessage={onMessage}
       />)}
-
-      {/* ── Weather overlay ── (the numbers moved into the activity panel's Overview) */}
-      {weather && (
-        <View style={styles.overlay}>
-          <Text style={styles.weatherLine} numberOfLines={2}>
-            {weatherLine(weather)}
-          </Text>
-        </View>
-      )}
 
       {/* ── Bouton téléchargement hors-ligne ── */}
       <TouchableOpacity
@@ -914,18 +914,12 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.background },
     loadingText: { color: t.mutedText, marginTop: 12 },
     errorText: { color: t.error, fontSize: 15 },
-    overlay: {
-      position: 'absolute',
-      top: 12,
-      left: 12,
-      right: 12,
+    weatherBar: {
       backgroundColor: t.card,
-      borderColor: t.mutedText + '33',
-      borderWidth: 1,
-      borderRadius: 14,
+      borderBottomColor: t.mutedText + '33',
+      borderBottomWidth: 1,
       paddingVertical: 8,
-      paddingHorizontal: 8,
-      gap: 8,
+      paddingHorizontal: 12,
     },
     statsRow: {
       flexDirection: 'row',
