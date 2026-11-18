@@ -29,6 +29,11 @@ from PIL import Image
 SRC = Path(__file__).resolve().parent / "sommet.html"
 OUT = Path(__file__).resolve().parent.parent
 DRAFTS = Path(__file__).resolve().parent / "pages"
+# extra pages, linked from every footer and from the Help and Watches pages: slug -> link text
+GUIDES = [("suunto-app-pc", "Suunto app for PC"), ("not-syncing", "Watch won't sync?"),
+          ("movescount", "After Movescount"), ("gpx-routes", "GPX routes")]
+WATCH_PAGES = [("ambit3", "Ambit3"), ("ambit2", "Ambit2"), ("ambit", "Ambit"),
+               ("traverse", "Traverse"), ("kailash", "Kailash")]
 BASE = "https://skinnie.github.io/sommet/"
 
 # slug -> title, description, breadcrumb name. Order = sitemap order.
@@ -123,7 +128,7 @@ def main():
         end = marks[i + 1].start() if i + 1 < len(marks) else main_close
         chunk = re.sub(r"\s*<!-- =+ [A-Z &]+ =+ -->\s*$", "\n", src[m.start():end])
         sections[m.group(1)] = re.sub(r'^<div class="page[^"]*"', '<div class="page active"', chunk)
-    if "--drafts" in sys.argv:  # extra pages kept as fragments in _src/pages/, not published by default
+    if "--no-guides" not in sys.argv:  # extra pages kept as fragments in _src/pages/
         for f in sorted(DRAFTS.glob("*.html")):
             raw = f.read_text(encoding="utf-8")
             meta, body = raw.split("-->", 1)
@@ -178,12 +183,31 @@ def main():
         return re.sub(r"<img\b[^>]*>", repl, html)
 
     def relink(html, slug, prefix):
-        html = re.sub(r'href="#/([a-z]*)"', lambda m: f'href="{url_for(m.group(1) or "home", prefix)}"', html)
+        html = re.sub(r'href="#/([a-z0-9-]*)"', lambda m: f'href="{url_for(m.group(1) or "home", prefix)}"', html)
         # mark the current page in the navigation
         html = re.sub(r'(<a href="[^"]*" data-nav="%s")( class="([^"]*)")?' % slug,
                       lambda m: f'{m.group(1)} class="{((m.group(3) or "") + " cur").strip()}" aria-current="page"',
                       html)
         return html
+
+    have = lambda items: [(k, t) for k, t in items if k in sections]
+    if have(GUIDES) or have(WATCH_PAGES):
+        col = lambda title, items: ('<div class="foot-col"><h4>%s</h4>\n          ' % title
+                                    + "".join('<a href="#/%s">%s</a>' % it for it in items) + "\n        </div>\n        ")
+        marker = '<div class="foot-col"><h4>Open source</h4>'
+        if marker not in footer:
+            sys.exit("footer changed: cannot add the Guides columns")
+        footer = footer.replace(marker, (col("Guides", have(GUIDES)) if have(GUIDES) else "")
+                                + (col("Your watch", have(WATCH_PAGES)) if have(WATCH_PAGES) else "") + marker, 1)
+        block = ('  <section class="blk" style="border-top:1px solid var(--hair)">\n    <div class="wrap">\n'
+                 '      <div class="sec-head"><div class="eyebrow">Guides</div><h2>Find your way.</h2></div>\n      <ul class="terms">\n'
+                 + "".join('        <li><span class="t">%s</span><span class="d"><a href="#/%s">%s</a></span></li>\n'
+                           % (t, k, PAGES[k]["title"].split(" — Sommet")[0]) for k, t in have(WATCH_PAGES) + have(GUIDES))
+                 + "      </ul>\n    </div>\n  </section>\n")
+        for slug in ("watches", "help"):
+            body = sections[slug].rstrip()
+            assert body.endswith("</div>")
+            sections[slug] = body[:-len("</div>")] + block + "</div>\n"
 
     sitemap = []
     for slug, meta in PAGES.items():
