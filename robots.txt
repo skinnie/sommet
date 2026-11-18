@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /sommet/_src/
 
 Sitemap: https://skinnie.github.io/sommet/sitemap.xml

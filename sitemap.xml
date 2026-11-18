@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://skinnie.github.io/sommet/</loc>
-    <lastmod>2026-09-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
-  </url>
+  <url><loc>https://skinnie.github.io/sommet/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/watches/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/software/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/faq/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/help/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/contribute/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/credits/</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://skinnie.github.io/sommet/legal/</loc><lastmod>2026-11-18</lastmod></url>
 </urlset>

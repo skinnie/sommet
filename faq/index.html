@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FAQ: using a Suunto Ambit without Movescount or the Suunto app — Sommet</title>
+<meta name="description" content="Answers about Sommet: can a Suunto Ambit still be used without Movescount, is a phone or an account needed, which watches are supported, and what to do if something goes wrong.">
+<meta name="author" content="André Faria">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://skinnie.github.io/sommet/faq/">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../favicon.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sommet">
+<meta property="og:title" content="FAQ: using a Suunto Ambit without Movescount or the Suunto app — Sommet">
+<meta property="og:description" content="Answers about Sommet: can a Suunto Ambit still be used without Movescount, is a phone or an account needed, which watches are supported, and what to do if something goes wrong.">
+<meta property="og:url" content="https://skinnie.github.io/sommet/faq/">
+<meta property="og:locale" content="en">
+<meta property="og:image" content="https://skinnie.github.io/sommet/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A mountain ridgeline at golden hour — Sommet, field software for Suunto watches">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FAQ: using a Suunto Ambit without Movescount or the Suunto app — Sommet">
+<meta name="twitter:description" content="Answers about Sommet: can a Suunto Ambit still be used without Movescount, is a phone or an account needed, which watches are supported, and what to do if something goes wrong.">
+<meta name="twitter:image" content="https://skinnie.github.io/sommet/og.jpg">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Sommet", "item": "https://skinnie.github.io/sommet/"}, {"@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://skinnie.github.io/sommet/faq/"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do I need a phone or a smartphone to use the watch?", "acceptedAnswer": {"@type": "Answer", "text": "No. These Suunto Ambit, Traverse and Kailash watches are standalone GPS watches that work on their own on the trail — no phone required. Sommet runs on your own computer or phone only to sync routes, waypoints, workouts and activities, and works almost entirely offline."}}, {"@type": "Question", "name": "Is there a subscription or a cloud account?", "acceptedAnswer": {"@type": "Answer", "text": "No. Sommet is free and open-source, with no account, no login and no subscription. It runs on your own machine and keeps your data local — no cloud you don't control."}}, {"@type": "Question", "name": "Can I use a Suunto Ambit without Movescount or the Suunto app?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — and you can skip the Suunto app too. The only thing you lose is syncing to the Suunto app itself; everything else is covered by Sommet."}}, {"@type": "Question", "name": "Will the Spartan, Suunto 5, 9 and later Suunto watches be supported?", "acceptedAnswer": {"@type": "Answer", "text": "No. SuuntoLink and the Suunto app already provide great features for those. Sommet focuses on the older Ambit, Traverse and Kailash families that lost features when Movescount closed."}}]}</script>
+<script>try{var t=localStorage.getItem('sommet-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>img{max-width:100%}[hidden]{display:none!important}</style>
+<style>
+:root{
+  --ground:#EFEFEC; --surface:#FFFFFF; --nested:#E8E8E3;
+  --ink:#16171A; --muted:#5C5D61; --faint:#8B8C88;
+  --hair:#DCDCD6; --hairStrong:#C7C7C0; color-scheme:light;
+}
+:root:not([data-theme="light"]){ @media (prefers-color-scheme:dark){
+  --ground:#0C0D0F; --surface:#141517; --nested:#1A1B1E;
+  --ink:#F1F0EC; --muted:#ADAEA8; --faint:#77786F;
+  --hair:#232427; --hairStrong:#34353A; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --ground:#0C0D0F; --surface:#141517; --nested:#1A1B1E;
+  --ink:#F1F0EC; --muted:#ADAEA8; --faint:#77786F;
+  --hair:#232427; --hairStrong:#34353A; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"Archivo","Helvetica Neue",Arial,sans-serif;font-weight:400;font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+.wrap{max-width:1140px;margin:0 auto;padding:0 34px}
+h1,h2,h3{font-weight:300;letter-spacing:-.015em;text-wrap:balance;margin:0}
+.eyebrow{font-size:11px;letter-spacing:.28em;text-transform:uppercase;font-weight:500;color:var(--faint)}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+a{color:inherit}
+:focus-visible{outline:1.5px solid var(--ink);outline-offset:3px}
+.arrow{display:inline-flex;align-items:center;gap:11px;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;text-decoration:none;padding-bottom:5px;border-bottom:1px solid currentColor;transition:gap .2s;cursor:pointer}
+.arrow:hover{gap:16px}
+.logo{display:inline-flex;vertical-align:middle;color:var(--ink)}
+
+/* TOPBAR */
+.top{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--ground) 84%,transparent);backdrop-filter:saturate(1.2) blur(12px);border-bottom:1px solid var(--hair)}
+.top .wrap{display:flex;align-items:center;gap:18px;height:66px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink);cursor:pointer}
+.brand .nm{font-weight:600;letter-spacing:.01em;font-size:18px}
+.nav{margin-left:auto;display:flex;align-items:center;gap:24px}
+.nav a{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;color:var(--muted);text-decoration:none;cursor:pointer}
+.nav a:hover,.nav a.cur{color:var(--ink)}
+.menuBtn{display:none;align-items:center;justify-content:center;width:36px;height:34px;border:1px solid var(--hair);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer;padding:0}
+.mobNav{display:none;flex-direction:column;border-top:1px solid var(--hair)}
+.mobNav a{padding:14px 34px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;color:var(--muted);text-decoration:none;border-bottom:1px solid var(--hair)}
+.mobNav a:last-child{border-bottom:none}
+.mobNav a:hover,.mobNav a.cur{color:var(--ink)}
+@media(max-width:820px){.menuBtn{display:inline-flex}.mobNav.open{display:flex}}
+@media(min-width:821px){.mobNav{display:none!important}}
+.tbtn{cursor:pointer;background:transparent;border:1px solid var(--hairStrong);border-radius:9px;color:var(--ink);width:38px;height:32px;display:grid;place-items:center}
+.tbtn:hover{background:var(--ink);color:var(--ground)}
+@media(max-width:820px){.nav a.hideMob{display:none}}
+
+.page{display:none}
+.page.active{display:block}
+
+/* HERO */
+.hero{position:relative;min-height:90vh;display:flex;align-items:center;overflow:hidden;background:#0A0B0D;color:#F3F1EC;isolation:isolate}
+.hero img{position:absolute;inset:0;z-index:0;width:100%;height:100%;object-fit:cover;object-position:68% 40%;filter:saturate(.94) contrast(1.02)}
+.hero .scrim{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,#0A0B0D 0%,rgba(10,11,13,.82) 32%,rgba(10,11,13,.32) 66%,rgba(10,11,13,.12) 100%),linear-gradient(0deg,rgba(10,11,13,.6),transparent 55%)}
+.hero .wrap{position:relative;z-index:2;padding:70px 34px}
+.hero .eyebrow{color:#CFCCC4}
+.hero h1{font-size:clamp(44px,7.2vw,92px);line-height:.96;margin:22px 0 0;color:#F5F3EE}
+.hero .lede{font-weight:300;font-size:clamp(17px,2vw,21px);line-height:1.5;color:#CFCDC6;max-width:40ch;margin:24px 0 0}
+.hero .links{display:flex;gap:30px;flex-wrap:wrap;margin-top:34px}
+.hero .meta{display:flex;gap:28px;flex-wrap:wrap;margin-top:40px;font-family:"IBM Plex Mono";font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#9A988F}
+.hero .meta b{color:#F3F1EC;font-weight:500}
+
+/* STATS */
+.stats{border-bottom:1px solid var(--hair)}
+.stats .wrap{display:grid;grid-template-columns:repeat(4,1fr)}
+@media(max-width:640px){.stats .wrap{grid-template-columns:repeat(2,1fr)}}
+.stat{padding:34px 12px 34px 0}
+.stat + .stat{padding-left:28px;border-left:1px solid var(--hair)}
+@media(max-width:640px){.stat{padding:24px 0}.stat:nth-child(even){padding-left:24px;border-left:1px solid var(--hair)}.stat:nth-child(-n+2){border-bottom:1px solid var(--hair)}}
+.stat .n{font-weight:300;font-size:38px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat .c{font-family:"IBM Plex Mono";font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:8px}
+
+/* SECTIONS */
+section.blk{padding:100px 0}
+.sec-head{max-width:62ch}
+.sec-head h2{font-size:clamp(30px,5vw,52px);line-height:1.0;margin:16px 0 0}
+.sec-head p{color:var(--muted);font-weight:300;font-size:19px;margin:18px 0 0}
+.page-head{padding:118px 0 0}
+.page-head h1{font-size:clamp(40px,6.5vw,72px);line-height:.98;margin:16px 0 0}
+.page-head p{color:var(--muted);font-weight:300;font-size:20px;margin:20px 0 0;max-width:60ch}
+
+/* WHY */
+.why{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+.why .cols{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;margin-top:8px}
+@media(max-width:860px){.why .cols{grid-template-columns:1fr;gap:14px}}
+.why p{font-weight:300;font-size:19px;line-height:1.6;margin:22px 0 0}
+.why .lead{font-size:23px;line-height:1.5}
+.why .sig{font-family:"IBM Plex Mono";font-size:12.5px;color:var(--faint);margin-top:26px;letter-spacing:.04em}
+.pullquote{font-weight:300;font-size:clamp(24px,3.2vw,34px);line-height:1.32;border-top:1px solid var(--hairStrong);padding-top:26px;margin:0}
+.pullquote cite{display:block;font-style:normal;font-family:"IBM Plex Mono";font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-top:18px}
+
+/* PHOTO BAND */
+.band{position:relative;min-height:64vh;display:flex;align-items:flex-end;overflow:hidden;background:#0A0B0D;color:#F3F1EC}
+.band img{position:absolute;inset:0;z-index:0;width:100%;height:100%;object-fit:cover;object-position:center 42%;filter:saturate(.9) contrast(1.02)}
+.band .scrim{position:absolute;inset:0;z-index:1;background:linear-gradient(0deg,rgba(10,11,13,.82),rgba(10,11,13,.2) 55%,transparent),linear-gradient(90deg,rgba(10,11,13,.6),transparent 60%)}
+.band .wrap{position:relative;z-index:2;padding:0 34px 60px}
+.band .eyebrow{color:#CFCCC4}
+.band h2{font-size:clamp(30px,5.4vw,60px);line-height:.98;margin:14px 0 0;color:#F5F3EE}
+.band p{font-weight:300;color:#CFCDC6;max-width:44ch;margin:18px 0 0}
+.band .arrow{margin-top:24px;color:#F3F1EC}
+
+/* WATCHES teaser + fleet */
+.chips{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.chip{font-weight:400;font-size:14.5px;color:var(--muted);border:1px solid var(--hair);border-radius:9px;padding:9px 15px}
+.fleet{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden;margin-top:36px}
+@media(max-width:860px){.fleet{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:460px){.fleet{grid-template-columns:1fr}}
+.fw{background:var(--ground);padding:22px 20px}
+.fw .fam{font-family:"IBM Plex Mono";font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.fw .nm{font-weight:500;font-size:18px;margin-top:9px;line-height:1.15}
+.fw .via{font-family:"IBM Plex Mono";font-size:11.5px;color:var(--muted);margin-top:10px;letter-spacing:.03em}
+
+/* KAILASH spotlight */
+.kail{display:grid;grid-template-columns:1.1fr .9fr;gap:52px;align-items:center;margin-top:44px}
+.kail.wide{grid-template-columns:.86fr 1.14fr}
+.kail.topimg{align-items:start}
+.kail.topimg .kcard{margin-top:96px!important}
+.kail.topk{align-items:start}
+.kail.topk .kcard{margin-top:94px!important}
+@media(max-width:860px){.kail.topk .kcard{margin-top:0!important}}
+@media(max-width:860px){.kail.topimg .kcard{margin-top:0}}
+@media(max-width:860px){.kail,.kail.wide{grid-template-columns:1fr;gap:30px}.kail .kcopy{order:-1}}
+.kcard{background:#F3F3EE;border:1px solid var(--hair);border-radius:16px;padding:24px}
+.kcard img{display:block;width:100%;height:auto;border-radius:8px}
+.kcard .cap{font-family:"IBM Plex Mono";font-size:11px;color:#5b6559;letter-spacing:.04em;margin-top:14px}
+.kail.rev .kcard{order:2}
+.kail + .kail{margin-top:44px}
+.kcopy h2{font-size:clamp(28px,4vw,44px);line-height:1;margin:14px 0 0}
+/* software screenshot gallery */
+.shots{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:36px}
+@media(max-width:760px){.shots{grid-template-columns:1fr}}
+.shots .shot{margin:0;border:1px solid var(--hair);border-radius:14px;overflow:hidden;background:var(--surface)}
+.shots .shot img{display:block;width:100%;aspect-ratio:3/2;object-fit:cover;object-position:left top}
+.shots .shot.mapshot img{object-position:left bottom}
+.shots .shot figcaption{font-family:"IBM Plex Mono";font-size:11.5px;color:var(--muted);letter-spacing:.04em;padding:12px 16px;border-top:1px solid var(--hair)}
+.kcopy p{color:var(--muted);font-weight:300;font-size:18px;margin:18px 0 0}
+.kcopy p em{color:var(--ink);font-style:italic}
+
+/* FEATURE grids (shared) */
+.group{margin-top:56px}.group:first-of-type{margin-top:40px}
+.group-head{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--hairStrong);padding-bottom:14px}
+.group-head .gi{font-family:"IBM Plex Mono";font-size:13px;color:var(--faint)}
+.group-head h3{font-size:24px;font-weight:400;letter-spacing:-.01em}
+.group-head .gsub{margin-left:auto;font-family:"IBM Plex Mono";font-size:11px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+@media(max-width:560px){.group-head .gsub{display:none}}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+@media(max-width:860px){.grid3{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.grid3{grid-template-columns:1fr}}
+.cell{background:var(--ground);padding:22px 20px 24px;transition:background .16s}
+.cell:hover{background:var(--surface)}
+.cell h4{font-weight:500;font-size:16px;margin:0;display:flex;align-items:baseline;gap:9px}
+.cell h4 .x{margin-left:auto;font-family:"IBM Plex Mono";font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);border:1px solid var(--hair);border-radius:5px;padding:2px 6px}
+.cell p{font-weight:300;font-size:15px;line-height:1.5;color:var(--muted);margin:11px 0 0}
+
+/* term list (honesty / help) */
+.terms{list-style:none;margin:34px 0 0;padding:0}
+.terms li{padding:22px 0;border-bottom:1px solid var(--hair);display:grid;grid-template-columns:210px 1fr;gap:24px;align-items:baseline}
+.terms li:last-child{border-bottom:none}
+@media(max-width:600px){.terms li{grid-template-columns:1fr;gap:6px}}
+.terms .t{font-family:"IBM Plex Mono";font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
+.terms .d{font-weight:300;font-size:17px;color:var(--muted);line-height:1.55}
+.terms .d a{text-decoration:underline;text-underline-offset:3px}
+
+/* RESPECT / bordered box */
+.box{border-left:1px solid var(--hairStrong);padding:6px 0 6px 28px;margin-top:28px;max-width:78ch}
+.box p{font-weight:300;font-size:19px;line-height:1.62;margin:0}
+.box p + p{margin-top:16px;color:var(--muted)}
+
+/* GET IT / platforms */
+.plat-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden;margin-top:36px}
+@media(max-width:700px){.plat-grid{grid-template-columns:1fr}}
+.plat{background:var(--ground);padding:30px}
+.plat .pf{display:flex;align-items:baseline;gap:12px}
+.plat .pf .nm{font-weight:400;font-size:22px}
+.plat .pf .tag{margin-left:auto;font-family:"IBM Plex Mono";font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);border:1px solid var(--hair);padding:4px 8px;border-radius:6px}
+.plat p{font-weight:300;color:var(--muted);font-size:16px;margin:16px 0 0}
+.plat .conn{font-family:"IBM Plex Mono";font-size:12px;color:var(--faint);margin-top:16px;letter-spacing:.02em}
+.get-note{text-align:center;font-family:"IBM Plex Mono";font-size:12.5px;color:var(--muted);margin-top:36px;letter-spacing:.03em}
+.get-note a{text-decoration:underline;text-underline-offset:3px}
+
+/* CONTRIBUTE */
+.give{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:40px}
+@media(max-width:720px){.give{grid-template-columns:1fr}}
+.give .g{border:1px solid var(--hair);border-radius:14px;padding:26px}
+.give .g h3{font-size:22px;font-weight:400;margin:0}
+.give .g p{color:var(--muted);font-weight:300;font-size:16.5px;margin:12px 0 0;line-height:1.55}
+.give .g .ways{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
+.give .g .ways span,.give .g .ways a{font-family:"IBM Plex Mono";font-size:12px;color:var(--muted);border:1px solid var(--hair);border-radius:8px;padding:7px 12px;text-decoration:none;cursor:pointer;transition:border-color .15s,color .15s}
+.give .g .ways a:hover{border-color:var(--ink);color:var(--ink)}
+
+/* PROSE (legal / credits) */
+.prose{max-width:74ch;margin-top:40px}
+.prose h3{font-size:15px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;margin:38px 0 0;color:var(--ink);font-family:"IBM Plex Mono";letter-spacing:.08em}
+.prose h3:first-child{margin-top:0}
+.prose p{font-weight:300;font-size:17px;line-height:1.6;color:var(--muted);margin:14px 0 0}
+.prose ul{list-style:none;margin:16px 0 0;padding:0}
+.prose li{font-weight:300;font-size:16px;line-height:1.55;color:var(--muted);padding:11px 0;border-bottom:1px solid var(--hair)}
+.prose li:last-child{border-bottom:none}
+.prose li b{color:var(--ink);font-weight:500}
+.prose a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* FOOTER */
+footer{border-top:1px solid var(--hair);padding:56px 0 64px}
+.foot-grid{display:flex;flex-wrap:wrap;gap:34px;justify-content:space-between}
+.foot-brand{max-width:38ch}
+.foot-brand p{font-family:"IBM Plex Mono";font-size:12px;line-height:1.75;color:var(--muted);margin:16px 0 0;letter-spacing:.01em}
+.foot-links{display:flex;gap:56px;flex-wrap:wrap}
+.foot-col h4{font-family:"IBM Plex Mono";font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 15px;font-weight:500}
+.foot-col a{display:block;font-size:16px;font-weight:300;color:var(--muted);text-decoration:none;margin-bottom:10px;cursor:pointer}
+.foot-col a:hover{color:var(--ink)}
+.legal{margin-top:44px;padding-top:24px;border-top:1px solid var(--hair);font-family:"IBM Plex Mono";font-size:11.5px;color:var(--faint);line-height:1.85;letter-spacing:.02em}
+
+/* user-added boxes (persist on the live site) */
+.ubox{border:1px solid var(--hair);border-radius:14px;padding:22px 24px;margin-top:16px}
+.ubox h3{font-size:20px;font-weight:400;letter-spacing:-.01em;margin:0}
+.ubox p{font-weight:300;color:var(--muted);font-size:16px;line-height:1.55;margin:10px 0 0}
+.ubox a,.qa a,.faq a,main p a:not(.arrow),main li a:not(.arrow){color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.uimg{margin:16px 0 0}
+.uimg img{display:block;width:100%;height:auto;border-radius:12px}
+/* FAQ */
+.qa{padding:24px 0;border-bottom:1px solid var(--hair)}
+.qa:last-child{border-bottom:none}
+.qa h3{font-size:20px;font-weight:400;letter-spacing:-.01em;margin:0}
+.qa p{font-weight:300;color:var(--muted);font-size:17px;line-height:1.55;margin:12px 0 0;max-width:72ch}
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+/* landscape device-card copy */
+.kcopy .lead{font-size:1.02em;color:var(--ink);margin:0 0 15px}
+.variants{display:flex;flex-direction:column;gap:7px;margin:0 0 17px;padding:0 0 16px;border-bottom:1px solid var(--hair)}
+.variants .v{font-size:.85em;line-height:1.45;color:var(--muted)}
+.variants .v b{color:var(--ink);font-weight:500}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(136px,1fr));gap:18px 22px}
+.fgroup h4{font-size:10.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--faint);font-weight:600;margin:0 0 8px}
+.fgroup ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.fgroup li{font-size:.85em;line-height:1.38;color:var(--muted)}
+.fgroup.span{grid-column:1/-1}
+.fgroup.span ul{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 22px}
+.kcopy h2 a{color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px;text-decoration-color:var(--faint)}
+.v a{text-decoration:underline;text-underline-offset:2px}
+.kcopy .note{font-size:.85em;color:var(--muted);line-height:1.5;margin:15px 0 0}
+.kcopy .note em{color:var(--ink);font-style:italic}
+
+/* --- mobile overrides (placed last so they win the cascade) --- */
+@media(max-width:640px){.hero{min-height:auto;overflow:visible}.hero .wrap{padding:58px 24px}.hero .meta{display:none!important}}
+@media(max-width:560px){.fgrid{grid-template-columns:1fr!important;gap:20px 0}}
+</style>
+<noscript><style>.reveal{opacity:1;transform:none}</style></noscript>
+</head>
+<body>
+<div id="app">
+<!-- ============ TOPBAR ============ -->
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../"><span class="logo" data-size="30"><svg viewBox="0 0 240 240" width="30" height="30" aria-hidden="true" style="color:var(--ink)"><circle cx="120" cy="122" r="78" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-dasharray="11 13"></circle><path d="M76 166 L120 76 L164 166 Z" fill="currentColor"></path></svg></span><span class="nm">Sommet</span></a>
+    <nav class="nav">
+      <a href="../#kit" class="hideMob">Features</a>
+      <a href="../software/" data-nav="software" class="hideMob">Software</a>
+      <a href="../watches/" data-nav="watches" class="hideMob">Watches</a>
+      <a href="../#get">Get it</a>
+      <a href="../help/" data-nav="help" class="hideMob">Help</a>
+      <a href="../faq/" data-nav="faq" class="hideMob cur" aria-current="page">FAQ</a>
+      <button class="tbtn" id="themeToggle" aria-label="Toggle light and dark" title="Toggle light / dark">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.9A9 9 0 1 1 11.1 3 7 7 0 0 0 21 12.9z"></path></svg>
+      </button>
+      <button class="menuBtn" id="menuBtn" aria-label="Open menu" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+    </nav>
+  </div>
+  <div class="mobNav" id="mobNav">
+    <a href="../#kit">Features</a>
+    <a href="../software/" data-nav="software">Software</a>
+    <a href="../watches/" data-nav="watches">Watches</a>
+    <a href="../#get">Get it</a>
+    <a href="../help/" data-nav="help">Help</a>
+    <a href="../faq/" data-nav="faq" class="cur" aria-current="page">FAQ</a>
+  </div>
+</header>
+
+<main>
+<div class="page active" id="p-faq">
+  <section class="blk">
+    <div class="wrap">
+      <div class="page-head"><div class="eyebrow">Questions</div><h1>F.A.Q.</h1></div>
+      <div style="margin-top:34px">
+        <div class="qa"><h3>Do I need a phone to use the watch?</h3><p>No. These Suunto Ambit, Traverse and Kailash watches are standalone GPS watches that work on their own on the trail — no phone required. Sommet runs on your own computer or phone only to sync, and works almost entirely offline.</p></div>
+        <div class="qa"><h3>Is there a subscription or a cloud account?</h3><p>No. Sommet is free and open-source — no account, no login, no subscription. It runs on your own machine and keeps your data local.</p></div>
+        <div class="qa"><h3>Can I use a Suunto Ambit without Movescount or the Suunto app?</h3><p>Yes — and you can skip the Suunto app too. The only thing you lose is syncing to the Suunto app itself; everything else is covered by Sommet.</p></div>
+        <div class="qa"><h3>Found something that's not right from a dev perspective?</h3><p><a href="mailto:andrepsfaria@gmail.com?subject=Sommet">Contact me</a>. I have zero experience, but I'm willing to learn — the whole app was vibe-coded.</p></div>
+        <div class="qa"><h3>Found a bug?</h3><p>Open an issue with logs and screenshots — <a href="https://github.com/skinnie/sommet/issues" target="_blank" rel="noopener">right here</a>.</p></div>
+        <div class="qa"><h3>Will the Spartan, Suunto 5, 9 and later Suuntos be supported?</h3><p>No. SuuntoLink and the Suunto app already provide great features for them.</p></div>
+        <div class="qa"><h3>Can you implement X, Y, Z feature?</h3><p>Propose it — but beware that if I don't have the hardware, it may be complicated to implement.</p></div>
+        <div class="qa"><h3>My watch bugged — what do I do now?!</h3><p>Go to Mac or Windows, connect to SuuntoLink and reset. Your settings will be lost, but your watch will be alive.</p></div>
+        <div class="qa"><h3>Will you add translations to X, Y, Z language?</h3><p>For the moment, no — but if anyone fancies doing it, go ahead.</p></div>
+      </div>
+    </div>
+  </section>
+</div>
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="../"><span class="logo" data-size="30"><svg viewBox="0 0 240 240" width="30" height="30" aria-hidden="true" style="color:var(--ink)"><circle cx="120" cy="122" r="78" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-dasharray="11 13"></circle><path d="M76 166 L120 76 L164 166 Z" fill="currentColor"></path></svg></span><span class="nm">Sommet</span></a>
+        <p>An independent app to sync and manage Suunto Ambit 1/2/3, Traverse, Traverse Alpha &amp; Kailash — plus Garmin eTrex and bike computers — on your own computer or phone. Free, offline, account-free.</p>
+      </div>
+      <div class="foot-links">
+        <div class="foot-col"><h4>Pages</h4>
+          <a href="../">Home</a><a href="../watches/">Watches</a><a href="../software/">Software</a><a href="../#kit">Features</a><a href="../#get">Download</a>
+        </div>
+        <div class="foot-col"><h4>Project</h4>
+          <a href="../contribute/">Contribute</a><a href="../help/">Help</a><a href="../faq/">FAQ</a><a href="../legal/">Legal &amp; licenses</a><a href="../credits/">Credits</a>
+        </div>
+        <div class="foot-col"><h4>Open source</h4>
+          <a href="https://github.com/skinnie/sommet" target="_blank" rel="noopener">GitHub repository</a>
+          <a href="https://github.com/skinnie/sommet/issues" target="_blank" rel="noopener">Report an issue</a>
+        </div>
+      </div>
+    </div>
+    <div class="legal">
+      Sommet · vibe-coded with coffee &amp; stubbornness · not affiliated with or endorsed by Suunto or Garmin · trademarks belong to their owners · provided as-is, no warranty · GNU GPLv3.<br>
+      Product images © their respective makers (Suunto, Garmin) and the retailers/press credited on each card, used only to identify supported devices. Landscape photos via Unsplash.
+    </div>
+  </div>
+</footer>
+</div><!-- /#app -->
+<script>
+var HOME=false, ROUTES={"home": "../", "watches": "../watches/", "software": "../software/", "faq": "../faq/", "help": "../help/", "contribute": "../contribute/", "credits": "../credits/", "legal": "../legal/", "get": "../#get", "features": "../#kit", "why": "../#why"};
+/* old #/page addresses keep working */
+function oldRoute(){
+  if(location.hash.indexOf('#/')!==0)return;
+  var k=location.hash.slice(2); if(ROUTES[k]) location.replace(ROUTES[k]);
+}
+if(HOME){oldRoute();window.addEventListener('hashchange',oldRoute);}
+/* theme toggle (remembered across pages) */
+document.getElementById('themeToggle').addEventListener('click',function(){
+  var root=document.documentElement, cur=root.getAttribute('data-theme');
+  var sysDark=window.matchMedia('(prefers-color-scheme:dark)').matches;
+  var next=(cur? cur==='dark' : sysDark)?'light':'dark';
+  root.setAttribute('data-theme',next);
+  try{localStorage.setItem('sommet-theme',next);}catch(e){}
+});
+/* mobile menu */
+var menuBtn=document.getElementById('menuBtn'),mobNav=document.getElementById('mobNav');
+if(menuBtn&&mobNav){menuBtn.addEventListener('click',function(){var o=mobNav.classList.toggle('open');menuBtn.setAttribute('aria-expanded',o?'true':'false');});
+  mobNav.addEventListener('click',function(e){if(e.target.closest('a'))mobNav.classList.remove('open');});}
+/* reveal on scroll */
+(function(){
+  var els=document.querySelectorAll('.reveal:not(.in)');
+  var reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  if('IntersectionObserver' in window && !reduce){
+    var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target);}})},{threshold:.1,rootMargin:'0px 0px -6% 0px'});
+    els.forEach(function(el){io.observe(el)});
+  } else els.forEach(function(el){el.classList.add('in')});
+})();
+</script>
+</body>
+</html>
