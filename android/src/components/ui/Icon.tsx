@@ -18,7 +18,9 @@ export type IconName =
   // Before this they all fell back to 'chart' and the rail showed four identical bar charts.
   | 'coach' | 'weight' | 'health' | 'ember'
   // For the search box, closing a note, and error notes (2026-11-02, desktop picks #7/#9).
-  | 'search' | 'close' | 'error';
+  | 'search' | 'close' | 'error'
+  // Move page on a landscape tablet: map beside the panel, or above it (2026-11-18).
+  | 'layoutBeside' | 'layoutAbove';
 
 interface Props {
   name: IconName;
@@ -476,6 +478,20 @@ export default function Icon({ name, size = 20, color = '#000' }: Props) {
           <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.9} fill="none" />
           <Line x1={12} y1={7.5} x2={12} y2={13} {...s} />
           <Circle cx={12} cy={16.4} r={0.9} fill={color} stroke="none" />
+        </Svg>
+      );
+    case 'layoutBeside':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={3.5} y={5} width={17} height={14} rx={2} {...s} />
+          <Line x1={12} y1={5} x2={12} y2={19} {...s} />
+        </Svg>
+      );
+    case 'layoutAbove':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Rect x={3.5} y={5} width={17} height={14} rx={2} {...s} />
+          <Line x1={3.5} y1={12} x2={20.5} y2={12} {...s} />
         </Svg>
       );
     default:

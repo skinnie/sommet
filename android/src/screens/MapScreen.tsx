@@ -27,6 +27,11 @@ import { weatherLabel } from '../components/WeatherCard';
 import { weatherEmoji } from '../services/WeatherService';
 import { fetchActivityWeather, ActivityWeather } from '../services/ActivityWeather';
 import ActivityPanel from '../components/activity/ActivityPanel';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Landscape tablet: the map beside the panel (default) or above it, like desktop (André,
+// 2026-11-18: "not a super fan of the vertical map"). Remembered on this device.
+const MAP_ABOVE_KEY = 'moveMapAbove';
 
 type Route = RouteProp<RootStackParamList, 'Map'>;
 type Nav   = NativeStackNavigationProp<RootStackParamList, 'Map'>;
@@ -358,7 +363,17 @@ export default function MapScreen() {
     mapJs(colouredRef.current);
   };
   const win = useWindowDimensions();
-  const sideBySide = win.width > win.height && win.width >= 900;   // tablet landscape: map left, panel right
+  const wideLandscape = win.width > win.height && win.width >= 900;
+  const [mapAbove, setMapAbove] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(MAP_ABOVE_KEY).then(v => setMapAbove(v === '1')).catch(() => undefined);
+  }, []);
+  const toggleMapAbove = () => {
+    const next = !mapAbove;
+    setMapAbove(next);
+    AsyncStorage.setItem(MAP_ABOVE_KEY, next ? '1' : '0').catch(() => undefined);
+  };
+  const sideBySide = wideLandscape && !mapAbove;   // tablet landscape: map left, panel right
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
@@ -807,6 +822,18 @@ export default function MapScreen() {
         )}
       </TouchableOpacity>
 
+      {/* ── Map beside or above the panel (landscape tablet only) ── */}
+      {wideLandscape && (
+        <TouchableOpacity
+          style={styles.layoutFab}
+          onPress={toggleMapAbove}
+          accessibilityRole="button"
+          accessibilityLabel={mapAbove ? 'Map beside the details' : 'Map above the details'}
+        >
+          <Icon name={mapAbove ? 'layoutBeside' : 'layoutAbove'} size={22} color={theme.primary} />
+        </TouchableOpacity>
+      )}
+
       {/* ── Bouton export flottant ── */}
       <TouchableOpacity
         style={[styles.exportFab, exporting && styles.btnDisabled]}
@@ -958,6 +985,19 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
     // Real, 2026-08-10 (offline maps) - same pill as exportFab, placed just to its left
     // (76 = 16 + 48 + 12, exportFab's own right offset + width + a real gap) rather than
     // stacking vertically, so it can't collide with exportMenu popping up above exportFab.
+    layoutFab: {
+      position: 'absolute',
+      bottom: 12,
+      right: 140,
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: t.primary + '1F',
+      borderColor: t.primary,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     offlineFab: {
       position: 'absolute',
       bottom: 12,
