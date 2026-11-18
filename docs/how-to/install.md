@@ -52,7 +52,7 @@ app → Open → Open; on Windows click "More info" → "Run anyway".
 
 > **Note:** the watch engine (the Python helper) is bundled inside these downloads and the
 > app starts it automatically, so no separate setup is needed. The Windows `.zip` was checked
-> with a real Ambit2; the macOS `.dmg` is **not yet confirmed against a real watch**. If a
+> with a real Ambit2, and the macOS `.dmg` with a watch over the cable. If a
 > download misbehaves, building from source with `run-desktop.sh` (below) is the proven path.
 
 ## macOS: the "Input Monitoring" permission

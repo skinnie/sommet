@@ -53,7 +53,7 @@ From the [Releases](https://github.com/skinnie/sommet/releases) page:
 
 - **Linux:** one AppImage file. USB needs a udev rule, once.
 - **Android:** the APK. Use a USB-OTG cable or Bluetooth.
-- **Windows:** the `.zip`. **macOS:** the `.dmg`, not yet tested with a watch.
+- **Windows:** the `.zip`. **macOS:** the `.dmg`. Both tested with a watch over the cable.
 
 Step by step, with the udev rule: [Install Sommet](docs/how-to/install.md). To build it
 yourself: [BUILDING.md](BUILDING.md).

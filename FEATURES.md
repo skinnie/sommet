@@ -71,7 +71,7 @@ Kailash — plus Garmin eTrex 10/20/30 handheld GPS units.
 
 ### ⚙️ Watch Settings
 - **Read** your watch's settings (units, personal info, etc.).
-- **Change settings** on the watches that support it (Ambit 3 and Kailash).
+- **Change settings** on the watches that support it (Ambit 1, Ambit 2, Ambit 3 and Kailash).
 
 ### 🔁 Copy one watch to another (Sync)
 - A separate **Sync** tool for moving your setup from one watch to another — handy when you
