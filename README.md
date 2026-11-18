@@ -4,7 +4,7 @@ Sommet keeps Suunto's Ambit, Traverse and Kailash watches in use after Movescoun
 and POIs, edit sport modes and settings, and download your activities on Linux, Windows, macOS,
 or Android, over USB or Bluetooth. It's free, needs no account and works offline.
 
-**[Download the latest release](https://github.com/skinnie/sommet/releases/latest)**
+**[Download the latest release](https://github.com/skinnie/sommet/releases/latest)** · **[Website](https://skinnie.github.io/sommet/)** · [Supported watches](https://skinnie.github.io/sommet/watches/) · [FAQ](https://skinnie.github.io/sommet/faq/)
 
 | Desktop | Android |
 |:---:|:---:|
