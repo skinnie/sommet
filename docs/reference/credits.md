@@ -76,8 +76,8 @@ reverse-engineering here would have been possible, or would have taken far longe
   bikes / shoes / components / service reminders both talk to its API.
 
 - **[OpenStreetMap](https://www.openstreetmap.org/copyright)** - © OpenStreetMap contributors
-  (ODbL). The map views render OSM tiles: **CyclOSM** (served by OpenStreetMap France), standard
-  OSM, and **IGN Géoplateforme** tiles for France.
+  (ODbL). The map views render OSM tiles: **CyclOSM** (served by OpenStreetMap France) and
+  standard OSM.
 
 - **[PitStopper](https://pitstopper.net)** - the route POI search whose GPX export the Race Plan
   reads for water / food / shelter stops along a route (`tools/race_pois.py`).

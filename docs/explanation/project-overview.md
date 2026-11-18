@@ -195,7 +195,7 @@ Mobile app version 0.2.67 (desktop app 0.2.67). `U` = over USB-OTG, `B` = over B
 | Kailash travel history / visited places | — | — | — | — | ✅ U *(2026-08-10)* ✅ B |
 | Firmware version check + download link *(from the manufacturer's service)* | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Firmware flashing *(emergencies only; use SuuntoLink for normal updates)* | not tested | not tested | ✅ U | 🟡 U | 🟡 U |
-| Weather (Open-Meteo), maps (IGN / OSM / CyclOSM) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Weather (Open-Meteo), maps (OSM / CyclOSM) | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Feature matrix — Desktop app (Qt 6 / QML, USB cable and experimental Bluetooth LE)
 
@@ -247,7 +247,7 @@ confirmed on a real Ambit3 on an iPhone (see the [Android changelog](../referenc
 | Activity upload and storage | Kept for these models via the Suunto app; the Movescount analysis layer is gone | ✅ **Local alternative** | Local library, GPX/FIT export, and OAuth2 upload to Strava, Runalyze, Livelox and Intervals.icu, at the user's choice. |
 | Firmware updates | Kept (SuuntoLink) | ✅ **Yes, for emergencies** | Version check and download link work against the manufacturer's service. The flasher is verified on an Ambit3 Peak; use SuuntoLink for normal updates. |
 | Kailash sync | Not supported in the Suunto app; activity/cities-visited sync was 7R-app-only (iOS, Bluetooth-only) | ✅ **Yes**, over Bluetooth and USB cable | Pair, identify, read and write settings including Home Location, read travel history and visited places, and export a recorded activity to GPX from the watch's ephemeral sample store. Confirmed live over both Bluetooth and, as of 2026-08-10, USB cable (device identify, TrackLog, DeviceHistory, and watch clock sync). |
-| Movescount web route planner | Not carried over | ✅ **Local alternative** | In-app maps (IGN / OSM / CyclOSM) and route import with preview. |
+| Movescount web route planner | Not carried over | ✅ **Local alternative** | In-app maps (OSM / CyclOSM) and route import with preview. |
 
 **Legend:** ✅ implemented · 🟡 partially implemented, no technical blocker · 🔬 understood, one
 unknown left · ❌ blocked on an unresolved unknown.

@@ -34,10 +34,6 @@ export const TRACK_COLOR = '#167E6A';
 
 export function tileUrl(provider: MapProvider, z: number, x: number, y: number): string {
   switch (provider) {
-    case 'ign':
-      return 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
-        `&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png` +
-        `&TILEMATRIXSET=PM&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}`;
     case 'osm':
       return `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
     case 'cyclosm':

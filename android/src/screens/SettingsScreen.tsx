@@ -81,7 +81,6 @@ import { checkNow, initAppUpdate, setAutoCheck, updateAvailable, updatesSupporte
 // descriptive suffix (matching desktop SettingsPage.qml's "(standard)"/"(cycling-focused)"
 // RadioButton text).
 const MAP_PROVIDER_OPTIONS: { provider: MapProvider; label: () => string }[] = [
-  { provider: 'ign',     label: () => t.mapProviderIgnLabel },
   { provider: 'osm',     label: () => t.mapProviderOsmLabel },
   { provider: 'cyclosm', label: () => t.mapProviderCyclosmLabel },
 ];
@@ -379,7 +378,7 @@ export default function SettingsScreen() {
     'strava' | 'runalyze' | 'intervals' | null
   >(null);
 
-  const [mapProvider, setMapProviderState] = useState<MapProvider>('ign');
+  const [mapProvider, setMapProviderState] = useState<MapProvider>('cyclosm');
 
   // Experimental "mark synced workouts as synced" toggle - own persisted flag (MarkSynced.ts),
   // independent of the master experimental switch, default OFF.
@@ -1010,8 +1009,8 @@ export default function SettingsScreen() {
 
         {/* ── Maps - real, 2026-08-09 ("no button to change provider, nor in the settings
             like the desktop version"). Ports SettingsPage.qml's real Maps card (icon + title
-            + "Provider: tiles from X" + exclusive toggle buttons), with IGN added as a
-            genuine Android-only third option (MapProviderService.ts's own header comment). ── */}
+            + "Provider: tiles from X" + exclusive toggle buttons). IGN, once an Android-only
+            third option, was dropped 2026-11-18 (MapProviderService.ts). ── */}
         <SettingsSection
           title={t.mapsSection}
           summary={`${MAP_PROVIDER_LABELS[mapProvider]} · offline tile cache ${tileCacheBytes === null ? '…' : formatCacheSize(tileCacheBytes)}`}

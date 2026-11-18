@@ -97,8 +97,8 @@ community and wanarun.net. At runtime it uses
 [wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp), Open Food Facts, USDA FoodData
 Central, [ZXing-C++](https://github.com/zxing-cpp/zxing-cpp),
 [react-native-camera-kit](https://github.com/teslamotors/react-native-camera-kit), the
-optional Anthropic Claude API, Qt, and React Native. Maps © OpenStreetMap contributors (CyclOSM,
-IGN Géoplateforme), weather by Open-Meteo, icons from Google Material Symbols, mobile maps with
+optional Anthropic Claude API, Qt, and React Native. Maps © OpenStreetMap contributors (CyclOSM),
+weather by Open-Meteo, icons from Google Material Symbols, mobile maps with
 Leaflet, route POIs from PitStopper. Who did what, and under which licence:
 [CREDITS.md](CREDITS.md).
 

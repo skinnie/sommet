@@ -40,7 +40,7 @@ export function TrackPreview({
   multiMarker?: boolean;
 }) {
   const theme = useV3Theme();
-  const [provider, setProvider] = useState<MapProvider>('ign');
+  const [provider, setProvider] = useState<MapProvider>('cyclosm');
   // Real bug, found live (2026-08-10) - a plain useEffect([]) only fetches the persisted
   // provider once, on mount. React Navigation's native-stack keeps RouteScreen/PoiScreen
   // mounted in the background for back-navigation, so a TrackPreview that mounted before a

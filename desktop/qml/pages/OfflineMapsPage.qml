@@ -180,9 +180,9 @@ Item {
                         Text { text: qsTr("Map"); color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel }
                         RoundedComboBox {
                             width: 170
-                            model: [MapService._providers.osm.name, MapService._providers.cyclosm.name, MapService._providers.ign.name]
-                            currentIndex: MapService.provider === "osm" ? 0 : MapService.provider === "cyclosm" ? 1 : 2
-                            onActivated: (i) => { MapService.provider = ["osm", "cyclosm", "ign"][i]; root.refreshEstimate() }
+                            model: [MapService._providers.osm.name, MapService._providers.cyclosm.name]
+                            currentIndex: MapService.provider === "osm" ? 0 : 1
+                            onActivated: (i) => { MapService.provider = ["osm", "cyclosm"][i]; root.refreshEstimate() }
                         }
                     }
                     Column {

@@ -25,7 +25,7 @@ import {
 // browsing tiles themselves stream online — you need signal to *choose* an area, not to use it
 // later. Works identically on iOS, iPadOS and Android.
 
-const PROVIDERS: MapProvider[] = ['osm', 'cyclosm', 'ign'];
+const PROVIDERS: MapProvider[] = ['osm', 'cyclosm'];
 
 // Zoom-level presets keep the tile count sane and prevent a giant continent-wide download.
 // z12≈city, z15≈street, z17≈building. Higher detail = exponentially more tiles.
@@ -57,8 +57,7 @@ ${LEAFLET_STYLE_TAG}
 var CACHE = '${cacheDirUri}';
 var TPL = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  cyclosm: 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
-  ign: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}'
+  cyclosm: 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'
 };
 function remoteUrl(key, c) { return TPL[key].split('{z}').join(c.z).split('{x}').join(c.x).split('{y}').join(c.y); }
 function makeLayer(key) {

@@ -937,8 +937,8 @@ PageFlickable {
                     // One switch (desktop picks #14). The full name of the chosen map is on the
                     // "Provider:" line above.
                     SegmentedControl {
-                        readonly property var _keys: ["osm", "cyclosm", "ign"]
-                        model: [qsTr("OpenStreetMap"), qsTr("CyclOSM (cycling)"), qsTr("IGN (France)")]
+                        readonly property var _keys: ["osm", "cyclosm"]
+                        model: [qsTr("OpenStreetMap"), qsTr("CyclOSM (cycling)")]
                         currentIndex: _keys.indexOf(MapService.provider)
                         onActivated: (i) => MapService.provider = _keys[i]
                     }
@@ -1813,8 +1813,8 @@ PageFlickable {
                         // Matches LICENSE at the repo root and docs/reference/credits.md.
                         text: qsTr("Licensed under the GNU GPLv3 and provided as is, without " +
                                     "warranty. Built with Qt 6 (LGPLv3). Map data © OpenStreetMap " +
-                                    "contributors (ODbL), tiles by CyclOSM, OpenStreetMap France " +
-                                    "and IGN; weather by Open-Meteo (CC BY 4.0); icons by Google " +
+                                    "contributors (ODbL), tiles by CyclOSM and OpenStreetMap " +
+                                    "France; weather by Open-Meteo (CC BY 4.0); icons by Google " +
                                     "Material Symbols (Apache 2.0).")
                     }
                     // The full credits list lives on GitHub; the tablet app opens the same page

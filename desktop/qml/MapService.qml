@@ -39,25 +39,17 @@ QtObject {
     // every reader of MapService.provider picks up the saved choice on next launch with no other
     // file needing to know persistence is involved. (QtObject has no default property, so the
     // Settings child is an explicit named property with its own id - see Theme.qml's note.)
-    property alias provider: mapSettings.provider  // "osm", "cyclosm" or "ign"
+    property alias provider: mapSettings.provider  // "osm" or "cyclosm"
     property QtObject mapSettingsObj: Settings {
         id: mapSettings
         category: "map"
         property string provider: "cyclosm"
+        Component.onCompleted: if (provider !== "osm" && provider !== "cyclosm") provider = "cyclosm"
     }
 
-    // IGN added on desktop 2026-08-11 (André: "ok add IGN to desktop"), which also corrects
-    // a claim this project had been carrying: MapProviderService.ts said IGN was
-    // Android-only because "desktop's plain XYZ tile renderer can't address IGN's WMTS
-    // scheme". That was never the real obstacle. IGN's TILEMATRIXSET=PM is Pseudo-Mercator -
-    // the SAME grid as XYZ, with TILEMATRIX/TILEROW/TILECOL being z/y/x - so the only
-    // difference is that the numbers go in query parameters instead of path segments. The
-    // blocker was this file building URLs by gluing "host + z/x/y.png" together, which no
-    // query-parameter service can fit. Providers now supply a FUNCTION, which any tile URL
-    // shape can satisfy.
-    //
-    // Endpoint verified live 2026-08-11 against data.geopf.fr (the Géoplateforme, where IGN
-    // moved these services): HTTP 200, a real 256x256 PNG of French topographic cartography.
+    // IGN (France) was dropped 2026-11-18 (André: it only covers France, so in Portugal every
+    // map was empty). A saved "ign" choice becomes CyclOSM on the next start. Providers still
+    // supply a URL function, so any tile URL shape fits.
     readonly property var _providers: ({
         osm: {
             name: "OpenStreetMap",
@@ -73,19 +65,6 @@ QtObject {
                        + z + "/" + x + "/" + y + ".png"
             },
             attribution: "© OpenStreetMap contributors, CyclOSM",
-        },
-        ign: {
-            name: "IGN (France)",
-            // Same layer and parameters the Android app already uses, so both versions draw
-            // the identical map - which was the point of adding it here (André: "having full
-            // parity between versions when synced").
-            url: function(z, x, y) {
-                return "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile"
-                       + "&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"
-                       + "&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM"
-                       + "&TILEMATRIX=" + z + "&TILEROW=" + y + "&TILECOL=" + x
-            },
-            attribution: "© IGN / Géoplateforme",
         },
     })
 

@@ -24,15 +24,6 @@ namespace {
 // either of those, it needs to change here too.
 QString tileUrlFor(const QString &provider, int z, int x, int y)
 {
-    if (provider == QStringLiteral("ign")) {
-        return QStringLiteral("https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile"
-                               "&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"
-                               "&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM"
-                               "&TILEMATRIX=%1&TILEROW=%2&TILECOL=%3")
-            .arg(z)
-            .arg(y)
-            .arg(x);
-    }
     if (provider == QStringLiteral("osm")) {
         return QStringLiteral("https://tile.openstreetmap.org/%1/%2/%3.png").arg(z).arg(x).arg(y);
     }

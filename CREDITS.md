@@ -91,7 +91,7 @@ Services and libraries the app talks to at runtime:
 ## Data & assets:
 
 - Map data © **OpenStreetMap** contributors, under the **Open Database License (ODbL)**. Tiles:
-  **CyclOSM** / OpenStreetMap France, standard OSM, and **IGN Géoplateforme** (France).
+  **CyclOSM** / OpenStreetMap France and standard OSM.
 - Weather by **[Open-Meteo](https://open-meteo.com/)** (CC BY 4.0).
 - Icons: **Google Material Symbols** (Apache License 2.0); 7 activity icons are Suunto's own (see credits).
 - Mobile maps: **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause).

@@ -1,8 +1,8 @@
 import { MapProvider, MAP_PROVIDER_LABELS } from './MapProviderService';
 
-// Shared by MapScreen.tsx (activity replay map) and TrackMapScreen.tsx (route/POI
+// Shared by MapScreen.tsx (activity map) and TrackMapScreen.tsx (route/POI
 // preview map) - both real Leaflet WebViews, same three tile hosts/attribution text as
-// desktop's own qml/MapService.qml (plus IGN, Android-only - see MapProviderService.ts's
+// desktop's own qml/MapService.qml (IGN was dropped 2026-11-18 - see MapProviderService.ts's
 // header comment). Pulled out so both screens share one real tile/provider-switcher
 // implementation instead of two copies drifting apart.
 //
@@ -32,11 +32,6 @@ import { MapProvider, MAP_PROVIDER_LABELS } from './MapProviderService';
 export function mapTileLayersJs(defaultProvider: MapProvider, cacheDirUri: string): string {
   return `
   var _remoteTileUrl = {
-    ign: function(z, x, y) {
-      return 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
-        '&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png' +
-        '&TILEMATRIXSET=PM&TILEMATRIX=' + z + '&TILEROW=' + y + '&TILECOL=' + x;
-    },
     osm: function(z, x, y) { return 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png'; },
     cyclosm: function(z, x, y) { return 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/' + z + '/' + x + '/' + y + '.png'; },
   };
@@ -48,25 +43,20 @@ export function mapTileLayersJs(defaultProvider: MapProvider, cacheDirUri: strin
     };
   }
 
-  var ign = L.tileLayer('${cacheDirUri}/ign/{z}/{x}/{y}.png',
-    { maxZoom: 18, attribution: '© IGN Géoplateforme' });
   var osm = L.tileLayer('${cacheDirUri}/osm/{z}/{x}/{y}.png',
     { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
   var cyclosm = L.tileLayer('${cacheDirUri}/cyclosm/{z}/{x}/{y}.png',
     { maxZoom: 20, attribution: '© OpenStreetMap contributors, CyclOSM' });
-  ign.on('tileerror', _onTileError('ign'));
   osm.on('tileerror', _onTileError('osm'));
   cyclosm.on('tileerror', _onTileError('cyclosm'));
 
-  var _layers = { ign: ign, osm: osm, cyclosm: cyclosm };
-  (_layers['${defaultProvider}'] || ign).addTo(map);
+  var _layers = { osm: osm, cyclosm: cyclosm };
+  (_layers['${defaultProvider}'] || cyclosm).addTo(map);
   L.control.layers({
-    '${MAP_PROVIDER_LABELS.ign}': ign,
     '${MAP_PROVIDER_LABELS.osm}': osm,
     '${MAP_PROVIDER_LABELS.cyclosm}': cyclosm,
   }, null, { position: 'topright', collapsed: false }).addTo(map);
   var _layerNameToKey = {
-    '${MAP_PROVIDER_LABELS.ign}': 'ign',
     '${MAP_PROVIDER_LABELS.osm}': 'osm',
     '${MAP_PROVIDER_LABELS.cyclosm}': 'cyclosm',
   };
