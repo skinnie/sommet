@@ -7,6 +7,14 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-19: Android map thumbnails name the app to OpenStreetMap
+
+- The activity list's map thumbnails now send "Sommet/2.0" as their User-Agent, as the move
+  page, the offline map cache and the weather lookup already did. OpenStreetMap's tile policy
+  asks every app to name itself, and on the tablet the thumbnails on the OpenStreetMap layer
+  showed its "403 Access blocked" tile.
+- `tools/make_screenshot_activities.py` refuses a library that already holds real moves.
+
 ## 2026-11-18: Desktop: one move's numbers no longer land on other moves (sync/07)
 
 - On desktop a move is (number, device), and moves from different watches share numbers, as did

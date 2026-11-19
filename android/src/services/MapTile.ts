@@ -32,6 +32,12 @@ const TILE_SIZE = 256;
 // same green as the same route on desktop.
 export const TRACK_COLOR = '#167E6A';
 
+// OpenStreetMap's tile policy blocks requests that don't name their app: React Native's <Image>
+// sends okhttp's own User-Agent, and every list thumbnail on the OpenStreetMap layer came back
+// as the "403 Access blocked" tile (André, 2026-11-19). Send this with every tile request, as
+// the move page's WebView, TileCache and the weather lookup already do.
+export const TILE_HEADERS = { 'User-Agent': 'Sommet/2.0' };
+
 export function tileUrl(provider: MapProvider, z: number, x: number, y: number): string {
   switch (provider) {
     case 'osm':

@@ -70,6 +70,14 @@ def hav(a, b):
 
 
 db = sqlite3.connect(DB)
+# Made-up moves never go into a real library: on 2026-11-12 these rides ended up in André's own
+# tablet library (25 moves, cleaned up 2026-11-19). Refuse any database that already holds a
+# move that isn't ours.
+_real = db.execute("SELECT count(*) FROM activities WHERE COALESCE(device, '') <> ?",
+                   (DEVICE,)).fetchone()[0]
+if _real:
+    sys.exit(f"{DB} holds {_real} real moves. This tool only fills a scratch library "
+             "(see the steps at the top); nothing was written.")
 db.execute("DELETE FROM activities")
 day = dt.datetime(2026, 11, 11, 7, 30, tzinfo=dt.timezone.utc)
 idx = 0

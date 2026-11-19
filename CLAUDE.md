@@ -57,6 +57,11 @@ General
 - This file is in the public GitHub repository. Never write serial numbers, keys, addresses of my
   devices, or notes about private work here. Those go in the local notes file, which git ignores.
 
+## Made-up data
+- Demo and screenshot moves (`tools/make_screenshot_activities.py`) go only into a scratch
+  library: a scratch home on desktop, never the owner's desktop library or the app on the
+  owner's tablet or phone. On 2026-11-12, 25 made-up rides ended up in the tablet's real library.
+
 ## Before every commit
 - Run `tools/check.sh`. It runs every automatic check that needs no watch (about 12 seconds).
   If it fails, something that worked before is broken: fix that first, do not commit around it.

@@ -4,7 +4,7 @@ import Svg, { Circle, Polyline } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { useV3Theme } from '../theme/v3';
 import { getMapProvider, MapProvider } from '../services/MapProviderService';
-import { fitBoundsMosaic, centeredPointMosaic, tileUrl, TileMosaic, TRACK_COLOR } from '../services/MapTile';
+import { fitBoundsMosaic, centeredPointMosaic, tileUrl, TileMosaic, TRACK_COLOR, TILE_HEADERS } from '../services/MapTile';
 import { t } from '../i18n';
 
 // v3.0 UI port, revised 2026-08-10 ("apply the same fix as we did on the desktop, centering
@@ -108,7 +108,7 @@ export function TrackPreview({
       {mosaic.tiles.map(tile => (
         <Image
           key={`${mosaic.z}-${tile.x}-${tile.y}`}
-          source={{ uri: tileUrl(provider, mosaic.z, tile.x, tile.y) }}
+          source={{ uri: tileUrl(provider, mosaic.z, tile.x, tile.y), headers: TILE_HEADERS }}
           style={{ position: 'absolute', left: tile.left, top: tile.top, width: tile.size, height: tile.size }}
         />
       ))}
