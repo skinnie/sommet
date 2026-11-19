@@ -3506,11 +3506,16 @@ void ActivityService::sommetPull()
         }
 
         // 2) upsert remote records (LWW), queueing GPX blob fetches for tracks we don't have.
+        // One transaction for the whole batch (2026-11-19): a first sync is ~4,800 moves, and one
+        // commit per move kept the window frozen for minutes on a new Windows install.
         const QJsonArray records = root.value(QStringLiteral("records")).toArray();
+        const bool batched = m_db.transaction();
         for (const auto &r : records) {
             if (sommetUpsertRecord(r.toObject()))
                 m_sommetPulled++;
         }
+        if (batched)
+            m_db.commit();
 
         // 3) advance the incremental cursor to the server's clock.
         const qint64 now = root.value(QStringLiteral("now")).toInteger();

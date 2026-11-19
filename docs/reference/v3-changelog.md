@@ -16,6 +16,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - Desktop and Android save that new token when the request used the saved one (the activities
   sync and the Settings "Test" button), so after a rotation nobody pastes it into each device.
   A device that stays off for the whole window still needs it typed in.
+- Desktop: the first Sommet Sync on a new install (about 4,800 moves) wrote each move in its own
+  database commit on the window's thread, so the window froze again and again (seen on a new
+  Windows install on the P5Q). The pulled moves are now written in one transaction.
 - Android: a Sommet Sync track or FIT download that never answered held the whole sync, and
   no later sync could start until the app was closed. Seen on the tablet: it stopped after
   1,436 of about 3,700 traces. Every such request now gives up after 60 s.
