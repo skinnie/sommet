@@ -3746,7 +3746,7 @@ void ActivityService::sommetPushAll()
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text, "
         "COALESCE(start_utc, 0), (fit_base64 IS NOT NULL AND fit_base64 <> ''), "
-        "COALESCE(moving_s, 0) FROM activities"),
+        "COALESCE(moving_s, 0), (length(track_json) > 20) FROM activities"),
         m_db);
     while (q.next()) {
         const QString device = q.value(1).toString();
@@ -3779,12 +3779,14 @@ void ActivityService::sommetPushAll()
         if (q.value(16).toInt() > 0)
             rec.insert(QStringLiteral("moving_s"), q.value(16).toInt());
         const QString gpx = q.value(13).toString();
-        rec.insert(QStringLiteral("has_track"), !gpx.isEmpty());
+        // sync/10: an intervals.icu import has its trace as track_json only; it goes out as GPX too
+        const bool trackOnly = gpx.isEmpty() && q.value(17).toBool();
+        rec.insert(QStringLiteral("has_track"), !gpx.isEmpty() || trackOnly);
         rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));
         if (trackRevs.value(uid) > 0)
             rec.insert(QStringLiteral("track_rev"), QJsonValue(trackRevs.value(uid)));
         records.append(rec);
-        if (!gpx.isEmpty() && !pushedSet.contains(uid))
+        if ((!gpx.isEmpty() || trackOnly) && !pushedSet.contains(uid))
             m_sommetPushQueue.append(uid);
         if (q.value(15).toBool() && !fitPushed.contains(uid))
             m_sommetFitPushQueue.append(uid);
@@ -3811,6 +3813,35 @@ void ActivityService::sommetPushAll()
     });
 }
 
+// sync/10 (2026-11-19): an intervals.icu import keeps its trace as track_json points only (the
+// list endpoint has no file), so it was never sent to the NAS and the tablet showed no map for any
+// of them. Positions (and altitude) as a GPX track, no times: enough for the map; the Charts come
+// from the move's FIT.
+static QString gpxFromTrackJson(const QString &trackJson)
+{
+    const QJsonArray pts = QJsonDocument::fromJson(trackJson.toUtf8()).array();
+    if (pts.size() < 2)
+        return QString();
+    QString out;
+    out.reserve(pts.size() * 64 + 300);
+    out += QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                          "<gpx version=\"1.1\" creator=\"Sommet\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n"
+                          "  <trk><trkseg>\n");
+    for (const QJsonValue &v : pts) {
+        const QJsonObject o = v.toObject();
+        if (!o.contains(QStringLiteral("lat")) || !o.contains(QStringLiteral("lon")))
+            continue;
+        out += QStringLiteral("    <trkpt lat=\"%1\" lon=\"%2\">")
+                   .arg(o.value(QStringLiteral("lat")).toDouble(), 0, 'f', 7)
+                   .arg(o.value(QStringLiteral("lon")).toDouble(), 0, 'f', 7);
+        if (o.contains(QStringLiteral("ele")))
+            out += QStringLiteral("<ele>%1</ele>").arg(o.value(QStringLiteral("ele")).toDouble(), 0, 'f', 1);
+        out += QStringLiteral("</trkpt>\n");
+    }
+    out += QStringLiteral("  </trkseg></trk>\n</gpx>\n");
+    return out;
+}
+
 void ActivityService::sommetPushNextBlob()
 {
     if (m_sommetPushQueue.isEmpty()) {
@@ -3827,11 +3858,14 @@ void ActivityService::sommetPushNextBlob()
     {
         QSqlQuery q(m_db);
         q.prepare(QStringLiteral(
-            "SELECT gpx_text FROM activities WHERE device=? AND substr(start_time,1,16)=?"));
+            "SELECT gpx_text, track_json FROM activities WHERE device=? AND substr(start_time,1,16)=?"));
         q.addBindValue(uid.left(bar));
         q.addBindValue(uid.mid(bar + 1));
-        if (q.exec() && q.next())
+        if (q.exec() && q.next()) {
             gpx = q.value(0).toString();
+            if (gpx.isEmpty())
+                gpx = gpxFromTrackJson(q.value(1).toString());   // sync/10
+        }
     }
     if (gpx.isEmpty()) {
         sommetPushNextBlob();

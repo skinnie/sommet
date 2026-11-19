@@ -22,6 +22,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - Sommet Sync (sync/08): a move carries a track version. "Split here" raises it, and a device
   that sees a higher one on the NAS fetches the track again and drops its old FIT, so part 1
   stops showing both rides on the other devices. Desktop and Android.
+- Desktop (sync/10): a move imported from intervals.icu keeps its trace as points only, so it
+  never reached the NAS and the tablet showed no map for any of them (3,720 moves). Those traces
+  now go to the NAS as a GPX track (positions and altitude).
 - Desktop (sync/09): each move imported from intervals.icu gets its original FIT kept, so the
   next Sommet Sync puts it on the NAS. A Suunto pool swim on the tablet showed only distance and
   time; with its FIT it shows 46 lengths, heart rate and rest at the wall.
