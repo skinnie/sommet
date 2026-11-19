@@ -16,6 +16,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - Desktop and Android save that new token when the request used the saved one (the activities
   sync and the Settings "Test" button), so after a rotation nobody pastes it into each device.
   A device that stays off for the whole window still needs it typed in.
+- Android: a Sommet Sync track or FIT download that never answered held the whole sync, and
+  no later sync could start until the app was closed. Seen on the tablet: it stopped after
+  1,436 of about 3,700 traces. Every such request now gives up after 60 s.
 - Android, a phone held sideways: the Activities list showed less than one move (two filter rows
   and a 160 dp picture). The sport chips and the column pills now share one row, and each card
   puts its picture on the left and the details on the right. Seen on the tablet set to a

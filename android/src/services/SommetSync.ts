@@ -72,6 +72,16 @@ export async function setSommetSyncCfg(cfg: SommetSyncCfg | null): Promise<void>
   await AsyncStorage.setItem(CFG_KEY, JSON.stringify({ url: cfg.url.trim(), token: (cfg.token ?? '').trim() }));
 }
 
+/** A request that gives up after `ms` (2026-11-19): one blob fetch that never answered held the
+ *  whole sync, and the one-run-at-a-time guard then kept every later sync from starting. */
+export async function fetchT(input: string, init: RequestInit = {}, ms = 60000): Promise<Response> {
+  const controller = new AbortController();
+  // Left running on purpose: it also cuts a body that stops arriving (res.text()); an abort
+  // after the request has finished does nothing.
+  setTimeout(() => controller.abort(), ms);
+  return fetch(input, { ...init, signal: controller.signal });
+}
+
 /** sync/11: the server rotated its token and still took our old one; save the new one it sent. */
 export async function adoptNewToken(url: string, token: string, res: { headers?: any }): Promise<void> {
   const next = (res?.headers?.get?.('X-Sommet-Token-New') ?? '').trim();
@@ -107,7 +117,7 @@ async function sommetHttp(url: string, token: string, method: 'GET' | 'POST',
 export async function testSommetSync(url: string, token: string): Promise<{ ok: boolean; message: string }> {
   if (!url.trim() || !token.trim()) return { ok: false, message: 'Enter both the server address and the token.' };
   try {
-    const res = await fetch(url.trim() + '?c=activities&since=0', {
+    const res = await fetchT(url.trim() + '?c=activities&since=0', {
       method: 'GET', headers: { 'X-Sommet-Token': token.trim() },
     });
     if (res.ok) {
@@ -130,7 +140,7 @@ function idFromDate(date: string, uid: string): string {
 
 async function fetchBlob(url: string, token: string, uid: string): Promise<string | null> {
   try {
-    const res = await fetch(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'gpx' }).toString(),
+    const res = await fetchT(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'gpx' }).toString(),
       { method: 'GET', headers: { 'X-Sommet-Token': token } });
     if (!res.ok) return null;
     return await res.text();
@@ -143,7 +153,7 @@ export async function fetchFitBlob(uid: string): Promise<Uint8Array | null> {
   const cfg = await getSommetSyncCfg();
   if (!cfg) return null;
   try {
-    const res = await fetch(cfg.url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
+    const res = await fetchT(cfg.url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
       { method: 'GET', headers: { 'X-Sommet-Token': cfg.token } });
     if (!res.ok) return null;
     const b = new Uint8Array(await res.arrayBuffer());
@@ -153,7 +163,7 @@ export async function fetchFitBlob(uid: string): Promise<Uint8Array | null> {
 
 async function pushFitBlob(url: string, token: string, uid: string, fit: Uint8Array): Promise<boolean> {
   try {
-    const res = await fetch(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
+    const res = await fetchT(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
       { method: 'POST', headers: { 'X-Sommet-Token': token, 'Content-Type': 'application/octet-stream' },
         body: fit.buffer.slice(fit.byteOffset, fit.byteOffset + fit.byteLength) as ArrayBuffer });
     if (!res.ok) return false;
@@ -164,7 +174,7 @@ async function pushFitBlob(url: string, token: string, uid: string, fit: Uint8Ar
 
 async function pushBlob(url: string, token: string, uid: string, gpx: string): Promise<boolean> {
   try {
-    const res = await fetch(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'gpx' }).toString(),
+    const res = await fetchT(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'gpx' }).toString(),
       { method: 'POST', headers: { 'X-Sommet-Token': token, 'Content-Type': 'application/octet-stream' }, body: gpx });
     return res.ok;
   } catch { return false; }

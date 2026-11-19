@@ -37,3 +37,15 @@ test('does not touch the settings when the request used other creds (e.g. a Test
   await adoptNewToken(URL, 'typed', reply({ 'X-Sommet-Token-New': 'new' }));
   expect((await getSommetSyncCfg())?.token).toBe('old');
 });
+
+test('fetchT gives up on a request that never answers', async () => {
+  jest.useFakeTimers();
+  const { fetchT } = require('../SommetSync');
+  (global as any).fetch = jest.fn((_u: string, init: any) => new Promise((_res, rej) => {
+    init.signal.addEventListener('abort', () => rej(new Error('aborted')));
+  }));
+  const p = fetchT('https://nas.example/sync.php?blob=1', {}, 1000);
+  jest.advanceTimersByTime(1000);
+  await expect(p).rejects.toThrow('aborted');
+  jest.useRealTimers();
+});
