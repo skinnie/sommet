@@ -3403,6 +3403,20 @@ void ActivityService::setSommetSync(const QString &url, const QString &token)
     emit sommetSyncConfiguredChanged();
 }
 
+// sync/11: the server rotated its token and still took the old one; save the new one it sent,
+// so a rotation reaches this install without pasting. Only when the request used the saved token.
+void ActivityService::adoptSommetToken(QNetworkReply *reply, const QString &usedToken)
+{
+    const QString next = QString::fromUtf8(reply->rawHeader("X-Sommet-Token-New")).trimmed();
+    if (next.isEmpty() || next == usedToken)
+        return;
+    QSettings s;
+    if (s.value(QStringLiteral("connections/sommet_sync/token")).toString() != usedToken)
+        return;
+    s.setValue(QStringLiteral("connections/sommet_sync/token"), next);
+    emit sommetSyncConfiguredChanged();
+}
+
 void ActivityService::sommetSyncTest(const QString &url, const QString &token)
 {
     if (url.trimmed().isEmpty() || token.trimmed().isEmpty()) {
@@ -3417,11 +3431,14 @@ void ActivityService::sommetSyncTest(const QString &url, const QString &token)
     QNetworkRequest req(u);
     req.setRawHeader("X-Sommet-Token", token.trimmed().toUtf8());
     QNetworkReply *reply = m_network.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const QString used = token.trimmed();
+    connect(reply, &QNetworkReply::finished, this, [this, reply, used]() {
         reply->deleteLater();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() == QNetworkReply::NoError && status == 200)
+        if (reply->error() == QNetworkReply::NoError && status == 200) {
+            adoptSommetToken(reply, used);
             emit sommetSyncTestResult(true, tr("Connected."));
+        }
         else if (status == 401)
             emit sommetSyncTestResult(false, tr("The token was rejected."));
         else
@@ -3456,13 +3473,14 @@ void ActivityService::sommetPull()
     QNetworkRequest req(u);
     req.setRawHeader("X-Sommet-Token", token.toUtf8());
     QNetworkReply *reply = m_network.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, token]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             m_sommetBusy = false;
             emit sommetSyncError(backendErrorText(reply));
             return;
         }
+        adoptSommetToken(reply, token);
         const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
 
         // 1) apply remote tombstones first, so an upsert can't resurrect a just-deleted move.

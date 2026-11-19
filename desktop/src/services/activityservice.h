@@ -401,6 +401,7 @@ private:
     // for the same move read on any device (same watch => same device+start), and for the same
     // imported move (same connector+start), so it de-dupes across the fleet. See design doc §3.
     static QString sommetUid(const QString &device, const QString &startTime);
+    void adoptSommetToken(QNetworkReply *reply, const QString &usedToken); // sync/11
     void sommetPull();                 // step 1: GET changes since lastPull, upsert, queue blobs
     void sommetPushAll();              // step 2: POST all local rows + tombstones (LWW on server)
     void sommetFetchNextBlob();        // drains m_sommetBlobQueue one GPX at a time

@@ -28,6 +28,7 @@ require __DIR__ . '/sommet_store.php';
 $cfgFile = __DIR__ . '/sommet_sync.config.php';
 $CONFIG = is_file($cfgFile) ? (require $cfgFile) : [];
 $TOKEN = isset($CONFIG['token']) ? (string)$CONFIG['token'] : (getenv('SOMMET_SYNC_TOKEN') ?: '');
+$PREVIOUS = isset($CONFIG['previous_tokens']) && is_array($CONFIG['previous_tokens']) ? $CONFIG['previous_tokens'] : [];
 $DATA_DIR = isset($CONFIG['data_dir']) ? (string)$CONFIG['data_dir'] : (__DIR__ . '/sommet-data');
 $BLOB_DIR = $DATA_DIR . '/blobs';
 $MAX_BODY = 32 * 1024 * 1024; // 32 MB — a big FIT/GPX is a few MB; cap abuse.
@@ -43,10 +44,44 @@ function fail($code, $msg) {
 }
 function now_ms() { return (int)round(microtime(true) * 1000); }
 
-function require_token($TOKEN) {
+// Token rotation (sync/11): a token listed in 'previous_tokens' still works until its 'until'
+// (unix seconds), optionally only from the address prefixes in 'from' (e.g. the tailnet
+// '100.64.0.0/10'). A device that uses one gets the current token back in the reply header
+// X-Sommet-Token-New and saves it, so a new token reaches every device without pasting.
+function ip_in_cidr($ip, $cidr) {
+    if (strpos($cidr, '/') === false) $cidr .= (strpos($cidr, ':') === false ? '/32' : '/128');
+    [$net, $bits] = explode('/', $cidr, 2);
+    $a = @inet_pton($ip); $b = @inet_pton($net);
+    if ($a === false || $b === false || strlen($a) !== strlen($b)) return false;
+    $bits = (int)$bits;
+    $whole = intdiv($bits, 8); $rest = $bits % 8;
+    if (substr($a, 0, $whole) !== substr($b, 0, $whole)) return false;
+    if ($rest === 0) return true;
+    $mask = chr((0xff << (8 - $rest)) & 0xff);
+    return (($a[$whole] & $mask) === ($b[$whole] & $mask));
+}
+function previous_token_ok($prev, $got, $ip, $now) {
+    if (!is_array($prev) || !isset($prev['token']) || (string)$prev['token'] === '') return false;
+    if (!hash_equals((string)$prev['token'], $got)) return false;
+    if (!isset($prev['until']) || (int)$prev['until'] < $now) return false;
+    if (!empty($prev['from'])) {
+        foreach ((array)$prev['from'] as $cidr) if (ip_in_cidr($ip, (string)$cidr)) return true;
+        return false;
+    }
+    return true;
+}
+function require_token($TOKEN, $PREVIOUS) {
     if ($TOKEN === '') fail(500, 'server has no token configured');
-    $got = isset($_SERVER['HTTP_X_SOMMET_TOKEN']) ? $_SERVER['HTTP_X_SOMMET_TOKEN'] : '';
-    if (!hash_equals($TOKEN, (string)$got)) fail(401, 'bad or missing token');
+    $got = (string)(isset($_SERVER['HTTP_X_SOMMET_TOKEN']) ? $_SERVER['HTTP_X_SOMMET_TOKEN'] : '');
+    if ($got !== '' && hash_equals($TOKEN, $got)) return;
+    $ip = isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '';
+    foreach ((array)$PREVIOUS as $prev) {
+        if ($got !== '' && previous_token_ok($prev, $got, $ip, time())) {
+            header('X-Sommet-Token-New: ' . $TOKEN);
+            return;
+        }
+    }
+    fail(401, 'bad or missing token');
 }
 function blob_path($BLOB_DIR, $uid, $fmt) {
     // Never trust uid as a path. Address blobs by a hash; keep fmt for the extension only.
@@ -58,7 +93,7 @@ function ensure_dir($d) {
     if (!is_dir($d) || !is_writable($d)) fail(500, 'data dir not writable');
 }
 // ---- routing ------------------------------------------------------------------------------
-require_token($TOKEN);
+require_token($TOKEN, $PREVIOUS);
 $method = $_SERVER['REQUEST_METHOD'];
 
 // --- blob transfer (raw bytes, not JSON) ---

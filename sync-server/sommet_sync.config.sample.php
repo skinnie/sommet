@@ -7,6 +7,9 @@
  */
 return [
     'token' => 'put_your_token_here',
+    // After a rotation (php rotate_token.php), the old token keeps working for a while and every
+    // device that still uses it gets the new one back and saves it. 'from' is optional.
+    // 'previous_tokens' => [['token' => 'old_token', 'until' => 1767225600, 'from' => ['100.64.0.0/10']]],
     // Storage: 'json' (default, any PHP), 'sqlite' (needs pdo_sqlite enabled in the PHP profile),
     // or 'shadow' (serve from JSON, replay every request on SQLite, log to sommet-data/shadow.log).
     // 'store' => 'json',

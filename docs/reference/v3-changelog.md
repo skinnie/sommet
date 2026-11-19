@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-19: A new Sommet Sync token reaches every device by itself (sync/11)
+
+- Sommet Sync server: `php rotate_token.php [days] [address prefixes]` writes a new token and
+  keeps the old one working for a while (`previous_tokens` in the config, optionally only from
+  given address prefixes, e.g. the tailnet). A request with the old token gets the new one back
+  in the `X-Sommet-Token-New` header. `rotate_token.php` answers 404 over the web.
+- Desktop and Android save that new token when the request used the saved one (the activities
+  sync and the Settings "Test" button), so after a rotation nobody pastes it into each device.
+  A device that stays off for the whole window still needs it typed in.
+
 ## 2026-11-19: Charts from the watch's own track; a split reaches every device; intervals.icu FITs kept
 
 - Android: a move read from an Ambit has no FIT, so its Charts tab was empty. The Charts are now

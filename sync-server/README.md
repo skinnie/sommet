@@ -18,6 +18,19 @@ HTTP. Design: `../docs/shared_app_db_design.md`. Merge model mirrors the app's p
 4. Make sure the web user can write the folder (it creates `sommet-data/` next to the script on
    first request).
 
+## Changing the token
+
+Run on the server, in the folder with `sync.php`:
+
+```
+php rotate_token.php            # new token; the old one keeps working for 30 days
+php rotate_token.php 7 100.64.0.0/10 fd7a:115c:a1e0::/48   # 7 days, only over the tailnet
+```
+
+While the old token still works, each device that syncs with it gets the new token back in the
+`X-Sommet-Token-New` reply header and saves it, so nothing needs pasting. A device that stays
+off for the whole window needs the new token typed in by hand.
+
 ## Storage: JSON files or SQLite
 
 Set `'store'` in `sommet_sync.config.php`:

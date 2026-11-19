@@ -72,6 +72,14 @@ export async function setSommetSyncCfg(cfg: SommetSyncCfg | null): Promise<void>
   await AsyncStorage.setItem(CFG_KEY, JSON.stringify({ url: cfg.url.trim(), token: (cfg.token ?? '').trim() }));
 }
 
+/** sync/11: the server rotated its token and still took our old one; save the new one it sent. */
+export async function adoptNewToken(url: string, token: string, res: { headers?: any }): Promise<void> {
+  const next = (res?.headers?.get?.('X-Sommet-Token-New') ?? '').trim();
+  if (!next || next === token) return;
+  const cfg = await getSommetSyncCfg();
+  if (cfg && cfg.url.trim() === url.trim() && cfg.token === token) await setSommetSyncCfg({ url: cfg.url, token: next });
+}
+
 // JSON request. Returns parsed body, {} on 404/empty, or null when unreachable (leave local alone).
 async function sommetHttp(url: string, token: string, method: 'GET' | 'POST',
                           params?: Record<string, string>, body?: any): Promise<any | null> {
@@ -87,6 +95,7 @@ async function sommetHttp(url: string, token: string, method: 'GET' | 'POST',
       signal: controller.signal,
     });
     clearTimeout(timer);
+    await adoptNewToken(url, token, res);
     if (res.status === 404) return {};
     if (!res.ok) return null;
     const raw = await res.text();
@@ -101,7 +110,10 @@ export async function testSommetSync(url: string, token: string): Promise<{ ok: 
     const res = await fetch(url.trim() + '?c=activities&since=0', {
       method: 'GET', headers: { 'X-Sommet-Token': token.trim() },
     });
-    if (res.ok) return { ok: true, message: 'Connected.' };
+    if (res.ok) {
+      await adoptNewToken(url, token.trim(), res);
+      return { ok: true, message: 'Connected.' };
+    }
     if (res.status === 401) return { ok: false, message: 'The token was rejected.' };
     return { ok: false, message: `Couldn't reach the server (HTTP ${res.status}).` };
   } catch (e: any) {
