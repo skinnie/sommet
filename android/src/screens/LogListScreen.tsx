@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, RefreshControl, Alert, ScrollView,
+  StyleSheet, RefreshControl, Alert, ScrollView, useWindowDimensions,
 } from 'react-native';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -94,6 +94,10 @@ async function cacheGpxMetrics(a: ActivityRecord): Promise<GpxMetadata | undefin
 
 export default function LogListScreen() {
   const theme = useV3Theme();
+  // A phone held sideways (under 500 dp tall): the sport chips and the column pills share one
+  // row, so the list keeps room for more than one move (2026-11-19).
+  const win = useWindowDimensions();
+  const oneBarRow = win.width > win.height && win.height < 500;
   const styles = createStyles(theme);
   const navigation = useNavigation<Nav>();
   const [activities, setActivities] = useState<EnrichedActivity[]>([]);
@@ -371,12 +375,13 @@ export default function LogListScreen() {
 
   return (
     <View style={styles.root}>
+      <View style={oneBarRow ? styles.barRow : undefined}>
       {/* Barre de filtres */}
       {filterTypes.length > 2 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.filterBar}
+          style={[styles.filterBar, oneBarRow && styles.barHalf]}
           contentContainerStyle={styles.filterBarContent}
         >
           {filterTypes.map(type => {
@@ -413,7 +418,7 @@ export default function LogListScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.colBar}
+        style={[styles.colBar, oneBarRow && styles.barHalf]}
         contentContainerStyle={styles.colBarContent}
       >
         <ViewModeToggle mode={viewMode} onChange={changeViewMode} />
@@ -438,6 +443,7 @@ export default function LogListScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+      </View>
 
       <FlatList
         ref={listRef}
@@ -467,18 +473,19 @@ export default function LogListScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.text} />}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={styles.card}
+            style={[styles.card, oneBarRow && viewMode === 'map' && styles.cardSide]}
             onPress={() => navigation.navigate('Map', { activity: item })}
             onLongPress={() => confirmDelete(item)}
             activeOpacity={0.75}
           >
             {viewMode === 'map' && (
-              <View style={styles.cardThumb}>
+              <View style={oneBarRow ? styles.cardThumbSide : styles.cardThumb}>
                 {item.gpx_path
-                  ? <ActivityThumbnail gpxPath={item.gpx_path} height={160} sport={item.activity_type} seed={item.date} />
-                  : <SportPicture sport={item.activity_type} seed={item.date} height={160} />}
+                  ? <ActivityThumbnail gpxPath={item.gpx_path} height={oneBarRow ? 96 : 160} sport={item.activity_type} seed={item.date} />
+                  : <SportPicture sport={item.activity_type} seed={item.date} height={oneBarRow ? 96 : 160} />}
               </View>
             )}
+            <View style={oneBarRow && viewMode === 'map' ? styles.cardBodySide : undefined}>
             <View style={styles.cardRow}>
               <View style={styles.cardLeft}>
                 <Text style={styles.cardDate}>{formatDate(item.date)}</Text>
@@ -510,6 +517,7 @@ export default function LogListScreen() {
                   </View>
                 );
               })}
+            </View>
             </View>
           </TouchableOpacity>
         )}
@@ -616,6 +624,10 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   // v3.0 UI port - real per-activity track preview (ActivitiesPage.qml parity), see
   // ActivityThumbnail.tsx's own comment on why it's a lightweight SVG shape, not a live map.
   cardThumb: { marginBottom: 10 },
+  // A phone held sideways: picture on the left, details on the right (2026-11-19).
+  cardSide: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
+  cardThumbSide: { width: '38%' },
+  cardBodySide: { flex: 1 },
   cardRow: { flexDirection: 'row', alignItems: 'center' },
   cardLeft: { flex: 1 },
   cardDate: { fontSize: 15, color: t.text, fontWeight: '600', marginBottom: 2 },
@@ -625,6 +637,8 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   cardSub: { fontSize: 13, color: t.mutedText },
   // ── Configurable column bar + metric cells ──
   colBar: { maxHeight: 48, backgroundColor: t.background },
+  barRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: t.background },
+  barHalf: { flex: 1 },
   colBarContent: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: 'center' },
   colPill: {
     flexDirection: 'row',
