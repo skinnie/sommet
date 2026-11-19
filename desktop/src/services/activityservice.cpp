@@ -1009,7 +1009,8 @@ bool ActivityService::dbLoadAll()
     QSqlQuery q(QStringLiteral(
         "SELECT idx, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
         "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
-        "gpx_text, fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0), "
+        "CASE WHEN source = 'intervals' THEN NULL ELSE gpx_text END, "   // see fromIntervals below
+        "fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0), "
         "COALESCE(moving_s, 0) "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
@@ -1051,7 +1052,11 @@ bool ActivityService::dbLoadAll()
         parsed[QStringLiteral("track")] = QVariantList();
         parsed[QStringLiteral("hasGps")] = q.value(8).toInt() != 0;
         parsed[QStringLiteral("trackPointCount")] = 0;   // filled when the track is actually parsed
-        parsed[QStringLiteral("gpxText")] = q.value(9).toString();
+        // An intervals.icu import's GPX, when it has one, is the points-only file Sommet built for
+        // the NAS (sync/10): nothing in it the list needs, and holding/parsing ~3,700 of them made
+        // this load take 50 s and every page crawl (2026-11-19). Its track is track_json.
+        const bool fromIntervals = q.value(12).toString() == QStringLiteral("intervals");
+        parsed[QStringLiteral("gpxText")] = fromIntervals ? QString() : q.value(9).toString();
         parsed[QStringLiteral("fitBase64")] = q.value(10).toString();
         // "watch" (or NULL for pre-migration rows) vs "intervals" - QML shows a small marker on
         // imported ones so you can tell them apart while they blend into the same lists.
@@ -1073,7 +1078,7 @@ bool ActivityService::dbLoadAll()
         // columns - re-parse the cached GPX text for them so the configurable Activities
         // columns work offline too, without a schema migration. Cheap: a local in-memory
         // string parse, and the extras just merge onto the fast DB core fields above.
-        const QString gpx = q.value(9).toString();
+        const QString gpx = fromIntervals ? QString() : q.value(9).toString();
         if (!gpx.isEmpty()) {
             const QVariantMap extra = parseGpx(gpx);
             for (const QString &key : {
@@ -3583,10 +3588,11 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
     int existingIdx = 0;
     qint64 localUpdated = 0;
     QString localGpx;
+    bool localPoints = false;   // holds its track as points (an intervals.icu import, sync/10)
     {
         QSqlQuery sel(m_db);
         sel.prepare(QStringLiteral(
-            "SELECT idx, updated_at, gpx_text FROM activities "
+            "SELECT idx, updated_at, gpx_text, (length(COALESCE(track_json,'')) > 20) FROM activities "
             "WHERE device = ? AND substr(start_time,1,16) = ?"));
         sel.addBindValue(device);
         sel.addBindValue(minute);
@@ -3595,6 +3601,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
             existingIdx = sel.value(0).toInt();
             localUpdated = sel.value(1).toLongLong();
             localGpx = sel.value(2).toString();
+            localPoints = sel.value(3).toBool();
         }
     }
 
@@ -3642,7 +3649,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
 
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
-        if (hasTrack && localGpx.isEmpty() && !m_sommetBlobQueue.contains(uid))
+        if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
             m_sommetBlobQueue.append(uid);
         return false;
     }
@@ -3712,7 +3719,7 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.exec();
     }
 
-    if (hasTrack && localGpx.isEmpty() && !m_sommetBlobQueue.contains(uid))
+    if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
         m_sommetBlobQueue.append(uid);
     return true;
 }

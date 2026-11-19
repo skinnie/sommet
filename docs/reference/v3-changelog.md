@@ -20,6 +20,11 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   A first sync sent every fetched track back (seen in a test: 600 of 600; 0 now).
 - Android: a sync reads a track file only when it still has to go to the server. It read all
   ~3,700 on every sync, which kept the tablet's CPU at one full core for minutes.
+- Desktop: loading the activity list took 50 s on the X230 and every page crawled (3 s per menu
+  click on the P5Q). Since sync/10 the NAS holds a points-only GPX for each intervals.icu import,
+  and the desktop fetched and stored all ~3,700 of them, then read and parsed every one on each
+  load. The list now skips those files (the track is already kept as points) and no longer
+  fetches a track it holds as points: 50 s to 1.5 s, Home opens in under 0.3 s.
 - Checked: desktop with a made-up 4,800-activity first sync from a local test server; Android
   on the tablet's own sync. The glossary gains **Track** (the GPS line an activity recorded).
 
