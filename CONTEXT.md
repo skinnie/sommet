@@ -98,6 +98,11 @@ _Avoid_: custom mode, exercise mode, profile, activity profile
 A line to follow, sent to a watch or bike computer.
 _Avoid_: track (a track is what was recorded), course
 
+**Track**:
+The GPS line an Activity recorded: drawn on its card in the Activities list and on the map of
+its page. Kept as a GPX file; Sommet Sync sends it to the NAS next to the Activity.
+_Avoid_: map, trace, route (a route is a line to follow)
+
 **POI**:
 One saved point on a watch, with a name.
 _Avoid_: waypoint (the word for a point inside a Route), favourite, location

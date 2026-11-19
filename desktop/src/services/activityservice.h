@@ -51,6 +51,13 @@ class ActivityService : public QObject
     QML_SINGLETON
 
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    // sync/12: what Sommet Sync is doing, for the progress bar. Stage "" = idle, else "moves"
+    // (saving pulled activities), "tracks" (fetching their tracks), "sending" (pushing ours).
+    // first = a first sync (nothing pulled before), which can take minutes.
+    Q_PROPERTY(QString sommetSyncStage READ sommetSyncStage NOTIFY sommetSyncProgressChanged)
+    Q_PROPERTY(int sommetSyncDone READ sommetSyncDone NOTIFY sommetSyncProgressChanged)
+    Q_PROPERTY(int sommetSyncTotal READ sommetSyncTotal NOTIFY sommetSyncProgressChanged)
+    Q_PROPERTY(bool sommetSyncFirst READ sommetSyncFirst NOTIFY sommetSyncProgressChanged)
     Q_PROPERTY(bool ok READ ok NOTIFY activitiesChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     // True when activities[] came from the local database (no live watch read succeeded
@@ -74,6 +81,10 @@ public:
     explicit ActivityService(QObject *parent = nullptr);
 
     bool loading() const { return m_loading; }
+    QString sommetSyncStage() const { return m_syncStage; }
+    int sommetSyncDone() const { return m_syncDone; }
+    int sommetSyncTotal() const { return m_syncTotal; }
+    bool sommetSyncFirst() const { return m_syncFirst; }
     bool ok() const { return m_ok; }
     QString lastError() const { return m_lastError; }
     bool showingCachedData() const { return m_showingCachedData; }
@@ -282,6 +293,7 @@ signals:
     void sommetSyncFinished(int pulled, int pushed);
     void sommetSyncError(const QString &message);
     void sommetSyncConfiguredChanged();
+    void sommetSyncProgressChanged();
 
 private:
     void importFromBleBike(const QString &tag, const QString &endpoint, const QString &deviceName,
@@ -412,6 +424,21 @@ private:
     // idx, else allocates a fresh negative idx for a foreign row). Returns true if it changed the DB.
     bool sommetUpsertRecord(const QJsonObject &rec);
     QStringList m_sommetBlobQueue;     // uids of just-pulled rows whose GPX still needs fetching
+    // sync/12: pulled records are saved 200 at a time, with the event loop running in between,
+    // so a first sync (~4,800 activities) never freezes the window.
+    void sommetApplyNextChunk();
+    void setSommetProgress(const QString &stage, int done, int total);
+    void sommetSyncEnded();
+    QJsonArray m_sommetPending;
+    QStringList m_sommetFetchedNow;   // tracks fetched this run: already on the server
+    int m_sommetPendingIdx = 0;
+    qint64 m_sommetPendingNow = 0;
+    int m_syncBlobTotal = 0;
+    int m_syncPushTotal = 0;
+    QString m_syncStage;
+    int m_syncDone = 0;
+    int m_syncTotal = 0;
+    bool m_syncFirst = false;
     // sync/08: the track version each queued fetch brings (a split raised it on another device).
     QHash<QString, qint64> m_sommetPendingRev;
     // sync/09: moves just imported from intervals.icu whose FIT is fetched to keep (for the NAS).

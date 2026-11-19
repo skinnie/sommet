@@ -13,6 +13,7 @@ import { ExperimentalProvider } from './src/config/ExperimentalContext';
 import { DemoProvider } from './src/config/DemoContext';
 import { MenuProvider, useNavMenu } from './src/navigation/MenuContext';
 import { MenuHost, MenuBurger, menuBottomRoom } from './src/navigation/MenuHost';
+import { SyncProgressBanner } from './src/components/SyncProgressBanner';
 import HomeScreen from './src/screens/HomeScreen';
 import LogListScreen from './src/screens/LogListScreen';
 import MapScreen from './src/screens/MapScreen';
@@ -214,6 +215,8 @@ function AppNav() {
   return (
     <NavigationContainer ref={navRef} onReady={track} onStateChange={track}>
       <MenuHost navRef={navRef} routeName={routeName}>
+        {/* Sommet Sync progress (sync/12): every screen, while a sync runs or after it failed. */}
+        <SyncProgressBanner />
         <Stack.Navigator
           initialRouteName="Home"
           screenOptions={{

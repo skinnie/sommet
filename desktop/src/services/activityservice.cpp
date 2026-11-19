@@ -3457,6 +3457,8 @@ void ActivityService::sommetSyncNow()
     m_sommetBusy = true;
     m_sommetPulled = 0;
     m_sommetPushed = 0;
+    m_syncFirst = QSettings().value(QStringLiteral("connections/sommet_sync/lastPull")).toLongLong() == 0;
+    setSommetProgress(QStringLiteral("moves"), 0, 0);
     sommetPull();
 }
 
@@ -3476,7 +3478,7 @@ void ActivityService::sommetPull()
     connect(reply, &QNetworkReply::finished, this, [this, reply, token]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            m_sommetBusy = false;
+            sommetSyncEnded();
             emit sommetSyncError(backendErrorText(reply));
             return;
         }
@@ -3505,26 +3507,62 @@ void ActivityService::sommetPull()
             }
         }
 
-        // 2) upsert remote records (LWW), queueing GPX blob fetches for tracks we don't have.
-        // One transaction for the whole batch (2026-11-19): a first sync is ~4,800 moves, and one
-        // commit per move kept the window frozen for minutes on a new Windows install.
-        const QJsonArray records = root.value(QStringLiteral("records")).toArray();
-        const bool batched = m_db.transaction();
-        for (const auto &r : records) {
-            if (sommetUpsertRecord(r.toObject()))
-                m_sommetPulled++;
-        }
-        if (batched)
-            m_db.commit();
-
-        // 3) advance the incremental cursor to the server's clock.
-        const qint64 now = root.value(QStringLiteral("now")).toInteger();
-        if (now > 0)
-            QSettings().setValue(QStringLiteral("connections/sommet_sync/lastPull"), now);
-
-        // 4) drain blob fetches, then push.
-        sommetFetchNextBlob();
+        // 2) upsert remote records (LWW), queueing GPX blob fetches for tracks we don't have,
+        // 200 at a time (sommetApplyNextChunk). 3) and 4) follow there.
+        m_sommetPending = root.value(QStringLiteral("records")).toArray();
+        m_sommetPendingIdx = 0;
+        m_sommetPendingNow = root.value(QStringLiteral("now")).toInteger();
+        setSommetProgress(QStringLiteral("moves"), 0, int(m_sommetPending.size()));
+        sommetApplyNextChunk();
     });
+}
+
+// sync/12: one transaction per 200 records, then back to the event loop, so the window keeps
+// drawing during a first sync. One commit per record froze a new Windows install for minutes.
+void ActivityService::sommetApplyNextChunk()
+{
+    const int n = int(m_sommetPending.size());
+    const int end = qMin(n, m_sommetPendingIdx + 200);
+    const bool batched = m_db.transaction();
+    for (; m_sommetPendingIdx < end; ++m_sommetPendingIdx) {
+        if (sommetUpsertRecord(m_sommetPending.at(m_sommetPendingIdx).toObject()))
+            m_sommetPulled++;
+    }
+    if (batched)
+        m_db.commit();
+    setSommetProgress(QStringLiteral("moves"), m_sommetPendingIdx, n);
+    if (m_sommetPendingIdx < n) {
+        QTimer::singleShot(0, this, &ActivityService::sommetApplyNextChunk);
+        return;
+    }
+    m_sommetPending = QJsonArray();
+
+    // 3) advance the incremental cursor to the server's clock.
+    if (m_sommetPendingNow > 0)
+        QSettings().setValue(QStringLiteral("connections/sommet_sync/lastPull"), m_sommetPendingNow);
+
+    // 4) drain blob fetches, then push.
+    m_syncBlobTotal = int(m_sommetBlobQueue.size());
+    if (m_syncBlobTotal > 0)
+        setSommetProgress(QStringLiteral("tracks"), 0, m_syncBlobTotal);
+    sommetFetchNextBlob();
+}
+
+void ActivityService::setSommetProgress(const QString &stage, int done, int total)
+{
+    if (stage == m_syncStage && done == m_syncDone && total == m_syncTotal)
+        return;
+    m_syncStage = stage;
+    m_syncDone = done;
+    m_syncTotal = total;
+    emit sommetSyncProgressChanged();
+}
+
+void ActivityService::sommetSyncEnded()
+{
+    m_sommetBusy = false;
+    m_syncFirst = false;
+    setSommetProgress(QString(), 0, 0);
 }
 
 bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
@@ -3682,6 +3720,14 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
 void ActivityService::sommetFetchNextBlob()
 {
     if (m_sommetBlobQueue.isEmpty()) {
+        if (!m_sommetFetchedNow.isEmpty()) {   // one settings write for the whole run
+            QSettings st;
+            QStringList pushed = st.value(QStringLiteral("connections/sommet_sync/blobsPushed")).toStringList();
+            pushed += m_sommetFetchedNow;
+            pushed.removeDuplicates();
+            st.setValue(QStringLiteral("connections/sommet_sync/blobsPushed"), pushed);
+            m_sommetFetchedNow.clear();
+        }
         if (m_sommetPulled > 0) {
             dropIndoorImportTracks(m_db);   // a pulled Zwift track stays off this one too
             dbLoadAll();
@@ -3691,6 +3737,9 @@ void ActivityService::sommetFetchNextBlob()
         return;
     }
     const QString uid = m_sommetBlobQueue.takeFirst();
+    if (m_syncBlobTotal > 0)
+        setSommetProgress(QStringLiteral("tracks"),
+                          m_syncBlobTotal - int(m_sommetBlobQueue.size()) - 1, m_syncBlobTotal);
     const QSettings s;
     QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
     QUrlQuery qq;
@@ -3719,7 +3768,11 @@ void ActivityService::sommetFetchNextBlob()
                 up.addBindValue(QString::fromUtf8(trackDoc.toJson(QJsonDocument::Compact)));
                 up.addBindValue(uid.left(bar));
                 up.addBindValue(uid.mid(bar + 1));
-                if (up.exec() && m_sommetPendingRev.contains(uid)) {
+                const bool stored = up.exec();
+                // sync/12: it came from the server, so it is already there - don't send it back.
+                if (stored)
+                    m_sommetFetchedNow.append(uid);
+                if (stored && m_sommetPendingRev.contains(uid)) {
                     QSqlQuery tr(m_db);
                     tr.prepare(QStringLiteral(
                         "INSERT OR REPLACE INTO sommet_track_rev (uid, rev) VALUES (?, ?)"));
@@ -3828,10 +3881,12 @@ void ActivityService::sommetPushAll()
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            m_sommetBusy = false;
+            sommetSyncEnded();
             emit sommetSyncError(backendErrorText(reply));
             return;
         }
+        m_syncPushTotal = int(m_sommetPushQueue.size() + m_sommetFitPushQueue.size());
+        setSommetProgress(m_syncPushTotal > 0 ? QStringLiteral("sending") : QString(), 0, m_syncPushTotal);
         sommetPushNextBlob();
     });
 }
@@ -3867,6 +3922,9 @@ static QString gpxFromTrackJson(const QString &trackJson)
 
 void ActivityService::sommetPushNextBlob()
 {
+    if (m_syncPushTotal > 0)
+        setSommetProgress(QStringLiteral("sending"), m_syncPushTotal
+            - int(m_sommetPushQueue.size() + m_sommetFitPushQueue.size()), m_syncPushTotal);
     if (m_sommetPushQueue.isEmpty()) {
         sommetPushNextFit();
         return;
@@ -3925,9 +3983,12 @@ void ActivityService::sommetPushNextBlob()
 // sommet_fit_pushed only when the server answered {ok:true}, i.e. after it renamed the file in.
 void ActivityService::sommetPushNextFit()
 {
+    if (m_syncPushTotal > 0)
+        setSommetProgress(QStringLiteral("sending"),
+                          m_syncPushTotal - int(m_sommetFitPushQueue.size()), m_syncPushTotal);
     if (m_sommetFitPushQueue.isEmpty()) {
         trimLocalOriginals();
-        m_sommetBusy = false;
+        sommetSyncEnded();
         emit sommetSyncFinished(m_sommetPulled, m_sommetPushed);
         return;
     }

@@ -340,9 +340,21 @@ ApplicationWindow {
                 anchors.rightMargin: Theme.spacingMedium
             }
 
-            Loader {
+            // Sommet Sync progress (sync/12): every page, while a sync runs or after it failed.
+            SyncProgressBanner {
+                id: syncBanner
                 anchors.top: suuntoLinkBanner.visible ? suuntoLinkBanner.bottom : parent.top
-                anchors.topMargin: suuntoLinkBanner.visible ? Theme.spacingSmall : 0
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.topMargin: Theme.spacingSmall
+                anchors.leftMargin: window.navExpanded ? Theme.spacingMedium : 56   // clear of the floating ☰
+                anchors.rightMargin: Theme.spacingMedium
+            }
+
+            Loader {
+                anchors.top: syncBanner.visible ? syncBanner.bottom
+                           : (suuntoLinkBanner.visible ? suuntoLinkBanner.bottom : parent.top)
+                anchors.topMargin: (syncBanner.visible || suuntoLinkBanner.visible) ? Theme.spacingSmall : 0
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom

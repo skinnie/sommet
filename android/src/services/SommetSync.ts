@@ -50,7 +50,7 @@ export async function forgetPushedFit(uid: string): Promise<void> {
 const FIT_PUSHED_KEY = 'sommet.sync.fitsPushed';
 
 export interface SommetSyncCfg { url: string; token: string; }
-export interface SommetSyncResult { pulled: number; pushed: number; ok: boolean; }
+export interface SommetSyncResult { pulled: number; pushed: number; ok: boolean; skipped?: boolean; }
 
 /** sync/06: a move's track changed here (Split here), so send it to the shared database again. */
 export async function forgetPushedBlob(uid: string): Promise<void> {
@@ -100,11 +100,13 @@ async function sommetHttp(url: string, token: string, method: 'GET' | 'POST',
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch(url + q, {
-      method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    let res: Response;
+    try {
+      res = await fetch(url + q, {
+        method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+    } finally { clearTimeout(timer); }
     await adoptNewToken(url, token, res);
     if (res.status === 404) return {};
     if (!res.ok) return null;
@@ -187,16 +189,46 @@ async function pushBlob(url: string, token: string, uid: string, gpx: string): P
 // One run at a time: the sync on opening the app and the one after a watch read can start
 // together, and two overlapping runs would push and pull the same rows twice.
 let runSommetSyncInFlight: Promise<SommetSyncResult> | null = null;
+// ── Progress (sync/12) ─────────────────────────────────────────────────────────────────────
+// What the sync is doing, for the banner on every screen. stage '' = idle; 'moves' = saving the
+// activities pulled from the server (and fetching their tracks); 'sending' = sending ours.
+// first = nothing pulled before, which takes minutes. error = the last run failed.
+export interface SommetSyncProgress { stage: '' | 'moves' | 'sending'; done: number; total: number; first: boolean; error: string; }
+let progress: SommetSyncProgress = { stage: '', done: 0, total: 0, first: false, error: '' };
+const progressListeners = new Set<(p: SommetSyncProgress) => void>();
+export function getSommetSyncProgress(): SommetSyncProgress { return progress; }
+export function onSommetSyncProgress(cb: (p: SommetSyncProgress) => void): () => void {
+  progressListeners.add(cb);
+  return () => { progressListeners.delete(cb); };
+}
+function setProgress(p: Partial<SommetSyncProgress>): void {
+  progress = { ...progress, ...p };
+  progressListeners.forEach(cb => { try { cb(progress); } catch { /* a screen's own problem */ } });
+}
+export function clearSommetSyncError(): void { setProgress({ error: '' }); }
+/** Give the screen a turn between batches, so a first sync never freezes it. */
+const yieldToUi = () => new Promise<void>(r => setTimeout(r, 0));
+
 export function runSommetSync(): Promise<SommetSyncResult> {
   if (!runSommetSyncInFlight) {
-    runSommetSyncInFlight = runSommetSyncOnce().finally(() => { runSommetSyncInFlight = null; });
+    setProgress({ stage: 'moves', done: 0, total: 0, error: '' });
+    runSommetSyncInFlight = runSommetSyncOnce()
+      .then(r => {
+        setProgress({ stage: '', done: 0, total: 0, first: false,
+                      error: r.ok || r.skipped ? '' : "Couldn't reach your server." });
+        return r;
+      }, e => {
+        setProgress({ stage: '', done: 0, total: 0, first: false, error: String(e?.message ?? e) });
+        throw e;
+      })
+      .finally(() => { runSommetSyncInFlight = null; });
   }
   return runSommetSyncInFlight;
 }
 
 async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   const cfg = await getSommetSyncCfg();
-  if (!cfg) return { pulled: 0, pushed: 0, ok: false };
+  if (!cfg) return { pulled: 0, pushed: 0, ok: false, skipped: true };
   const { url, token } = cfg;
 
   const tombstones = new Set<string>(await getSommetTombstones());
@@ -207,6 +239,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   // ── PULL ──────────────────────────────────────────────────────────────────────
   const repullDone = await AsyncStorage.getItem(REPULL_KEY);
   const since = repullDone ? Number((await AsyncStorage.getItem(LASTPULL_KEY)) || '0') : 0;
+  setProgress({ first: since === 0 });
   const remote = await sommetHttp(url, token, 'GET', { c: 'activities', since: String(since) });
   if (remote === null) return { pulled: 0, pushed: 0, ok: false }; // unreachable: leave local alone
 
@@ -224,7 +257,12 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     start: startUtcOf(a), durationS: a.duration_s, distanceM: a.distance_m,
     watch: !a.id.startsWith('icu:') && !a.device, device: a.device ?? '',
   }));
-  for (const rec of (remote.records ?? [])) {
+  const pulledRecs: any[] = remote.records ?? [];
+  setProgress({ stage: 'moves', done: 0, total: pulledRecs.length });
+  let seen = 0;
+  const fetchedNow: string[] = [];
+  for (const rec of pulledRecs) {
+    if (++seen % 25 === 0) { setProgress({ done: seen }); await yieldToUi(); }
     const device = String(rec.device ?? '');
     const start = String(rec.start_time ?? '');
     if (!start) continue;
@@ -276,6 +314,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
           if (existing) streamsCache.delete(existing.id);
         }
         gpxPath = (await writeGpxFile(id, gpx, true)) ?? '';
+        if (gpxPath) fetchedNow.push(uid);   // sync/12: came from the server, don't send it back
         if (newerTrack && gpxPath) { trackRevs[uid] = remoteRev; revsChanged = true; }
       }
     }
@@ -302,17 +341,24 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
 
   // ── PUSH ──────────────────────────────────────────────────────────────────────
   const acts = await getAllActivities();
+  setProgress({ stage: 'sending', done: 0, total: acts.length });
+  let readCount = 0;
   const records: any[] = [];
   const blobsToPush: { uid: string; gpx: string }[] = [];
   const pushedRaw = await AsyncStorage.getItem(PUSHED_KEY);
   const pushed = new Set<string>(pushedRaw ? JSON.parse(pushedRaw) : []);
+  for (const u of fetchedNow) pushed.add(u);
 
   for (const a of acts) {
+    if (++readCount % 50 === 0) { setProgress({ done: readCount }); await yieldToUi(); }
     const device = a.device ?? '';
     const uid = sommetUid(device, a.date);
     if (tombstones.has(uid)) continue;
+    // Read the file only when it still has to go to the server (sync/12): reading all ~3,700
+    // tracks on every sync kept the tablet's CPU busy for minutes.
     let gpx = '';
-    if (a.gpx_path) { try { gpx = await readGpxFile(a.gpx_path); } catch { gpx = ''; } }
+    if (a.gpx_path && !pushed.has(uid)) { try { gpx = await readGpxFile(a.gpx_path); } catch { gpx = ''; } }
+    const hasTrack = !!gpx || (!!a.gpx_path && pushed.has(uid));
     records.push({
       uid,
       device,
@@ -324,7 +370,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       ascent_m: a.d_plus,
       energy_kcal: a.energy_kcal || 0,
       source: a.id.startsWith('icu:') ? 'intervals' : 'watch',
-      has_track: !!gpx,
+      has_track: hasTrack,
       track_fmt: 'gpx',
       updated_at: a.updated_at || a.synced_at,
       ...(a.start_utc ? { start_utc: a.start_utc } : {}),

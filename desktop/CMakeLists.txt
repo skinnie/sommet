@@ -267,6 +267,7 @@ qt_add_qml_module(sommet_app
         qml/components/ActivityWeather.qml
         qml/components/EmberMealDialog.qml
         qml/components/SuuntoLinkWarning.qml
+        qml/components/SyncProgressBanner.qml
         ${SOMMET_SCAN_QML}
         qml/components/MapView.qml
         qml/components/ActivityCard.qml

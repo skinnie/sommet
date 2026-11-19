@@ -7,6 +7,22 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-19: Sommet Sync shows its progress and no longer freezes the window (sync/12)
+
+- Desktop and Android: while Sommet Sync runs, a bar on every page says what it is doing and how
+  far it is ("Saving activities", "Fetching tracks 68 / 600", "Sending to your server"). A first
+  sync adds: "This can take a few minutes; you can keep using Sommet." A failed sync stays up
+  with its reason until closed.
+- Desktop: pulled activities are saved 200 at a time with the window drawing in between; Android
+  gives the screen a turn every 25. On a new Windows install the first sync had frozen the window
+  again and again.
+- Desktop and Android: a track fetched from the server is no longer sent straight back to it.
+  A first sync sent every fetched track back (seen in a test: 600 of 600; 0 now).
+- Android: a sync reads a track file only when it still has to go to the server. It read all
+  ~3,700 on every sync, which kept the tablet's CPU at one full core for minutes.
+- Checked: desktop with a made-up 4,800-activity first sync from a local test server; Android
+  on the tablet's own sync. The glossary gains **Track** (the GPS line an activity recorded).
+
 ## 2026-11-19: A new Sommet Sync token reaches every device by itself (sync/11)
 
 - Sommet Sync server: `php rotate_token.php [days] [address prefixes]` writes a new token and

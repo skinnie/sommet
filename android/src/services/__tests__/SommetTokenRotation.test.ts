@@ -9,7 +9,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: jest.fn(async (k: string) => { delete mockStore[k]; }),
   },
 }));
-jest.mock('../../database/db', () => ({}));
+jest.mock('../../database/db', () => ({ getSommetTombstones: async () => [], getAllActivities: async () => [] }));
 jest.mock('../GpxService', () => ({}));
 jest.mock('../SportNames', () => ({}));
 jest.mock('../StreamsCache', () => ({ streamsCache: new Map() }));
@@ -48,4 +48,25 @@ test('fetchT gives up on a request that never answers', async () => {
   jest.advanceTimersByTime(1000);
   await expect(p).rejects.toThrow('aborted');
   jest.useRealTimers();
+});
+
+test('a run with no server set up reports no error and ends idle', async () => {
+  const mod = require('../SommetSync');
+  await mod.setSommetSyncCfg(null);
+  const seen: any[] = [];
+  const off = mod.onSommetSyncProgress((p: any) => seen.push({ ...p }));
+  await mod.runSommetSync();
+  off();
+  expect(seen[0].stage).toBe('moves');
+  expect(mod.getSommetSyncProgress()).toEqual(expect.objectContaining({ stage: '', error: '' }));
+});
+
+test('an unreachable server leaves an error until it is closed', async () => {
+  const mod = require('../SommetSync');
+  (global as any).fetch = jest.fn(async () => { throw new Error('offline'); });
+  await mod.runSommetSync();
+  expect(mod.getSommetSyncProgress().error).not.toBe('');
+  expect(mod.getSommetSyncProgress().stage).toBe('');
+  mod.clearSommetSyncError();
+  expect(mod.getSommetSyncProgress().error).toBe('');
 });
