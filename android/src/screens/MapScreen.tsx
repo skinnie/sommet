@@ -229,7 +229,9 @@ export default function MapScreen() {
     mapJs(colouredRef.current);
   };
   const win = useWindowDimensions();
-  const wideLandscape = win.width > win.height && win.width >= 900;
+  // Any landscape from 560 dp: a phone on its side (about 640-900 dp wide, 300-400 dp tall) has no
+  // room for the details under the map - they were squeezed to nothing (checked 2026-11-19).
+  const wideLandscape = win.width > win.height && win.width >= 560;
   const [mapAbove, setMapAbove] = useState(false);
   useEffect(() => {
     AsyncStorage.getItem(MAP_ABOVE_KEY).then(v => setMapAbove(v === '1')).catch(() => undefined);
@@ -239,7 +241,11 @@ export default function MapScreen() {
     setMapAbove(next);
     AsyncStorage.setItem(MAP_ABOVE_KEY, next ? '1' : '0').catch(() => undefined);
   };
-  const sideBySide = wideLandscape && !mapAbove;   // tablet landscape: map left, panel right
+  // Under 500 dp tall (a phone on its side, about 300 dp) "above" leaves the details no room: the
+  // page was 116 dp tall and the map alone 128 dp (measured 2026-11-19). Always beside there, and
+  // App.tsx drops the strip it keeps free for the menu button.
+  const shortLandscape = wideLandscape && win.height < 500;
+  const sideBySide = wideLandscape && (!mapAbove || shortLandscape);   // map left, panel right
   // The page's own width, not the window's: on a tablet the side menu takes part of the window,
   // and a panel sized from the window left the map about a fifth of the page (André,
   // 2026-11-19). Beside, the map and the panel share the page half and half (panel 320-560).
@@ -589,7 +595,9 @@ export default function MapScreen() {
       onLayout={e => setPageW(Math.round(e.nativeEvent.layout.width))}>
       {/* ── Carte Leaflet ── (a fixed box now: the activity panel scrolls below, or beside it on a
           landscape tablet) */}
-      <View style={sideBySide ? { flex: 1 } : { height: Math.round(win.height * 0.42) }}>
+      {/* Beside: the map's own width, not flex - flex let the details take three quarters of a
+          phone held sideways (2026-11-19). */}
+      <View style={sideBySide ? { width: Math.max(160, (pageW || win.width) - panelW) } : { height: Math.round(win.height * 0.42) }}>
       {/* Loaded from a caches-dir file:// page (mapWebView.ts) with Leaflet bundled inline — no
           more android_asset dependency, so this renders on iOS too, and cached tiles read off
           disk for offline use (mapWebViewFileProps grants the read access per platform). */}
@@ -636,7 +644,7 @@ export default function MapScreen() {
       </TouchableOpacity>
 
       {/* ── Map beside or above the panel (landscape tablet only) ── */}
-      {wideLandscape && (
+      {wideLandscape && !shortLandscape && (
         <TouchableOpacity
           style={styles.layoutFab}
           onPress={toggleMapAbove}
@@ -682,7 +690,7 @@ export default function MapScreen() {
         onClose={() => setShowGearPicker(false)}
       />
 
-      <ScrollView style={sideBySide ? { width: panelW } : { flex: 1 }}>
+      <ScrollView style={{ flex: 1 }}>
       {/* ── Overview / Charts / Laps ── (desktop parity: ActivityDetail.qml) */}
       <ActivityPanel activity={activity} meta={meta} hasMap mapView={mapView}
         onHover={onPanelHover} onStretch={onPanelStretch} onColoured={onPanelColoured} />

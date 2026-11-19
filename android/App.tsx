@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Linking, StatusBar } from 'react-native';
+import { Alert, Linking, StatusBar, useWindowDimensions } from 'react-native';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -198,6 +198,10 @@ function AppShell() {
 function AppNav() {
   const theme = useV3Theme();
   const menu = useNavMenu();
+  // A phone on its side (under 500 dp tall): the move page puts the map beside the details and
+  // needs every row, so no strip is kept free for the menu button there (2026-11-19).
+  const win = useWindowDimensions();
+  const shortLandscape = win.width > win.height && win.height < 500;
   const navRef = useNavigationContainerRef<RootStackParamList>();
   // The page on top, so the menu can light up its place and close when the page changes.
   const [routeName, setRouteName] = useState('Home');
@@ -242,7 +246,7 @@ function AppNav() {
                 .filter(Boolean).join(' · ') || t.mapFallback,
               // The map has its own round buttons at the bottom right, where the menu sits: keep
               // that strip free so neither covers the other.
-              contentStyle: { backgroundColor: theme.background, paddingBottom: menuBottomRoom(menu.style) },
+              contentStyle: { backgroundColor: theme.background, paddingBottom: shortLandscape ? 0 : menuBottomRoom(menu.style) },
             })}
           />
           <Stack.Screen

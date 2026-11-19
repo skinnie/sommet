@@ -22,6 +22,11 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - Sommet Sync (sync/08): a move carries a track version. "Split here" raises it, and a device
   that sees a higher one on the NAS fetches the track again and drops its old FIT, so part 1
   stops showing both rides on the other devices. Desktop and Android.
+- Android, a phone held sideways: the move page had 116 dp of height and the map alone wanted
+  128 dp, so the details under it didn't show. In any landscape under 500 dp tall the map now
+  sits beside the details, half and half, and no strip is kept free for the menu button. Seen on
+  the tablet set to a 720x1280 phone screen; tablet landscape (beside and above) and phone
+  portrait unchanged.
 - Desktop (sync/10): a move imported from intervals.icu keeps its trace as points only, so it
   never reached the NAS and the tablet showed no map for any of them (3,720 moves). Those traces
   now go to the NAS as a GPX track (positions and altitude).
