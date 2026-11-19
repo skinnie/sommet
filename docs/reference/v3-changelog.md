@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-19: Every move's original FIT on the NAS; Android sends and fetches FITs
+
+- Android now sends each move's FIT to the NAS on sync (only GPX went before, so a move read on
+  the tablet had no FIT on desktop), and its Charts tab asks the NAS for the FIT before
+  intervals.icu, as desktop does.
+- The NAS was filled from the Garmin Connect export it already held
+  (`tools/nas/fit_backfill_from_garmin_export.py`): 4,711 moves got their original FIT, matched by
+  UTC start within 2 minutes; existing FITs were not touched. 4,758 of 4,827 moves now have one.
+- Android move page: the round buttons on the map are solid discs with a shadow, readable over
+  any map.
+
 ## 2026-11-19: Android map thumbnails name the app to OpenStreetMap
 
 - The activity list's map thumbnails now send "Sommet/2.0" as their User-Agent, as the move

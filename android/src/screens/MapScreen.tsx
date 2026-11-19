@@ -716,6 +716,18 @@ function ExportMenuItem({ styles, label, onPress }: { styles: ReturnType<typeof 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 function createStyles(t: ReturnType<typeof useV3Theme>) {
+  const mapFab = {
+    backgroundColor: t.card,
+    borderColor: t.primary,
+    borderWidth: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  };
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: t.background },
     map: { flex: 1 },
@@ -749,6 +761,9 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
       paddingHorizontal: 8,
       gap: 12,
     },
+    // The three round buttons sit on the map itself: a see-through tint vanished over busy tiles
+    // (André, 2026-11-19). A solid card disc with a shadow reads over any map, in both themes, on
+    // tablets and phones, landscape and portrait.
     exportFab: {
       position: 'absolute',
       bottom: 12,
@@ -756,11 +771,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: t.primary + '1F',
-      borderColor: t.primary,
-      borderWidth: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
+      ...mapFab,
     },
     // Real, 2026-08-10 (offline maps) - same pill as exportFab, placed just to its left
     // (76 = 16 + 48 + 12, exportFab's own right offset + width + a real gap) rather than
@@ -772,11 +783,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: t.primary + '1F',
-      borderColor: t.primary,
-      borderWidth: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
+      ...mapFab,
     },
     offlineFab: {
       position: 'absolute',
@@ -785,11 +792,7 @@ function createStyles(t: ReturnType<typeof useV3Theme>) {
       width: 48,
       height: 48,
       borderRadius: 24,
-      backgroundColor: t.primary + '1F',
-      borderColor: t.primary,
-      borderWidth: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
+      ...mapFab,
     },
     btnDisabled: { opacity: 0.5 },
     exportFabText: { fontSize: 20, color: t.primary },

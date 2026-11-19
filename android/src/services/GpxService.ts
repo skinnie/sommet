@@ -61,6 +61,13 @@ export async function fitPathForGpx(gpxPath: string): Promise<string | null> {
   return (await RNFS.exists(path)) ? path : null;
 }
 
+/** A move's FIT next to its GPX, as bytes (base64 from disk); null when there is none. */
+export async function readFitForGpx(gpxPath: string): Promise<string | null> {
+  const p = await fitPathForGpx(gpxPath);
+  if (!p) return null;
+  try { return await RNFS.readFile(p, 'base64'); } catch { return null; }
+}
+
 /** Lit un fichier GPX depuis le stockage local. */
 export async function readGpxFile(path: string): Promise<string> {
   return RNFS.readFile(path, 'utf8');

@@ -4,6 +4,8 @@ import { ActivityRecord } from '../database/db';
 import { activityFileStem, fitPathForGpx, writeFitFile } from './GpxService';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { base64ToBytes, bytesToBase64 } from './Base64';
+import { fetchFitBlob } from './SommetSync';
+import { sommetUid } from '../database/db';
 // The FIT decoder and the activity-screen maths are SHARED with the desktop (edit shared/, then
 // run tools/gen_activity_view.py): the same JavaScript the desktop's QML runs, and a decoder that
 // tools/test_activity_streams_parity.js checks against the desktop's Python one.
@@ -36,6 +38,12 @@ async function fitBytes(activity: ActivityRecord): Promise<Uint8Array | null> {
   }
   const kept = `${RNFS.DocumentDirectoryPath}/activities/${activityFileStem(activity.id)}.fit`;
   if (await RNFS.exists(kept)) return base64ToBytes(await RNFS.readFile(kept, 'base64'));
+  // The user's own copy on the NAS before any third party (desktop's order, sync/03).
+  const nas = await fetchFitBlob(sommetUid(activity.device ?? '', activity.date));
+  if (nas) {
+    await writeFitFile(activityFileStem(activity.id), bytesToBase64(nas), true);
+    return nas;
+  }
   if (!activity.id.startsWith('icu:')) return null;
   const creds = await getIntervalsIcuCredentials();
   if (!creds) throw new Error('Connect intervals.icu in Settings to see this activity\'s charts.');

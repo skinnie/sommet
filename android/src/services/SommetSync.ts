@@ -4,7 +4,8 @@ import {
   deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
-import { readGpxFile, writeGpxFile } from './GpxService';
+import { readFitForGpx, readGpxFile, writeGpxFile } from './GpxService';
+import { base64ToBytes } from './Base64';
 import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
@@ -21,6 +22,9 @@ const LASTPULL_KEY = 'sommet.sync.lastPull';
 // shared sport names (a normal pull only asks for what changed since the last one).
 const REPULL_KEY = 'sommet.sync.repull.kcal1';
 const PUSHED_KEY = 'sommet.sync.blobsPushed';
+// sync/03 (2026-11-19): the moves whose original FIT the NAS confirmed. Android pushed only GPX
+// before, so the tablet's own FITs (its Charts) never reached desktop or the NAS.
+const FIT_PUSHED_KEY = 'sommet.sync.fitsPushed';
 
 export interface SommetSyncCfg { url: string; token: string; }
 export interface SommetSyncResult { pulled: number; pushed: number; ok: boolean; }
@@ -96,6 +100,31 @@ async function fetchBlob(url: string, token: string, uid: string): Promise<strin
     if (!res.ok) return null;
     return await res.text();
   } catch { return null; }
+}
+
+/** The move's original FIT from the NAS (sync/03): what desktop and the Garmin-export backfill
+ *  stored there. Null when the NAS has none or can't be reached. */
+export async function fetchFitBlob(uid: string): Promise<Uint8Array | null> {
+  const cfg = await getSommetSyncCfg();
+  if (!cfg) return null;
+  try {
+    const res = await fetch(cfg.url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
+      { method: 'GET', headers: { 'X-Sommet-Token': cfg.token } });
+    if (!res.ok) return null;
+    const b = new Uint8Array(await res.arrayBuffer());
+    return b.length > 12 && String.fromCharCode(b[8], b[9], b[10], b[11]) === '.FIT' ? b : null;
+  } catch { return null; }
+}
+
+async function pushFitBlob(url: string, token: string, uid: string, fit: Uint8Array): Promise<boolean> {
+  try {
+    const res = await fetch(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'fit' }).toString(),
+      { method: 'POST', headers: { 'X-Sommet-Token': token, 'Content-Type': 'application/octet-stream' },
+        body: fit.buffer.slice(fit.byteOffset, fit.byteOffset + fit.byteLength) as ArrayBuffer });
+    if (!res.ok) return false;
+    const j = await res.json().catch(() => null);
+    return !!(j && j.ok);   // desktop's rule: recorded only once the server said ok
+  } catch { return false; }
 }
 
 async function pushBlob(url: string, token: string, uid: string, gpx: string): Promise<boolean> {
@@ -254,6 +283,18 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     if (await pushBlob(url, token, b.uid, b.gpx)) pushed.add(b.uid);
   }
   await AsyncStorage.setItem(PUSHED_KEY, JSON.stringify(Array.from(pushed)));
+
+  // Original FITs, one per request, read only when not yet confirmed (a few KB to a few MB each).
+  const fitRaw = await AsyncStorage.getItem(FIT_PUSHED_KEY);
+  const fitPushed = new Set<string>(fitRaw ? JSON.parse(fitRaw) : []);
+  for (const a of acts) {
+    const uid = sommetUid(a.device ?? '', a.date);
+    if (tombstones.has(uid) || fitPushed.has(uid) || !a.gpx_path) continue;
+    const b64 = await readFitForGpx(a.gpx_path);
+    if (!b64) continue;
+    if (await pushFitBlob(url, token, uid, base64ToBytes(b64))) fitPushed.add(uid);
+  }
+  await AsyncStorage.setItem(FIT_PUSHED_KEY, JSON.stringify(Array.from(fitPushed)));
 
   return { pulled, pushed: records.length, ok: true };
 }
