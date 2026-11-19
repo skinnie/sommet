@@ -14,6 +14,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   asks every app to name itself, and on the tablet the thumbnails on the OpenStreetMap layer
   showed its "403 Access blocked" tile.
 - `tools/make_screenshot_activities.py` refuses a library that already holds real moves.
+- Android move page, map beside the details: the map and the details now share the page half
+  and half. The details were sized from the whole window, menu included, so the map got about a
+  fifth of the page.
 
 ## 2026-11-18: Desktop: one move's numbers no longer land on other moves (sync/07)
 

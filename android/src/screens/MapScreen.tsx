@@ -240,6 +240,11 @@ export default function MapScreen() {
     AsyncStorage.setItem(MAP_ABOVE_KEY, next ? '1' : '0').catch(() => undefined);
   };
   const sideBySide = wideLandscape && !mapAbove;   // tablet landscape: map left, panel right
+  // The page's own width, not the window's: on a tablet the side menu takes part of the window,
+  // and a panel sized from the window left the map about a fifth of the page (André,
+  // 2026-11-19). Beside, the map and the panel share the page half and half (panel 320-560).
+  const [pageW, setPageW] = useState(0);
+  const panelW = Math.max(320, Math.min(560, Math.round((pageW || win.width) * 0.5)));
   
   const [isReady, setIsReady] = useState(false);
 
@@ -580,7 +585,8 @@ export default function MapScreen() {
   }
 
   return (
-    <View style={[styles.container, sideBySide && { flexDirection: 'row' }]}>
+    <View style={[styles.container, sideBySide && { flexDirection: 'row' }]}
+      onLayout={e => setPageW(Math.round(e.nativeEvent.layout.width))}>
       {/* ── Carte Leaflet ── (a fixed box now: the activity panel scrolls below, or beside it on a
           landscape tablet) */}
       <View style={sideBySide ? { flex: 1 } : { height: Math.round(win.height * 0.42) }}>
@@ -676,7 +682,7 @@ export default function MapScreen() {
         onClose={() => setShowGearPicker(false)}
       />
 
-      <ScrollView style={sideBySide ? { width: Math.min(560, Math.round(win.width * 0.45)) } : { flex: 1 }}>
+      <ScrollView style={sideBySide ? { width: panelW } : { flex: 1 }}>
       {/* ── Overview / Charts / Laps ── (desktop parity: ActivityDetail.qml) */}
       <ActivityPanel activity={activity} meta={meta} hasMap mapView={mapView}
         onHover={onPanelHover} onStretch={onPanelStretch} onColoured={onPanelColoured} />
