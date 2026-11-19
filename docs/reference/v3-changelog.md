@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-19: Charts from the watch's own track; a split reaches every device; intervals.icu FITs kept
+
+- Android: a move read from an Ambit has no FIT, so its Charts tab was empty. The Charts are now
+  drawn from its own GPX track when no FIT exists (`streamsFromGpx` in
+  `shared/activity_streams.js`): time, distance, speed, altitude and, when recorded, heart rate,
+  cadence, power and temperature. On a 17 Nov trek it gives 4,854 m against the Suunto app's
+  4,847 m.
+- Android: the GPX it writes from the watch now carries heart rate, cadence, temperature and
+  power at every point (carried forward from the watch's periodic samples, as the desktop's FIT
+  does). Before, it kept only position, altitude and time.
+- Android: Sommet no longer crashes when Android rebuilds its screen (screen size or density
+  change): react-native-screens' saved fragments are no longer restored.
+- Sommet Sync (sync/08): a move carries a track version. "Split here" raises it, and a device
+  that sees a higher one on the NAS fetches the track again and drops its old FIT, so part 1
+  stops showing both rides on the other devices. Desktop and Android.
+- Desktop (sync/09): each move imported from intervals.icu gets its original FIT kept, so the
+  next Sommet Sync puts it on the NAS. A Suunto pool swim on the tablet showed only distance and
+  time; with its FIT it shows 46 lengths, heart rate and rest at the wall.
+
 ## 2026-11-19: Every move's original FIT on the NAS; Android sends and fetches FITs
 
 - Android now sends each move's FIT to the NAS on sync (only GPX went before, so a move read on

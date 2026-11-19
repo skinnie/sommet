@@ -6,11 +6,12 @@ import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { fetchFitBlob } from './SommetSync';
 import { sommetUid } from '../database/db';
+import { streamsCache as cache } from './StreamsCache';
 // The FIT decoder and the activity-screen maths are SHARED with the desktop (edit shared/, then
 // run tools/gen_activity_view.py): the same JavaScript the desktop's QML runs, and a decoder that
 // tools/test_activity_streams_parity.js checks against the desktop's Python one.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { streamsFromFit } = require('../config/activityStreams');
+const { streamsFromFit, streamsFromGpx } = require('../config/activityStreams');
 
 // The activity screen's data (André, 2026-09-27 - desktop parity, plan ACT-6): what the charts,
 // zones, laps and pool lengths are drawn from. A watch move has its FIT next to its GPX (written
@@ -19,7 +20,6 @@ const { streamsFromFit } = require('../config/activityStreams');
 export type Streams = any;   // tools/activity_streams.py's JSON shape (see shared/activity_streams.js)
 
 const API = 'https://intervals.icu/api/v1';
-const cache = new Map<string, Streams>();
 
 function authHeader(apiKey: string): Record<string, string> {
   return { Authorization: 'Basic ' + btoa(`API_KEY:${apiKey}`), 'User-Agent': 'Sommet/1.0' };
@@ -60,13 +60,29 @@ async function fitBytes(activity: ActivityRecord): Promise<Uint8Array | null> {
   throw new Error('intervals.icu returned no FIT for this activity.');
 }
 
+/** The FIT sport for a move on foot (1 running, 11 walking, 17 hiking), else null: the watch counts
+ *  steps of one foot, and the FIT path doubles them for these sports, so the track path must too. */
+function footSport(type?: string | null): number | null {
+  const t = (type ?? '').toLowerCase();
+  if (/run|jog|course|trail|orient/.test(t)) return 1;
+  if (/walk|march/.test(t)) return 11;
+  if (/hik|trek|randon|mountaineer/.test(t)) return 17;
+  return null;
+}
+
 /** Decoded streams for an activity (memory-cached). Null when the move has no file at all. */
 export async function getStreams(activity: ActivityRecord): Promise<Streams | null> {
   const hit = cache.get(activity.id);
   if (hit) return hit;
   const b = await fitBytes(activity);
-  if (!b) return null;
-  const st = streamsFromFit(b, 2000);
+  let st: Streams;
+  if (b) st = streamsFromFit(b, 2000);
+  else {
+    // No FIT anywhere (a move read from an Ambit never has one): draw from the track itself.
+    if (!activity.gpx_path || !(await RNFS.exists(activity.gpx_path))) return null;
+    st = streamsFromGpx(await RNFS.readFile(activity.gpx_path, 'utf8'), 2000, footSport(activity.activity_type));
+    if (!st.records) return null;
+  }
   cache.set(activity.id, st);
   if (cache.size > 12) cache.delete(cache.keys().next().value as string);
   return st;

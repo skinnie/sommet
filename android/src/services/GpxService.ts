@@ -61,6 +61,12 @@ export async function fitPathForGpx(gpxPath: string): Promise<string | null> {
   return (await RNFS.exists(path)) ? path : null;
 }
 
+/** sync/08: drop the FIT kept next to a GPX (its track changed on another device). */
+export async function removeFitForGpx(gpxPath: string): Promise<void> {
+  const p = await fitPathForGpx(gpxPath);
+  if (p) await RNFS.unlink(p).catch(() => undefined);
+}
+
 /** A move's FIT next to its GPX, as bytes (base64 from disk); null when there is none. */
 export async function readFitForGpx(gpxPath: string): Promise<string | null> {
   const p = await fitPathForGpx(gpxPath);

@@ -804,6 +804,10 @@ void ActivityService::openDatabase()
     // "nas" originals mode; a row not in here keeps its FIT until the NAS has it.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_fit_pushed (uid TEXT PRIMARY KEY)"));
+    // sync/08: each move's track version (Sommet Sync uid -> ms). A "Split here" raises it, so the
+    // other devices fetch the shortened track and FIT again instead of keeping the whole file.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_track_rev (uid TEXT PRIMARY KEY, rev INTEGER)"));
     // sync/06: the file a "Split here" cut, kept as it was recorded.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS split_originals (idx INTEGER, device TEXT, start_time TEXT, "
@@ -1622,6 +1626,20 @@ void ActivityService::splitMove(int idx, const QString &device, int atS)
             fp.addBindValue(sommetUid(device, startTime));
             fp.exec();
         }
+        {   // sync/08: a new track version for both rides, so other devices fetch them again
+            const QString secondStart = b.value(QStringLiteral("startTime")).toString();
+            for (const QString &u : {sommetUid(device, startTime), sommetUid(device, secondStart)}) {
+                QSqlQuery tr(m_db);
+                tr.prepare(QStringLiteral("INSERT OR REPLACE INTO sommet_track_rev (uid, rev) VALUES (?, ?)"));
+                tr.addBindValue(u);
+                tr.addBindValue(now);
+                tr.exec();
+            }
+            QSettings st;
+            QStringList pushedGpx = st.value(QStringLiteral("connections/sommet_sync/blobsPushed")).toStringList();
+            pushedGpx.removeAll(sommetUid(device, startTime));
+            st.setValue(QStringLiteral("connections/sommet_sync/blobsPushed"), pushedGpx);
+        }
         m_db.commit();
         const QString key = QString::number(idx) + QLatin1Char('|') + device;
         m_streamsCache.remove(key);
@@ -2318,7 +2336,8 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         ins.addBindValue(extId);
         ins.addBindValue(device);
         ins.addBindValue(utcOf(o));
-        ins.exec();
+        if (ins.exec() && !extId.isEmpty())
+            m_intervalsFitQueue.append({idx + 1, device});   // sync/09: its FIT goes to the NAS too
         if (!extId.isEmpty())
             existing.insert(extId, {INT_MIN, QString(), QString(), QString(), true});   // new this run
         ++count;
@@ -2420,6 +2439,34 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     // per run so this stays a background trickle rather than thousands of calls at once; the
     // remaining count comes back on trackBackfillFinished for a caller that wants to continue.
     backfillIntervalsTracks(150);
+    fetchNextIntervalsFit();
+}
+
+// sync/09 (2026-11-19): each move just imported from intervals.icu gets its original FIT, kept
+// here, so the next Sommet Sync puts it on the NAS. Before, only opening a move's Charts on the
+// desktop fetched it, and the tablet showed a Suunto pool swim as distance and time only (the
+// FIT has its 46 lengths, heart rate and stroke rate). One at a time, at most 50 a run.
+void ActivityService::fetchNextIntervalsFit()
+{
+    if (m_intervalsFitRunning)
+        return;
+    if (m_intervalsFitQueue.isEmpty() || m_intervalsFitDone >= 50) {
+        if (m_intervalsFitDone > 0)
+            qInfo("[intervals] kept %d original FITs for the NAS", m_intervalsFitDone);
+        m_intervalsFitQueue.clear();
+        m_intervalsFitDone = 0;
+        return;
+    }
+    const auto next = m_intervalsFitQueue.takeFirst();
+    m_intervalsFitRunning = true;
+    fetchIntervalsFitThen(next.first, next.second, [this](const QString &fit, const QString &err) {
+        m_intervalsFitRunning = false;
+        if (!fit.isEmpty())
+            ++m_intervalsFitDone;
+        else if (!err.isEmpty())
+            qInfo().noquote() << "[intervals] no FIT kept:" << err;
+        fetchNextIntervalsFit();
+    });
 }
 
 // Garmin activity typeKey -> Suunto's sport name (shared/sport_names.json, "garmin").
@@ -3502,6 +3549,36 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
     const qint64 movingIn = rec.value(QStringLiteral("moving_s")).toInteger();
     const QVariant remoteMoving = movingIn > 0 ? QVariant(movingIn) : QVariant();
 
+    // sync/08: a newer track version (a "Split here" on another device) replaces the track and the
+    // FIT we hold: fetch the GPX again, and drop our FIT so the Charts read the NAS's new one.
+    const qint64 remoteRev = rec.value(QStringLiteral("track_rev")).toInteger();
+    if (have && hasTrack && remoteRev > 0) {
+        qint64 localRev = 0;
+        QSqlQuery rv(m_db);
+        rv.prepare(QStringLiteral("SELECT rev FROM sommet_track_rev WHERE uid = ?"));
+        rv.addBindValue(uid);
+        if (rv.exec() && rv.next())
+            localRev = rv.value(0).toLongLong();
+        if (remoteRev > localRev) {
+            if (!m_sommetBlobQueue.contains(uid))
+                m_sommetBlobQueue.append(uid);
+            m_sommetPendingRev.insert(uid, remoteRev);
+            QSqlQuery dropFit(m_db);
+            dropFit.prepare(QStringLiteral(
+                "UPDATE activities SET fit_base64 = NULL WHERE idx = ? AND COALESCE(device, '') = ?"));
+            dropFit.addBindValue(existingIdx);
+            dropFit.addBindValue(device);
+            dropFit.exec();
+            QSqlQuery fp(m_db);
+            fp.prepare(QStringLiteral("DELETE FROM sommet_fit_pushed WHERE uid = ?"));
+            fp.addBindValue(uid);
+            fp.exec();
+            const QString key = QString::number(existingIdx) + QLatin1Char('|') + device;
+            m_streamsCache.remove(key);
+            m_streamsOrder.removeAll(key);
+        }
+    }
+
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
         if (hasTrack && localGpx.isEmpty() && !m_sommetBlobQueue.contains(uid))
@@ -3619,9 +3696,17 @@ void ActivityService::sommetFetchNextBlob()
                 up.addBindValue(QString::fromUtf8(trackDoc.toJson(QJsonDocument::Compact)));
                 up.addBindValue(uid.left(bar));
                 up.addBindValue(uid.mid(bar + 1));
-                up.exec();
+                if (up.exec() && m_sommetPendingRev.contains(uid)) {
+                    QSqlQuery tr(m_db);
+                    tr.prepare(QStringLiteral(
+                        "INSERT OR REPLACE INTO sommet_track_rev (uid, rev) VALUES (?, ?)"));
+                    tr.addBindValue(uid);
+                    tr.addBindValue(m_sommetPendingRev.value(uid));
+                    tr.exec();
+                }
             }
         }
+        m_sommetPendingRev.remove(uid);
         sommetFetchNextBlob();
     });
 }
@@ -3650,6 +3735,12 @@ void ActivityService::sommetPushAll()
         QSqlQuery fp(QStringLiteral("SELECT uid FROM sommet_fit_pushed"), m_db);
         while (fp.next())
             fitPushed.insert(fp.value(0).toString());
+    }
+    QHash<QString, qint64> trackRevs;   // sync/08
+    {
+        QSqlQuery tr(QStringLiteral("SELECT uid, rev FROM sommet_track_rev"), m_db);
+        while (tr.next())
+            trackRevs.insert(tr.value(0).toString(), tr.value(1).toLongLong());
     }
     QSqlQuery q(QStringLiteral(
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
@@ -3690,6 +3781,8 @@ void ActivityService::sommetPushAll()
         const QString gpx = q.value(13).toString();
         rec.insert(QStringLiteral("has_track"), !gpx.isEmpty());
         rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));
+        if (trackRevs.value(uid) > 0)
+            rec.insert(QStringLiteral("track_rev"), QJsonValue(trackRevs.value(uid)));
         records.append(rec);
         if (!gpx.isEmpty() && !pushedSet.contains(uid))
             m_sommetPushQueue.append(uid);

@@ -16,7 +16,11 @@ jest.mock('../../database/db', () => ({
   markActivitySynced: jest.fn(async (r: any) => { mockRows.push(r); }),
   sommetUid: (d: string, date: string) => `${d}|${date.slice(0, 16)}`,
 }));
-jest.mock('../SommetSync', () => ({ forgetPushedBlob: jest.fn(async () => {}) }));
+jest.mock('../SommetSync', () => ({
+  forgetPushedBlob: jest.fn(async () => {}),
+  forgetPushedFit: jest.fn(async () => {}),
+  bumpTrackRev: jest.fn(async () => {}),
+}));
 jest.mock('../GpxService', () => ({
   fitPathForGpx: jest.fn(async (g: string) => {
     const p = g.replace(/\.gpx$/, '.fit');
@@ -44,6 +48,11 @@ beforeEach(() => {
 test('two moves from one file; the first keeps its id and start, the file as recorded is kept', async () => {
   const r = await splitMove(activity as any, 535);
   expect(r).toEqual({ ok: true, secondId: 'edge_B6E15513-2' });
+  // sync/08: both rides get a new track version, and the first ride's FIT is sent again
+  const sync = require('../SommetSync');
+  expect(sync.bumpTrackRev).toHaveBeenCalledTimes(1);
+  expect(sync.bumpTrackRev.mock.calls[0][0]).toHaveLength(2);
+  expect(sync.forgetPushedFit).toHaveBeenCalledTimes(1);
   expect(mockFiles['/doc/a/edge_B6E15513.orig.fit']).toBe(fixture.fit_b64);
   expect(mockRows).toHaveLength(2);
   const [a, b] = mockRows;

@@ -168,7 +168,6 @@ function lapsKind(laps, hasLengths) {
 }
 
 function streamsFromFit(bytes, points) {
-    points = points || 2000;
     var fileId = null, session = null, lapsRaw = [], recs = [], lensRaw = [];
     var stepDefs = {}, stepEvents = [];
     decodeFit(bytes, function (gn, v) {
@@ -180,7 +179,74 @@ function streamsFromFit(bytes, points) {
         else if (gn === 20) recs.push(v);
         else if (gn === 101) lensRaw.push(v);
     });
-    fileId = fileId || {}; session = session || {};
+    return streamsFromMessages(fileId || {}, session || {}, lapsRaw, recs, lensRaw, stepDefs, stepEvents, points);
+}
+
+// A GPX track (time, position, altitude, heart rate / cadence / power / temperature extensions)
+// as FIT record messages, so a move with no FIT - one read from an Ambit, which never writes one -
+// still gets Charts from its own track (2026-11-19). Distance and speed come from the positions.
+function gpxNum(seg, tags) {
+    for (var i = 0; i < tags.length; i++) {
+        var m = new RegExp("<(?:[A-Za-z0-9_]+:)?" + tags[i] + ">\\s*(-?[0-9.]+)").exec(seg);
+        if (m) return parseFloat(m[1]);
+    }
+    return null;
+}
+
+function streamsFromGpx(text, points, sport) {
+    var re = /<trkpt\b([^>]*)>([\s\S]*?)<\/trkpt>/g, m, recs = [], dist = 0, prev = null;
+    while ((m = re.exec(text)) !== null) {
+        var la = /lat="(-?[0-9.]+)"/.exec(m[1]), lo = /lon="(-?[0-9.]+)"/.exec(m[1]);
+        var tm = /<time>([^<]+)<\/time>/.exec(m[2]);
+        if (!tm) continue;
+        var t = Date.parse(tm[1]);
+        if (isNaN(t)) continue;
+        var r = { 253: Math.round(t / 1000) - FIT_EPOCH };
+        var lat = la ? parseFloat(la[1]) : null, lon = lo ? parseFloat(lo[1]) : null;
+        if (lat !== null && lon !== null) {
+            r[0] = Math.round(lat / SEMI); r[1] = Math.round(lon / SEMI);
+            if (prev) {
+                var rad = Math.PI / 180, dLa = (lat - prev[0]) * rad, dLo = (lon - prev[1]) * rad;
+                var a = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
+                        Math.cos(prev[0] * rad) * Math.cos(lat * rad) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+                dist += 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(a)));
+            }
+            prev = [lat, lon];
+        }
+        if (prev) r[5] = Math.round(dist * 100);
+        var ele = gpxNum(m[2], ["ele"]);
+        if (ele !== null) r[2] = Math.round((ele + 500) * 5);
+        var hr = gpxNum(m[2], ["hr", "heartrate"]);
+        if (hr !== null && hr > 0) r[3] = Math.round(hr);
+        var cad = gpxNum(m[2], ["cad", "cadence"]);
+        if (cad !== null) r[4] = Math.round(cad);
+        var pw = gpxNum(m[2], ["power", "PowerInWatts"]);
+        if (pw !== null) r[7] = Math.round(pw);
+        var tc = gpxNum(m[2], ["atemp", "temp"]);
+        if (tc !== null) r[13] = Math.round(tc) & 0xFF;
+        recs.push(r);
+    }
+    // speed over about 10 s either side, from the distance (a GPX has no speed of its own)
+    for (var i = 0, j0 = 0, j1 = 0; i < recs.length; i++) {
+        while (j0 < i && recs[i][253] - recs[j0][253] > 10) j0++;
+        while (j1 < recs.length - 1 && recs[j1 + 1][253] - recs[i][253] <= 10) j1++;
+        var dt = recs[j1][253] - recs[j0][253];
+        if (dt > 0 && has(recs[j1], 5) && has(recs[j0], 5)) recs[i][6] = Math.round((recs[j1][5] - recs[j0][5]) * 10 / dt);
+    }
+    var session = {};
+    if (sport !== undefined && sport !== null) session[5] = sport;
+    if (recs.length) {
+        session[2] = recs[0][253];
+        session[7] = (recs[recs.length - 1][253] - recs[0][253]) * 1000;
+        if (prev) session[9] = Math.round(dist * 100);
+    }
+    var out = streamsFromMessages({}, session, [], recs, [], {}, [], points);
+    out.from_track = true;
+    return out;
+}
+
+function streamsFromMessages(fileId, session, lapsRaw, recs, lensRaw, stepDefs, stepEvents, points) {
+    points = points || 2000;
     var sport = has(session, 5) ? session[5] : null, foot = !!FOOT_SPORTS[sport];
     var t0 = session[2] || (recs.length && recs[0][253]) || 0;
 
@@ -332,4 +398,4 @@ function streamsFromFit(bytes, points) {
     };
 }
 
-if (typeof module !== "undefined" && module.exports) module.exports = { streamsFromFit: streamsFromFit, decodeFit: decodeFit, lapsKind: lapsKind };
+if (typeof module !== "undefined" && module.exports) module.exports = { streamsFromFit: streamsFromFit, streamsFromGpx: streamsFromGpx, decodeFit: decodeFit, lapsKind: lapsKind };

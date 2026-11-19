@@ -411,6 +411,13 @@ private:
     // idx, else allocates a fresh negative idx for a foreign row). Returns true if it changed the DB.
     bool sommetUpsertRecord(const QJsonObject &rec);
     QStringList m_sommetBlobQueue;     // uids of just-pulled rows whose GPX still needs fetching
+    // sync/08: the track version each queued fetch brings (a split raised it on another device).
+    QHash<QString, qint64> m_sommetPendingRev;
+    // sync/09: moves just imported from intervals.icu whose FIT is fetched to keep (for the NAS).
+    void fetchNextIntervalsFit();
+    QList<QPair<int, QString>> m_intervalsFitQueue;
+    bool m_intervalsFitRunning = false;
+    int m_intervalsFitDone = 0;
     QStringList m_sommetPushQueue;     // uids of local rows whose GPX still needs pushing
     QStringList m_sommetFitPushQueue;  // uids of local rows whose FIT the NAS doesn't have yet
     bool m_sommetBusy = false;

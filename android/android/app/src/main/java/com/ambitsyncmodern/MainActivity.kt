@@ -1,6 +1,7 @@
 package com.ambitsyncmodern
 
 import android.content.Intent
+import android.os.Bundle
 import android.hardware.usb.UsbManager
 import com.ambitsyncmodern.usb.AmbitUsbModule
 import com.facebook.react.ReactActivity
@@ -15,6 +16,14 @@ class MainActivity : ReactActivity() {
    * rendering of the component.
    */
   override fun getMainComponentName(): String = "Sommet"
+
+  // react-native-screens keeps its screens as fragments; restoring them after Android recreates the
+  // activity (rotation, screen size change) throws Fragment$InstantiationException and crashes the
+  // app (seen on the tablet 2026-11-19, dropbox data_app_crash). React rebuilds the screens itself,
+  // so start from no saved state, as react-native-screens' install notes say.
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(null)
+  }
 
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]

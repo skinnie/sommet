@@ -322,6 +322,12 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
     // État GPS courant — mis à jour par gps_base, complété par gps_small/tiny/periodic
     double cur_lat = 0.0, cur_lon = 0.0, cur_ele = 0.0;
     bool   has_pos = false;
+    // Sensor channels in effect at each point, carried forward from the periodic samples like the
+    // desktop's FIT does (tools/exercise_log.py extract_track_points). Without them a move read on
+    // Android had no heart rate, cadence or temperature in its Charts (2026-11-19, checked against
+    // the Suunto app's file of the same trek). -1 = not recorded yet.
+    int cur_hr = -1, cur_cad = -1, cur_pw = -1;
+    double cur_temp = -1000.0;
     uint32_t cur_time_ms = 0;  // temps depuis le début en ms
 
     // Calculer le timestamp Unix de début (approximatif, seconds depuis epoch)
@@ -371,6 +377,13 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
                 const ambit_log_sample_periodic_value_t &pv = s.u.periodic.values[v];
                 if (pv.type == ambit_log_sample_periodic_type_latitude)  { lat = pv.u.latitude  / 1e7; lat_ok = true; }
                 if (pv.type == ambit_log_sample_periodic_type_longitude) { lon = pv.u.longitude / 1e7; lon_ok = true; }
+                if (pv.type == ambit_log_sample_periodic_type_hr && pv.u.hr != 0xff && pv.u.hr > 0) cur_hr = pv.u.hr;
+                if (pv.type == ambit_log_sample_periodic_type_cadence && pv.u.cadence != 0xff) cur_cad = pv.u.cadence;
+                if (pv.type == ambit_log_sample_periodic_type_wristcadence && pv.u.wristcadence != 0xffff && cur_cad < 0)
+                    cur_cad = pv.u.wristcadence;
+                if (pv.type == ambit_log_sample_periodic_type_bikepower && pv.u.bikepower != 0xffff) cur_pw = pv.u.bikepower;
+                if (pv.type == ambit_log_sample_periodic_type_temperature && pv.u.temperature >= -1000 && pv.u.temperature <= 1000)
+                    cur_temp = pv.u.temperature / 10.0;
                 // Ne pas écraser cur_ele avec l'altitude barométrique periodique :
                 // elle diverge souvent de l'altitude GPS (gps_base) et cause des D+ délirants.
             }
@@ -386,8 +399,17 @@ static std::string convertEntryToGpx(const ambit_log_entry_t *entry)
             gpx << std::fixed << std::setprecision(7)
                 << "    <trkpt lat=\"" << cur_lat << "\" lon=\"" << cur_lon << "\">"
                 << "<ele>" << std::setprecision(1) << cur_ele << "</ele>"
-                << "<time>" << time_buf << "</time>"
-                << "</trkpt>\n";
+                << "<time>" << time_buf << "</time>";
+            if (cur_hr > 0 || cur_cad >= 0 || cur_pw >= 0 || cur_temp > -1000.0) {
+                gpx << "<extensions><gpxtpx:TrackPointExtension>";
+                if (cur_temp > -1000.0) gpx << "<gpxtpx:atemp>" << std::setprecision(1) << cur_temp << "</gpxtpx:atemp>";
+                if (cur_hr > 0)   gpx << "<gpxtpx:hr>" << cur_hr << "</gpxtpx:hr>";
+                if (cur_cad >= 0) gpx << "<gpxtpx:cad>" << cur_cad << "</gpxtpx:cad>";
+                gpx << "</gpxtpx:TrackPointExtension>";
+                if (cur_pw >= 0) gpx << "<power>" << cur_pw << "</power>";
+                gpx << "</extensions>";
+            }
+            gpx << "</trkpt>\n";
         }
     }
 

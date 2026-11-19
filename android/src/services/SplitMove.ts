@@ -12,7 +12,7 @@ import { ActivityRecord, markActivitySynced, sommetUid } from '../database/db';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { fitPathForGpx, writeFitFile, writeGpxFile } from './GpxService';
 import { decodeFit, rideToGpx } from './MageneFit';
-import { forgetPushedBlob } from './SommetSync';
+import { bumpTrackRev, forgetPushedBlob, forgetPushedFit } from './SommetSync';
 const { splitFit } = require('../config/fitSplit');
 
 export interface SplitResult { ok: boolean; message?: string; secondId?: string }
@@ -55,6 +55,10 @@ export async function splitMove(activity: ActivityRecord, atS: number): Promise<
     distance_m: Math.round(rides[1].distanceMeters), d_plus: Math.round(rides[1].ascentMeters ?? 0),
     energy_kcal: rides[1].energyKcal,
   });
-  await forgetPushedBlob(sommetUid(activity.device ?? '', activity.date)).catch(() => {});
+  const uid1 = sommetUid(activity.device ?? '', activity.date);
+  await forgetPushedBlob(uid1).catch(() => {});
+  await forgetPushedFit(uid1).catch(() => {});
+  // sync/08: other devices hold the whole file's track for the first ride - make them refetch it
+  await bumpTrackRev([uid1, sommetUid(activity.device ?? '', rides[1].startTime || activity.date)]).catch(() => {});
   return { ok: true, secondId };
 }

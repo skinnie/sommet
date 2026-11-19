@@ -4,7 +4,8 @@ import {
   deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
-import { readFitForGpx, readGpxFile, writeGpxFile } from './GpxService';
+import { readFitForGpx, readGpxFile, removeFitForGpx, writeGpxFile } from './GpxService';
+import { streamsCache } from './StreamsCache';
 import { base64ToBytes } from './Base64';
 import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 
@@ -22,6 +23,28 @@ const LASTPULL_KEY = 'sommet.sync.lastPull';
 // shared sport names (a normal pull only asks for what changed since the last one).
 const REPULL_KEY = 'sommet.sync.repull.kcal1';
 const PUSHED_KEY = 'sommet.sync.blobsPushed';
+// sync/08: each move's track version (uid -> ms) as this device holds it. A "Split here" raises
+// it; a device that sees a higher one on the NAS fetches the track and the FIT again.
+const TRACK_REV_KEY = 'sommet.sync.trackRev';
+
+async function readTrackRevs(): Promise<Record<string, number>> {
+  try { return JSON.parse((await AsyncStorage.getItem(TRACK_REV_KEY)) || '{}'); } catch { return {}; }
+}
+
+/** sync/08: a split changed these moves' tracks here - raise their versions so others refetch. */
+export async function bumpTrackRev(uids: string[]): Promise<void> {
+  const revs = await readTrackRevs();
+  const now = Date.now();
+  for (const u of uids) revs[u] = now;
+  await AsyncStorage.setItem(TRACK_REV_KEY, JSON.stringify(revs));
+}
+
+/** sync/08: the FIT of a split move changed here, so send it to the NAS again. */
+export async function forgetPushedFit(uid: string): Promise<void> {
+  const raw = await AsyncStorage.getItem(FIT_PUSHED_KEY);
+  const pushed = new Set<string>(raw ? JSON.parse(raw) : []);
+  if (pushed.delete(uid)) await AsyncStorage.setItem(FIT_PUSHED_KEY, JSON.stringify(Array.from(pushed)));
+}
 // sync/03 (2026-11-19): the moves whose original FIT the NAS confirmed. Android pushed only GPX
 // before, so the tablet's own FITs (its Charts) never reached desktop or the NAS.
 const FIT_PUSHED_KEY = 'sommet.sync.fitsPushed';
@@ -155,6 +178,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   const { url, token } = cfg;
 
   const tombstones = new Set<string>(await getSommetTombstones());
+  const trackRevs = await readTrackRevs();
+  let revsChanged = false;
   let pulled = 0;
 
   // ── PULL ──────────────────────────────────────────────────────────────────────
@@ -192,7 +217,9 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     // Junk/test entries (under a minute AND under 100 m) are not kept - same rule as the
     // desktop's import; they reach the shared store from a watch read on the desktop.
     if (isJunkActivity(Number(rec.duration_s || 0), Number(rec.distance_m || 0))) continue;
-    if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path) { // ours is newer & has track
+    const remoteRev = Number(rec.track_rev || 0);
+    const newerTrack = !!rec.has_track && remoteRev > (trackRevs[uid] || 0);   // sync/08: split elsewhere
+    if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path && !newerTrack) { // ours is newer & has track
       // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
       const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number; moving_s?: number } = {};
       if (energy > 0 && !existing.energy_kcal) fix.energy_kcal = energy;
@@ -218,9 +245,17 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     }
     const id = idFromDate(start, uid);
     let gpxPath = existing?.gpx_path ?? '';
-    if (rec.has_track && !gpxPath) {
+    if (rec.has_track && (!gpxPath || newerTrack)) {
       const gpx = await fetchBlob(url, token, uid);
-      if (gpx) gpxPath = (await writeGpxFile(id, gpx, true)) ?? '';
+      if (gpx) {
+        if (newerTrack && gpxPath) {
+          // the old FIT covers the whole file: drop it, the Charts fetch the NAS's new one
+          await removeFitForGpx(gpxPath);
+          if (existing) streamsCache.delete(existing.id);
+        }
+        gpxPath = (await writeGpxFile(id, gpx, true)) ?? '';
+        if (newerTrack && gpxPath) { trackRevs[uid] = remoteRev; revsChanged = true; }
+      }
     }
     await markActivitySynced({
       id,
@@ -239,6 +274,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     });
     pulled++;
   }
+  if (revsChanged) await AsyncStorage.setItem(TRACK_REV_KEY, JSON.stringify(trackRevs));
   if (remote.now) await AsyncStorage.setItem(LASTPULL_KEY, String(remote.now));
   if (!repullDone) await AsyncStorage.setItem(REPULL_KEY, '1');
 
@@ -271,6 +307,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       updated_at: a.updated_at || a.synced_at,
       ...(a.start_utc ? { start_utc: a.start_utc } : {}),
       ...(a.moving_s ? { moving_s: a.moving_s } : {}),
+      ...(trackRevs[uid] ? { track_rev: trackRevs[uid] } : {}),
     });
     if (gpx && !pushed.has(uid)) blobsToPush.push({ uid, gpx });
   }
