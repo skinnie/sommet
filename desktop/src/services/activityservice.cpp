@@ -47,6 +47,12 @@ static bool isJunkActivity(int durationS, double distanceM)
 // that ocean's weather and "hours outside" in Totals were all wrong (André, 2026-10-24). Same
 // words as Android's SportNames.isIndoorSport; an intervals.icu import keeps its sport in `name`
 // ("Indoor cycling"). SQLite's LIKE ignores ASCII case.
+// Start minute ("yyyy-MM-ddTHH:mm") before which a move counts as older (sync/13: 90 days).
+static QString lightCutoffMinute()
+{
+    return QDateTime::currentDateTimeUtc().addDays(-90).toString(Qt::ISODate).left(16);
+}
+
 static const QString kNotIndoorName = QStringLiteral(
     "COALESCE(name,'') NOT LIKE '%indoor%' AND COALESCE(name,'') NOT LIKE '%virtual%' "
     "AND COALESCE(name,'') NOT LIKE '%trainer%' AND COALESCE(name,'') NOT LIKE '%treadmill%' "
@@ -877,6 +883,11 @@ void ActivityService::openDatabase()
     // Tagged with a hash of the GPX it came from, so any write of gpx_text makes it stale.
     // Added after every table rebuild above, so none of them drops it.
     q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN gpx_extras_json TEXT"));
+    // Light library (sync/13): track_remote = 1 when this move's Track is kept on the server (the
+    // NAS or intervals.icu) and not here; track_cached_at = when an opened older move's Track was
+    // fetched back (those count against the size limit, oldest dropped first).
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN track_remote INTEGER"));
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN track_cached_at INTEGER"));
     // Sommet Sync finds a move by (device, start minute) for every record it applies, deletes,
     // fetches or sends. Without this index each lookup read the whole table (0.4 s on 4,700
     // moves), and a full pull of 4,800 records held the window for half an hour: the P5Q "hang",
@@ -886,9 +897,27 @@ void ActivityService::openDatabase()
         "ON activities(device, substr(start_time,1,16))"));
     dropIndoorImportTracks(m_db);
 
+    // Light library: Tracks left on the server free their space inside the file, not on disk.
+    // When more than 100 MB and a third of the file is free, rewrite it once at start (VACUUM
+    // copies only the live rows: ~40 MB of a 535 MB file after the trim, 2026-11-20).
+    {
+        QSqlQuery fl(m_db);
+        qint64 freePages = 0, pages = 0, pageSize = 4096;
+        if (fl.exec(QStringLiteral("PRAGMA freelist_count")) && fl.next()) freePages = fl.value(0).toLongLong();
+        if (fl.exec(QStringLiteral("PRAGMA page_count")) && fl.next()) pages = fl.value(0).toLongLong();
+        if (fl.exec(QStringLiteral("PRAGMA page_size")) && fl.next()) pageSize = fl.value(0).toLongLong();
+        if (freePages * pageSize > 100LL * 1024 * 1024 && freePages * 3 > pages) {
+            QElapsedTimer vt; vt.start();
+            fl.exec(QStringLiteral("VACUUM"));
+            qInfo().noquote() << QStringLiteral("[library] database compacted: %1 MB freed in %2 ms")
+                                     .arg(freePages * pageSize / (1024 * 1024)).arg(vt.elapsed());
+        }
+    }
     loadTombstones();
     // Moving times for rows stored before sync/06; the backend may still be starting.
     QTimer::singleShot(15000, this, &ActivityService::backfillMovingTimes);
+    // Light library: older Tracks the server holds leave this device a minute after start.
+    QTimer::singleShot(60000, this, &ActivityService::trimOldTracks);
 }
 
 void ActivityService::backfillMovingTimes()
@@ -1067,7 +1096,7 @@ bool ActivityService::dbLoadAll()
         "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
         "CASE WHEN source = 'intervals' THEN NULL ELSE gpx_text END, "   // see fromIntervals below
         "fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0), "
-        "COALESCE(moving_s, 0), gpx_extras_json "
+        "COALESCE(moving_s, 0), gpx_extras_json, COALESCE(track_remote, 0) "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -1106,7 +1135,8 @@ bool ActivityService::dbLoadAll()
         // Track is DEFERRED (see the query comment): start empty, expose a cheap has_gps flag, and
         // remember this row's position so eager-loading below / trackFor() can fill it in later.
         parsed[QStringLiteral("track")] = QVariantList();
-        parsed[QStringLiteral("hasGps")] = q.value(8).toInt() != 0;
+        // A Track kept on the server only (light library) still counts: the card fetches it.
+        parsed[QStringLiteral("hasGps")] = q.value(8).toInt() != 0 || q.value(17).toInt() == 1;
         parsed[QStringLiteral("trackPointCount")] = 0;   // filled when the track is actually parsed
         // An intervals.icu import's GPX, when it has one, is the points-only file Sommet built for
         // the NAS (sync/10): nothing in it the list needs, and holding/parsing ~3,700 of them made
@@ -1155,6 +1185,12 @@ bool ActivityService::dbLoadAll()
                 ++_gpxN;
             }
             _gpxMs += _g.elapsed();
+            for (const QString &key : kGpxExtraKeys)
+                parsed[key] = extra.value(key);
+        } else if (q.value(17).toInt() == 1 && !q.value(16).toString().isEmpty()) {
+            // Its GPX now lives on the server only (light library): the figures kept from it.
+            const QVariantMap extra = QJsonDocument::fromJson(q.value(16).toString().toUtf8())
+                                          .object().toVariantMap();
             for (const QString &key : kGpxExtraKeys)
                 parsed[key] = extra.value(key);
         }
@@ -1504,10 +1540,29 @@ void ActivityService::fetchFitThen(int idx, const QString &device,
     });
 }
 
+// "nas" = light library (sync/13, the default since 2026-11-20): Tracks and FITs of moves older
+// than 90 days stay on the server and load when opened. "device" = keep everything here.
 QString ActivityService::originalsLocation() const
 {
     const QString v = QSettings().value(QStringLiteral("storage/originals")).toString();
-    return v == QStringLiteral("nas") ? v : QStringLiteral("device");
+    return v == QStringLiteral("device") ? v : QStringLiteral("nas");
+}
+
+int ActivityService::libraryCacheMb() const
+{
+    return QSettings().value(QStringLiteral("storage/cacheMb"), kDefaultCacheMb).toInt();
+}
+
+void ActivityService::setLibraryCacheMb(int mb)
+{
+    QSettings().setValue(QStringLiteral("storage/cacheMb"), qBound(100, mb, 2000));
+    evictTrackCache();
+}
+
+
+bool ActivityService::keepRecentOnly() const
+{
+    return originalsLocation() == QStringLiteral("nas");
 }
 
 void ActivityService::setOriginalsLocation(const QString &where)
@@ -1790,7 +1845,17 @@ void ActivityService::requestPlanned(const QString &date)
 
 QVariantMap ActivityService::trackFor(int idx, const QString &device)
 {
-    return fetchTrack(idx, device);
+    const QVariantMap t = fetchTrack(idx, device);
+    if (t.value(QStringLiteral("track")).toList().isEmpty() && m_db.isOpen()) {
+        // Light library: kept on the server only - fetch it; trackFetched() follows (sync/13).
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT track_remote FROM activities WHERE idx = ? AND COALESCE(device,'') = ?"));
+        q.addBindValue(idx);
+        q.addBindValue(device);
+        if (q.exec() && q.next() && q.value(0).toInt() == 1)
+            fetchRemoteTrack(idx, device);
+    }
+    return t;
 }
 
 void ActivityService::updateWatchHrvStore()
@@ -2062,7 +2127,14 @@ void ActivityService::backfillIntervalsTracks(int maxCount)
         "  AND COALESCE(track_json,'') IN ('', '[]') "
         "  AND %1 "
         "  AND external_id NOT IN (SELECT external_id FROM intervals_no_track) "
+        // Light library: only the last 90 days; older ones load when opened (sync/13).
+        "  AND (? = '' OR substr(start_time,1,16) >= ?) "
         "ORDER BY start_time DESC LIMIT ?").arg(kNotIndoorName));
+    {
+        const QString cut = keepRecentOnly() ? lightCutoffMinute() : QString();
+        q.addBindValue(cut);
+        q.addBindValue(cut);
+    }
     q.addBindValue(maxCount > 0 ? maxCount : 200);
     if (!q.exec()) return;
 
@@ -2091,8 +2163,9 @@ void ActivityService::fetchNextTrack()
                 "SELECT COUNT(*) FROM activities WHERE source = 'intervals' "
                 "AND COALESCE(external_id,'') <> '' AND COALESCE(distance_m,0) > 0 "
                 "AND COALESCE(track_json,'') IN ('', '[]') AND %1 "
-                "AND external_id NOT IN (SELECT external_id FROM intervals_no_track)")
-                .arg(kNotIndoorName), m_db);
+                "AND external_id NOT IN (SELECT external_id FROM intervals_no_track) "
+                "AND ('%2' = '' OR substr(start_time,1,16) >= '%2')")
+                .arg(kNotIndoorName, keepRecentOnly() ? lightCutoffMinute() : QString()), m_db);
             if (c.next()) remaining = c.value(0).toInt();
         }
         if (m_trackFilled > 0) {
@@ -3744,8 +3817,8 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         sommetMarkSent(uid, remoteUpdated);   // same version on both sides: nothing to push
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
-        if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
-            m_sommetBlobQueue.append(uid);
+        if (hasTrack && localGpx.isEmpty() && !localPoints)
+            queueOrDeferBlob(uid);
         return false;
     }
 
@@ -3815,9 +3888,29 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
     }
 
     sommetMarkSent(uid, remoteUpdated);       // written from the NAS: it already has this version
-    if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
-        m_sommetBlobQueue.append(uid);
+    if (hasTrack && localGpx.isEmpty() && !localPoints)
+        queueOrDeferBlob(uid);
     return true;
+}
+
+// A pulled move's Track: fetched now, or - light library, older than 90 days - left on the NAS
+// and marked so the list still shows a map and fetches it when the move is opened (sync/13).
+void ActivityService::queueOrDeferBlob(const QString &uid)
+{
+    const int bar = uid.indexOf(QLatin1Char('|'));
+    if (keepRecentOnly() && bar > 0 && uid.mid(bar + 1) < lightCutoffMinute()) {
+        QSqlQuery m(m_db);
+        m.prepare(QStringLiteral("UPDATE activities SET track_remote = 1 "
+                                 "WHERE COALESCE(device,'') = ? AND substr(start_time,1,16) = ?"));
+        m.addBindValue(uid.left(bar));
+        m.addBindValue(uid.mid(bar + 1));
+        m.exec();
+        if (!m_sommetFetchedNow.contains(uid))
+            m_sommetFetchedNow.append(uid);       // the NAS holds it: recorded like a fetched one
+        return;
+    }
+    if (!m_sommetBlobQueue.contains(uid))
+        m_sommetBlobQueue.append(uid);
 }
 
 void ActivityService::sommetMarkSent(const QString &uid, qint64 updatedAt)
@@ -4154,6 +4247,7 @@ void ActivityService::sommetPushNextFit()
                           m_syncPushTotal - int(m_sommetFitPushQueue.size()), m_syncPushTotal);
     if (m_sommetFitPushQueue.isEmpty()) {
         trimLocalOriginals();
+        trimOldTracks();
         sommetSyncEnded();
         emit sommetSyncFinished(m_sommetPulled, m_sommetPushed);
         return;
@@ -4207,7 +4301,7 @@ void ActivityService::trimLocalOriginals()
     if (originalsLocation() != QStringLiteral("nas") || !m_db.isOpen())
         return;
     // Recent moves keep their FIT here: the exports to intervals.icu / Garmin read it locally.
-    const QString cutoff = QDateTime::currentDateTime().addDays(-30).toString(Qt::ISODate).left(16);
+    const QString cutoff = lightCutoffMinute();   // 90 days (sync/13; was 30 for FITs alone)
     // Only rows whose sync uid (device|start minute) is theirs alone: two moves started in the
     // same minute share a uid, the NAS holds just one of their FITs, and trimming both would lose
     // the other for good. Picked first, then cleared row by row (by idx + device).
@@ -4243,4 +4337,221 @@ void ActivityService::trimLocalOriginals()
         a.remove(QStringLiteral("fitBase64"));
         m_activities[i] = a;
     }
+}
+
+// ── Light library (sync/13, André 2026-11-20) ──────────────────────────────────────────────
+// "The average joe don't want 4000 activities on his pc or tablet.. he wants to consult it and
+// be safe.. either intervals.. or nas". Every move stays in the list; a Track older than 90 days
+// is kept here only while it is NOT confirmed elsewhere. Confirmed = the NAS holds its GPX
+// (blobsPushed: sent from here or fetched from there), or it is an intervals.icu import (its
+// streams can be asked again). A watch-only setup has neither, so nothing is dropped.
+
+void ActivityService::trimOldTracks()
+{
+    if (!keepRecentOnly() || !m_db.isOpen())
+        return;
+    const QString cutoff = lightCutoffMinute();
+    const QSettings s;
+    const bool intervals =
+        !s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString().isEmpty()
+        && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
+    const QSet<QString> onNas = [&s] {
+        const QStringList l = s.value(QStringLiteral("connections/sommet_sync/blobsPushed")).toStringList();
+        return QSet<QString>(l.cbegin(), l.cend());
+    }();
+
+    QSqlQuery pick(m_db);
+    pick.prepare(QStringLiteral(
+        "SELECT a.idx, COALESCE(a.device,''), substr(a.start_time,1,16), COALESCE(a.source,''), "
+        "       COALESCE(a.external_id,''), "
+        "       (SELECT COUNT(*) FROM activities b WHERE COALESCE(b.device,'') = COALESCE(a.device,'') "
+        "        AND substr(b.start_time,1,16) = substr(a.start_time,1,16)) "
+        "FROM activities a "
+        "WHERE substr(a.start_time,1,16) < ? AND a.track_cached_at IS NULL "
+        "  AND (COALESCE(a.track_json,'') NOT IN ('', '[]') OR COALESCE(a.gpx_text,'') <> '')"));
+    pick.addBindValue(cutoff);
+    if (!pick.exec())
+        return;
+    struct Row { int idx; QString device; };
+    QList<Row> drop;
+    while (pick.next()) {
+        const QString uid = pick.value(1).toString() + QLatin1Char('|') + pick.value(2).toString();
+        const bool fromIntervals = pick.value(3).toString() == QStringLiteral("intervals")
+                                   && !pick.value(4).toString().isEmpty() && intervals;
+        // Same-minute twins share one uid and the NAS holds one GPX for both: keep them here.
+        const bool nasHasIt = onNas.contains(uid) && pick.value(5).toInt() == 1;
+        if (fromIntervals || nasHasIt)
+            drop.append({pick.value(0).toInt(), pick.value(1).toString()});
+    }
+    // intervals.icu imports older than 90 days that never got their Track: fetched when opened.
+    if (intervals) {
+        QSqlQuery mark(m_db);
+        mark.prepare(QStringLiteral(
+            "UPDATE activities SET track_remote = 1 "
+            "WHERE source = 'intervals' AND COALESCE(external_id,'') <> '' AND COALESCE(distance_m,0) > 0 "
+            "  AND COALESCE(track_json,'') IN ('', '[]') AND %1 "
+            "  AND external_id NOT IN (SELECT external_id FROM intervals_no_track) "
+            "  AND substr(start_time,1,16) < ? AND track_remote IS NULL").arg(kNotIndoorName));
+        mark.addBindValue(cutoff);
+        mark.exec();
+    }
+    if (drop.isEmpty())
+        return;
+    const bool tx = m_db.transaction();
+    QSqlQuery clear(m_db);
+    // gpx_extras_json stays: the list's HR/cadence/pace figures still show (see dbLoadAll).
+    clear.prepare(QStringLiteral(
+        "UPDATE activities SET track_json = NULL, gpx_text = NULL, track_remote = 1 "
+        "WHERE idx = ? AND COALESCE(device,'') = ?"));
+    for (const Row &r : std::as_const(drop)) {
+        clear.bindValue(0, r.idx);
+        clear.bindValue(1, r.device);
+        clear.exec();
+    }
+    if (tx) m_db.commit();
+    qInfo().noquote() << "[library] kept on the server only:" << drop.size() << "older Tracks";
+    dbLoadAll();
+    emit activitiesChanged();
+}
+
+// Opened older moves' Tracks (track_cached_at set) beyond the size limit: oldest fetch dropped.
+void ActivityService::evictTrackCache()
+{
+    if (!m_db.isOpen())
+        return;
+    const qint64 limit = qint64(libraryCacheMb()) * 1024 * 1024;
+    QSqlQuery sum(m_db);
+    if (!sum.exec(QStringLiteral("SELECT COALESCE(SUM(LENGTH(track_json)),0) FROM activities "
+                                 "WHERE track_cached_at IS NOT NULL")) || !sum.next())
+        return;
+    qint64 total = sum.value(0).toLongLong();
+    if (total <= limit)
+        return;
+    QSqlQuery oldest(m_db);
+    if (!oldest.exec(QStringLiteral("SELECT idx, COALESCE(device,''), LENGTH(track_json) FROM activities "
+                                    "WHERE track_cached_at IS NOT NULL ORDER BY track_cached_at ASC")))
+        return;
+    QSqlQuery clear(m_db);
+    clear.prepare(QStringLiteral("UPDATE activities SET track_json = NULL, track_cached_at = NULL "
+                                 "WHERE idx = ? AND COALESCE(device,'') = ?"));
+    while (total > limit && oldest.next()) {
+        clear.bindValue(0, oldest.value(0).toInt());
+        clear.bindValue(1, oldest.value(1).toString());
+        if (clear.exec())
+            total -= oldest.value(2).toLongLong();
+    }
+}
+
+// An older move's Track, asked for by its card or detail view: from the NAS (its GPX), else from
+// intervals.icu (its streams). Stored with track_cached_at, then trackFetched() lets QML redraw.
+void ActivityService::fetchRemoteTrack(int idx, const QString &device)
+{
+    const QString key = QString::number(idx) + QLatin1Char('|') + device;
+    if (m_remoteTrackPending.contains(key) || !m_db.isOpen())
+        return;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT substr(start_time,1,16), COALESCE(source,''), COALESCE(external_id,'') "
+                             "FROM activities WHERE idx = ? AND COALESCE(device,'') = ?"));
+    q.addBindValue(idx);
+    q.addBindValue(device);
+    if (!q.exec() || !q.next())
+        return;
+    const QString uid = device + QLatin1Char('|') + q.value(0).toString();
+    const QString source = q.value(1).toString();
+    const QString extId = q.value(2).toString();
+    m_remoteTrackPending.insert(key);
+
+    auto store = [this, idx, device, key](const QJsonArray &track) {
+        m_remoteTrackPending.remove(key);
+        QSqlQuery up(m_db);
+        if (track.isEmpty()) {
+            // Nowhere has it after all: stop showing a map placeholder for it.
+            up.prepare(QStringLiteral("UPDATE activities SET track_remote = NULL "
+                                      "WHERE idx = ? AND COALESCE(device,'') = ?"));
+            up.addBindValue(idx);
+            up.addBindValue(device);
+            up.exec();
+            emit trackFetched(idx, device, false);
+            return;
+        }
+        up.prepare(QStringLiteral("UPDATE activities SET track_json = ?, track_cached_at = ? "
+                                  "WHERE idx = ? AND COALESCE(device,'') = ?"));
+        up.addBindValue(QString::fromUtf8(QJsonDocument(track).toJson(QJsonDocument::Compact)));
+        up.addBindValue(QDateTime::currentMSecsSinceEpoch());
+        up.addBindValue(idx);
+        up.addBindValue(device);
+        up.exec();
+        evictTrackCache();
+        emit trackFetched(idx, device, true);
+    };
+    auto fromIntervals = [this, extId, source, store, key]() {
+        const QSettings s;
+        const QString key2 = s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString();
+        if (source != QStringLiteral("intervals") || extId.isEmpty() || key2.isEmpty()) {
+            store(QJsonArray());
+            return;
+        }
+        QNetworkRequest req(QUrl(QStringLiteral(
+            "https://intervals.icu/api/v1/activity/%1/streams?types=latlng,altitude").arg(extId)));
+        req.setRawHeader("Authorization", "Basic " + (QByteArrayLiteral("API_KEY:") + key2.toUtf8()).toBase64());
+        req.setRawHeader("User-Agent",
+                         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Sommet/1.0");
+        QNetworkReply *reply = m_network.get(req);
+        connect(reply, &QNetworkReply::finished, this, [reply, store, this, key]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                m_remoteTrackPending.remove(key);   // asked again next time it is opened
+                return;
+            }
+            QJsonArray lat, lon, alt, track;
+            for (const QJsonValue &v : QJsonDocument::fromJson(reply->readAll()).array()) {
+                const QJsonObject o = v.toObject();
+                const QString type = o.value(QStringLiteral("type")).toString();
+                if (type == QLatin1String("latlng")) {
+                    lat = o.value(QStringLiteral("data")).toArray();
+                    lon = o.value(QStringLiteral("data2")).toArray();
+                } else if (type == QLatin1String("altitude")) {
+                    alt = o.value(QStringLiteral("data")).toArray();
+                }
+            }
+            const int n = qMin(lat.size(), lon.size());
+            for (int i = 0; i < n; ++i) {
+                if (lat.at(i).isNull() || lon.at(i).isNull()) continue;
+                QJsonObject p{{QStringLiteral("lat"), lat.at(i).toDouble()},
+                              {QStringLiteral("lon"), lon.at(i).toDouble()}};
+                if (i < alt.size() && !alt.at(i).isNull())
+                    p.insert(QStringLiteral("ele"), alt.at(i).toDouble());
+                track.append(p);
+            }
+            store(track);
+        });
+    };
+
+    const QSettings s;
+    const QString url = s.value(QStringLiteral("connections/sommet_sync/url")).toString();
+    const QString token = s.value(QStringLiteral("connections/sommet_sync/token")).toString();
+    if (url.isEmpty() || token.isEmpty()) {
+        fromIntervals();
+        return;
+    }
+    QUrl u(url);
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), uid);
+    qq.addQueryItem(QStringLiteral("fmt"), QStringLiteral("gpx"));
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token", token.toUtf8());
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, store, fromIntervals]() {
+        reply->deleteLater();
+        const QString gpx = reply->error() == QNetworkReply::NoError
+                            ? QString::fromUtf8(reply->readAll()) : QString();
+        const QJsonArray track = gpx.isEmpty() ? QJsonArray()
+            : QJsonArray::fromVariantList(parseGpx(gpx).value(QStringLiteral("track")).toList());
+        if (!track.isEmpty())
+            store(track);
+        else
+            fromIntervals();                         // not on the NAS: intervals.icu, if it is one
+    });
 }

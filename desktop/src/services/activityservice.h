@@ -250,6 +250,9 @@ public:
     // back from the NAS when the activity is opened. Needs Sommet Sync for "nas".
     Q_INVOKABLE QString originalsLocation() const;
     Q_INVOKABLE void setOriginalsLocation(const QString &where);
+    // Light library (sync/13): MB for opened older moves' Tracks fetched back from the server.
+    Q_INVOKABLE int libraryCacheMb() const;
+    Q_INVOKABLE void setLibraryCacheMb(int mb);
 
 signals:
     void loadingChanged();
@@ -272,6 +275,8 @@ signals:
     // final count of how many rows actually gained a real track.
     void trackBackfillProgress(int done, int total);
     void trackBackfillFinished(int filled, int remaining);
+    // An older move's Track came back from the server (light library); ok = false: none exists.
+    void trackFetched(int idx, const QString &device, bool ok);
     void exportFinished(int uploaded, int failed);
     void exportAllProgress(int done, int total);
     // skipped = activities that had nothing to write (no track and no FIT); error set if the
@@ -420,7 +425,15 @@ private:
     void sommetFetchNextBlob();        // drains m_sommetBlobQueue one GPX at a time
     void sommetPushNextBlob();         // drains m_sommetPushQueue one GPX at a time
     void sommetPushNextFit();          // then m_sommetFitPushQueue, one original FIT at a time
-    void trimLocalOriginals();         // "nas" mode: drop local FITs the NAS holds (>30 days old)
+    void trimLocalOriginals();
+    // Light library (sync/13): keep older Tracks on the server only, fetch them back on open.
+    static constexpr int kDefaultCacheMb = 800;
+    bool keepRecentOnly() const;
+    void queueOrDeferBlob(const QString &uid);
+    void trimOldTracks();
+    void evictTrackCache();
+    void fetchRemoteTrack(int idx, const QString &device);
+    QSet<QString> m_remoteTrackPending;      // "idx|device" being fetched         // "nas" mode: drop local FITs the NAS holds (>30 days old)
     // Upsert one pulled wire-record into activities.db (LWW by updated_at; reuses an existing row's
     // idx, else allocates a fresh negative idx for a foreign row). Returns true if it changed the DB.
     bool sommetUpsertRecord(const QJsonObject &rec);

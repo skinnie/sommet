@@ -7,6 +7,23 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: light library - older maps stay on your server (sync/13)
+
+- Settings → Keep on this computer: "Last 90 days" (the default) or "Everything". Every activity
+  stays in the list with its figures. With "Last 90 days", the Track (map) and original file of
+  an activity older than 90 days leave this computer once your server holds them (or, for an
+  intervals.icu import, intervals.icu can give it again). A watch-only setup keeps everything.
+- An older activity's map loads when its card or detail is shown: from the server, else from
+  intervals.icu. Those are kept up to "Space for older activities you open" (100 MB to 2 GB,
+  default 800 MB); the oldest fetched one goes first.
+- A sync no longer downloads older Tracks at all. The database is compacted once when most of
+  it is empty space.
+- Checked with a copy of the P5Q library and the local test server: all 3,610 older Tracks the
+  server held left the computer, none of the last 90 days; scrolling back to June fetched 85 of
+  them and drew their maps; the file went from 535 MB to 31 MB (compacting took 0.9 s) and the
+  library loads in 0.1 s.
+- Speed test: the watch activity read now prints how long each step takes.
+
 ## 2026-11-20: Desktop: Routes map at full size, Gear's Delete clear of the scrollbar
 
 - Routes: the import map was a fixed 160 px strip, a thin band on a 1080p screen, and it could

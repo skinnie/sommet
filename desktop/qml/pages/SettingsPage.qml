@@ -1391,28 +1391,46 @@ PageFlickable {
                         }
                     }
 
-                    // Original files (André 2026-11-08): the FIT behind each activity's charts. With a
-                    // NAS the user can keep them only there, so a small disk stays small.
+                    // What this computer keeps (sync/13, André 2026-11-20: "the average joe don't
+                    // want 4000 activities on his pc... a freak like me MAY want everything
+                    // offline, but that should be an option"). Every activity stays in the list;
+                    // "Last 90 days" leaves older Tracks and original files on the server once it
+                    // holds them, and loads them when one is opened.
                     Text {
-                        visible: databaseSection.syncOn
-                        text: qsTr("Original files")
+                        visible: databaseSection.syncOn || ConnectionsService.intervalsIcuConnected
+                        text: qsTr("Keep on this computer")
                         color: Theme.text; font.pixelSize: Theme.fontSizeLabel; font.bold: true
                         topPadding: Theme.spacingMedium
                     }
                     Text {
-                        visible: databaseSection.syncOn
-                        text: qsTr("Your activities' original files are saved on your server. Choose if this computer keeps a copy too. Without one, older activities load from the server when you open them.")
+                        visible: databaseSection.syncOn || ConnectionsService.intervalsIcuConnected
+                        text: qsTr("Every activity stays in your list. With \"Last 90 days\", the maps and original files of older activities stay on your server (or intervals.icu) and load when you open one.")
                         color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption
                         width: parent.width; wrapMode: Text.WordWrap
                     }
                     RoundedComboBox {
                         id: originalsCombo
-                        visible: databaseSection.syncOn
+                        visible: databaseSection.syncOn || ConnectionsService.intervalsIcuConnected
                         width: 260
-                        readonly property var _keys: ["device", "nas"]
-                        model: [qsTr("Keep a copy here too"), qsTr("Server only")]
+                        readonly property var _keys: ["nas", "device"]
+                        model: [qsTr("Last 90 days"), qsTr("Everything")]
                         currentIndex: Math.max(0, _keys.indexOf(ActivityService.originalsLocation()))
                         onActivated: (i) => ActivityService.setOriginalsLocation(_keys[i])
+                    }
+                    Text {
+                        visible: originalsCombo.visible && originalsCombo.currentIndex === 0
+                        text: qsTr("Space for older activities you open: %1").arg(
+                                  cacheSlider.value >= 1000 ? qsTr("%1 GB").arg((cacheSlider.value / 1000).toFixed(1))
+                                                            : qsTr("%1 MB").arg(cacheSlider.value))
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                    }
+                    RoundedSlider {
+                        id: cacheSlider
+                        visible: originalsCombo.visible && originalsCombo.currentIndex === 0
+                        width: 260
+                        from: 100; to: 2000; stepSize: 100
+                        value: ActivityService.libraryCacheMb()
+                        onMoved: ActivityService.setLibraryCacheMb(value)
                     }
 
                     // Results as notes (desktop picks #7).

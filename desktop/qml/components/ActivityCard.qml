@@ -27,6 +27,16 @@ Card {
         }
     }
     onActivityChanged: _resolveTrack()
+
+    // Light library (sync/13): an older move's Track kept on the server arrives a moment later.
+    Connections {
+        target: ActivityService
+        function onTrackFetched(idx, device, ok) {
+            if (ok && root.activity && root.activity.index === idx
+                    && (root.activity.device || "") === device)
+                root._resolveTrack()
+        }
+    }
     Component.onCompleted: _resolveTrack()
     readonly property var _center: ActivityViewModel.trackCenter(_resolvedTrack)
 

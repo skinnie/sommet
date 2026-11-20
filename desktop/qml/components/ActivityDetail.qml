@@ -369,6 +369,16 @@ Item {
     }
     readonly property var _center: ActivityViewModel.trackCenter(_resolvedTrack)
 
+    // Light library (sync/13): an older move's Track kept on the server arrives a moment later.
+    Connections {
+        target: ActivityService
+        function onTrackFetched(idx, device, ok) {
+            if (ok && root.activity && root.activity.index === idx
+                    && (root.activity.device || "") === device)
+                root._resolveTrack()
+        }
+    }
+
     // ---------------------------------------------------------------- tabs
     property int currentTab: 0
     readonly property var availableTabs: {

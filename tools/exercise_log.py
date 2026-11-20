@@ -1735,7 +1735,12 @@ def main():
                   "(0x1201) for each new move")
         else:
             print("read-only: 0x0b17 reads flash, nothing is written")
+        import time as _time
+        _t0 = _time.monotonic()
+        def _stage(label):   # speed test (desktop-ui/04): where a watch read spends its time
+            print(f"  [time] {label}: {int((_time.monotonic() - _t0) * 1000)} ms")
         link.open()
+        _stage("watch opened")
         # Resolve the ExerciseLog region from the watch's own 0x0b21 memory map rather than
         # trusting the hardcoded Ambit3-Peak address - the same per-device discipline the nav
         # regions already use. Real bug, 2026-08-15: the Traverse keeps its ExerciseLog at
@@ -1744,6 +1749,7 @@ def main():
         # Falls back to the reference constants for a watch that declares no such region.
         log_base, log_size = read_memory_map(link).get(
             "ExerciseLog", (EXERCISE_LOG_BASE, EXERCISE_LOG_SIZE))
+        _stage("memory map read")
         # Real fix, 2026-08-07 - this used to always read the full log region regardless of
         # how much is actually used, which is why this was slow ("blazing fast" on the real
         # Android app, minutes here for the same watch) - confirmed with real numbers, not a
@@ -1764,7 +1770,9 @@ def main():
             probe_master = parse_master_header(probe)
             needed = probe_master["next_free_address"] - log_base + 8192
             needed = max(1024, min(log_size, needed))
+            _stage("log header read")
             data = read_flash(link, log_base, needed, label="ExerciseLog")
+            _stage(f"log read ({len(data)} bytes)")
 
             # Correctness net for the read-less-than-everything optimization above:
             # logical_read()'s own wraparound handling (for a log old enough to have filled
@@ -1783,8 +1791,10 @@ def main():
                 print(f"  fast read parsed incompletely ({exc}) - falling back to a full "
                       f"region read")
                 data = read_flash(link, log_base, log_size, label="ExerciseLog")
+                _stage(f"full log read ({len(data)} bytes)")
                 entries = list(walk_entries(data, mem_start=log_base, mem_size=log_size,
                                             skip_count=args.known_count))
+            _stage("entries walked")
     if args.from_file:
         entries = list(walk_entries(data, skip_count=args.known_count))
 

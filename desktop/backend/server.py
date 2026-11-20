@@ -2207,8 +2207,10 @@ class Handler(BaseHTTPRequestHandler):
             for m in query.get("map", []):
                 if "=" in m:
                     tool_args += ["--map", m]
+            _t_read = time.monotonic()
             code, out, err = run_tool("exercise_log.py", tool_args,
                                       product_id=device_pid, serial=device_serial)
+            read_ms = int((time.monotonic() - _t_read) * 1000)
             if code != 0:
                 self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
                 return
@@ -2232,10 +2234,14 @@ class Handler(BaseHTTPRequestHandler):
             master_path = tmp / "master.json"
             total_entries = (json.loads(master_path.read_text())["total_entries"]
                               if master_path.exists() else len(activities))
+            _t_clock = time.monotonic()
             clock_set = self._sync_clock_usb(device_pid, device_serial)
+            clock_ms = int((time.monotonic() - _t_clock) * 1000)
+            # Speed test (desktop-ui/04): the read tool vs the clock set, in ms.
             self._send_json(200, {"ok": True, "activities": activities,
                                    "total_entries": total_entries, "device": response_device,
-                                   "raw_output": out, "clock_set": clock_set})
+                                   "raw_output": out, "clock_set": clock_set,
+                                   "timing": {"read_ms": read_ms, "clock_ms": clock_ms}})
 
     def _handle_mtp_devices(self):
         """GET /api/mtp/devices - bike computers reachable over USB right now (Garmin Edge and
