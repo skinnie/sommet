@@ -872,6 +872,11 @@ void ActivityService::openDatabase()
     // outdoor one. Android's twin is IntervalsTracks' intervals_no_track_v1.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS intervals_no_track (external_id TEXT PRIMARY KEY)"));
+    // The list figures parseGpx() reads from a watch move's GPX (HR, cadence, pace, ...), kept so
+    // the library load doesn't parse every GPX again: 2 s of a 3 s load (P5Q library, 2026-11-20).
+    // Tagged with a hash of the GPX it came from, so any write of gpx_text makes it stale.
+    // Added after every table rebuild above, so none of them drops it.
+    q.exec(QStringLiteral("ALTER TABLE activities ADD COLUMN gpx_extras_json TEXT"));
     // Sommet Sync finds a move by (device, start minute) for every record it applies, deletes,
     // fetches or sends. Without this index each lookup read the whole table (0.4 s on 4,700
     // moves), and a full pull of 4,800 records held the window for half an hour: the P5Q "hang",
@@ -1035,6 +1040,19 @@ bool ActivityService::dbLoadAll()
     m_activities.clear();
     if (!m_db.isOpen())
         return false;
+    qint64 _gpxMs = 0; int _gpxN = 0;   // PERF: time spent on watch GPX extras, files parsed
+    static const QStringList kGpxExtraKeys = {
+        QStringLiteral("avgHr"), QStringLiteral("maxHr"),
+        QStringLiteral("avgCadence"), QStringLiteral("maxCadence"),
+        QStringLiteral("avgSpeedMh"), QStringLiteral("maxSpeedMh"),
+        QStringLiteral("descentMeters"), QStringLiteral("recoverySeconds"),
+        QStringLiteral("peakTrainingEffect"), QStringLiteral("poolLengths"),
+        QStringLiteral("maxAltitudeMeters"), QStringLiteral("paceSecPerKm"),
+        QStringLiteral("hrvRmssd"), QStringLiteral("hrvResting"),
+        QStringLiteral("hrvOrthoDrop"),
+        QStringLiteral("shots"), QStringLiteral("shotPoints") };
+    struct ExtrasRow { int idx; QString device; QString json; };
+    QList<ExtrasRow> extrasToStore;
 
     // The GPS track (track_json, up to ~650 KB and 45k points) is BY FAR the most expensive column
     // to parse - measured 3.2 s across a 4700-activity cache and the reason opening the app / the
@@ -1049,7 +1067,7 @@ bool ActivityService::dbLoadAll()
         "start_time, (COALESCE(track_json,'') NOT IN ('','[]')) AS has_gps, "
         "CASE WHEN source = 'intervals' THEN NULL ELSE gpx_text END, "   // see fromIntervals below
         "fit_base64, rule_outputs_json, source, device, COALESCE(start_utc, 0), "
-        "COALESCE(moving_s, 0) "
+        "COALESCE(moving_s, 0), gpx_extras_json "
         // By date (newest first) rather than log index, so imported intervals.icu moves blend
         // in chronologically with watch moves instead of clumping by idx. Real watch rows all
         // carry an ISO start_time (sortable as text); the idx tiebreak keeps a stable order.
@@ -1118,29 +1136,52 @@ bool ActivityService::dbLoadAll()
         // string parse, and the extras just merge onto the fast DB core fields above.
         const QString gpx = fromIntervals ? QString() : q.value(9).toString();
         if (!gpx.isEmpty()) {
-            const QVariantMap extra = parseGpx(gpx);
-            for (const QString &key : {
-                     QStringLiteral("avgHr"), QStringLiteral("maxHr"),
-                     QStringLiteral("avgCadence"), QStringLiteral("maxCadence"),
-                     QStringLiteral("avgSpeedMh"), QStringLiteral("maxSpeedMh"),
-                     QStringLiteral("descentMeters"), QStringLiteral("recoverySeconds"),
-                     QStringLiteral("peakTrainingEffect"), QStringLiteral("poolLengths"),
-                     QStringLiteral("maxAltitudeMeters"), QStringLiteral("paceSecPerKm"),
-                     QStringLiteral("hrvRmssd"), QStringLiteral("hrvResting"),
-                     QStringLiteral("hrvOrthoDrop"),
-                     QStringLiteral("shots"), QStringLiteral("shotPoints") }) {
-                parsed[key] = extra.value(key);
+            QElapsedTimer _g; _g.start();
+            const QString gpxKey = QString::number(qHash(gpx), 16);
+            const QJsonObject cached =
+                QJsonDocument::fromJson(q.value(16).toString().toUtf8()).object();
+            QVariantMap extra;
+            if (cached.value(QStringLiteral("_k")).toString() == gpxKey) {
+                extra = cached.toVariantMap();
+            } else {
+                extra = parseGpx(gpx);
+                QJsonObject keep;
+                for (const QString &key : kGpxExtraKeys)   // only real values: an absent one
+                    if (extra.value(key).isValid())         // must stay absent, not null
+                        keep.insert(key, QJsonValue::fromVariant(extra.value(key)));
+                keep.insert(QStringLiteral("_k"), gpxKey);
+                extrasToStore.append({q.value(0).toInt(), q.value(13).toString(),
+                                      QString::fromUtf8(QJsonDocument(keep).toJson(QJsonDocument::Compact))});
+                ++_gpxN;
             }
+            _gpxMs += _g.elapsed();
+            for (const QString &key : kGpxExtraKeys)
+                parsed[key] = extra.value(key);
         }
         m_activities.append(parsed);
     }
+    if (!extrasToStore.isEmpty()) {
+        const bool tx = m_db.transaction();
+        QSqlQuery up(m_db);
+        up.prepare(QStringLiteral("UPDATE activities SET gpx_extras_json = ? "
+                                  "WHERE idx = ? AND COALESCE(device, '') = ?"));
+        for (const ExtrasRow &r : std::as_const(extrasToStore)) {
+            up.bindValue(0, r.json);
+            up.bindValue(1, r.idx);
+            up.bindValue(2, r.device);
+            up.exec();
+        }
+        if (tx) m_db.commit();
+    }
+    const qint64 _beforeDedupe = _t.elapsed();
     dedupeActivities();
     const qint64 _summaryMs = _t.elapsed();
+    const qint64 _dedupeMs = _summaryMs - _beforeDedupe;
     // Eager-parse GPS tracks for the first screens' worth so the initial list shows map thumbnails
     // immediately; every other row's track is parsed on demand by trackFor() when it's opened or
     // scrolled into view. This is what keeps opening the app / the Activities page fast with a big
     // history (was 3.2 s to parse all tracks up front).
-    constexpr int kEagerTracks = 60;
+    constexpr int kEagerTracks = 24;   // was 60: ~1 s on a Core 2 Quad, more than one screen of cards
     int eager = 0;
     for (int i = 0; i < m_activities.size() && eager < kEagerTracks; ++i) {
         QVariantMap a = m_activities.at(i).toMap();
@@ -1157,9 +1198,10 @@ bool ActivityService::dbLoadAll()
     updateWatchHrvStore();
     m_showingCachedData = !m_activities.isEmpty();
     qWarning().noquote() << QStringLiteral("[PERF] dbLoadAll #%1: %2 rows, summary %3 ms, "
-        "+%4 eager tracks %5 ms, +hrv %6 ms")
+        "+%4 eager tracks %5 ms, +hrv %6 ms (gpx extras: %7 files %8 ms, dedupe %9 ms)")
         .arg(s_dbLoadAllCalls).arg(m_activities.size()).arg(_summaryMs)
-        .arg(eager).arg(_afterLoad - _summaryMs).arg(_t.elapsed() - _afterLoad);
+        .arg(eager).arg(_afterLoad - _summaryMs).arg(_t.elapsed() - _afterLoad)
+        .arg(_gpxN).arg(_gpxMs).arg(_dedupeMs);
     return !m_activities.isEmpty();
 }
 

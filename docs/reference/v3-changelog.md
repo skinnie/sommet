@@ -7,6 +7,15 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: the library loads about 4x faster after the first start
+
+- Every load parsed each watch move's GPX file again for the list's HR, cadence and pace
+  figures: 53 files, 2 of the 3 s a load took (P5Q library on the X230, measured). The figures
+  are now kept in the database with a hash of the GPX they came from, so a load parses only a
+  GPX that is new or changed. Second start: 3.2 s down to 0.7 s.
+- Maps prepared before the list opens: 24 instead of 60 (two screens of cards); the rest load
+  as they scroll into view, as before. About 1 s less on the P5Q.
+
 ## 2026-11-20: Weight readings are kept on your own server too
 
 - Every weight reading a device sees (scale, typed in, intervals.icu, Garmin Connect) goes to
