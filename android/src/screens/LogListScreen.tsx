@@ -18,7 +18,8 @@ import { extractGpxMetadata, GpxMetadata } from '../services/GpxParser';
 import RNFS from 'react-native-fs';
 import { t, fmtDate } from '../i18n';
 import { useV3Theme } from '../theme/v3';
-import { ActivityThumbnail } from '../components/ActivityThumbnail';
+import { ActivityThumbnail, RemoteActivityThumbnail } from '../components/ActivityThumbnail';
+import { isTrackRemote } from '../services/LightLibrary';
 import { SportPicture } from '../components/SportPicture';
 import Icon, { IconName } from '../components/ui/Icon';
 import { activityIconName } from '../services/ActivityColors';
@@ -482,6 +483,8 @@ export default function LogListScreen() {
               <View style={oneBarRow ? styles.cardThumbSide : styles.cardThumb}>
                 {item.gpx_path
                   ? <ActivityThumbnail gpxPath={item.gpx_path} height={oneBarRow ? 96 : 160} sport={item.activity_type} seed={item.date} />
+                  : isTrackRemote(item)
+                  ? <RemoteActivityThumbnail activityId={item.id} height={oneBarRow ? 96 : 160} sport={item.activity_type} seed={item.date} />
                   : <SportPicture sport={item.activity_type} seed={item.date} height={oneBarRow ? 96 : 160} />}
               </View>
             )}

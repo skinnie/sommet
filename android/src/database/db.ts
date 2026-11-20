@@ -44,6 +44,11 @@ export interface ActivityRecord {
   // Moving time (s): the FIT's timer time, beside duration_s (its total time) - sync/06,
   // 2026-11-18. The Coach's own load counts this one. 0 = not known.
   moving_s?: number;
+  // Light library (sync/13): 1 = this move's Track is kept on the server (the NAS or
+  // intervals.icu), not here; it is fetched when the move is opened. track_cached_at = when an
+  // opened older move's Track was fetched back (ms); those count against the size limit.
+  track_remote?: number;
+  track_cached_at?: number;
 }
 
 // ─── Singleton DB ─────────────────────────────────────────────────────────────
@@ -123,6 +128,8 @@ async function openAndMigrate(): Promise<SQLiteDatabase> {
     ['energy_kcal', 'INTEGER NOT NULL DEFAULT 0'],
     ['start_utc', 'INTEGER NOT NULL DEFAULT 0'],
     ['moving_s', 'INTEGER NOT NULL DEFAULT 0'],
+    ['track_remote', 'INTEGER NOT NULL DEFAULT 0'],
+    ['track_cached_at', 'INTEGER NOT NULL DEFAULT 0'],
   ]);
   await tidyImportedActivities(db).catch(() => {});
   // ── Gear tracker (v3) — see gearDb.ts. Local-first, mirrored to intervals.icu. ──
@@ -458,8 +465,10 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
   await db.executeSql(
     `INSERT OR REPLACE INTO activities
        (id, synced_at, gpx_path, date, duration_s, distance_m, d_plus, activity_type, device, updated_at,
-        energy_kcal, start_utc, moving_s)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        energy_kcal, start_utc, moving_s, track_remote, track_cached_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             COALESCE(?, (SELECT track_remote FROM activities WHERE id = ?), 0),
+             COALESCE(?, (SELECT track_cached_at FROM activities WHERE id = ?), 0))`,
     [
       record.id,
       record.synced_at,
@@ -474,6 +483,10 @@ export async function markActivitySynced(record: ActivityRecord): Promise<void> 
       Math.round(record.energy_kcal ?? 0) || 0,
       Math.round(record.start_utc ?? 0) || 0,
       Math.round(record.moving_s ?? 0) || 0,
+      // Light library: a caller that doesn't say keeps what the row had (INSERT OR REPLACE would
+      // otherwise reset them and forget that the Track is on the server).
+      record.track_remote ?? null, record.id,
+      record.track_cached_at ?? null, record.id,
     ]
   );
 }
@@ -559,21 +572,21 @@ export async function deleteActivitiesByUid(uid: string): Promise<void> {
 /** The local row (updated_at + gpx_path) for a uid, or null if we don't have it. */
 export async function getActivityByUid(
   uid: string
-): Promise<{ id: string; updated_at: number; gpx_path: string; energy_kcal: number; activity_type: string; start_utc: number; moving_s: number } | null> {
+): Promise<{ id: string; updated_at: number; gpx_path: string; energy_kcal: number; activity_type: string; start_utc: number; moving_s: number; track_remote: number } | null> {
   const bar = uid.indexOf('|');
   if (bar < 0) return null;
   const device = uid.slice(0, bar);
   const minute = uid.slice(bar + 1);
   const db = await getDb();
   const [r] = await db.executeSql(
-    'SELECT id, updated_at, gpx_path, energy_kcal, activity_type, start_utc, moving_s FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
+    'SELECT id, updated_at, gpx_path, energy_kcal, activity_type, start_utc, moving_s, track_remote FROM activities WHERE device = ? AND substr(date,1,16) = ? LIMIT 1',
     [device, minute]
   );
   if (r.rows.length === 0) return null;
   const row = r.rows.item(0);
   return { id: row.id, updated_at: Number(row.updated_at || 0), gpx_path: row.gpx_path,
     energy_kcal: Number(row.energy_kcal || 0), activity_type: String(row.activity_type || ''), start_utc: Number(row.start_utc || 0),
-    moving_s: Number(row.moving_s || 0) };
+    moving_s: Number(row.moving_s || 0), track_remote: Number(row.track_remote || 0) };
 }
 
 /** Retourne toutes les activités triées par date décroissante. */
@@ -650,4 +663,62 @@ export async function deleteActivity(id: string): Promise<void> {
     [id, Date.now()]
   );
   if (uid) await db.executeSql('INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)', [uid]);
+}
+
+// ─── Light library (sync/13) ──────────────────────────────────────────────────
+
+/** One move by its local id, or null. */
+export async function getActivityById(id: string): Promise<ActivityRecord | null> {
+  const db = await getDb();
+  const [r] = await db.executeSql('SELECT * FROM activities WHERE id = ? LIMIT 1', [id]);
+  if (r.rows.length === 0) return null;
+  const a = r.rows.item(0);
+  a.gpx_path = rebaseToDocuments(a.gpx_path);
+  return a;
+}
+
+/** The move's Track now lives on the server only: the local file is gone (trimmed), or it was
+ *  never fetched (an older pulled move). The list still shows it as a move with a map. */
+export async function setTrackRemote(id: string): Promise<void> {
+  const db = await getDb();
+  await db.executeSql(
+    "UPDATE activities SET gpx_path = '', track_remote = 1, track_cached_at = 0 WHERE id = ?", [id]);
+}
+
+/** Many moves at once whose Track was never here but can be asked for (older intervals.icu imports). */
+export async function markTracksRemote(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  for (let i = 0; i < ids.length; i += 400) {
+    const part = ids.slice(i, i + 400);
+    await db.executeSql(
+      `UPDATE activities SET track_remote = 1 WHERE gpx_path = '' AND id IN (${part.map(() => '?').join(', ')})`, part);
+  }
+}
+
+/** A fetched Track was written to `gpxPath`. cachedAt > 0: an opened older move, counted against
+ *  the size limit; 0: kept for good ("Everything"). Leaves synced_at alone, so the list's cached
+ *  figures stay valid. */
+export async function setTrackLocal(id: string, gpxPath: string, cachedAt: number): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('UPDATE activities SET gpx_path = ?, track_cached_at = ? WHERE id = ?', [gpxPath, cachedAt, id]);
+}
+
+/** Nowhere has this move's Track after all: stop showing it as a move with a map. */
+export async function clearTrackRemote(id: string): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('UPDATE activities SET track_remote = 0 WHERE id = ?', [id]);
+}
+
+/** Opened older moves whose Track was fetched back, oldest fetch first. */
+export async function getCachedTracks(): Promise<{ id: string; gpx_path: string; track_cached_at: number }[]> {
+  const db = await getDb();
+  const [r] = await db.executeSql(
+    "SELECT id, gpx_path, track_cached_at FROM activities WHERE track_cached_at > 0 AND gpx_path <> '' ORDER BY track_cached_at ASC");
+  const out: { id: string; gpx_path: string; track_cached_at: number }[] = [];
+  for (let i = 0; i < r.rows.length; i++) {
+    const a = r.rows.item(i);
+    out.push({ id: a.id, gpx_path: rebaseToDocuments(a.gpx_path), track_cached_at: Number(a.track_cached_at) });
+  }
+  return out;
 }

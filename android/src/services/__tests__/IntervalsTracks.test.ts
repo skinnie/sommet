@@ -36,6 +36,7 @@ let fetched: string[] = [];
 let answers: Record<string, { status: number; body?: any }> = {};
 beforeEach(() => {
   for (const k of Object.keys(mockStore)) delete mockStore[k];
+  mockStore['sommet.library.keep'] = 'all';   // these cases are about the queue, not the 90 days
   for (const k of Object.keys(mockWritten)) delete mockWritten[k];
   mockRows.length = 0;
   fetched = [];

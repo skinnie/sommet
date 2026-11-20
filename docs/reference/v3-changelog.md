@@ -23,6 +23,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   them and drew their maps; the file went from 535 MB to 31 MB (compacting took 0.9 s) and the
   library loads in 0.1 s.
 - Speed test: the watch activity read now prints how long each step takes.
+- Android (same day): the same, in Settings → Database: "Keep on this device" and "Space for
+  older activities you open" (a list, 100 MB to 2 GB, default 300 MB). The list card and the map
+  fetch an older Track when shown. A FIT is removed only when the server holds it too. Checked
+  with unit tests; not yet on the tablet.
 
 ## 2026-11-20: Desktop: Routes map at full size, Gear's Delete clear of the scrollbar
 

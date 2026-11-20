@@ -1,6 +1,7 @@
 import { AppState, AppStateStatus } from 'react-native';
 import { runSommetSync } from './SommetSync';
 import { runSommetGearSync } from './SommetGearSync';
+import { trimOldTracks } from './LightLibrary';
 
 // Sommet Sync when the app opens (André, 2026-11-18): the desktop pulls from the NAS ~20 s after
 // launch and every 15 min; Android used to pull only after a watch sync or from Settings. Now it
@@ -18,6 +19,9 @@ export async function syncNowIfDue(now = Date.now()): Promise<boolean> {
   lastRun = now;
   await runSommetSync().catch(() => {});
   await runSommetGearSync().catch(() => {});
+  // Light library (sync/13): older Tracks the server holds leave this device. Also runs with no
+  // Sommet Sync (intervals.icu only); a watch-only setup keeps everything.
+  await trimOldTracks().catch(() => {});
   return true;
 }
 

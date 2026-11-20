@@ -92,3 +92,18 @@ export async function listGpxFiles(): Promise<string[]> {
     .filter(item => item.name.endsWith('.gpx'))
     .map(item => item.path);
 }
+
+/** Bytes a move's Track takes here: its GPX plus the FIT kept next to it (light library, sync/13:
+ *  what counts against the space for opened older moves). 0 when neither is there. */
+export async function trackFileBytes(gpxPath: string): Promise<number> {
+  let total = 0;
+  for (const p of [gpxPath, gpxPath.replace(/\.gpx$/, '.fit')]) {
+    try { if (await RNFS.exists(p)) total += Number((await RNFS.stat(p)).size) || 0; } catch { /* gone */ }
+  }
+  return total;
+}
+
+/** Whether a stored file is still there. */
+export async function fileExists(path: string): Promise<boolean> {
+  try { return !!path && await RNFS.exists(path); } catch { return false; }
+}

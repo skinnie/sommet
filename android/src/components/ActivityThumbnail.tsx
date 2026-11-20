@@ -3,6 +3,7 @@ import { readGpxFile } from '../services/GpxService';
 import { parseTrackPoints } from '../services/GpxParser';
 import { TrackPreview } from './TrackPreview';
 import { SportPicture } from './SportPicture';
+import { fetchRemoteTrack } from '../services/LightLibrary';
 
 // v3.0 UI port (2026-08-09, "re do activities... to match entirely desktop") - desktop's
 // ActivitiesPage.qml shows a live embedded map per card, real request "activities... just a
@@ -40,4 +41,20 @@ export function ActivityThumbnail({ gpxPath, height = 90, sport, seed }: {
   if (points === null) return null;
   if (points.length === 0) return <SportPicture sport={sport} seed={seed ?? gpxPath} height={height} />;
   return <TrackPreview points={points} height={height} />;
+}
+
+// Light library (sync/13): an older move whose Track is kept on the server. Its sport shows
+// until the Track arrives (one fetch at a time, counted against the size limit), then its map,
+// like the desktop's card on trackFetched.
+export function RemoteActivityThumbnail({ activityId, height = 90, sport, seed }: {
+  activityId: string; height?: number; sport?: string | null; seed?: string;
+}) {
+  const [path, setPath] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchRemoteTrack(activityId).then(p => { if (!cancelled && p) setPath(p); });
+    return () => { cancelled = true; };
+  }, [activityId]);
+  if (!path) return <SportPicture sport={sport} seed={seed ?? activityId} height={height} />;
+  return <ActivityThumbnail gpxPath={path} height={height} sport={sport} seed={seed} />;
 }

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { writeGpxFile } from './GpxService';
 import { isIndoorSport } from './SportNames';
+import { getKeepRecentOnly, lightCutoffMinute } from './LibraryPrefs';
 import { getAllActivities, markActivitySynced } from '../database/db';
 
 // Backfill the GPS trace for activities imported from intervals.icu (André, 2026-08-26:
@@ -28,7 +29,7 @@ const API_BASE = 'https://intervals.icu/api/v1';
 // 40 newest pending were such rides, the backfill never reached an older outdoor one.
 const NO_TRACK_KEY = 'intervals_no_track_v1';
 
-async function loadNoTrack(): Promise<Set<string>> {
+export async function loadNoTrack(): Promise<Set<string>> {
   try {
     const v = JSON.parse((await AsyncStorage.getItem(NO_TRACK_KEY)) || '[]');
     return new Set(Array.isArray(v) ? v.map(String) : []);
@@ -69,6 +70,18 @@ function buildGpx(name: string, lat: number[], lon: number[], alt: number[]): st
 async function backfillOne(
   icuId: string, apiKey: string, name: string,
 ): Promise<string | 'none' | null> {
+  const gpx = await fetchIntervalsGpx(icuId, apiKey, name);
+  if (gpx === null || gpx === 'none') return gpx;
+  // overwrite=true: a re-run should replace a partial file rather than silently keep it.
+  return await writeGpxFile(icuId, gpx, true);
+}
+
+/** One intervals.icu activity's trace as a GPX (the light library also asks for an older move's
+ *  Track this way when it is opened, sync/13): 'none' when it has no positions, null on an error
+ *  worth trying again later. */
+export async function fetchIntervalsGpx(
+  icuId: string, apiKey: string, name: string,
+): Promise<string | 'none' | null> {
   const raw = icuId.replace(/^icu:/, '');
   const resp = await fetch(`${API_BASE}/activity/${encodeURIComponent(raw)}/streams?types=latlng,altitude`, {
     headers: { Authorization: 'Basic ' + btoa(`API_KEY:${apiKey}`), 'User-Agent': 'Sommet/1.0' },
@@ -85,11 +98,7 @@ async function backfillOne(
     if (s?.type === 'latlng') { lat = s.data ?? []; lon = s.data2 ?? []; }
     else if (s?.type === 'altitude') { alt = s.data ?? []; }
   }
-  const gpx = buildGpx(name, lat, lon, alt);
-  if (!gpx) return 'none';
-
-  // overwrite=true: a re-run should replace a partial file rather than silently keep it.
-  return await writeGpxFile(icuId, gpx, true);
+  return buildGpx(name, lat, lon, alt) || 'none';
 }
 
 // Walk up to `maxCount` imported activities that still have no trace, newest first.
@@ -101,7 +110,8 @@ export async function backfillIntervalsTracks(maxCount = 40): Promise<BackfillRe
 
   const all = await getAllActivities();
   const noTrack = await loadNoTrack();
-  const pending = intervalsTrackQueue(all, noTrack);
+  // Light library (sync/13): only the last 90 days; an older one loads when it is opened.
+  const pending = intervalsTrackQueue(all, noTrack, (await getKeepRecentOnly()) ? lightCutoffMinute() : '');
 
   let filled = 0, none = 0;
   for (const act of pending.slice(0, maxCount)) {
@@ -131,10 +141,11 @@ export async function backfillIntervalsTracks(maxCount = 40): Promise<BackfillRe
  *  indoor move read off the watch), and not already found to have none. */
 export function intervalsTrackQueue<T extends { id: string; distance_m?: number; gpx_path?: string;
                                                activity_type?: string; date: string }>(
-  all: T[], noTrack: Set<string>,
+  all: T[], noTrack: Set<string>, cutoff = '',
 ): T[] {
   return all
     .filter(a => a.id.startsWith('icu:') && (a.distance_m ?? 0) > 0 && !a.gpx_path
-                 && !isIndoorSport(a.activity_type || '') && !noTrack.has(a.id))
+                 && !isIndoorSport(a.activity_type || '') && !noTrack.has(a.id)
+                 && (!cutoff || a.date.slice(0, 16) >= cutoff))
     .sort((a, b) => b.date.localeCompare(a.date));
 }

@@ -5,6 +5,7 @@ jest.mock('react-native', () => ({
 }));
 jest.mock('../SommetSync', () => ({ runSommetSync: () => mockRun() }));
 jest.mock('../SommetGearSync', () => ({ runSommetGearSync: () => mockGear() }));
+jest.mock('../LightLibrary', () => ({ trimOldTracks: async () => {} }));
 
 import { AppState } from 'react-native';
 import { syncNowIfDue, startSommetSyncOnOpen, _resetSommetSyncOnOpen, MIN_GAP_MS, FIRST_DELAY_MS } from '../SommetSyncOnOpen';

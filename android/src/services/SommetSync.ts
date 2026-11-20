@@ -9,6 +9,7 @@ import { readFitForGpx, readGpxFile, removeFitForGpx, writeGpxFile } from './Gpx
 import { streamsCache } from './StreamsCache';
 import { base64ToBytes } from './Base64';
 import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
+import { getKeepRecentOnly, lightCutoffMinute } from './LibraryPrefs';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
 // (sync-server/sync.php), so the same history appears on desktop (Linux/Mac/Windows) and phone.
@@ -141,6 +142,24 @@ function idFromDate(date: string, uid: string): string {
   return id || `sommet_${uid.replace(/[^0-9A-Za-z]/g, '_')}`;
 }
 
+/** The moves whose GPX the server confirmed holding (sent from here, or fetched from it). */
+export async function getPushedBlobs(): Promise<Set<string>> {
+  try { return new Set<string>(JSON.parse((await AsyncStorage.getItem(PUSHED_KEY)) || '[]')); } catch { return new Set(); }
+}
+
+/** The moves whose original FIT the server confirmed holding. */
+export async function getPushedFits(): Promise<Set<string>> {
+  try { return new Set<string>(JSON.parse((await AsyncStorage.getItem(FIT_PUSHED_KEY)) || '[]')); } catch { return new Set(); }
+}
+
+/** A move's GPX from the server (light library, sync/13: an older move opened here). Null when
+ *  Sommet Sync is off, the server has none, or it can't be reached. */
+export async function fetchGpxBlob(uid: string): Promise<string | null> {
+  const cfg = await getSommetSyncCfg();
+  if (!cfg) return null;
+  return fetchBlob(cfg.url, cfg.token, uid);
+}
+
 async function fetchBlob(url: string, token: string, uid: string): Promise<string | null> {
   try {
     const res = await fetchT(url + '?' + new URLSearchParams({ blob: '1', uid, fmt: 'gpx' }).toString(),
@@ -269,6 +288,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   setProgress({ stage: 'moves', done: 0, total: pulledRecs.length });
   let seen = 0;
   const fetchedNow: string[] = [];
+  // Light library (sync/13): an older move's Track stays on the server, fetched when opened.
+  const lightCutoff = (await getKeepRecentOnly()) ? lightCutoffMinute() : '';
   for (const rec of pulledRecs) {
     if (++seen % 25 === 0) { setProgress({ done: seen }); await yieldToUi(); }
     const device = String(rec.device ?? '');
@@ -289,7 +310,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     const newerTrack = !!rec.has_track && remoteRev > (trackRevs[uid] || 0);   // sync/08: split elsewhere
     if (existing && remoteUpdated > 0 && existing.updated_at === remoteUpdated)
       pulledSent.push({ uid, updatedAt: remoteUpdated });   // the server holds our version
-    if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path && !newerTrack) { // ours is newer & has track
+    const haveTrack = !!existing && (!!existing.gpx_path || existing.track_remote === 1);   // here or kept there
+    if (existing && existing.updated_at >= remoteUpdated && haveTrack && !newerTrack) { // ours is newer & has track
       // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
       const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number; moving_s?: number } = {};
       if (energy > 0 && !existing.energy_kcal) fix.energy_kcal = energy;
@@ -315,7 +337,13 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     }
     const id = idFromDate(start, uid);
     let gpxPath = existing?.gpx_path ?? '';
-    if (rec.has_track && (!gpxPath || newerTrack)) {
+    let trackRemote = existing?.track_remote === 1 && !gpxPath ? 1 : 0;
+    if (rec.has_track && !gpxPath && lightCutoff && start.slice(0, 16) < lightCutoff) {
+      // Older than 90 days: not downloaded. The server holds it, so it counts as sent there.
+      trackRemote = 1;
+      fetchedNow.push(uid);
+      if (newerTrack) { trackRevs[uid] = remoteRev; revsChanged = true; }
+    } else if (rec.has_track && (!gpxPath || newerTrack)) {
       const gpx = await fetchBlob(url, token, uid);
       if (gpx) {
         if (newerTrack && gpxPath) {
@@ -324,7 +352,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
           if (existing) streamsCache.delete(existing.id);
         }
         gpxPath = (await writeGpxFile(id, gpx, true)) ?? '';
-        if (gpxPath) fetchedNow.push(uid);   // sync/12: came from the server, don't send it back
+        if (gpxPath) { fetchedNow.push(uid); trackRemote = 0; }   // sync/12: came from the server, don't send it back
         if (newerTrack && gpxPath) { trackRevs[uid] = remoteRev; revsChanged = true; }
       }
     }
@@ -342,6 +370,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       updated_at: remoteUpdated || Date.now(),
       start_utc: startUtc || existing?.start_utc || 0,
       moving_s: moving || existing?.moving_s || 0,
+      track_remote: trackRemote,
     });
     pulledSent.push({ uid, updatedAt: remoteUpdated || Date.now() });
     pulled++;
@@ -377,7 +406,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     const trackPending = !!a.gpx_path && !pushed.has(uid);
     if ((ledger.get(uid) ?? -1) >= updatedAt && !trackPending) continue;   // the server has this one
     if (trackPending) { try { gpx = await readGpxFile(a.gpx_path); } catch { gpx = ''; } }
-    const hasTrack = !!gpx || (!!a.gpx_path && pushed.has(uid));
+    // A Track kept on the server only (light library) is still this move's Track there.
+    const hasTrack = !!gpx || ((!!a.gpx_path || a.track_remote === 1) && pushed.has(uid));
     records.push({
       uid,
       device,

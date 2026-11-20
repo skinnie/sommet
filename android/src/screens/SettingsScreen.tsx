@@ -49,6 +49,10 @@ import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
 import { getUsdaApiKey, setUsdaApiKey } from '../services/EmberFood';
 import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
+import {
+  getKeepRecentOnly, setKeepRecentOnly, getLibraryCacheMb, setLibraryCacheMb, formatCacheMb,
+} from '../services/LibraryPrefs';
+import { trimOldTracks, evictTrackCache } from '../services/LightLibrary';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -102,6 +106,9 @@ const THEME_OPTIONS: { mode: ThemeMode; icon: IconName; label: () => string }[] 
 // top; everything else is one closed row each (SettingsSection) showing its current value. Which
 // rows are open is remembered between visits.
 const OPEN_SECTIONS_KEY = 'sommet:settings:openSections';
+// "Space for older activities you open": the desktop's slider runs 100 MB to 2 GB in steps of
+// 100; a phone has no slider in this design, so the same range as a short list.
+const LIBRARY_CACHE_CHOICES_MB = [100, 200, 300, 500, 800, 1000, 1500, 2000];
 const CLOSED_SECTIONS = ['activities', 'health', 'maps', 'weather', 'ember', 'coach', 'database',
   'catalog', 'experimental', 'testing', 'firmware', 'devices', 'about'];
 // How many apps the Coach's offline workout catalogue holds (data/systm-sample.json).
@@ -362,6 +369,9 @@ export default function SettingsScreen() {
   const [sommetSaved, setSommetSaved]               = useState(false);
   const [sommetStatus, setSommetStatus]             = useState('');
   const [sommetTone, setSommetTone] = useState<'success' | 'error' | 'working'>('success');
+  // Light library (sync/13): "Keep on this device" + the space for opened older activities.
+  const [keepRecent, setKeepRecentState] = useState(true);
+  const [libraryCacheMb, setLibraryCacheMbState] = useState(300);
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
   const [savingIntervals, setSavingIntervals]       = useState(false);
@@ -460,6 +470,8 @@ export default function SettingsScreen() {
       if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); }
       setSommetSaved(!!c?.url);
     });
+    getKeepRecentOnly().then(setKeepRecentState);
+    getLibraryCacheMb().then(setLibraryCacheMbState);
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
     isStrapHrvEnabled().then(setStrapHrvEnabledState);
@@ -538,6 +550,16 @@ export default function SettingsScreen() {
     setSommetStatus('Stopped syncing.'); setSommetTone('success');
   }
 
+  function handleKeepRecent(recent: boolean) {
+    setKeepRecentState(recent);
+    // Applied at once: older Tracks leave (once the server holds them), or come back.
+    setKeepRecentOnly(recent).then(() => trimOldTracks()).catch(() => undefined);
+  }
+  function handleLibraryCacheMb(mb: number) {
+    setLibraryCacheMbState(mb);
+    setLibraryCacheMb(mb).then(() => evictTrackCache()).catch(() => undefined);
+  }
+
   async function handleTestSommet() {
     setSommetStatus('Testing…'); setSommetTone('working');
     const r = await testSommetSync(sommetSyncUrl, sommetSyncToken);
@@ -553,6 +575,7 @@ export default function SettingsScreen() {
       await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
       setSommetSaved(!!url);
       const r = await runSommetSync();
+      trimOldTracks().catch(() => undefined);   // light library, as after the sync on opening
       setSommetStatus(r.ok
         ? `Synced — ${r.pulled} received, ${r.pushed} sent.`
         : 'Couldn’t reach the server — will retry later.');
@@ -1235,7 +1258,7 @@ export default function SettingsScreen() {
         >
           <Text style={styles.sectionDesc}>
             Sync this phone with your computers through your own server or NAS — the only way to
-            include the phone. A copy always stays on this phone, so it works offline.
+            include the phone. Your activity list always stays on this phone, so it works offline.
           </Text>
           <FieldRow
             icon="link"
@@ -1264,6 +1287,37 @@ export default function SettingsScreen() {
               style={{ marginTop: 8, alignSelf: 'flex-start' }} />
           )}
           <StatusNote text={sommetStatus} tone={sommetTone} />
+
+          {/* What this device keeps (sync/13, André 2026-11-20: "the average joe don't want 4000
+              activities on his pc or tablet... a freak like me MAY want everything offline, but
+              that should be an option"). Same words as the desktop's "Keep on this computer". */}
+          {(sommetSaved || intervalsSaved) && (
+            <>
+              <Text style={[styles.connRowText, { fontWeight: '700', marginTop: 16 }]}>Keep on this device</Text>
+              <Text style={[styles.sectionDesc, { fontSize: 11, lineHeight: 16 }]}>
+                Every activity stays in your list. With "Last 90 days", the maps and original files
+                of older activities stay on your server (or intervals.icu) and load when you open one.
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <Text style={[styles.connRowText, { flex: 1 }]}>Keep</Text>
+                <Dropdown
+                  value={keepRecent ? 0 : 1}
+                  choices={[{ value: 0, label: 'Last 90 days' }, { value: 1, label: 'Everything' }]}
+                  onSelect={v => handleKeepRecent(v === 0)}
+                />
+              </View>
+              {keepRecent && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <Text style={[styles.connRowText, { flex: 1 }]}>Space for older activities you open</Text>
+                  <Dropdown
+                    value={libraryCacheMb}
+                    choices={LIBRARY_CACHE_CHOICES_MB.map(mb => ({ value: mb, label: formatCacheMb(mb) }))}
+                    onSelect={handleLibraryCacheMb}
+                  />
+                </View>
+              )}
+            </>
+          )}
         </SettingsSection>
 
         {/* ── Suunto Apps Catalog (desktop parity, 2026-10-22). Same import the App Zone screen has. ── */}

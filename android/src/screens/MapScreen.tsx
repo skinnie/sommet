@@ -28,6 +28,8 @@ import { weatherEmoji } from '../services/WeatherService';
 import { fetchActivityWeather, ActivityWeather } from '../services/ActivityWeather';
 import ActivityPanel from '../components/activity/ActivityPanel';
 import { SportPicture } from '../components/SportPicture';
+import { StatusNote } from '../components/ui/primitives';
+import { fetchRemoteTrack, isTrackRemote } from '../services/LightLibrary';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Landscape tablet: the map beside the panel (default) or above it, like desktop (André,
@@ -202,7 +204,14 @@ export default function MapScreen() {
   const styles = createStyles(theme);
   const route      = useRoute<Route>();
   const navigation = useNavigation<Nav>();
-  const { activity } = route.params;
+  const { activity: routeActivity } = route.params;
+  // Light library (sync/13): an older move's Track kept on the server is fetched when opened;
+  // its local path then replaces the empty one, so the map, charts and exports all use it.
+  const [fetchedGpx, setFetchedGpx] = useState('');
+  const [fetchRev, setFetchRev] = useState(0);
+  const [trackAway, setTrackAway] = useState(false);   // kept on the server, can't be fetched now
+  const activity = useMemo(() => (fetchedGpx ? { ...routeActivity, gpx_path: fetchedGpx } : routeActivity),
+    [routeActivity, fetchedGpx]);
 
   const [points, setPoints] = useState<TrackPoint[]>([]);
   const [meta, setMeta] = useState<GpxMetadata | null>(null);   // summary (used for no-GPS moves)
@@ -280,12 +289,33 @@ export default function MapScreen() {
   useEffect(() => {
     // No GPX at all (an intervals.icu import without a track): nothing to read - the activity
     // panel shows it from its FIT. Reading '' only raised a "Cannot read GPX file" alert.
-    if (!activity.gpx_path) { setLoading(false); return; }
+    let alive = true;
+    const fetchBack = (onFail: () => void, away: boolean) => {
+      fetchRemoteTrack(activity.id).then(p => {
+        if (!alive) return;
+        if (p) { setFetchedGpx(p); setFetchRev(n => n + 1); }
+        else { if (away) setTrackAway(true); onFail(); }
+      });
+    };
+    if (!activity.gpx_path) {
+      if (isTrackRemote(activity)) fetchBack(() => setLoading(false), true);
+      else setLoading(false);
+      return () => { alive = false; };
+    }
     readGpxFile(activity.gpx_path)
-      .then(xml => { setPoints(parseTrackPoints(xml)); setMeta(extractGpxMetadata(xml)); })
-      .catch(e => Alert.alert(t.error, t.readError + e?.message))
-      .finally(() => setLoading(false));
-  }, [activity.gpx_path]);
+      .then(xml => {
+        if (!alive) return;
+        setPoints(parseTrackPoints(xml)); setMeta(extractGpxMetadata(xml)); setLoading(false);
+      })
+      .catch(e => {
+        if (!alive) return;
+        // The list may still hold a path a trim has since removed: ask for it from the server.
+        if (!fetchedGpx) fetchBack(() => { setLoading(false); Alert.alert(t.error, t.readError + e?.message); }, false);
+        else { setLoading(false); Alert.alert(t.error, t.readError + e?.message); }
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity.gpx_path, fetchRev]);
 
 
   // Shots on the map: once the map page is up and the GPX is read (either can come first).
@@ -548,6 +578,10 @@ export default function MapScreen() {
             {/* No track: the sport, drawn like a quiet map, the same picture as the list card
                 and desktop's move page (move-page/03). */}
             <SportPicture sport={activity.activity_type} seed={activity.date} height={160} />
+            {trackAway && (
+              <StatusNote tone="warning"
+                text="This activity's Track is kept on your server. It loads when the server can be reached." />
+            )}
           </View>
           {/* Overview / Charts / Laps - the same panel as the map view (desktop parity). */}
           <ActivityPanel activity={activity} meta={meta} hasMap={false} mapView={null}
