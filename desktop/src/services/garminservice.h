@@ -164,6 +164,9 @@ private:
     // enough to just poll continuously, decoupling "is a Garmin here" from page navigation
     // entirely, the same way WeatherService's own background timer runs unconditionally.
     QTimer m_detectTimer;
+    // detect()'s volume scan runs on a worker thread; this is its second half.
+    void applyDetect(const QStringList &roots, const QStringList &garminRoots);
+    bool m_scanRunning = false;
     static constexpr int kDetectIntervalMs = 2000;
 
     bool m_activitiesLoading = false;

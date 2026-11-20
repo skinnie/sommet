@@ -4,7 +4,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
+#include <QPointer>
 #include <QStorageInfo>
+#include <QThreadPool>
 #include <QXmlStreamReader>
 #include <QtMath>
 #include <algorithm>
@@ -123,31 +126,66 @@ bool GarminService::parseGarminDeviceXml(const QString &xmlPath, Volume &volume,
 
 void GarminService::detect()
 {
+    // Testing mode substitutes its fixture tree for the mounted-volume scan - deliberately
+    // instead of, not alongside, real hardware: a simulated device sitting next to a real one
+    // would make it impossible to tell which one the app is talking about.
+    if (!m_demoRoot.isEmpty()) {
+        m_detecting = true;
+        emit detectingChanged();
+        QStringList roots, garminRoots;
+        roots << m_demoRoot + QStringLiteral("/internal")
+              << m_demoRoot + QStringLiteral("/sdcard");
+        for (const QString &root : std::as_const(roots))
+            if (QFile::exists(root + QStringLiteral("/Garmin/GarminDevice.xml")))
+                garminRoots << root;
+        applyDetect(roots, garminRoots);
+        return;
+    }
+
+    // The volume scan runs on a worker thread, never on the window's own. Asking Windows
+    // whether a drive is ready can take seconds: an empty floppy drive answered in 5.5 s on the
+    // P5Q (measured 2026-11-20), and a sleeping USB disk or a lost network drive is no faster.
+    // This runs every 2 s and on every visit to Home, so the window froze for 4.5-6 s at a
+    // time. One scan at a time: a tick that finds a scan still running is skipped.
+    if (m_scanRunning)
+        return;
+    m_scanRunning = true;
     m_detecting = true;
     emit detectingChanged();
+    QPointer<GarminService> self(this);
+    QThreadPool::globalInstance()->start([self] {
+        QStringList roots, garminRoots;
+        const auto storages = QStorageInfo::mountedVolumes();
+        for (const auto &storage : storages) {
+            if (!storage.isValid() || !storage.isReady())
+                continue;
+            const QString root = storage.rootPath();
+            roots << root;
+            if (QFile::exists(root + QStringLiteral("/Garmin/GarminDevice.xml")))
+                garminRoots << root;
+        }
+        QMetaObject::invokeMethod(qApp, [self, roots, garminRoots] {
+            if (!self)
+                return;
+            self->m_scanRunning = false;
+            // Testing mode switched on while the scan ran: its own detect() already answered.
+            if (self->m_demoRoot.isEmpty())
+                self->applyDetect(roots, garminRoots);
+        }, Qt::QueuedConnection);
+    });
+}
 
+// The rest of detect(), on the window's thread: `roots` are the ready volumes, `garminRoots`
+// those that hold Garmin/GarminDevice.xml.
+void GarminService::applyDetect(const QStringList &roots, const QStringList &garminRoots)
+{
     m_volumes.clear();
     QString model, firmware, partNumber;
     QString garminParentDir;
 
-    // Testing mode substitutes its fixture tree for the mounted-volume scan - deliberately
-    // instead of, not alongside, real hardware: a simulated device sitting next to a real one
-    // would make it impossible to tell which one the app is talking about.
-    QStringList roots;
-    if (!m_demoRoot.isEmpty()) {
-        roots << m_demoRoot + QStringLiteral("/internal")
-              << m_demoRoot + QStringLiteral("/sdcard");
-    } else {
-        const auto storages = QStorageInfo::mountedVolumes();
-        for (const auto &storage : storages) {
-            if (storage.isValid() && storage.isReady())
-                roots << storage.rootPath();
-        }
-    }
-
     for (const QString &root : roots) {
         const QString xmlPath = root + QStringLiteral("/Garmin/GarminDevice.xml");
-        if (!QFile::exists(xmlPath))
+        if (!garminRoots.contains(root))
             continue;
 
         Volume vol;

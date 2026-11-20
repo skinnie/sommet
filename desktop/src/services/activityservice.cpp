@@ -2298,6 +2298,10 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
     QString windowStart;
 
     int count = 0;
+    // Did this import change any row the list shows? A routine 15-minute import with nothing
+    // new used to reload the whole library anyway: 2 s with the window held on a Core 2 Quad,
+    // then every page re-totalled it (P5Q, 2026-11-20).
+    bool listChanged = false;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const QString extId = o.value(QStringLiteral("id")).toVariant().toString();
@@ -2322,6 +2326,7 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
                 fix.prepare(QStringLiteral("UPDATE activities SET name = ? WHERE idx = ? AND device = ?"));
                 fix.addBindValue(proper); fix.addBindValue(h.idx); fix.addBindValue(h.device);
                 fix.exec();
+                listChanged = true;
             }
             // Rows imported before start_utc existed get their UTC start (the one-time full
             // pass below asks for the whole history so every row is reached once).
@@ -2336,6 +2341,7 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
                     fix.addBindValue(utc); fix.addBindValue(QDateTime::currentMSecsSinceEpoch());
                     fix.addBindValue(h.idx); fix.addBindValue(h.device);
                     fix.exec();
+                    listChanged = true;
                 }
             }
             continue;
@@ -2464,6 +2470,7 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
                 del.bindValue(0, h.idx);
                 del.bindValue(1, h.device);
                 del.exec();
+                listChanged = true;
                 if (!h.device.isEmpty() && !h.start.isEmpty()) {
                     const QString uid = sommetUid(h.device, h.start);
                     m_sommetTombstones.insert(uid);
@@ -2474,8 +2481,10 @@ void ActivityService::importActivitiesInto(const QJsonArray &arr)
         }
     }
         m_db.commit();
-    dbLoadAll();
-    emit activitiesChanged();
+    if (count > 0 || listChanged || m_activities.isEmpty()) {
+        dbLoadAll();
+        emit activitiesChanged();
+    }
     emit importFinished(count);
     // Pull the GPS traces for what was just imported (André, 2026-08-25 - imported outdoor
     // moves used to show "No GPS track" because the list endpoint carries no positions). Bounded
@@ -3564,21 +3573,16 @@ void ActivityService::sommetPull()
     });
 }
 
-// sync/12: one transaction per chunk, then back to the event loop, so the window keeps
+// sync/12: one transaction per 200 records, then back to the event loop, so the window keeps
 // drawing during a first sync. One commit per record froze a new Windows install for minutes.
-// A chunk is at most 200 records AND at most ~40 ms: a fixed 200 took ~450 ms per chunk on a
-// Core 2 Quad, so scrolling during a sync stalled every half second (P5Q, 2026-11-20).
 void ActivityService::sommetApplyNextChunk()
 {
     const int n = int(m_sommetPending.size());
     const int end = qMin(n, m_sommetPendingIdx + 200);
     const bool batched = m_db.transaction();
-    QElapsedTimer chunkTimer;
-    chunkTimer.start();
     for (; m_sommetPendingIdx < end; ++m_sommetPendingIdx) {
         if (sommetUpsertRecord(m_sommetPending.at(m_sommetPendingIdx).toObject()))
             m_sommetPulled++;
-        if (chunkTimer.elapsed() >= 40) { ++m_sommetPendingIdx; break; }
     }
     if (batched)
         m_db.commit();

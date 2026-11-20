@@ -9,18 +9,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ## 2026-11-20: Desktop: switching screens on an old PC no longer takes seconds
 
-- On the P5Q (Core 2 Quad, Windows) every screen switch held the window for 4.5-6 s and scrolling
-  stalled every half second. The graphics card was not the cause (frames drew in 1-17 ms).
+- On the P5Q (Core 2 Quad, Windows) every screen switch held the window for 4.5-6 s. The
+  graphics card was not the cause (frames drew in 1-17 ms).
+- Main cause on the P5Q: the Garmin check asks every drive whether it is ready, every 2 s and on
+  every visit to Home, on the window's own thread. The P5Q's empty floppy drive takes 5.5 s to
+  answer (measured there). A sleeping USB disk or a lost network drive would do the same. The
+  scan now runs on a worker thread, one at a time. Checked on Linux: a GarminDevice.xml put on
+  a mounted drive showed the eTrex within seconds, and removing it cleared it.
 - Every visit to Home, Activities, Calendar or Totals asks for a refresh, and with no watch read
   that refresh still announced "activities changed". Each page then re-totalled the whole history
   (4,680 activities), hidden pages included. It is now announced only when the list or its
-  state really changed.
+  state really changed. The 15-minute intervals.icu import did the same and reloaded the whole
+  library (2 s on the P5Q) even with nothing new; it now reloads only when a row changed.
 - QML rebuilt a JavaScript object from the C++ list on every read of every activity. The list is
   now copied into plain JavaScript once per change and every page reads that copy.
-- A Sommet Sync pull saves its records in slices of at most 40 ms (was 200 records, ~450 ms on
-  the P5Q), so the window keeps scrolling during a sync.
 - Measured on the X230 with a copy of the P5Q library (QML profiler): about 0.27 s of work per
-  screen switch, down from about 1.1 s.
+  screen switch, down from about 1.1 s. Not yet measured on the P5Q.
+- Withdrawn: a first version also cut each Sommet Sync pull chunk to 40 ms. The "450 ms stalls"
+  it was meant to fix were idle repaints in the log, not stalls, and smaller chunks mean more
+  commits, so it is back to 200 records per chunk.
 
 ## 2026-11-20: Desktop: Sommet Sync sends only what changed (sync ledger, #SYNC-8/9/11)
 
