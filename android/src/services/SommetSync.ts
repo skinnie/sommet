@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getAllActivities, markActivitySynced, getSommetTombstones, addSommetTombstone,
   deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
+  getSommetLedger, markSommetSent, getSommetDeletedSent, markSommetDeletedSent,
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
 import { readFitForGpx, readGpxFile, removeFitForGpx, writeGpxFile } from './GpxService';
@@ -244,12 +245,19 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   if (remote === null) return { pulled: 0, pushed: 0, ok: false }; // unreachable: leave local alone
 
   // remote tombstones first, so an upsert can't resurrect a just-deleted move
+  const deletedSent = await getSommetDeletedSent();
+  const pulledDeleted: string[] = [];
   for (const uid of (remote.deleted ?? [])) {
-    if (!uid || tombstones.has(uid)) continue;
+    if (!uid) continue;
+    if (!deletedSent.has(uid)) { deletedSent.add(uid); pulledDeleted.push(uid); }   // the server has it
+    if (tombstones.has(uid)) continue;
     tombstones.add(uid);
     await addSommetTombstone(uid);
     await deleteActivitiesByUid(uid);
   }
+  await markSommetDeletedSent(pulledDeleted);
+  // Versions that came from the server count as held there (sync ledger): they are not sent back.
+  const pulledSent: { uid: string; updatedAt: number }[] = [];
   // The same move from another source (a watch move here, its intervals.icu or Suunto copy from
   // another device) is not added twice: the shared rule, SameMove.ts. The desktop keeps every
   // copy and shows one; this app keeps one.
@@ -279,6 +287,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     if (isJunkActivity(Number(rec.duration_s || 0), Number(rec.distance_m || 0))) continue;
     const remoteRev = Number(rec.track_rev || 0);
     const newerTrack = !!rec.has_track && remoteRev > (trackRevs[uid] || 0);   // sync/08: split elsewhere
+    if (existing && remoteUpdated > 0 && existing.updated_at === remoteUpdated)
+      pulledSent.push({ uid, updatedAt: remoteUpdated });   // the server holds our version
     if (existing && existing.updated_at >= remoteUpdated && existing.gpx_path && !newerTrack) { // ours is newer & has track
       // ...but a row pulled before 2026-10-03 has no calories and may hold a raw sport name.
       const fix: { activity_type?: string; energy_kcal?: number; start_utc?: number; moving_s?: number } = {};
@@ -333,14 +343,20 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       start_utc: startUtc || existing?.start_utc || 0,
       moving_s: moving || existing?.moving_s || 0,
     });
+    pulledSent.push({ uid, updatedAt: remoteUpdated || Date.now() });
     pulled++;
   }
+  await markSommetSent(pulledSent);
   if (revsChanged) await AsyncStorage.setItem(TRACK_REV_KEY, JSON.stringify(trackRevs));
   if (remote.now) await AsyncStorage.setItem(LASTPULL_KEY, String(remote.now));
   if (!repullDone) await AsyncStorage.setItem(REPULL_KEY, '1');
 
   // ── PUSH ──────────────────────────────────────────────────────────────────────
+  // Only what the server doesn't hold yet (sync ledger, #SYNC-8/9/11): a move whose updated_at
+  // is newer than the one recorded as sent, or whose track still has to go. Sent in requests of
+  // 200, each recorded once the server accepts it, so an interrupted sync resumes where it stopped.
   const acts = await getAllActivities();
+  const ledger = await getSommetLedger();
   setProgress({ stage: 'sending', done: 0, total: acts.length });
   let readCount = 0;
   const records: any[] = [];
@@ -357,7 +373,10 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     // Read the file only when it still has to go to the server (sync/12): reading all ~3,700
     // tracks on every sync kept the tablet's CPU busy for minutes.
     let gpx = '';
-    if (a.gpx_path && !pushed.has(uid)) { try { gpx = await readGpxFile(a.gpx_path); } catch { gpx = ''; } }
+    const updatedAt = a.updated_at || a.synced_at;
+    const trackPending = !!a.gpx_path && !pushed.has(uid);
+    if ((ledger.get(uid) ?? -1) >= updatedAt && !trackPending) continue;   // the server has this one
+    if (trackPending) { try { gpx = await readGpxFile(a.gpx_path); } catch { gpx = ''; } }
     const hasTrack = !!gpx || (!!a.gpx_path && pushed.has(uid));
     records.push({
       uid,
@@ -372,7 +391,7 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
       source: a.id.startsWith('icu:') ? 'intervals' : 'watch',
       has_track: hasTrack,
       track_fmt: 'gpx',
-      updated_at: a.updated_at || a.synced_at,
+      updated_at: updatedAt,
       ...(a.start_utc ? { start_utc: a.start_utc } : {}),
       ...(a.moving_s ? { moving_s: a.moving_s } : {}),
       ...(trackRevs[uid] ? { track_rev: trackRevs[uid] } : {}),
@@ -380,9 +399,19 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     if (gpx && !pushed.has(uid)) blobsToPush.push({ uid, gpx });
   }
 
-  const post = await sommetHttp(url, token, 'POST', { c: 'activities' },
-    { records, deleted: Array.from(tombstones) });
-  if (post === null) return { pulled, pushed: 0, ok: false };
+  const deletions = Array.from(tombstones).filter(u => !deletedSent.has(u));
+  let sentCount = 0;
+  for (let i = 0; i < records.length || (i === 0 && deletions.length > 0); i += 200) {
+    const batch = records.slice(i, i + 200);
+    const dels = i === 0 ? deletions : [];
+    const post = await sommetHttp(url, token, 'POST', { c: 'activities' }, { records: batch, deleted: dels });
+    if (post === null) return { pulled, pushed: sentCount, ok: false };
+    await markSommetSent(batch.map(r => ({ uid: r.uid, updatedAt: r.updated_at })));
+    await markSommetDeletedSent(dels);
+    sentCount += batch.length;
+    setProgress({ done: Math.min(acts.length, sentCount) });
+    await yieldToUi();
+  }
 
   for (const b of blobsToPush) {
     if (await pushBlob(url, token, b.uid, b.gpx)) pushed.add(b.uid);
@@ -401,5 +430,5 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   }
   await AsyncStorage.setItem(FIT_PUSHED_KEY, JSON.stringify(Array.from(fitPushed)));
 
-  return { pulled, pushed: records.length, ok: true };
+  return { pulled, pushed: sentCount, ok: true };
 }

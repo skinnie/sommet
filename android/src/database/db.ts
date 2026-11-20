@@ -101,6 +101,20 @@ async function openAndMigrate(): Promise<SQLiteDatabase> {
       uid TEXT PRIMARY KEY
     )
   `);
+  // Sync ledger (#SYNC-8/9/11, like desktop's sommet_ledger): which version (updated_at) of each
+  // move the server already holds, and which tombstones it was sent. A sync sends only what is
+  // missing here, instead of every move and every tombstone each time.
+  await db.executeSql(`
+    CREATE TABLE IF NOT EXISTS sommet_ledger (
+      uid TEXT PRIMARY KEY,
+      sent_updated_at INTEGER NOT NULL
+    )
+  `);
+  await db.executeSql(`
+    CREATE TABLE IF NOT EXISTS sommet_deleted_sent (
+      uid TEXT PRIMARY KEY
+    )
+  `);
   // Migrations
   await addMissingColumns(db, 'activities', [
     ['activity_type', `TEXT NOT NULL DEFAULT ''`],
@@ -483,6 +497,50 @@ export async function getSommetTombstones(): Promise<string[]> {
 export async function addSommetTombstone(uid: string): Promise<void> {
   const db = await getDb();
   await db.executeSql('INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)', [uid]);
+}
+
+/** Sync ledger: uid -> the updated_at the server holds for it. */
+export async function getSommetLedger(): Promise<Map<string, number>> {
+  const db = await getDb();
+  const [r] = await db.executeSql('SELECT uid, sent_updated_at FROM sommet_ledger');
+  const out = new Map<string, number>();
+  for (let i = 0; i < r.rows.length; i++) {
+    const row = r.rows.item(i);
+    out.set(row.uid, Number(row.sent_updated_at));
+  }
+  return out;
+}
+
+/** Record that the server holds these versions (after it accepted them, or they came from it). */
+export async function markSommetSent(entries: { uid: string; updatedAt: number }[]): Promise<void> {
+  if (entries.length === 0) return;
+  const db = await getDb();
+  for (let i = 0; i < entries.length; i += 200) {
+    const part = entries.slice(i, i + 200);
+    await db.executeSql(
+      'INSERT OR REPLACE INTO sommet_ledger (uid, sent_updated_at) VALUES '
+        + part.map(() => '(?, ?)').join(', '),
+      part.flatMap(e => [e.uid, e.updatedAt]));
+  }
+}
+
+/** Tombstones the server already has (sent from here, or pulled from it). */
+export async function getSommetDeletedSent(): Promise<Set<string>> {
+  const db = await getDb();
+  const [r] = await db.executeSql('SELECT uid FROM sommet_deleted_sent');
+  const out = new Set<string>();
+  for (let i = 0; i < r.rows.length; i++) out.add(r.rows.item(i).uid);
+  return out;
+}
+
+export async function markSommetDeletedSent(uids: string[]): Promise<void> {
+  if (uids.length === 0) return;
+  const db = await getDb();
+  for (let i = 0; i < uids.length; i += 400) {
+    const part = uids.slice(i, i + 400);
+    await db.executeSql(
+      'INSERT OR IGNORE INTO sommet_deleted_sent (uid) VALUES ' + part.map(() => '(?)').join(', '), part);
+  }
 }
 
 /** Delete every local row matching a uid (device|start-minute). Used when a remote tombstone

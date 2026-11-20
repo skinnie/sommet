@@ -37,7 +37,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   sync stopped. A record pulled from the NAS counts as held there, and each deletion is sent once.
 - Checked against the local test server with a copy of the X230 library: the first sync sent all
   4,759; the next one sent none; after one change and one deletion it sent exactly those two.
-  Android: not yet.
+- Android (same day): the same ledger, as two tables in the app's database. Pulled versions
+  count as held by the server; changed moves go in requests of 200, each recorded once the
+  server accepts it; each deletion is sent once. Checked with a unit test (450 moves: 200 +
+  200 + 50, then no request, then exactly one change and one deletion); not yet on the tablet.
 
 ## 2026-11-20: Desktop: a full Sommet Sync pull takes seconds, not half an hour
 
