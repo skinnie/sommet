@@ -138,7 +138,7 @@ Item {
         if (!activity || !cfg || !cfg.sports) return null
         if (sport === "pool_swim")
             return _st && _st.longest_nonstop_m ? AVL.swimBenchmark(_st.longest_nonstop_m, _earlierSwims()) : null
-        const all = ActivityService.activities || []
+        const all = ActivityViewModel.baseActivities
         const cands = []
         for (let i = 0; i < all.length; i++) {
             const a = all[i]

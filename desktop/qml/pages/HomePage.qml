@@ -2439,7 +2439,7 @@ PageFlickable {
                     ? (KailashService.trackLogOk
                        ? ActivityViewModel.mostRecent(KailashService.trackLogActivities) : null)
                     : ActivityViewModel.mostRecent(
-                          HomeViewModel.isGarmin ? GarminService.activities : ActivityService.activities)
+                          HomeViewModel.isGarmin ? GarminService.activities : ActivityViewModel.baseActivities)
 
                 Row {
                     width: parent.width

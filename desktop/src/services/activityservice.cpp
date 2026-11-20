@@ -303,11 +303,16 @@ void ActivityService::refreshAllWatches()
         if (netOk && root.value(QStringLiteral("ok")).toBool() && watches.isEmpty()
             && root.contains(QStringLiteral("readsWithoutUsb"))
             && !root.value(QStringLiteral("readsWithoutUsb")).toBool()) {
-            if (m_activities.isEmpty())
+            const bool reload = m_activities.isEmpty();
+            const bool flagsMoved = !m_ok;
+            if (reload)
                 dbLoadAll();
             m_ok = true;                     // no watch is not a failure to load
             setLoading(false);
-            emit activitiesChanged();
+            // Only when something moved: every page visit calls refresh(), and a needless
+            // activitiesChanged makes every page re-total the whole history (P5Q, 2026-11-20).
+            if (reload || flagsMoved)
+                emit activitiesChanged();
             return;
         }
         if (!netOk || !root.value(QStringLiteral("ok")).toBool() || watches.isEmpty()) {
@@ -604,10 +609,12 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
             setLoading(false);
             // Show whatever cache we have; only re-parse if it isn't loaded yet (avoids a full
             // re-parse on a revisit while the watch is unreachable - André, 2026-09-20).
-            m_ok = m_activities.isEmpty() ? dbLoadAll() : true;
+            const bool wasOk = m_ok, reload = m_activities.isEmpty();
+            m_ok = reload ? dbLoadAll() : true;
             if (!m_ok)
                 setLastError(backendErrorText(reply));
-            emit activitiesChanged();
+            if (reload || wasOk != m_ok)     // see refreshAllWatches(): no needless re-totals
+                emit activitiesChanged();
             return;
         }
 
@@ -616,10 +623,12 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         const bool liveOk = root.value(QStringLiteral("ok")).toBool();
         if (!liveOk) {
             setLoading(false);
-            m_ok = m_activities.isEmpty() ? dbLoadAll() : true;
+            const bool wasOk = m_ok, reload = m_activities.isEmpty();
+            m_ok = reload ? dbLoadAll() : true;
             if (!m_ok)
                 setLastError(root.value(QStringLiteral("stderr")).toString());
-            emit activitiesChanged();
+            if (reload || wasOk != m_ok)
+                emit activitiesChanged();
             return;
         }
 
@@ -680,11 +689,14 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         // every visit, and re-parsing the entire history each time - even with 0 new rows - is
         // what made opening the page slow with a large cache (André, 2026-09-20). Other sources
         // (intervals/Garmin imports) rebuild via their own dbLoadAll + activitiesChanged.
-        if (!rawList.isEmpty() || m_activities.isEmpty())
+        const bool reload = !rawList.isEmpty() || m_activities.isEmpty();
+        const bool flagsMoved = !m_ok || m_showingCachedData;
+        if (reload)
             dbLoadAll();
         m_ok = true;
         m_showingCachedData = false;
-        emit activitiesChanged();
+        if (reload || flagsMoved)
+            emit activitiesChanged();
 
         if (device != QStringLiteral("demo"))
             readWatchSteps();
@@ -3552,16 +3564,21 @@ void ActivityService::sommetPull()
     });
 }
 
-// sync/12: one transaction per 200 records, then back to the event loop, so the window keeps
+// sync/12: one transaction per chunk, then back to the event loop, so the window keeps
 // drawing during a first sync. One commit per record froze a new Windows install for minutes.
+// A chunk is at most 200 records AND at most ~40 ms: a fixed 200 took ~450 ms per chunk on a
+// Core 2 Quad, so scrolling during a sync stalled every half second (P5Q, 2026-11-20).
 void ActivityService::sommetApplyNextChunk()
 {
     const int n = int(m_sommetPending.size());
     const int end = qMin(n, m_sommetPendingIdx + 200);
     const bool batched = m_db.transaction();
+    QElapsedTimer chunkTimer;
+    chunkTimer.start();
     for (; m_sommetPendingIdx < end; ++m_sommetPendingIdx) {
         if (sommetUpsertRecord(m_sommetPending.at(m_sommetPendingIdx).toObject()))
             m_sommetPulled++;
+        if (chunkTimer.elapsed() >= 40) { ++m_sommetPendingIdx; break; }
     }
     if (batched)
         m_db.commit();

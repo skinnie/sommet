@@ -94,17 +94,38 @@ QtObject {
     // made the whole app unresponsive. Rebuild only when a cheap signature (counts + the newest
     // start time of each source) really changed; otherwise hand back the exact same array, so the
     // Home totals/last-activity bindings that read `feed` don't re-loop either. (Perf, 2026-09-20.)
-    property var _feedMemo: ({ sig: "\u0000", result: [] })
+    // ActivityService.activities is a QVariantList of QVariantMaps. Every time QML reads an
+    // element of it, the engine builds a fresh JS object from that map - so each page that
+    // loops over 4,680 activities (totals, calendar, home, the list) paid that conversion
+    // again on every pass, and several bindings loop it per screen switch. On a Core 2 Quad
+    // that was 4-6 s per screen switch (P5Q, 2026-11-20). Copy the list into plain JS objects
+    // ONCE per activitiesChanged; every reader below and on the pages then reads ordinary JS.
+    readonly property var baseActivities: _plainCopy(ActivityService.activities)
+    function _plainCopy(list) {
+        if (!list || list.length === 0) return []
+        const n = list.length
+        const out = new Array(n)
+        for (let i = 0; i < n; i++) {
+            const m = list[i]
+            const o = {}
+            for (const k in m) o[k] = m[k]
+            out[i] = o
+        }
+        return out
+    }
+
+    property var _feedMemo: ({ sig: "\u0000", base: null, result: [] })
     readonly property var feed: {
-        const base = ActivityService.activities || []
+        const base = baseActivities
         const extra = HomeViewModel.isGarmin ? (GarminService.activities || [])
                     : HomeViewModel.isKailash ? kailashSessions
                     : []
         const sig = base.length + "|" + (base.length ? (base[0].startTime || "") : "")
                   + "#" + extra.length + "|" + (extra.length ? (extra[0].startTime || "") : "")
-        if (sig === _feedMemo.sig)
+        if (sig === _feedMemo.sig && base === _feedMemo.base)
             return _feedMemo.result
         _feedMemo.sig = sig
+        _feedMemo.base = base
         if (extra.length === 0) {
             _feedMemo.result = base
             return base
