@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: Sommet Sync sends only what changed (sync ledger, #SYNC-8/9/11)
+
+- Every sync sent the NAS every activity (4,700 records) and read each one's track text just to
+  say it had one. A small table now records which version of each activity the NAS holds; a sync
+  sends only the activities changed since, in requests of 200 that pick up where an interrupted
+  sync stopped. A record pulled from the NAS counts as held there, and each deletion is sent once.
+- Checked against the local test server with a copy of the X230 library: the first sync sent all
+  4,759; the next one sent none; after one change and one deletion it sent exactly those two.
+  Android: not yet.
+
 ## 2026-11-20: Desktop: a full Sommet Sync pull takes seconds, not half an hour
 
 - Sommet Sync looks up each activity by its watch and start minute, to apply, delete, fetch or

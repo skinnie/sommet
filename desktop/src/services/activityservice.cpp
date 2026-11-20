@@ -808,6 +808,13 @@ void ActivityService::openDatabase()
     // here, same protection as the start|name tombstones.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_deleted (uid TEXT PRIMARY KEY)"));
+    // Sync ledger (#SYNC-8, docs/sync-ledger-plan.md): what the NAS already holds of each move, so
+    // a push sends only the records whose updated_at moved since, not the whole library. A pulled
+    // record is entered too, so it isn't echoed back. sommet_deleted_sent: deletions already sent.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_ledger (uid TEXT PRIMARY KEY, sent_updated_at INTEGER NOT NULL)"));
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_deleted_sent (uid TEXT PRIMARY KEY)"));
     // intervals.icu activities the last import didn't list, with when that was first seen
     // (ms). One missing reply isn't a delete: the prune waits for a second import a day later.
     q.exec(QStringLiteral(
@@ -3520,6 +3527,10 @@ void ActivityService::sommetPull()
             su.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted (uid) VALUES (?)"));
             su.addBindValue(uid);
             su.exec();
+            QSqlQuery ss(m_db);   // came from the NAS: nothing to send back
+            ss.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted_sent (uid) VALUES (?)"));
+            ss.addBindValue(uid);
+            ss.exec();
             const int bar = uid.indexOf(QLatin1Char('|'));
             if (bar > 0) {
                 QSqlQuery del(m_db);
@@ -3666,6 +3677,8 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         }
     }
 
+    if (have && localUpdated == remoteUpdated)
+        sommetMarkSent(uid, remoteUpdated);   // same version on both sides: nothing to push
     if (have && localUpdated >= remoteUpdated) {
         // Nothing newer to write, but we might still be missing this move's track.
         if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
@@ -3738,9 +3751,19 @@ bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
         up.exec();
     }
 
+    sommetMarkSent(uid, remoteUpdated);       // written from the NAS: it already has this version
     if (hasTrack && localGpx.isEmpty() && !localPoints && !m_sommetBlobQueue.contains(uid))
         m_sommetBlobQueue.append(uid);
     return true;
+}
+
+void ActivityService::sommetMarkSent(const QString &uid, qint64 updatedAt)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO sommet_ledger (uid, sent_updated_at) VALUES (?, ?)"));
+    q.addBindValue(uid);
+    q.addBindValue(updatedAt);
+    q.exec();
 }
 
 void ActivityService::sommetFetchNextBlob()
@@ -3829,6 +3852,12 @@ void ActivityService::sommetPushAll()
                                       .toStringList();
     const QSet<QString> pushedSet(pushedList.begin(), pushedList.end());
 
+    QHash<QString, qint64> ledger;      // #SYNC-8: the version the NAS already holds
+    {
+        QSqlQuery lq(QStringLiteral("SELECT uid, sent_updated_at FROM sommet_ledger"), m_db);
+        while (lq.next())
+            ledger.insert(lq.value(0).toString(), lq.value(1).toLongLong());
+    }
     QJsonArray records;
     m_sommetPushQueue.clear();
     m_sommetFitPushQueue.clear();
@@ -3846,7 +3875,8 @@ void ActivityService::sommetPushAll()
     }
     QSqlQuery q(QStringLiteral(
         "SELECT idx, device, name, duration_s, distance_m, ascent_m, energy_kcal, sport_type_raw, "
-        "start_time, source, external_id, rule_outputs_json, updated_at, gpx_text, "
+        "start_time, source, external_id, rule_outputs_json, updated_at, "
+        "(gpx_text IS NOT NULL AND gpx_text <> ''), "
         "COALESCE(start_utc, 0), (fit_base64 IS NOT NULL AND fit_base64 <> ''), "
         "COALESCE(moving_s, 0), (length(track_json) > 20) FROM activities"),
         m_db);
@@ -3858,6 +3888,15 @@ void ActivityService::sommetPushAll()
         const QString uid = sommetUid(device, start);
         if (m_sommetTombstones.contains(uid))
             continue;
+        const qint64 updated = q.value(12).toLongLong();
+        const bool hasGpx = q.value(13).toBool();
+        const bool trackOnly = !hasGpx && q.value(17).toBool();   // sync/10: points only, sent as GPX
+        if ((hasGpx || trackOnly) && !pushedSet.contains(uid))
+            m_sommetPushQueue.append(uid);
+        if (q.value(15).toBool() && !fitPushed.contains(uid))
+            m_sommetFitPushQueue.append(uid);
+        if (ledger.value(uid, -1) >= updated)
+            continue;                                          // the NAS has this version
         QJsonObject rec;
         rec.insert(QStringLiteral("uid"), uid);
         rec.insert(QStringLiteral("idx"), q.value(0).toInt());
@@ -3875,45 +3914,83 @@ void ActivityService::sommetPushAll()
             rec.insert(QStringLiteral("external_id"), q.value(10).toString());
         if (!q.value(11).toString().isEmpty())
             rec.insert(QStringLiteral("rule_outputs_json"), q.value(11).toString());
-        rec.insert(QStringLiteral("updated_at"), QJsonValue(q.value(12).toLongLong()));
+        rec.insert(QStringLiteral("updated_at"), QJsonValue(updated));
         if (q.value(14).toLongLong() > 0)
             rec.insert(QStringLiteral("start_utc"), QJsonValue(q.value(14).toLongLong()));
         if (q.value(16).toInt() > 0)
             rec.insert(QStringLiteral("moving_s"), q.value(16).toInt());
-        const QString gpx = q.value(13).toString();
-        // sync/10: an intervals.icu import has its trace as track_json only; it goes out as GPX too
-        const bool trackOnly = gpx.isEmpty() && q.value(17).toBool();
-        rec.insert(QStringLiteral("has_track"), !gpx.isEmpty() || trackOnly);
+        rec.insert(QStringLiteral("has_track"), hasGpx || trackOnly);
         rec.insert(QStringLiteral("track_fmt"), QStringLiteral("gpx"));
         if (trackRevs.value(uid) > 0)
             rec.insert(QStringLiteral("track_rev"), QJsonValue(trackRevs.value(uid)));
         records.append(rec);
-        if ((!gpx.isEmpty() || trackOnly) && !pushedSet.contains(uid))
-            m_sommetPushQueue.append(uid);
-        if (q.value(15).toBool() && !fitPushed.contains(uid))
-            m_sommetFitPushQueue.append(uid);
     }
     m_sommetPushed = records.size();
 
+    QSet<QString> delSent;
+    {
+        QSqlQuery dq(QStringLiteral("SELECT uid FROM sommet_deleted_sent"), m_db);
+        while (dq.next())
+            delSent.insert(dq.value(0).toString());
+    }
     QJsonArray dels;
     for (const QString &t : m_sommetTombstones)
-        dels.append(t);
+        if (!delSent.contains(t))
+            dels.append(t);                                    // #SYNC-11: each deletion once
 
+    m_sommetPushRecords = records;
+    m_sommetPushDels = dels;
+    m_sommetPushRequest = req;
+    sommetPushNextBatch();
+}
+
+// #SYNC-9: 200 records per request; each batch the server accepts goes into the ledger, so a sync
+// cut short (sleep, Wi-Fi) carries on with what is left next time.
+void ActivityService::sommetPushNextBatch()
+{
+    if (m_sommetPushRecords.isEmpty() && m_sommetPushDels.isEmpty()) {
+        m_syncPushTotal = int(m_sommetPushQueue.size() + m_sommetFitPushQueue.size());
+        setSommetProgress(m_syncPushTotal > 0 ? QStringLiteral("sending") : QString(), 0, m_syncPushTotal);
+        sommetPushNextBlob();
+        return;
+    }
+    QJsonArray batch;
+    const int n = int(qMin<qsizetype>(200, m_sommetPushRecords.size()));
+    for (int i = 0; i < n; ++i)
+        batch.append(m_sommetPushRecords.at(i));
+    const QJsonArray dels = m_sommetPushDels;   // all with the first batch (uids only, small)
     QJsonObject body;
-    body.insert(QStringLiteral("records"), records);
+    body.insert(QStringLiteral("records"), batch);
     body.insert(QStringLiteral("deleted"), dels);
 
-    QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    QNetworkReply *reply = m_network.post(m_sommetPushRequest,
+                                          QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, batch, dels, n]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            m_sommetPushRecords = QJsonArray();
+            m_sommetPushDels = QJsonArray();
             sommetSyncEnded();
             emit sommetSyncError(backendErrorText(reply));
             return;
         }
-        m_syncPushTotal = int(m_sommetPushQueue.size() + m_sommetFitPushQueue.size());
-        setSommetProgress(m_syncPushTotal > 0 ? QStringLiteral("sending") : QString(), 0, m_syncPushTotal);
-        sommetPushNextBlob();
+        m_db.transaction();
+        for (const auto &v : batch) {
+            const QJsonObject r = v.toObject();
+            sommetMarkSent(r.value(QStringLiteral("uid")).toString(),
+                           r.value(QStringLiteral("updated_at")).toInteger());
+        }
+        for (const auto &d : dels) {
+            QSqlQuery ss(m_db);
+            ss.prepare(QStringLiteral("INSERT OR IGNORE INTO sommet_deleted_sent (uid) VALUES (?)"));
+            ss.addBindValue(d.toString());
+            ss.exec();
+        }
+        m_db.commit();
+        for (int i = 0; i < n; ++i)
+            m_sommetPushRecords.removeFirst();
+        m_sommetPushDels = QJsonArray();
+        sommetPushNextBatch();
     });
 }
 

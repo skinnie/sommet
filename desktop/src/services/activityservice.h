@@ -452,4 +452,10 @@ private:
     bool m_sommetBusy = false;
     int m_sommetPulled = 0;
     int m_sommetPushed = 0;
+    // Sync ledger (#SYNC-8/9/11): the changed records still to send, 200 per request.
+    void sommetPushNextBatch();
+    void sommetMarkSent(const QString &uid, qint64 updatedAt);
+    QJsonArray m_sommetPushRecords;
+    QJsonArray m_sommetPushDels;
+    QNetworkRequest m_sommetPushRequest;
 };
