@@ -853,6 +853,13 @@ void ActivityService::openDatabase()
     // outdoor one. Android's twin is IntervalsTracks' intervals_no_track_v1.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS intervals_no_track (external_id TEXT PRIMARY KEY)"));
+    // Sommet Sync finds a move by (device, start minute) for every record it applies, deletes,
+    // fetches or sends. Without this index each lookup read the whole table (0.4 s on 4,700
+    // moves), and a full pull of 4,800 records held the window for half an hour: the P5Q "hang",
+    // 2026-11-20. The expression must stay exactly substr(start_time,1,16) for SQLite to use it.
+    q.exec(QStringLiteral(
+        "CREATE INDEX IF NOT EXISTS activities_device_minute "
+        "ON activities(device, substr(start_time,1,16))"));
     dropIndoorImportTracks(m_db);
 
     loadTombstones();

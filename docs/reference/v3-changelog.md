@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: a full Sommet Sync pull takes seconds, not half an hour
+
+- Sommet Sync looks up each activity by its watch and start minute, to apply, delete, fetch or
+  send it. The library had no index for that, so every lookup read the whole table: 0.4 s each
+  on 4,700 activities. A full pull of 4,800 records held the window for about half an hour (the
+  P5Q "hang" on Windows: one core busy and 170 GB read from disk in 8 minutes). The pull also
+  never saved its place when Sommet was closed during it, so the next start pulled everything
+  again.
+- The library now has that index, created when Sommet opens it. On a copy of the P5Q library a
+  full pull of 4,943 records was applied in about 6 s.
+
 ## 2026-11-20: Desktop: Activities, Calendar and Totals open at once after the first visit
 
 - The three pages stay built after their first visit and are only shown again. Each visit built
