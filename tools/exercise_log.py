@@ -1702,6 +1702,10 @@ def main():
     # the sommet-activity-sync-no-delete finding. Only marks the entries decoded THIS
     # run (with --known-count, that's just the new ones, so each move is marked once, the
     # call that first reads it), and never for --from FILE (nothing to write to).
+    ap.add_argument("--known-master", metavar="SIG", default="",
+                    help="the master index signature (entries:first:last:next_free) of the last "
+                         "full read; with --known-count equal to its entries and the index "
+                         "unchanged, the log is not read at all (nothing can be new)")
     ap.add_argument("--mark-synced", action="store_true",
                      help="also tell the watch each newly-read move is synced (0x1201 write)")
     args = ap.parse_args()
@@ -1768,6 +1772,26 @@ def main():
         else:
             probe = read_flash(link, log_base, 1024, label="ExerciseLog (header)")
             probe_master = parse_master_header(probe)
+            sig = "{entries}:{first_entry:x}:{last_entry:x}:{next_free_address:x}".format(**probe_master)
+            # Nothing new (P5Q speed test 4, 2026-11-20: a read with nothing new still read the
+            # whole 430 KB log, 11.6 of its 13.5 s): the index is the one the caller last read in
+            # full and the caller already holds that many moves. Any added, deleted or wrapped
+            # move changes the index, so this never hides one.
+            if (args.known_master and args.known_master == sig and not args.mark_synced
+                    and args.known_count == probe_master["entries"]):
+                _stage("log header read (index unchanged)")
+                print(f"master index: entries={probe_master['entries']} "
+                      f"first=0x{probe_master['first_entry']:x} "
+                      f"last=0x{probe_master['last_entry']:x} "
+                      f"next_free=0x{probe_master['next_free_address']:x}")
+                print(f"\nno new entries since known-count={args.known_count} "
+                      f"(index unchanged, log not read)")
+                if args.gpx_out:
+                    import os
+                    with open(os.path.join(args.gpx_out, "master.json"), "w") as f:
+                        json.dump({"total_entries": probe_master["entries"], "signature": sig,
+                                   "skipped": True}, f)
+                return 0
             needed = probe_master["next_free_address"] - log_base + 8192
             needed = max(1024, min(log_size, needed))
             _stage("log header read")
@@ -1907,7 +1931,9 @@ def main():
     if args.gpx_out:
         import os
         with open(os.path.join(args.gpx_out, "master.json"), "w") as f:
-            json.dump({"total_entries": master["entries"]}, f)
+            json.dump({"total_entries": master["entries"],
+                       "signature": "{entries}:{first_entry:x}:{last_entry:x}:{next_free_address:x}"
+                                    .format(**master)}, f)
 
     return 0
 

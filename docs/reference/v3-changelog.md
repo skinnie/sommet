@@ -7,6 +7,14 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Watch read with nothing new skips the log
+
+- A watch read when nothing is new read the whole activity log every time (430 KB, 11.6 of 13.5
+  s on the P5Q). The backend now remembers each watch's log index from its last full read
+  (SommetBackups/watch-log-index.json); when the index is unchanged and the app already holds
+  that many moves, exercise_log.py stops after the 1 KB header. Any new, deleted or wrapped move
+  changes the index, so it is read in full as before.
+
 ## 2026-11-20: Desktop: map drag inside lists works; the first light-library trim no longer freezes the window
 
 - Maps inside a scrolling page or list (Routes, activity cards, POIs): a drag moved the page

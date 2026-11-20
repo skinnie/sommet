@@ -238,6 +238,30 @@ class _WatchLock:
 _REQUEST_CTX = threading.local()   # per request thread: .foreground
 WATCH_LOCK = _WatchLock()
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
+
+# Per watch, the ExerciseLog index signature of its last full read, so a read with nothing new
+# can skip the log (exercise_log.py --known-master). Kept across restarts: the first read after
+# plugging the watch in is the one that was slow (13.5 s on the P5Q).
+_LOG_SIG_FILE = Path.home() / "SommetBackups" / "watch-log-index.json"
+_LOG_SIG_LOCK = threading.Lock()
+
+
+def _log_signature(device, sig=None):
+    """Read (sig=None) or store the last full read's index signature for `device`."""
+    with _LOG_SIG_LOCK:
+        try:
+            sigs = json.loads(_LOG_SIG_FILE.read_text())
+        except (OSError, ValueError):
+            sigs = {}
+        if sig is None:
+            return sigs.get(str(device), "")
+        sigs[str(device)] = sig
+        try:
+            _LOG_SIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _LOG_SIG_FILE.write_text(json.dumps(sigs))
+        except OSError:
+            pass
+        return sig
 MAGENE_LOCK = threading.Lock()   # one BLE connection to the C406 at a time (see run_tool)
 
 # --- USB keep-alive handle (Ambit1/2 "connecting/disconnecting" chime fix) -------------
@@ -2240,6 +2264,9 @@ class Handler(BaseHTTPRequestHandler):
                            else device_key())
         with tempfile.TemporaryDirectory() as tmpdir:
             tool_args = ["--gpx-out", tmpdir, "--fit-out", tmpdir, "--known-count", known_count]
+            known_sig = _log_signature(response_device)
+            if known_sig:
+                tool_args += ["--known-master", known_sig]
             if mark_synced:
                 tool_args.append("--mark-synced")
             # Optional per-app native-stream mapping for logged Suunto App outputs (off by
@@ -2274,8 +2301,10 @@ class Handler(BaseHTTPRequestHandler):
                     "rule_outputs": rule_outputs,
                 })
             master_path = tmp / "master.json"
-            total_entries = (json.loads(master_path.read_text())["total_entries"]
-                              if master_path.exists() else len(activities))
+            master_info = json.loads(master_path.read_text()) if master_path.exists() else {}
+            total_entries = master_info.get("total_entries", len(activities))
+            if master_info.get("signature") and not master_info.get("skipped"):
+                _log_signature(response_device, master_info["signature"])
             _t_clock = time.monotonic()
             clock_set = self._sync_clock_usb(device_pid, device_serial)
             clock_ms = int((time.monotonic() - _t_clock) * 1000)
