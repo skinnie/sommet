@@ -117,13 +117,13 @@ Item {
     // be copied into this page, TotalsPage and CalendarPage separately.
     readonly property var activeActivities: ActivityViewModel.feed
 
-    Component.onCompleted: {
+    // Main.qml keeps this page built after its first visit; pageShown() runs on every later one.
+    // A visit opens on the list, as it did when the page was built fresh each time.
+    function pageShown() {
         // Opened straight into an activity (from a Calendar day click) - honour the pending
         // selection the NavBus carried, then clear it so a later plain visit shows the list.
-        if (NavBus.pendingActivity) {
-            root.selectedActivity = NavBus.pendingActivity
-            NavBus.pendingActivity = null
-        }
+        root.selectedActivity = NavBus.pendingActivity
+        NavBus.pendingActivity = null
         ActivityService.refresh()
         GarminService.refreshActivities()
         KailashService.refreshHistory()
@@ -142,6 +142,7 @@ Item {
         if (!KailashService.trackLogOk)
             KailashService.refreshTrackLog()
     }
+    Component.onCompleted: pageShown()
 
     // Real, not a guess: the watch's ExerciseLog region is ~5.3MB, read 1024 bytes at a
     // time over USB - genuinely takes a couple of minutes. Without this, the page was a
@@ -579,7 +580,8 @@ Item {
         readonly property int columnsShown:
             Math.max(1, Math.min(Math.floor(width / cellWidth), Math.max(1, model ? model.length : 1)))
         readonly property real contentWidthUsed: columnsShown * cellWidth
-        model: root.sortedActivities
+        // The view not shown gets no rows, so it builds no cards (2026-11-20, same complaint).
+        model: Theme.activitiesView !== "list" ? root.sortedActivities : []
         delegate: Item {
             width: GridView.view.cellWidth
             height: GridView.view.cellHeight
@@ -607,7 +609,10 @@ Item {
         // Anchor below the column headers, with a generous gap so the headers read as a
         // separate band from the rows (André, 2026-08-16: "do more distance between the first
         // two lines of text and the activities").
-        anchors.top: activitiesHeader.visible ? activitiesHeader.bottom
+        // The "Showing cached activities" line goes between the headers and the rows, as on the
+        // grid; the rows covered it (2026-11-20).
+        anchors.top: cachedBanner.visible ? cachedBanner.bottom
+                     : activitiesHeader.visible ? activitiesHeader.bottom
                      : trackLogLoadingBanner.visible ? trackLogLoadingBanner.bottom
                      : activityLoadingPill.visible ? activityLoadingPill.bottom : parent.top
         // 2px (André, 2026-08-25: "align them" with the nav rail) - matches NavItem's own
@@ -615,12 +620,12 @@ Item {
         // real 44px slot and each ActivityRow is 44px too: header-bottom + 2 lands the first
         // row's center on "Activities"'s nav position, and every row after that keeps the same
         // 46px pitch as the nav rail (44 + 2), so row N lines up with nav item N+1.
-        anchors.topMargin: 2
+        anchors.topMargin: cachedBanner.visible ? Theme.spacingMedium : 2
         visible: root.selectedActivity === null && Theme.activitiesView === "list"
         clip: true
         reuseItems: true
         spacing: 2
-        model: root.sortedActivities
+        model: Theme.activitiesView === "list" ? root.sortedActivities : []
         delegate: ActivityRow {
             required property var modelData
             width: activitiesList.width
@@ -630,11 +635,15 @@ Item {
         }
     }
 
-    ActivityDetail {
+    // Built only while an activity is open (2026-11-20, André: "i click on a menu and it takes
+    // like 3s to open"): a hidden detail still built its map and charts on every visit.
+    Loader {
         anchors.fill: parent
-        visible: root.selectedActivity !== null
-        activity: root.selectedActivity
-        onBack: root.selectedActivity = null
+        active: root.selectedActivity !== null
+        sourceComponent: ActivityDetail {
+            activity: root.selectedActivity
+            onBack: root.selectedActivity = null
+        }
     }
 
     FolderDialog {

@@ -317,6 +317,7 @@ void ActivityService::refreshAllWatches()
             return;
         }
         m_pendingWatchReads = watches.size();
+        m_watchReadsChanged = false;
         for (const auto &wv : watches) {
             const auto w = wv.toObject();
             readWatchActivities(w.value(QStringLiteral("productId")).toInt(),
@@ -347,10 +348,18 @@ void ActivityService::readWatchActivities(int productId, const QString &serial,
             if (--m_pendingWatchReads <= 0) {
                 m_pendingWatchReads = 0;
                 setLoading(false);
+                const bool flagsMoved = !m_ok || m_showingCachedData;
                 m_ok = true;                 // an empty result is a valid "no activities" state
                 m_showingCachedData = false;
-                dbLoadAll();                 // one reload + de-dupe after every watch is in
-                emit activitiesChanged();
+                // One reload + de-dupe after every watch is in, and only when a watch brought
+                // something: the reload takes 1-2 s on an old PC, and with a watch plugged in
+                // every visit to Activities, Calendar or Totals read the watch again and paid it
+                // (2026-11-20, André: "i click on a menu and it takes like 3s to open").
+                const bool reload = m_watchReadsChanged || m_activities.isEmpty();
+                if (reload)
+                    dbLoadAll();
+                if (reload || flagsMoved)
+                    emit activitiesChanged();
             }
         };
         if (reply->error() != QNetworkReply::NoError) { finishOne(); return; }
@@ -362,6 +371,7 @@ void ActivityService::readWatchActivities(int productId, const QString &serial,
         const int totalEntries = root.value(QStringLiteral("total_entries")).toInt();
         if (!retriedFromZero && totalEntries < dbKnownCount(tag)) {
             dbClear(tag);
+            m_watchReadsChanged = true;
             readWatchActivities(productId, serial, /*retriedFromZero=*/true);
             return;                          // this slot's finishOne fires on the retry's reply
         }
@@ -371,6 +381,8 @@ void ActivityService::readWatchActivities(int productId, const QString &serial,
         if (device.isEmpty())
             device = QStringLiteral("demo");
         const auto rawList = root.value(QStringLiteral("activities")).toArray();
+        if (!rawList.isEmpty())
+            m_watchReadsChanged = true;
         for (const auto &rawValue : rawList) {
             const auto rawObj = rawValue.toObject();
             const int index = rawObj.value(QStringLiteral("index")).toInt();

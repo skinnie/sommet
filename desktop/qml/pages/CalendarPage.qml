@@ -17,11 +17,13 @@ Item {
     // place to read this from - not re-derived per page.
     readonly property var allActivities: ActivityViewModel.feed
 
-    Component.onCompleted: {
+    // Main.qml keeps this page built after its first visit; pageShown() runs on every later one.
+    function pageShown() {
         ActivityService.refresh()
         GarminService.refreshActivities()
         KailashService.refreshHistory()
     }
+    Component.onCompleted: pageShown()
 
     readonly property date today: new Date()
     property int viewYear: today.getFullYear()
@@ -52,6 +54,10 @@ Item {
     }
     // Left click: show what was recorded that day, in a themed window.
     function openDay(day) {
+        // Main.qml keeps this page built while another one shows: the click that opened an
+        // activity from this window must not reach the day under it and open it again.
+        if (!root.visible)
+            return
         plannerDay = day
         dayActivities = root.byDay[day] || []
         dayDialog.open()

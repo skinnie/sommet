@@ -131,6 +131,15 @@ ApplicationWindow {
             if (AppExtensions.pages[i].id === id) return AppExtensions.pages[i].source
         return pageSources[id]
     }
+    // Built once, then kept (see pageArea). An extension page that claims one of these ids is
+    // built fresh like any other page.
+    readonly property var keptPages: ["activities", "calendar", "totals"]
+    function isKeptPage(id) {
+        if (keptPages.indexOf(id) === -1) return false
+        for (var i = 0; i < AppExtensions.pages.length; i++)
+            if (AppExtensions.pages[i].id === id) return false
+        return true
+    }
     function hasPage(id) {
         for (var i = 0; i < AppExtensions.pages.length; i++)
             if (AppExtensions.pages[i].id === id) return true
@@ -351,14 +360,45 @@ ApplicationWindow {
                 anchors.rightMargin: Theme.spacingMedium
             }
 
-            Loader {
+            // The pages under the banners. Most are built fresh on every visit; the ones in
+            // keptPages stay built after their first visit and are only shown again, since
+            // building them took 1-2 s on an old PC (2026-11-20, André: "i click on a menu and it
+            // takes like 3s to open"). A kept page that refreshes on a visit does it in
+            // pageShown(), which runs on every visit after the first.
+            Item {
+                id: pageArea
                 anchors.top: syncBanner.visible ? syncBanner.bottom
                            : (suuntoLinkBanner.visible ? suuntoLinkBanner.bottom : parent.top)
                 anchors.topMargin: (syncBanner.visible || suuntoLinkBanner.visible) ? Theme.spacingSmall : 0
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                source: window.pageSourceFor(navRail.currentPage)
+
+                Loader {
+                    id: pageLoader
+                    anchors.fill: parent
+                    source: window.isKeptPage(navRail.currentPage) ? "" : window.pageSourceFor(navRail.currentPage)
+                }
+
+                Repeater {
+                    model: window.keptPages
+                    delegate: Loader {
+                        id: keptLoader
+                        required property string modelData
+                        readonly property bool current: navRail.currentPage === modelData
+                        property bool visited: false
+                        anchors.fill: parent
+                        visible: current
+                        active: visited
+                        source: window.pageSourceFor(modelData)
+                        onCurrentChanged: {
+                            if (!current) return
+                            if (!visited) { visited = true; return }   // the first build does its own refresh
+                            if (item && typeof item.pageShown === "function") item.pageShown()
+                        }
+                        Component.onCompleted: if (current) visited = true
+                    }
+                }
             }
         }
     }

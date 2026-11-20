@@ -27,11 +27,13 @@ Item {
     // decides it - one source of truth for "what have I got", reused rather than re-derived.
     readonly property var allActivities: ActivityViewModel.feed
 
-    Component.onCompleted: {
+    // Main.qml keeps this page built after its first visit; pageShown() runs on every later one.
+    function pageShown() {
         ActivityService.refresh()
         GarminService.refreshActivities()
         KailashService.refreshHistory()
     }
+    Component.onCompleted: pageShown()
 
     function yearOf(activity) {
         if (!activity || !activity.startTime)

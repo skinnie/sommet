@@ -7,6 +7,24 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: Activities, Calendar and Totals open at once after the first visit
+
+- The three pages stay built after their first visit and are only shown again. Each visit built
+  them afresh, which took 1.3-2.2 s for Activities on the X230 (André: "i click on a menu and it
+  takes like 3s to open"). Measured on the X230 with the real library: reopening Activities went
+  from 1.3-2.2 s to under 0.1 s, and Totals to 0.04 s. A visit still refreshes the list and opens
+  on the list, as before.
+- Activities builds only the view on show (map cards or list), and the activity detail only while
+  an activity is open. The first visit went from 1.3-2.2 s to about 0.9 s.
+- With a watch plugged in, a visit read the watch and then reloaded the whole list (1-2 s) even
+  when the watch had nothing new. It now reloads only when the watch brought something.
+- List view: the "Showing cached activities" line is no longer covered by the first row.
+- Home is still built on every visit (0.7-1 s on the X230).
+- Checked on the X230 in a test window: page times, a Calendar day opening its activity, Back,
+  and Map/List. Not yet checked with a watch plugged in.
+
+---
+
 ## 2026-11-19: Sommet Sync shows its progress and no longer freezes the window (sync/12)
 
 - Desktop and Android: while Sommet Sync runs, a bar on every page says what it is doing and how
@@ -24,7 +42,7 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   click on the P5Q). Since sync/10 the NAS holds a points-only GPX for each intervals.icu import,
   and the desktop fetched and stored all ~3,700 of them, then read and parsed every one on each
   load. The list now skips those files (the track is already kept as points) and no longer
-  fetches a track it holds as points: 50 s to 1.5 s, Home opens in under 0.3 s.
+  fetches a track it holds as points: 50 s to 1.5 s.
 - Checked: desktop with a made-up 4,800-activity first sync from a local test server; Android
   on the tablet's own sync. The glossary gains **Track** (the GPS line an activity recorded).
 
