@@ -166,16 +166,36 @@ a.datas = [d for d in a.datas if not _is_excluded(d[0])]
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="sommet-backend",
-    debug=False,
-    strip=False,
-    upx=False,
-    console=True,          # it's a background helper; console output goes to the app's log
-    disable_windowed_traceback=False,
-)
+# SOMMET_ONEDIR=1 (the Windows job): a folder (sommet-backend.exe + _internal\) instead of one
+# packed file. The helper starts itself again for every watch tool, and a packed file unpacks
+# all of itself first: 3.9 s per tool on a Core 2 Quad, two tools per watch read, so 8 of the
+# 12 s a watch read took on the P5Q (measured 2026-11-20). A folder starts in well under a second.
+import os as _os
+if _os.environ.get("SOMMET_ONEDIR") == "1":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="sommet-backend",
+        debug=False,
+        strip=False,
+        upx=False,
+        console=True,      # it's a background helper; console output goes to the app's log
+        disable_windowed_traceback=False,
+    )
+    coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="sommet-backend")
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name="sommet-backend",
+        debug=False,
+        strip=False,
+        upx=False,
+        console=True,      # it's a background helper; console output goes to the app's log
+        disable_windowed_traceback=False,
+    )

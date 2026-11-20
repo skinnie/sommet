@@ -8,23 +8,23 @@ import SommetUi
 // selection, layout, and Sport Modes staying hidden until FeatureFlags.sportModes flips.
 ApplicationWindow {
     id: window
-    // Opens maximized the first time, then the way it was left: maximized, or the size it had
-    // (2026-11-13). Shown from Component.onCompleted, so it doesn't flash at 1200x800 first.
-    // Never bigger than the screen, so it fits even where the window manager ignores the
-    // maximize request.
+    // Always opens maximized (André, 2026-11-20: on the P5Q it opened as a window off to one
+    // side, partly off the screen). Shown from Component.onCompleted, so it doesn't flash at
+    // 1200x800 first. The size a window gets when un-maximized is remembered, never bigger than
+    // the screen, and centred on it.
     width: Math.min(winState.width, Screen.desktopAvailableWidth || winState.width)
     height: Math.min(winState.height, Screen.desktopAvailableHeight || winState.height)
+    x: Screen.virtualX + Math.max(0, ((Screen.desktopAvailableWidth || width) - width) / 2)
+    y: Screen.virtualY + Math.max(0, ((Screen.desktopAvailableHeight || height) - height) / 2)
     property QtObject winStateObj: Settings {
         id: winState
         category: "window"
-        property bool maximized: true
         property int width: 1200
         property int height: 800
     }
-    Component.onCompleted: winState.maximized ? showMaximized() : show()
+    Component.onCompleted: showMaximized()
     onClosing: {
         const big = visibility === Window.Maximized || visibility === Window.FullScreen
-        winState.maximized = big
         if (!big) { winState.width = width; winState.height = height }
     }
     title: qsTr("Sommet")
