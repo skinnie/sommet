@@ -714,15 +714,40 @@ PageFlickable {
                 }
                 Item {
                     width: parent.width
-                    height: 160
+                    // Grows with the page: a fixed 160 px made a thin strip on a 1080p screen
+                    // (André, 2026-11-20). About 2.6:1, never below 160 or above 480 px.
+                    height: Math.max(160, Math.min(480, width * 0.38))
                     MapView {
+                        id: importMap
                         anchors.fill: parent
                         readonly property var center: RouteViewModel.trackCenter(RouteService.pendingRoute.track)
                         latitude: center ? center.lat : WeatherService.latitude
                         longitude: center ? center.lon : WeatherService.longitude
                         zoomLevel: center ? 12 : 10
                         trackPoints: RouteService.pendingRoute.track || []
+                        // It can be moved and zoomed (it couldn't before); the mouse wheel still
+                        // scrolls the page, the + and - buttons zoom.
+                        showZoomControls: true
                         TapHandler { onTapped: root.showBig({ name: RouteService.pendingRoute.name, track: RouteService.pendingRoute.track }) }
+                        DragHandler {
+                            id: importMapPanner
+                            target: null
+                            property real lastX: 0
+                            property real lastY: 0
+                            onActiveChanged: {
+                                lastX = centroid.position.x
+                                lastY = centroid.position.y
+                                if (active) importMap.userControlled = true
+                            }
+                            onCentroidChanged: {
+                                if (!active) return
+                                importMap.panX -= centroid.position.x - lastX
+                                importMap.panY -= centroid.position.y - lastY
+                                lastX = centroid.position.x
+                                lastY = centroid.position.y
+                            }
+                        }
+                        HoverHandler { cursorShape: importMapPanner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
                     }
                 }
                 Text {

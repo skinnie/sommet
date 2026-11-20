@@ -303,12 +303,16 @@ Item {
         }
 
         ScrollView {
+            id: gearScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
             ColumnLayout {
-                width: root.width - 2 * Theme.spacingLarge
+                // Leave the scrollbar its own strip: the cards were exactly as wide as the view,
+                // so the scrollbar lay over their right edge, where Delete sits (André, 2026-11-20).
+                width: gearScroll.availableWidth
+                       - (gearScroll.ScrollBar.vertical.visible ? gearScroll.ScrollBar.vertical.width + Theme.spacingSmall : 0)
                 spacing: Theme.spacingMedium
 
                 EmptyState {

@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: Routes map at full size, Gear's Delete clear of the scrollbar
+
+- Routes: the import map was a fixed 160 px strip, a thin band on a 1080p screen, and it could
+  not be moved. It now grows with the page (up to 480 px), can be dragged, and has + and -
+  buttons. Checked at 1920x1080.
+- Gear: the cards were as wide as the scroll area, so the scrollbar covered their right edge,
+  where Delete sits. They now leave the scrollbar its own strip. Not seen with gear on screen
+  here (the test library has none).
+- Speed test: SOMMET_STALL_LOG=1 logs every time the window was busy for more than 200 ms.
+
 ## 2026-11-20: Traverse Alpha and Ambit3 Vertical over Bluetooth use their own entry numbers (GitHub #25)
 
 - Android and iPhone guessed the watch model from the advertised Bluetooth name, which is often

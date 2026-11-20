@@ -1,6 +1,8 @@
 #include <QFontDatabase>
 #include <QGuiApplication>
+#include <QElapsedTimer>
 #include <QIcon>
+#include <QTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkDiskCache>
 #include <QNetworkReply>
@@ -140,5 +142,20 @@ int main(int argc, char *argv[])
 
     engine.loadFromModule("SommetUi", "Main");
 
+    // Speed test (SommetPerf.bat sets SOMMET_STALL_LOG=1): logs every time the window's thread
+    // was busy for more than 200 ms, i.e. the window could not react. Frame timings alone can't
+    // tell this: an idle window draws no frames, so idle and frozen look the same there.
+    QTimer stallProbe;
+    QElapsedTimer stallClock;
+    if (qEnvironmentVariableIsSet("SOMMET_STALL_LOG")) {
+        stallClock.start();
+        stallProbe.setInterval(50);
+        QObject::connect(&stallProbe, &QTimer::timeout, [&stallClock] {
+            const qint64 late = stallClock.restart() - 50;
+            if (late > 200)
+                qWarning().noquote() << QStringLiteral("[STALL] %1 ms").arg(late);
+        });
+        stallProbe.start();
+    }
     return app.exec();
 }
