@@ -9,20 +9,52 @@ import SommetUi
 ApplicationWindow {
     id: window
     // Always opens maximized (André, 2026-11-20: on the P5Q it opened as a window off to one
-    // side, partly off the screen). Shown from Component.onCompleted, so it doesn't flash at
-    // 1200x800 first. The size a window gets when un-maximized is remembered, never bigger than
-    // the screen, and centred on it.
-    width: Math.min(winState.width, Screen.desktopAvailableWidth || winState.width)
-    height: Math.min(winState.height, Screen.desktopAvailableHeight || winState.height)
-    x: Screen.virtualX + Math.max(0, ((Screen.desktopAvailableWidth || width) - width) / 2)
-    y: Screen.virtualY + Math.max(0, ((Screen.desktopAvailableHeight || height) - height) / 2)
+    // side, partly off the screen). The size is set ONCE before showing, not bound: a binding on
+    // Screen.* re-fired after the window reached its screen, and resizing a maximized window on
+    // Windows drops it out of maximized - at 1080p its close button then sat past the right
+    // edge (André, same day: "the closing icon gets out of screen"). The un-maximized size is
+    // remembered, kept to 90% of the screen so its frame and title bar always fit, and centred.
+    width: 1200
+    height: 800
     property QtObject winStateObj: Settings {
         id: winState
         category: "window"
         property int width: 1200
         property int height: 800
     }
-    Component.onCompleted: showMaximized()
+    Component.onCompleted: {
+        const aw = Screen.desktopAvailableWidth || 1280, ah = Screen.desktopAvailableHeight || 800
+        width = Math.min(winState.width, Math.round(aw * 0.9))
+        height = Math.min(winState.height, Math.round(ah * 0.9))
+        x = Screen.virtualX + Math.round((aw - width) / 2)
+        y = Screen.virtualY + Math.round((ah - height) / 2)
+        showMaximized()
+    }
+
+    // sync/13 option 7b: keep map tiles around the last 90 days' activities (Settings → Database).
+    // First run 90 s after start (out of the start-up's way on an old PC), then every 6 hours,
+    // after a sync, and at once when the option is switched on. Cached tiles cost nothing.
+    Timer {
+        id: recentTilesTimer
+        interval: 90 * 1000
+        running: TileCacheService.keepRecentTiles
+        repeat: true
+        onTriggered: {
+            interval = 6 * 3600 * 1000
+            if (!TileCacheService.corridorRunning) ActivityService.collectRecentTracks(90)
+        }
+    }
+    Connections {
+        target: ActivityService
+        function onRecentTracksReady(tracks) {
+            if (TileCacheService.keepRecentTiles)
+                TileCacheService.downloadCorridors(tracks, MapService.provider)
+        }
+        function onSommetSyncFinished(pulled, pushed) {
+            if (TileCacheService.keepRecentTiles && pulled > 0 && !TileCacheService.corridorRunning)
+                ActivityService.collectRecentTracks(90)
+        }
+    }
     onClosing: {
         const big = visibility === Window.Maximized || visibility === Window.FullScreen
         if (!big) { winState.width = width; winState.height = height }

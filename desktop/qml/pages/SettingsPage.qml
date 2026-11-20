@@ -1433,6 +1433,19 @@ PageFlickable {
                         onMoved: ActivityService.setLibraryCacheMb(value)
                     }
 
+                    // sync/13 option 7b: map tiles around recent activities, for offline use.
+                    SidebarSwitch {
+                        title: qsTr("Keep maps of the last 90 days offline")
+                        description: TileCacheService.corridorRunning
+                            ? qsTr("Downloading map tiles: %1 of %2").arg(TileCacheService.corridorDone).arg(TileCacheService.corridorTotal)
+                            : qsTr("Downloads the map around every activity of the last 90 days, so those maps show without a connection. Uses part of the map cache (500 MB).")
+                        checked: TileCacheService.keepRecentTiles
+                        onToggled: (on) => {
+                            TileCacheService.keepRecentTiles = on
+                            if (on) ActivityService.collectRecentTracks(90)
+                        }
+                    }
+
                     // Results as notes (desktop picks #7).
                     StatusNote {
                         id: sommetSyncStatus

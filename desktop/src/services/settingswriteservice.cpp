@@ -61,7 +61,10 @@ void SettingsWriteService::refresh()
     if (!m_device.isEmpty())
         path += QStringLiteral("?device=") + QUrl::toPercentEncoding(m_device);
     const bool afterFailedWrite = std::exchange(m_rereadAfterFailedWrite, false);
-    QNetworkReply *reply = m_network.get(QNetworkRequest(backendUrl(path)));
+    QNetworkRequest request(backendUrl(path));
+    // The page is waiting for it: ahead of the background reads in the backend's watch queue.
+    request.setRawHeader("X-Sommet-Foreground", "1");
+    QNetworkReply *reply = m_network.get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply, afterFailedWrite] {
         reply->deleteLater();
         setLoading(false);

@@ -44,8 +44,10 @@ void CustomModesService::setWritingMode(const QString &mode)
 void CustomModesService::refresh()
 {
     setLoading(true);
-    QNetworkReply *reply =
-        m_network.get(QNetworkRequest(backendUrl(QStringLiteral("/api/customodes"))));
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/customodes")));
+    // The page is waiting for it: ahead of the background reads in the backend's watch queue.
+    request.setRawHeader("X-Sommet-Foreground", "1");
+    QNetworkReply *reply = m_network.get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
         setLoading(false);

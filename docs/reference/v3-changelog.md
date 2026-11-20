@@ -7,6 +7,20 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: maps of the last 90 days offline; pages jump the watch queue; window fits at 1080p
+
+- Settings → Database → "Keep maps of the last 90 days offline" (off by default; sync/13
+  option 7b): downloads the map tiles (zoom 12-16) along every outdoor activity of the last 90
+  days, four at a time in the background, into the normal map cache. Runs 90 s after start, every
+  6 hours, after a sync that brought something, and when switched on. Checked: 160 activities of
+  a copy of the P5Q library = 3,445 tiles.
+- Watch reads: the Sport modes and Settings pages' reads now go ahead of the background reads
+  that start when the watch is plugged in (activity check, routes, POIs). A read already running
+  finishes first.
+- Window (André: at 1080p on Windows the close button was off the screen): the size is set once
+  before the window opens instead of being bound to the screen, whose late update took a
+  maximized window out of maximized. The un-maximized size is kept within 90% of the screen.
+
 ## 2026-11-20: Android: keep maps of the last 90 days offline (sync/13 option 7b)
 
 - Settings → Database: "Keep maps of the last 90 days offline" (off by default). It saves the

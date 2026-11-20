@@ -197,7 +197,46 @@ _NOMINATIM_LAST = [0.0]
 # watch or the connection - confirmed live, 2026-08-07, see V3_CHANGELOG.md. write_nav.py's
 # own retry (Link.open(), 5 tries/2s) only covers the reconnect-permission race, not two of
 # this backend's own requests overlapping - that needs serializing here instead.
-WATCH_LOCK = threading.Lock()
+class _WatchLock:
+    """WATCH_LOCK with a front of the queue (André, 2026-11-20: Sport modes and Settings waited
+    behind the background reads that start when the watch is plugged in). A request the window
+    marks as being for the page on screen (header X-Sommet-Foreground: 1) is let in before every
+    waiting background request. A read already running is never interrupted."""
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._held = False
+        self._waiting_fg = 0
+
+    def acquire(self):
+        fg = getattr(_REQUEST_CTX, "foreground", False)
+        with self._cond:
+            if fg:
+                self._waiting_fg += 1
+            try:
+                while self._held or (not fg and self._waiting_fg > 0):
+                    self._cond.wait()
+            finally:
+                if fg:
+                    self._waiting_fg -= 1
+            self._held = True
+        return True
+
+    def release(self):
+        with self._cond:
+            self._held = False
+            self._cond.notify_all()
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
+_REQUEST_CTX = threading.local()   # per request thread: .foreground
+WATCH_LOCK = _WatchLock()
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
 MAGENE_LOCK = threading.Lock()   # one BLE connection to the C406 at a time (see run_tool)
 
@@ -1514,6 +1553,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        _REQUEST_CTX.foreground = self.headers.get("X-Sommet-Foreground") == "1"
         if not self._guard_local():
             return
         if self.path == "/api/health":
@@ -1670,6 +1710,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        _REQUEST_CTX.foreground = self.headers.get("X-Sommet-Foreground") == "1"
         if not self._guard_local():
             return
         try:

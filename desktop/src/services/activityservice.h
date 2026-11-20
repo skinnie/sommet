@@ -252,6 +252,9 @@ public:
     Q_INVOKABLE void setOriginalsLocation(const QString &where);
     // Light library (sync/13): MB for opened older moves' Tracks fetched back from the server.
     Q_INVOKABLE int libraryCacheMb() const;
+    // sync/13 option 7b: the GPS tracks of the last `days` days' outdoor activities, thinned to a
+    // point every ~150 m, gathered on a worker thread; recentTracksReady(tracks) follows.
+    Q_INVOKABLE void collectRecentTracks(int days);
     Q_INVOKABLE void setLibraryCacheMb(int mb);
 
 signals:
@@ -277,6 +280,7 @@ signals:
     void trackBackfillFinished(int filled, int remaining);
     // An older move's Track came back from the server (light library); ok = false: none exists.
     void trackFetched(int idx, const QString &device, bool ok);
+    void recentTracksReady(const QVariantList &tracks);
     void exportFinished(int uploaded, int failed);
     void exportAllProgress(int done, int total);
     // skipped = activities that had nothing to write (no track and no FIT); error set if the

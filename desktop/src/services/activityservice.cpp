@@ -11,6 +11,12 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTimer>
+#include <QPointer>
+#include <QSqlDatabase>
+#include <QThreadPool>
+#include <QThread>
+#include <QCoreApplication>
+#include <QtMath>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -4553,5 +4559,59 @@ void ActivityService::fetchRemoteTrack(int idx, const QString &device)
             store(track);
         else
             fromIntervals();                         // not on the NAS: intervals.icu, if it is one
+    });
+}
+
+void ActivityService::collectRecentTracks(int days)
+{
+    if (!m_db.isOpen())
+        return;
+    const QString path = m_db.databaseName();
+    const QString cut = QDateTime::currentDateTimeUtc().addDays(-days).toString(Qt::ISODate).left(16);
+    QPointer<ActivityService> self(this);
+    // Its own read-only connection on a pool thread: parsing ~100 tracks took over a second on
+    // the P5Q, too long for the window's thread.
+    QThreadPool::globalInstance()->start([self, path, cut]() {
+        QVariantList tracks;
+        const QString conn = QStringLiteral("recentTracks-%1").arg(quintptr(QThread::currentThreadId()));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+            db.setDatabaseName(path);
+            db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000"));
+            if (db.open()) {
+                QSqlQuery q(db);
+                q.prepare(QStringLiteral(
+                    "SELECT track_json FROM activities WHERE start_time >= ? "
+                    "AND track_json LIKE '[%' AND %1").arg(kNotIndoorName));
+                q.addBindValue(cut);
+                if (q.exec()) {
+                    while (q.next()) {
+                        const QJsonArray arr = QJsonDocument::fromJson(q.value(0).toByteArray()).array();
+                        QVariantList pts;
+                        double lastLat = 1000, lastLon = 1000;
+                        for (const QJsonValue &v : arr) {
+                            const QJsonObject o = v.toObject();
+                            const double lat = o.value(QStringLiteral("lat")).toDouble();
+                            const double lon = o.value(QStringLiteral("lon")).toDouble();
+                            if (lat == 0 && lon == 0)
+                                continue;
+                            const double dy = (lat - lastLat) * 111000.0;
+                            const double dx = (lon - lastLon) * 111000.0 * std::cos(qDegreesToRadians(lat));
+                            if (dx * dx + dy * dy < 150.0 * 150.0)
+                                continue;
+                            lastLat = lat; lastLon = lon;
+                            pts.append(QVariantMap{{QStringLiteral("lat"), lat}, {QStringLiteral("lon"), lon}});
+                        }
+                        if (!pts.isEmpty())
+                            tracks.append(QVariant(pts));
+                    }
+                }
+                db.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(conn);
+        QMetaObject::invokeMethod(qApp, [self, tracks]() {
+            if (self) emit self->recentTracksReady(tracks);
+        }, Qt::QueuedConnection);
     });
 }

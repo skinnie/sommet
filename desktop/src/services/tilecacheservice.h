@@ -30,6 +30,11 @@ class TileCacheService : public QObject
     Q_PROPERTY(int downloadTotal READ downloadTotal NOTIFY progressChanged)
     Q_PROPERTY(int downloadFailed READ downloadFailed NOTIFY progressChanged)
     Q_PROPERTY(qint64 cacheSizeBytes READ cacheSizeBytes NOTIFY cacheSizeChanged)
+    // sync/13 option 7b: keep the map tiles along the last 90 days' activities for offline use.
+    Q_PROPERTY(bool keepRecentTiles READ keepRecentTiles WRITE setKeepRecentTiles NOTIFY keepRecentTilesChanged)
+    Q_PROPERTY(bool corridorRunning READ corridorRunning NOTIFY corridorChanged)
+    Q_PROPERTY(int corridorDone READ corridorDone NOTIFY corridorChanged)
+    Q_PROPERTY(int corridorTotal READ corridorTotal NOTIFY corridorChanged)
 
 public:
     explicit TileCacheService(QObject *parent = nullptr);
@@ -66,12 +71,25 @@ public:
     // of the same provider are kept).
     Q_INVOKABLE void deleteSavedRegion(const QString &id);
 
+    bool keepRecentTiles() const;
+    void setKeepRecentTiles(bool on);
+    bool corridorRunning() const { return !m_corridorQueue.isEmpty() || m_corridorActive > 0; }
+    int corridorDone() const { return m_corridorDone; }
+    int corridorTotal() const { return m_corridorTotal; }
+    // tracks: [[{lat, lon}, ...], ...]. Fetches every tile (z12-16) a track passes through plus
+    // its 8 neighbours, a few at a time in the background; tiles already cached cost nothing.
+    // Separate from downloadRegion() so a hand-picked area can still be downloaded meanwhile.
+    // Returns how many tiles the corridors cover (0 when one is already running).
+    Q_INVOKABLE int downloadCorridors(const QVariantList &tracks, const QString &provider);
+
 signals:
     void downloadingChanged();
     void progressChanged();
     void cacheSizeChanged();
     void downloadFinished(int done, int total, int failed);
     void savedRegionsChanged();
+    void keepRecentTilesChanged();
+    void corridorChanged();
 
 private:
     void setDownloading(bool value);
@@ -84,4 +102,10 @@ private:
     int m_failed = 0;
     qint64 m_cacheSizeBytes = 0;
     QVector<QNetworkReply *> m_activeReplies;
+
+    void pumpCorridor();
+    QList<QUrl> m_corridorQueue;
+    int m_corridorActive = 0;
+    int m_corridorDone = 0;
+    int m_corridorTotal = 0;
 };

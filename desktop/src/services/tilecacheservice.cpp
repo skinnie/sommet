@@ -417,3 +417,93 @@ void TileCacheService::deleteSavedRegion(const QString &id)
     refreshCacheSize();
     emit savedRegionsChanged();
 }
+
+// ── sync/13 option 7b: tiles around the last 90 days' activities ─────────────────────────────
+// André, 2026-11-20 (light library, question 7: "a and b"): offline areas stay as they are, plus
+// an option to keep map tiles around recent activities, so those maps work without network.
+
+bool TileCacheService::keepRecentTiles() const
+{
+    return QSettings().value(QStringLiteral("map/keepRecentTiles"), false).toBool();
+}
+
+void TileCacheService::setKeepRecentTiles(bool on)
+{
+    if (on == keepRecentTiles())
+        return;
+    QSettings().setValue(QStringLiteral("map/keepRecentTiles"), on);
+    if (!on) {
+        m_corridorQueue.clear();          // the ones in flight finish; nothing new starts
+        emit corridorChanged();
+    }
+    emit keepRecentTilesChanged();
+}
+
+int TileCacheService::downloadCorridors(const QVariantList &tracks, const QString &provider)
+{
+    if (corridorRunning())
+        return 0;
+    // A tile is keyed z/x/y; QSet keeps each once however many activities pass through it.
+    QSet<quint64> seen;
+    QList<QUrl> urls;
+    constexpr int kMinZ = 12, kMaxZ = 16;
+    constexpr int kMaxTiles = 20000;       // ~400 MB at worst; a normal 90 days is far less
+    for (const QVariant &tv : tracks) {
+        const QVariantList pts = tv.toList();
+        for (const QVariant &pv : pts) {
+            const QVariantMap p = pv.toMap();
+            const double lat = p.value(QStringLiteral("lat")).toDouble();
+            const double lon = p.value(QStringLiteral("lon")).toDouble();
+            if ((lat == 0 && lon == 0) || std::abs(lat) > 85)
+                continue;
+            for (int z = kMinZ; z <= kMaxZ; ++z) {
+                const int n = 1 << z;
+                const int cx = lonToTileX(lon, z), cy = latToTileY(lat, z);
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        const int x = (cx + dx + n) % n, y = cy + dy;
+                        if (y < 0 || y >= n)
+                            continue;
+                        const quint64 key = (quint64(z) << 58) | (quint64(x) << 29) | quint64(y);
+                        if (seen.contains(key))
+                            continue;
+                        seen.insert(key);
+                        urls.append(QUrl(tileUrlFor(provider, z, x, y)));
+                        if (urls.size() >= kMaxTiles)
+                            goto done;
+                    }
+                }
+            }
+        }
+    }
+done:
+    m_corridorQueue = urls;
+    m_corridorDone = 0;
+    m_corridorTotal = urls.size();
+    emit corridorChanged();
+    pumpCorridor();
+    return m_corridorTotal;
+}
+
+void TileCacheService::pumpCorridor()
+{
+    // Four at a time: a background job, gentle on an old PC and on the tile servers.
+    while (m_corridorActive < 4 && !m_corridorQueue.isEmpty()) {
+        QNetworkRequest request(m_corridorQueue.takeFirst());
+        request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Sommet/2.0"));
+        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                              QNetworkRequest::PreferCache);
+        request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, true);
+        QNetworkReply *reply = m_network.get(request);
+        ++m_corridorActive;
+        connect(reply, &QNetworkReply::finished, this, [this, reply] {
+            reply->deleteLater();
+            --m_corridorActive;
+            ++m_corridorDone;
+            if (m_corridorQueue.isEmpty() && m_corridorActive == 0)
+                refreshCacheSize();
+            emit corridorChanged();
+            pumpCorridor();
+        });
+    }
+}
