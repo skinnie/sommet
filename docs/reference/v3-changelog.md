@@ -7,6 +7,18 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Android: keep maps of the last 90 days offline (sync/13 option 7b)
+
+- Settings → Database: "Keep maps of the last 90 days offline" (off by default). It saves the
+  map around every outdoor activity of the last 90 days that has its Track on the device: each
+  tile from zoom 12 to 16 under the Track, plus the tiles around it, up to 20000 tiles, 4 at a
+  time in the background. Tiles already saved are skipped. The map screens use the same saved
+  tiles, so those maps show without a connection. While it runs, the line under the switch shows
+  "Downloading map tiles: N of M".
+- It runs 90 s after the app starts, then every 6 hours, after a Sommet Sync that brought new
+  activities, and as soon as the switch is turned on. Turning it off stops a download in
+  progress. Same rules as the desktop.
+
 ## 2026-11-20: Desktop: every map zooms with the wheel and moves with the mouse; Sport modes opens faster
 
 - Maps (André: "on every map to be able to zoom in and out with scroll and to drag with mouse"):

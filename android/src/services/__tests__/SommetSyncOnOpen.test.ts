@@ -6,11 +6,22 @@ jest.mock('react-native', () => ({
 jest.mock('../SommetSync', () => ({ runSommetSync: () => mockRun() }));
 jest.mock('../SommetGearSync', () => ({ runSommetGearSync: () => mockGear() }));
 jest.mock('../LightLibrary', () => ({ trimOldTracks: async () => {} }));
+const mockTiles = jest.fn(async () => 0);
+jest.mock('../RecentTiles', () => ({ downloadRecentTiles: () => mockTiles(), startRecentTiles: () => () => {} }));
 
 import { AppState } from 'react-native';
 import { syncNowIfDue, startSommetSyncOnOpen, _resetSommetSyncOnOpen, MIN_GAP_MS, FIRST_DELAY_MS } from '../SommetSyncOnOpen';
 
-beforeEach(() => { _resetSommetSyncOnOpen(); mockRun.mockClear(); mockGear.mockClear(); });
+beforeEach(() => { _resetSommetSyncOnOpen(); mockRun.mockClear(); mockGear.mockClear(); mockTiles.mockClear(); });
+
+test('a sync that pulled moves refreshes the recent maps; one that pulled nothing does not', async () => {
+  await syncNowIfDue(10);
+  expect(mockTiles).not.toHaveBeenCalled();
+  _resetSommetSyncOnOpen();
+  mockRun.mockResolvedValueOnce({ pulled: 3, pushed: 0, ok: true });
+  await syncNowIfDue(20);
+  expect(mockTiles).toHaveBeenCalledTimes(1);
+});
 
 test('syncs activities and gear, then waits the gap before syncing again', async () => {
   expect(await syncNowIfDue(1_000_000)).toBe(true);

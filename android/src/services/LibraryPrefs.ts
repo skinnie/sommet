@@ -9,6 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEEP_KEY = 'sommet.library.keep';          // 'recent' (default) | 'all'
 const CACHE_MB_KEY = 'sommet.library.cacheMb';  // space for opened older moves, 100..2000
+// sync/13 option 7b: keep the map tiles around the last 90 days' moves (desktop map/keepRecentTiles).
+const KEEP_TILES_KEY = 'sommet.library.keepRecentTiles';   // '1' = on; off by default
 
 export const LIGHT_DAYS = 90;
 /** Default space for opened older moves on a tablet or phone (desktop: 800 MB). */
@@ -23,6 +25,15 @@ export async function getKeepRecentOnly(): Promise<boolean> {
 
 export async function setKeepRecentOnly(recent: boolean): Promise<void> {
   await AsyncStorage.setItem(KEEP_KEY, recent ? 'recent' : 'all');
+}
+
+/** "Keep maps of the last 90 days offline" (Settings → Database). Off by default. */
+export async function getKeepRecentTiles(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(KEEP_TILES_KEY)) === '1'; } catch { return false; }
+}
+
+export async function setKeepRecentTiles(on: boolean): Promise<void> {
+  await AsyncStorage.setItem(KEEP_TILES_KEY, on ? '1' : '0');
 }
 
 export async function getLibraryCacheMb(): Promise<number> {

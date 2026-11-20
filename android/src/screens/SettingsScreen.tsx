@@ -51,8 +51,12 @@ import { getUsdaApiKey, setUsdaApiKey } from '../services/EmberFood';
 import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
 import {
   getKeepRecentOnly, setKeepRecentOnly, getLibraryCacheMb, setLibraryCacheMb, formatCacheMb,
+  getKeepRecentTiles, setKeepRecentTiles,
 } from '../services/LibraryPrefs';
 import { trimOldTracks, evictTrackCache } from '../services/LightLibrary';
+import {
+  downloadRecentTiles, stopRecentTiles, onRecentTilesProgress, RecentTilesProgress,
+} from '../services/RecentTiles';
 // Gear <-> intervals.icu import/sync lives here (in the intervals.icu connection), not on the
 // Gear screen (André, 2026-08-18: "that options regarding intervals.icu should be on settings,
 // when you connect to intervals.icu"). The Gear screen just shows the gear now.
@@ -372,6 +376,10 @@ export default function SettingsScreen() {
   // Light library (sync/13): "Keep on this device" + the space for opened older activities.
   const [keepRecent, setKeepRecentState] = useState(true);
   const [libraryCacheMb, setLibraryCacheMbState] = useState(300);
+  // sync/13 option 7b: "Keep maps of the last 90 days offline" and its download progress.
+  const [keepTiles, setKeepTilesState] = useState(false);
+  const [tilesProgress, setTilesProgress] = useState<RecentTilesProgress>({ running: false, done: 0, total: 0 });
+  useEffect(() => onRecentTilesProgress(setTilesProgress), []);
   // Which coordinate row (if any) is currently being picked on a map - desktop parity with
   // WatchSettingsPage's "Pick on a map". null = picker closed.
   const [savingIntervals, setSavingIntervals]       = useState(false);
@@ -472,6 +480,7 @@ export default function SettingsScreen() {
     });
     getKeepRecentOnly().then(setKeepRecentState);
     getLibraryCacheMb().then(setLibraryCacheMbState);
+    getKeepRecentTiles().then(setKeepTilesState);
     getMapProvider().then(setMapProviderState);
     isMarkSyncedEnabled().then(setMarkSyncedEnabledState);
     isStrapHrvEnabled().then(setStrapHrvEnabledState);
@@ -554,6 +563,13 @@ export default function SettingsScreen() {
     setKeepRecentState(recent);
     // Applied at once: older Tracks leave (once the server holds them), or come back.
     setKeepRecentOnly(recent).then(() => trimOldTracks()).catch(() => undefined);
+  }
+  function handleKeepTiles(on: boolean) {
+    setKeepTilesState(on);
+    if (!on) stopRecentTiles();
+    // Switched on: the download starts at once (then with the 6-hourly timer and after a sync).
+    setKeepRecentTiles(on).then(() => { if (on) downloadRecentTiles().catch(() => undefined); })
+      .catch(() => undefined);
   }
   function handleLibraryCacheMb(mb: number) {
     setLibraryCacheMbState(mb);
@@ -1318,6 +1334,18 @@ export default function SettingsScreen() {
               )}
             </>
           )}
+
+          {/* sync/13 option 7b (desktop's switch under the space slider): the map around every
+              move of the last 90 days, saved for use without a connection. */}
+          <SwitchLine value={keepTiles} onValueChange={handleKeepTiles}
+            label="Keep maps of the last 90 days offline" />
+          <Text style={[styles.sectionDesc, { fontSize: 11, lineHeight: 16 }]}>
+            {tilesProgress.running
+              ? (tilesProgress.total > 0
+                ? `Downloading map tiles: ${tilesProgress.done} of ${tilesProgress.total}`
+                : 'Finding the maps of the last 90 days…')
+              : 'Downloads the map around every activity of the last 90 days, so those maps show without a connection.'}
+          </Text>
         </SettingsSection>
 
         {/* ── Suunto Apps Catalog (desktop parity, 2026-10-22). Same import the App Zone screen has. ── */}
