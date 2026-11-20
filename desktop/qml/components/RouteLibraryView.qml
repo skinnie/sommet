@@ -567,6 +567,7 @@ PageFlickable {
                                 height: visible ? 140 : 0
                                 MapView {
                                     anchors.fill: parent
+                                    inScrollingPage: true
                                     readonly property var center: RouteViewModel.trackCenter(routeDelegate.route.track)
                                     latitude: center ? center.lat : 0
                                     longitude: center ? center.lon : 0
@@ -725,9 +726,10 @@ PageFlickable {
                         longitude: center ? center.lon : WeatherService.longitude
                         zoomLevel: center ? 12 : 10
                         trackPoints: RouteService.pendingRoute.track || []
-                        // It can be moved and zoomed (it couldn't before); the mouse wheel still
-                        // scrolls the page, the + and - buttons zoom.
+                        // Moved by dragging, zoomed by + and - or the wheel after a click.
                         showZoomControls: true
+                        inScrollingPage: true
+                        dragPan: false
                         TapHandler { onTapped: root.showBig({ name: RouteService.pendingRoute.name, track: RouteService.pendingRoute.track }) }
                         DragHandler {
                             id: importMapPanner

@@ -2337,6 +2337,7 @@ PageFlickable {
                         clip: true
                         MapView {
                             anchors.fill: parent
+                            inScrollingPage: true
                             markers: KailashService.visitedPlaces
                             zoomLevel: 4  // only used for a single pin - see MapView.qml's
                                           // own _singlePoint comment; 2+ pins auto-fit

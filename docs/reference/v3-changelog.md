@@ -7,6 +7,18 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: every map zooms with the wheel and moves with the mouse; Sport modes opens faster
+
+- Maps (André: "on every map to be able to zoom in and out with scroll and to drag with mouse"):
+  every map now pans by dragging and zooms with the wheel by default. A map inside a scrolling
+  page (activity cards, route list, POI list and picker, Home, the route import map) lets the
+  wheel scroll the page until you click or drag that map; then the wheel zooms it until the
+  pointer leaves. Hovering such a map says so. A click on an activity card's map still opens the
+  activity. The + and - buttons keep the map where you moved it.
+- Sport modes: the field-type list and the activity list are answered by the backend itself
+  instead of starting a helper that waited behind any watch read. The activity list had never
+  worked (the helper printed a table, not JSON), so "Select activity" was empty.
+
 ## 2026-11-20: Desktop: light library - older maps stay on your server (sync/13)
 
 - Settings → Keep on this computer: "Last 90 days" (the default) or "Everything". Every activity

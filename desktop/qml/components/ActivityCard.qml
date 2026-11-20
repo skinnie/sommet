@@ -77,12 +77,11 @@ Card {
                 longitude: root._center ? root._center.lon : 0
                 zoomLevel: 12
                 trackPoints: root._resolvedTrack
+                // Drag and wheel like every map (André, 2026-11-20); a click still opens it.
+                inScrollingPage: true
             }
-            // Previews are for identification, not interaction - the card itself opens the
-            // real, large, interactive map (the spec's own "Selecting an activity opens:
-            // Large MapLibre map"), so panning/zooming a thumbnail would just fight the
-            // TapHandler above for no benefit.
-            MouseArea { anchors.fill: parent; onClicked: root.opened() }
+            // On the holder, so a click opens the activity on the map and on the sport picture.
+            TapHandler { onTapped: root.opened() }
 
             // No track: the sport, drawn like a quiet map (move-page/03).
             SportPicture {

@@ -198,6 +198,7 @@ _NOMINATIM_LAST = [0.0]
 # own retry (Link.open(), 5 tries/2s) only covers the reconnect-permission race, not two of
 # this backend's own requests overlapping - that needs serializing here instead.
 WATCH_LOCK = threading.Lock()
+_STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
 MAGENE_LOCK = threading.Lock()   # one BLE connection to the C406 at a time (see run_tool)
 
 # --- USB keep-alive handle (Ambit1/2 "connecting/disconnecting" chime fix) -------------
@@ -7487,14 +7488,20 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_customodes_field_types(self):
         """GET /api/customodes/field-types - the real FIELD_TYPES catalog (95 entries),
         for a UI's own data-field picker when editing a display row's "type". No watch
-        touched at all - custom_modes.py --list-field-types just dumps a static dict."""
-        code, out, err = run_tool("custom_modes.py", ["--list-field-types"])
-        info = self._parse_last_json_line(out)
+        touched at all - custom_modes.py --list-field-types just dumps a static dict.
+
+        Answered in-process and kept (2026-11-20): it used to start the helper, which waited
+        for WATCH_LOCK behind any watch read and cost a tool start on every Sport modes visit
+        (seconds on an old PC, André: "reading of sports modes ... still slow")."""
+        info = _STATIC_ANSWERS.get("field-types")
         if info is None:
-            self._send_json(502, {"ok": False, "error": "custom_modes.py --list-field-types "
-                                   "produced no parseable JSON", "raw_output": out, "stderr": err})
-            return
-        self._send_json(200 if info.get("ok") else 502, info)
+            sys.path.insert(0, str(TOOLS_DIR))
+            import custom_modes                              # noqa: PLC0415
+            info = {"ok": True, "fieldTypes": [
+                {"value": k, "name": v, "label": custom_modes.field_type_label(v)}
+                for k, v in sorted(custom_modes.FIELD_TYPES.items())]}
+            _STATIC_ANSWERS["field-types"] = info
+        self._send_json(200, info)
 
     def _handle_customodes_row_menu(self):
         """GET /api/customodes/row-menu?activity=<id>&template=<n>&row=<TOP|CENTER|BOTTOM>
@@ -7746,13 +7753,23 @@ class Handler(BaseHTTPRequestHandler):
 
         Static-file lookup; no watch touched.
         """
-        code, out, err = run_tool("sport_mode_manage.py", ["--activities", "--json"])
-        parsed = self._parse_last_json_line(out)
+        # In-process and kept (2026-11-20). The helper's --activities prints a text table even
+        # with --json, so this endpoint always answered 502 and the "Select activity" picker
+        # stayed empty, after a tool start that waited behind any watch read.
+        parsed = _STATIC_ANSWERS.get("activities")
         if parsed is None:
-            self._send_json(502, {"ok": False,
-                                   "error": "sport_mode_manage.py --activities produced "
-                                            "no JSON", "raw_output": out, "stderr": err})
-            return
+            sys.path.insert(0, str(TOOLS_DIR))
+            import sport_mode_manage                         # noqa: PLC0415
+            activities, rows = sport_mode_manage.load_catalogue()
+            multi = set(rows.get("multisportActivities") or [])
+            limits = rows.get("limits") or {}
+            parsed = {"ok": True,
+                      "activities": [{"id": a["id"], "name": a["name"], "color": a.get("color", ""),
+                                      "isMultisport": a["id"] in multi}
+                                     for a in sorted(activities.values(), key=lambda x: x["name"])],
+                      "minLegs": limits.get("minMultisportLegs", 2),
+                      "maxLegs": limits.get("maxMultisportLegs", 6)}
+            _STATIC_ANSWERS["activities"] = parsed
         self._send_json(200, parsed)
 
     def _sport_mode_manage(self, args, body):

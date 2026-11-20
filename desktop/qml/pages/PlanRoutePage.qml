@@ -772,6 +772,7 @@ Item {
 
             MapView {
                 id: map
+                dragPan: false   // has its own pan handler
                 anchors.fill: parent
                 clip: true
                 scrollZoom: true

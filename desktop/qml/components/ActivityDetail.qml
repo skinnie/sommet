@@ -561,6 +561,7 @@ Item {
                 anchors.fill: parent
                 MapView {
                     id: map
+                    dragPan: false   // has its own pan handler
                     anchors.fill: parent
                     // Scroll to zoom, at the pointer; the chart follows (see _chartFromMap).
                     scrollZoom: true

@@ -358,7 +358,9 @@ PageFlickable {
                         // screen"). Zoom is still available via the map's own +/- buttons.
                         // Full-screen/dedicated maps (MapWindow, OfflineMaps, Plan) keep
                         // scrollZoom because there is no page to scroll past them.
-                        scrollZoom: false
+                        // 2026-11-20: wheel zoom on, after a click (inScrollingPage).
+                        inScrollingPage: true
+                        dragPan: false   // its own drag picks the point on release
                         anchors.fill: parent
                         clip: true
                         latitude: root.poiLat
@@ -758,6 +760,7 @@ PageFlickable {
                             height: visible ? 120 : 0
                             MapView {
                                 anchors.fill: parent
+                                inScrollingPage: true
                                 latitude: modelData.lat
                                 longitude: modelData.lon
                                 zoomLevel: 14

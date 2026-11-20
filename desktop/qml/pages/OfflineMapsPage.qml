@@ -85,6 +85,7 @@ Item {
 
         MapView {
             id: map
+            dragPan: false   // has its own pan handler
             anchors.fill: parent
             scrollZoom: true
             showZoomControls: false  // page draws its own, clear of the selection box (below)

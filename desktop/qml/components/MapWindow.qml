@@ -56,6 +56,7 @@ ThemedDialog {
 
         MapView {
             id: map
+            dragPan: false   // has its own pan handler
             scrollZoom: true
             anchors.fill: parent
             trackPoints: root.trackPoints

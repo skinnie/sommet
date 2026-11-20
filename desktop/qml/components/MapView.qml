@@ -370,15 +370,58 @@ Item {
     // being repeated in each map's owner, so every map behaves the same way and a new map
     // gets it for free.
     //
-    // OPT-IN, and that is the point rather than an oversight: several of this app's maps are
-    // small previews sitting inside a scrolling page (the activity cards' grid, Home's own
-    // preview). A wheel handler on those would swallow the scroll meant for the page, so the
-    // list would stop scrolling whenever the pointer crossed a thumbnail. Enabled on maps
-    // the user actually navigates; left off on maps that are pictures.
-    property bool scrollZoom: false
+    // ON for every map (André, 2026-11-20: "make default on desktop, on every map to be able
+    // to zoom in and out with scroll and to drag with mouse"). A map that sits inside a
+    // scrolling page (cards, lists, the POI picker) sets inScrollingPage: there the wheel keeps
+    // scrolling the page until the map is clicked or dragged once, then zooms the map until
+    // the pointer leaves it (the usual embedded-map rule). Without that, the page stopped
+    // scrolling whenever the pointer crossed a map (André, 2026-09-05, POI page).
+    property bool scrollZoom: true
+    property bool inScrollingPage: false
+    property bool _wheelArmed: false
+    readonly property bool _wheelZooms: scrollZoom && (!inScrollingPage || _wheelArmed)
+
+    // Drag to move, ON for every map. A map whose owner already has its own pan handler (one
+    // that also does something else on release, like the POI and home pickers) turns it off.
+    property bool dragPan: true
+
+    // Arms the wheel on press without taking the press away from the owner's own tap/drag.
+    PointHandler {
+        enabled: root.inScrollingPage
+        acceptedButtons: Qt.LeftButton
+        onActiveChanged: if (active) root._wheelArmed = true
+    }
+    HoverHandler {
+        enabled: root.inScrollingPage
+        onHoveredChanged: if (!hovered) root._wheelArmed = false
+    }
+
+    DragHandler {
+        id: builtInPan
+        enabled: root.dragPan
+        target: null
+        property real lastX: 0
+        property real lastY: 0
+        onActiveChanged: {
+            lastX = centroid.position.x
+            lastY = centroid.position.y
+            if (active) { root.userControlled = true; root._wheelArmed = true }
+        }
+        onCentroidChanged: {
+            if (!active) return
+            root.panX -= centroid.position.x - lastX
+            root.panY -= centroid.position.y - lastY
+            lastX = centroid.position.x
+            lastY = centroid.position.y
+        }
+    }
+    HoverHandler {
+        enabled: root.dragPan
+        cursorShape: builtInPan.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+    }
 
     WheelHandler {
-        enabled: root.scrollZoom
+        enabled: root._wheelZooms
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         // Up (positive angleDelta) zooms in, down zooms out - the direction every map
         // application uses.
@@ -394,7 +437,7 @@ Item {
     // thumbnail shouldn't grab the gesture). target:null so it zooms the map, not transforms
     // the Item.
     PinchHandler {
-        enabled: root.scrollZoom
+        enabled: root._wheelZooms
         target: null
         property int _startZoom: 12
         onActiveChanged: if (active) _startZoom = root.currentZoom
@@ -1031,7 +1074,7 @@ Item {
                 color: "#333333"
             }
             TapHandler {
-                onTapped: root.currentZoom = Math.min(19, root.currentZoom + 1)
+                onTapped: { root._wheelArmed = true; root.zoomBy(1) }
             }
         }
         Rectangle {
@@ -1045,8 +1088,28 @@ Item {
                 color: "#333333"
             }
             TapHandler {
-                onTapped: root.currentZoom = Math.max(1, root.currentZoom - 1)
+                onTapped: { root._wheelArmed = true; root.zoomBy(-1) }
             }
+        }
+    }
+
+    // In a scrolling page the wheel scrolls the page until the map is clicked; say so on hover.
+    HoverHandler { id: pageHover; enabled: root.inScrollingPage && root.scrollZoom }
+    Rectangle {
+        visible: pageHover.hovered && !root._wheelArmed && root.height >= 100
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 4
+        color: "#CCFFFFFF"
+        radius: 6
+        width: wheelHint.implicitWidth + 10
+        height: wheelHint.implicitHeight + 4
+        Text {
+            id: wheelHint
+            anchors.centerIn: parent
+            text: qsTr("Click the map to zoom with the wheel")
+            font.pixelSize: Theme.fontSizeTiny
+            color: "#333333"
         }
     }
 
