@@ -474,8 +474,10 @@ LEGACY_PRODUCT_IDS = {0x0010, 0x0019, 0x001A, 0x001D}  # Bluebird, Duck, Colibri
 # The watches that get direction pins on their routes: Ambit3 Peak / Sport / Run / Vertical and
 # Traverse / Traverse Alpha (route waypoints of 54 bytes there; write_nav.py writes that layout).
 AMBIT3_PIN_PRODUCT_IDS = {0x001B, 0x001C, 0x001E, 0x002C, 0x002B, 0x002D}
-# Ambit3 codenames as the Bluetooth hello gives them (Peak, Sport, Run, Vertical).
-BLE_AMBIT3_MODELS = {"Emu", "Finch", "Ibisbill", "Kaka"}
+# The product id of each model as the Bluetooth hello names it (Peak, Sport, Run, Vertical,
+# Traverse, Traverse Alpha): over Bluetooth there is no USB product id to read.
+BLE_MODEL_PRODUCT_IDS = {"Emu": 0x001B, "Finch": 0x001C, "Ibisbill": 0x001E, "Kaka": 0x002C,
+                         "Jabiru": 0x002B, "Loon": 0x002D}
 
 
 def device_key():
@@ -4649,12 +4651,12 @@ class Handler(BaseHTTPRequestHandler):
         target_pid = body.get("productId")
         target_pid = int(target_pid) if str(target_pid or "").isdigit() else SELECTED_PRODUCT_ID
         # Over Bluetooth the app sends no product id and none is pinned, so an Ambit3 lost its
-        # pins on that path only (found 2026-10-27). The hello names the model: the Ambit3
-        # codenames get them like on the cable; anything else (Traverse, Kailash) as before.
+        # pins on that path only (found 2026-10-27), and a Traverse or Traverse Alpha still did
+        # (2026-11-20, GitHub #25 audit). The hello names the model: each gets its own id, like on
+        # the cable; Kailash (no routes) as before.
         if target_pid is None and use_ble() and not body.get("productId"):
             model = ((ble_bridge.bridge.status().get("device_info") or {}).get("model") or "").strip()
-            if model in BLE_AMBIT3_MODELS:
-                target_pid = 0x001B          # any Ambit3 id: only the pin check reads it here
+            target_pid = BLE_MODEL_PRODUCT_IDS.get(model)
         def route_pins(extra):
             with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
                 f.write(gpx_text)

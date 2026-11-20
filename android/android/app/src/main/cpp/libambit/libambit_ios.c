@@ -164,6 +164,11 @@ ambit_object_t *libambit_new_from_ble_ios(ambit_ble_write_fn write_cb, void *wri
         return NULL;
     }
 
+    /* The product id passed in was only guessed from the advertised name: take it from the model
+     * the watch names in its hello (GitHub #25, see libambit_device_support_ble_pid_for_model). */
+    object->device_info.product_id = libambit_device_support_ble_pid_for_model(
+        object->device_info.model, object->device_info.product_id);
+
     if (object->driver->init != NULL) {
         object->driver->init(object, known->driver_param);
     }

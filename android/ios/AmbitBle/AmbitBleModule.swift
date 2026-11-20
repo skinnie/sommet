@@ -57,10 +57,16 @@ private let kScanTimeoutSec: TimeInterval = 20.0
 private let kFallbackChunkSize = 20
 
 // VID is always Suunto's; PID only picks the driver_support row (mirrors Kotlin guessProductId).
+// Only a first guess: libambit_ios.c takes the real id from the model the watch names in its
+// hello. The advertised prefixes are Movescount's own table (a Traverse Alpha is "TraverseA ").
 private func guessProductId(_ name: String?) -> UInt16 {
   guard let n = name else { return 0x001c }
-  if n.hasPrefix("Traverse Alpha") { return 0x002d }
+  if n.hasPrefix("TraverseA ") || n.hasPrefix("Traverse Alpha") { return 0x002d }
   if n.hasPrefix("Traverse") { return 0x002b }
+  if n.hasPrefix("Ambit3V ") { return 0x002c }
+  if n.hasPrefix("Ambit3R ") { return 0x001e }
+  if n.hasPrefix("Ambit3S ") { return 0x001c }
+  if n.hasPrefix("Ambit3 ") { return 0x001b }
   return 0x001c
 }
 

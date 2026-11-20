@@ -173,6 +173,17 @@ ambit_object_t *libambit_new_from_ble(JavaVM *jvm, jobject module_ref_local, JNI
         return NULL;
     }
 
+    /* The product id passed in was only guessed from the advertised name: take it from the model
+     * the watch names in its hello (see libambit_device_support_ble_pid_for_model). */
+    {
+        const uint16_t guessed = object->device_info.product_id;
+        object->device_info.product_id =
+            libambit_device_support_ble_pid_for_model(object->device_info.model, guessed);
+        if (object->device_info.product_id != guessed)
+            LOG_INFO("BLE: model %s -> product 0x%04x (name guess was 0x%04x)",
+                     object->device_info.model, object->device_info.product_id, guessed);
+    }
+
     if (object->driver->init != NULL) {
         object->driver->init(object, known->driver_param);
     }

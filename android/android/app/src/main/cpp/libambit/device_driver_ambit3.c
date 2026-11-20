@@ -1113,7 +1113,10 @@ static int date_time_set(ambit_object_t *object, struct tm *tm)
     if (object->device_info.model != NULL) {
         if (strcmp(object->device_info.model, "Hoopoe") == 0)
             return kailash_time_sync(object, tm);
-        if (strcmp(object->device_info.model, "Jabiru") == 0)
+        // Loon (Traverse Alpha) runs the same watch program as Jabiru, byte for byte
+        // (2.0.22 firmware files, issue #25).
+        if (strcmp(object->device_info.model, "Jabiru") == 0
+                || strcmp(object->device_info.model, "Loon") == 0)
             return traverse_time_sync(object, tm);
     }
     return libambit_device_driver_date_time_set(object, tm);

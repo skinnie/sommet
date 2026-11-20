@@ -38,6 +38,9 @@ bool libambit_device_support_known(uint16_t vendor_id, uint16_t product_id);
 const ambit_known_device_t *libambit_device_support_find(uint16_t vendor_id, uint16_t product_id, const char *model, const uint8_t *fw_version);
 /* Android: find first supported driver for this VID/PID (no model/fw needed) */
 const ambit_known_device_t *libambit_device_support_find_first(uint16_t vendor_id, uint16_t product_id);
+/* Bluetooth: the product id for an Ambit3-family codename from the watch's hello ("Loon" ->
+ * 0x002d), or `fallback` (the guess from the advertised name) for any other model. */
+uint16_t libambit_device_support_ble_pid_for_model(const char *model, uint16_t fallback);
 const uint8_t *libambit_device_komposti(uint16_t vendor_id, uint16_t product_id, uint8_t next);
 uint32_t libambit_fw_version_number(const uint8_t version[4]);
 

@@ -411,8 +411,13 @@ class AmbitUsbModule(private val reactContext: ReactApplicationContext) :
             val name = when {
                 device != null -> SUUNTO_PID_NAMES[device.productId] ?: device.productName ?: "Suunto"
                 // BLE: derive a friendly name from the watch's own codename.
-                model == "Hoopoe" -> "Suunto Kailash"
-                model == "Emu"    -> "Suunto Ambit3 Peak"
+                model == "Hoopoe"   -> "Suunto Kailash"
+                model == "Emu"      -> "Suunto Ambit3 Peak"
+                model == "Finch"    -> "Suunto Ambit3 Sport"
+                model == "Ibisbill" -> "Suunto Ambit3 Run"
+                model == "Kaka"     -> "Suunto Ambit3 Vertical"
+                model == "Jabiru"   -> "Suunto Traverse"
+                model == "Loon"     -> "Suunto Traverse Alpha"   // shown as "Suunto Loon" before (issue #25)
                 model.isNotEmpty() -> "Suunto $model"
                 else -> "Suunto"
             }

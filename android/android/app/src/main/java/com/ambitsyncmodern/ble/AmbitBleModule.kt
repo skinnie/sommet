@@ -969,9 +969,17 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
     /** VID is always Suunto's; PID only picks the driver_support row, and any
      * Ambit3-family device (Kailash included — driven internally as an Ambit3
      * Peak, KAILASH-BLE-FINDINGS.md Finding 8) shares device_driver_ambit3.c. */
+    // The names the watches advertise (Movescount's own table, suuntoconnectivity/b/c.java):
+    // a Traverse Alpha is "TraverseA ", never "Traverse Alpha" (issue #25). Only a first guess:
+    // libambit_android.c takes the real id from the model the watch names in its hello.
     private fun guessProductId(name: String?): Int = when {
-        name?.startsWith("Traverse Alpha") == true -> 0x002d
-        name?.startsWith("Traverse") == true -> 0x002b
+        name == null -> 0x001c // Ambit3 Sport
+        name.startsWith("TraverseA ") || name.startsWith("Traverse Alpha") -> 0x002d
+        name.startsWith("Traverse") -> 0x002b
+        name.startsWith("Ambit3V ") -> 0x002c
+        name.startsWith("Ambit3R ") -> 0x001e
+        name.startsWith("Ambit3S ") -> 0x001c
+        name.startsWith("Ambit3 ") -> 0x001b
         else -> 0x001c // Ambit3 Sport
     }
 

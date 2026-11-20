@@ -7,6 +7,21 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Traverse Alpha and Ambit3 Vertical over Bluetooth use their own entry numbers (GitHub #25)
+
+- Android and iPhone guessed the watch model from the advertised Bluetooth name, which is often
+  missing and never matched a Traverse Alpha ("TraverseA ") or an Ambit3 Vertical ("Ambit3V ").
+  Both ran as an Ambit3 Sport, with that model's entry numbers: the log read hung and POIs went
+  to the wrong entry (on a Traverse Alpha 0x55 is the logbook count). The model now comes from
+  the watch's own hello (one shared function, libambit_device_support_ble_pid_for_model);
+  the advertised prefixes are Movescount's own table. Kailash is unchanged.
+- The Traverse Alpha sets its clock like the Traverse (same watch program, byte for byte), and
+  shows as "Suunto Traverse Alpha" instead of "Suunto Loon"; every codename has its real name.
+- Desktop over Bluetooth already used the hello's model; a route sent to a Traverse or
+  Traverse Alpha over Bluetooth now gets its direction pins, as on the cable.
+- From our firmware files (Loon 2.0.22, Kaka 1.1.22) and the Suunto/Movescount apps, not yet on
+  a watch: we have neither model.
+
 ## 2026-11-20: Desktop: the library loads about 4x faster after the first start
 
 - Every load parsed each watch move's GPX file again for the list's HR, cadence and pace

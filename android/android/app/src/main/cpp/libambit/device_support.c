@@ -193,3 +193,21 @@ uint32_t libambit_fw_version_number(const uint8_t version[4])
             | (version[2] <<  0)
             | (version[3] <<  8));
 }
+
+/* Over Bluetooth the product id was only guessed from the advertised name, which is often
+ * missing (it rides in the scan response) and didn't match a Traverse Alpha ("TraverseA ") or an
+ * Ambit3 Vertical ("Ambit3V "): both ran as an Ambit3 Sport with that model's entry numbers, so
+ * logbook and POI reads went to the wrong entries (GitHub #25). The hello names the model. Hoopoe
+ * (Kailash) keeps its guess: it is driven as an Ambit3, which is what was validated live. */
+uint16_t libambit_device_support_ble_pid_for_model(const char *model, uint16_t fallback)
+{
+    static const struct { const char *model; uint16_t pid; } kModels[] = {
+        { "Emu", 0x001b }, { "Finch", 0x001c }, { "Ibisbill", 0x001e },
+        { "Jabiru", 0x002b }, { "Kaka", 0x002c }, { "Loon", 0x002d },
+    };
+    if (model == NULL) return fallback;
+    for (size_t i = 0; i < sizeof(kModels) / sizeof(kModels[0]); i++)
+        if (strcmp(model, kModels[i].model) == 0)
+            return kModels[i].pid;
+    return fallback;
+}
