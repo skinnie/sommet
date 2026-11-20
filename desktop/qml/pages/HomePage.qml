@@ -12,7 +12,10 @@ PageFlickable {
     contentHeight: column.height + Theme.spacingLarge * 2
     clip: true
 
-    Component.onCompleted: {
+    // Home stays built after its first visit (Main.qml keptPages); each visit calls this again,
+    // so the watch, devices, weather and activities refresh as they did when Home was rebuilt.
+    Component.onCompleted: pageShown()
+    function pageShown() {
         root.restoreMagene();
         // Which watch we are looking at - a real one, or the sample Testing mode serves.
         DeviceService.refreshDemoMode();
@@ -670,8 +673,8 @@ PageFlickable {
         scan.send();
     }
 
-    Timer {
-        interval: 8000; running: true; repeat: true
+    Timer {   // only while Home is on screen: the page stays built when another page is shown
+        interval: 8000; running: root.visible; repeat: true
         onTriggered: root.refreshBikeComputers()
     }
 

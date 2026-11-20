@@ -133,7 +133,7 @@ ApplicationWindow {
     }
     // Built once, then kept (see pageArea). An extension page that claims one of these ids is
     // built fresh like any other page.
-    readonly property var keptPages: ["activities", "calendar", "totals"]
+    readonly property var keptPages: ["home", "activities", "calendar", "totals"]
     function isKeptPage(id) {
         if (keptPages.indexOf(id) === -1) return false
         for (var i = 0; i < AppExtensions.pages.length; i++)

@@ -18,8 +18,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - The library now has that index, created when Sommet opens it. On a copy of the P5Q library a
   full pull of 4,943 records was applied in about 6 s.
 
-## 2026-11-20: Desktop: Activities, Calendar and Totals open at once after the first visit
+## 2026-11-20: Desktop: Home, Activities, Calendar and Totals open at once after the first visit
 
+- Home joined later the same day: it stays built too, refreshes the watch, devices, weather and
+  activities on each visit, and polls for bike computers only while it is on screen.
 - The three pages stay built after their first visit and are only shown again. Each visit built
   them afresh, which took 1.3-2.2 s for Activities on the X230 (André: "i click on a menu and it
   takes like 3s to open"). Measured on the X230 with the real library: reopening Activities went
