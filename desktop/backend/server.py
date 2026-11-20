@@ -7800,8 +7800,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed = _STATIC_ANSWERS.get("activities")
         if parsed is None:
             sys.path.insert(0, str(TOOLS_DIR))
-            import sport_mode_manage                         # noqa: PLC0415
-            activities, rows = sport_mode_manage.load_catalogue()
+            try:
+                import sport_mode_manage                     # noqa: PLC0415
+                activities, rows = sport_mode_manage.load_catalogue()
+            except (OSError, ValueError, ImportError) as e:
+                self._send_json(502, {"ok": False, "error": f"activity catalogue: {e}"})
+                return
             multi = set(rows.get("multisportActivities") or [])
             limits = rows.get("limits") or {}
             parsed = {"ok": True,

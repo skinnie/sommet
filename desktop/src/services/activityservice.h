@@ -435,6 +435,11 @@ private:
     bool keepRecentOnly() const;
     void queueOrDeferBlob(const QString &uid);
     void trimOldTracks();
+    // The trim's clearing, 100 Tracks per event-loop turn: the first trim on the P5Q (3,611
+    // Tracks) froze the window for 11 s in one go.
+    void trimStep();
+    QList<QPair<int, QString>> m_trimPending;
+    int m_trimTotal = 0;
     void evictTrackCache();
     void fetchRemoteTrack(int idx, const QString &device);
     QSet<QString> m_remoteTrackPending;      // "idx|device" being fetched         // "nas" mode: drop local FITs the NAS holds (>30 days old)

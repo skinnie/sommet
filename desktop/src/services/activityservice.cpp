@@ -4369,10 +4369,12 @@ void ActivityService::trimOldTracks()
     QSqlQuery pick(m_db);
     pick.prepare(QStringLiteral(
         "SELECT a.idx, COALESCE(a.device,''), substr(a.start_time,1,16), COALESCE(a.source,''), "
-        "       COALESCE(a.external_id,''), "
-        "       (SELECT COUNT(*) FROM activities b WHERE COALESCE(b.device,'') = COALESCE(a.device,'') "
-        "        AND substr(b.start_time,1,16) = substr(a.start_time,1,16)) "
+        "       COALESCE(a.external_id,''), m.n "
         "FROM activities a "
+        // Same-minute twins counted once per minute, not once per row (that was n^2 on the P5Q).
+        "JOIN (SELECT COALESCE(device,'') AS d, substr(start_time,1,16) AS mn, COUNT(*) AS n "
+        "      FROM activities GROUP BY 1, 2) m "
+        "  ON m.d = COALESCE(a.device,'') AND m.mn = substr(a.start_time,1,16) "
         "WHERE substr(a.start_time,1,16) < ? AND a.track_cached_at IS NULL "
         "  AND (COALESCE(a.track_json,'') NOT IN ('', '[]') OR COALESCE(a.gpx_text,'') <> '')"));
     pick.addBindValue(cutoff);
@@ -4401,7 +4403,17 @@ void ActivityService::trimOldTracks()
         mark.addBindValue(cutoff);
         mark.exec();
     }
-    if (drop.isEmpty())
+    if (drop.isEmpty() || !m_trimPending.isEmpty())
+        return;
+    for (const Row &r : std::as_const(drop))
+        m_trimPending.append({r.idx, r.device});
+    m_trimTotal = m_trimPending.size();
+    trimStep();
+}
+
+void ActivityService::trimStep()
+{
+    if (m_trimPending.isEmpty() || !m_db.isOpen())
         return;
     const bool tx = m_db.transaction();
     QSqlQuery clear(m_db);
@@ -4409,13 +4421,18 @@ void ActivityService::trimOldTracks()
     clear.prepare(QStringLiteral(
         "UPDATE activities SET track_json = NULL, gpx_text = NULL, track_remote = 1 "
         "WHERE idx = ? AND COALESCE(device,'') = ?"));
-    for (const Row &r : std::as_const(drop)) {
-        clear.bindValue(0, r.idx);
-        clear.bindValue(1, r.device);
+    for (int n = 0; n < 100 && !m_trimPending.isEmpty(); ++n) {
+        const auto r = m_trimPending.takeFirst();
+        clear.bindValue(0, r.first);
+        clear.bindValue(1, r.second);
         clear.exec();
     }
     if (tx) m_db.commit();
-    qInfo().noquote() << "[library] kept on the server only:" << drop.size() << "older Tracks";
+    if (!m_trimPending.isEmpty()) {
+        QTimer::singleShot(0, this, &ActivityService::trimStep);
+        return;
+    }
+    qInfo().noquote() << "[library] kept on the server only:" << m_trimTotal << "older Tracks";
     dbLoadAll();
     emit activitiesChanged();
 }

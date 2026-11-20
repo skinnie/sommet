@@ -7,6 +7,17 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Desktop: map drag inside lists works; the first light-library trim no longer freezes the window
+
+- Maps inside a scrolling page or list (Routes, activity cards, POIs): a drag moved the page
+  instead of the map. The map's drag now keeps the mouse (André: "you have the hand for drag
+  but drag doesn't work"). Checked on Routes (import map and library map) and activity cards.
+- Light library: the first trim on the P5Q (3,611 Tracks) froze the window for 11 s. Picking
+  them counted same-minute twins row by row (5 s on a copy of that library here, 0.05 s now),
+  and the clearing now runs 100 Tracks at a time with the window drawing in between.
+- Windows download: assets/activity_types.json was not packed, so Sport modes' "Select
+  activity" list could not load (the request now answers with an error instead of dropping).
+
 ## 2026-11-20: Desktop: maps of the last 90 days offline; pages jump the watch queue; window fits at 1080p
 
 - Settings → Database → "Keep maps of the last 90 days offline" (off by default; sync/13

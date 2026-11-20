@@ -400,6 +400,9 @@ Item {
         id: builtInPan
         enabled: root.dragPan
         target: null
+        // Not handed over to a scrolling page or list around the map: without this a drag on a
+        // map inside a Flickable scrolled the page instead (André, 2026-11-20, Routes).
+        grabPermissions: PointerHandler.CanTakeOverFromAnything
         property real lastX: 0
         property real lastY: 0
         onActiveChanged: {

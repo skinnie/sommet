@@ -58,6 +58,11 @@ if (BACKEND / "demo_data").is_dir():
 # repeated 500s on the sport-mode/demo endpoints (real bug on the macOS .dmg, 2026-08-27).
 if (REPO / "assets" / "sportmode_rows.json").is_file():
     datas.append((str(REPO / "assets" / "sportmode_rows.json"), "assets"))
+# assets/activity_types.json: the 84 sports a sport mode can be (tools/sport_mode_manage.py's
+# load_catalogue). Missing from the download until 2026-11-20, so Sport modes' "Select activity"
+# list was empty on Windows/macOS/AppImage.
+if (REPO / "assets" / "activity_types.json").is_file():
+    datas.append((str(REPO / "assets" / "activity_types.json"), "assets"))
 
 # server.py and ble_bridge sit next to the entry script; every tool the backend can shell out
 # to is imported by runpy at runtime, so name them all as hidden imports to make sure their

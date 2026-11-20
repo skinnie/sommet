@@ -734,6 +734,7 @@ PageFlickable {
                         DragHandler {
                             id: importMapPanner
                             target: null
+                            grabPermissions: PointerHandler.CanTakeOverFromAnything
                             property real lastX: 0
                             property real lastY: 0
                             onActiveChanged: {
