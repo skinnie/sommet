@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-20: Weight readings are kept on your own server too
+
+- Every weight reading a device sees (scale, typed in, intervals.icu, Garmin Connect) goes to
+  Sommet Sync as one record per day, with the source it came from, and comes back to every other
+  device. A device without intervals.icu still shows the whole history, and a copy is kept on
+  the device for when the server can't be reached. Desktop and Android.
+- The server needs the new `weight` collection: update `sync.php` on the NAS.
+- Checked on desktop with the local test server and two scratch profiles: the first sent its two
+  readings; the second, with nothing but the sync set up, showed both (70.9 kg, 14.2 % body fat)
+  and did not send them back; with the server stopped it still showed them. Android: unit test.
+- Not yet: deleting a typed-in reading doesn't remove it from the server.
+
+## 2026-11-20: Desktop: always opens maximized; a watch read no longer waits 8 s for the helper
+
+- The window always opens maximized. On the P5Q it opened as a window off to one side, partly
+  off the screen. A window made smaller is centred on the screen.
+- Windows: the watch helper ships as a folder instead of one packed file. It starts itself again
+  for every watch tool, and a packed file unpacks all of itself first: 3.9 s per tool on the P5Q,
+  and a watch read runs two (read the moves, set the clock), so 8 of the 12.3 s a read with
+  nothing new took (measured there).
+
 ## 2026-11-20: Desktop: switching screens on an old PC no longer takes seconds
 
 - On the P5Q (Core 2 Quad, Windows) every screen switch held the window for 4.5-6 s. The

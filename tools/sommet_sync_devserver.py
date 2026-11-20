@@ -20,7 +20,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-COLLECTIONS = {"activities", "gear", "gear_reminder", "gear_assignment", "activity_gear"}
+COLLECTIONS = {"activities", "gear", "gear_reminder", "gear_assignment", "activity_gear", "weight"}
 MAX_BODY = 32 * 1024 * 1024
 
 

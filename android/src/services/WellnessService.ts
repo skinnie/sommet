@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { pullNasWeights, loadNasCache, pushNasWeights } from './NasWeight';
 import { computeSleepScore } from './SleepScore';
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { loadScaleSeries, refreshProfileFromIntervals } from './ScaleService';
@@ -40,7 +41,8 @@ export interface WellnessDay {
 export interface WeightPoint {
   date: string;
   weightKg: number;
-  source: 'intervals' | 'manual' | 'scale';
+  // 'garmin' only arrives from the NAS (a desktop with Garmin Connect sent it there).
+  source: 'intervals' | 'manual' | 'scale' | 'garmin';
   // Only a reading from the Bluetooth scale carries these, and they are ESTIMATES (Sun et al. 2003).
   bmi?: number;
   bodyFatPct?: number;
@@ -156,9 +158,16 @@ export async function removeManualWeight(date: string): Promise<void> {
 // nothing to pick, so this always merges intervals + manual.
 export async function loadWeightSeries(days = 365): Promise<WeightPoint[]> {
   const byDate = new Map<string, WeightPoint>();
+  // The NAS first (Sommet Sync): what this or another device saw, kept with its own source, so
+  // the history is here without intervals.icu, or offline (from the cached copy).
+  const pulled = await pullNasWeights();
+  const onServer = pulled ?? await loadNasCache();
+  for (const p of onServer) byDate.set(p.date, p);
+  const ownReading = (p?: WeightPoint) => !!p && (p.source === 'manual' || p.source === 'scale');
   try {
     for (const d of await fetchWellness(days)) {
-      if (typeof d.weight === 'number')
+      // intervals.icu doesn't replace a scale or typed reading the NAS holds for that day
+      if (typeof d.weight === 'number' && !ownReading(byDate.get(d.date)))
         byDate.set(d.date, { date: d.date, weightKg: d.weight, source: 'intervals' });
     }
   } catch {
@@ -169,5 +178,7 @@ export async function loadWeightSeries(days = 365): Promise<WeightPoint[]> {
   for (const sp of await loadScaleSeries()) byDate.set(sp.date, sp);
   for (const m of await loadManualWeights()) byDate.set(m.date, m);
 
-  return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const merged = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (pulled) pushNasWeights(merged, pulled).catch(() => {});   // background; never holds the screen
+  return merged;
 }

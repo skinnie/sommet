@@ -130,6 +130,14 @@ private:
     void fetchGarmin(int days);
     void fetchProfile();                   // height + sex from intervals.icu, cached
     void fetchScale(bool poll = false);    // local scale weigh-ins from the backend
+    // Sommet Sync (the NAS): every reading this device sees goes there, and what is there comes
+    // back, so a device without intervals.icu (or offline) still has the history.
+    bool nasConfigured() const;
+    void fetchNas();
+    void pushNas();
+    void saveNasCache() const;
+    QVariantList m_nasSeries;              // the server's readings (also cached locally)
+    bool m_nasPulled = false;              // pulled this session: only then push (never stale)
     void pollScale();                      // status + weigh-ins; cheap, local
     void scalePost(const QString &path, const QJsonObject &body);
     void oneSourceDone();

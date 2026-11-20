@@ -34,7 +34,8 @@ $BLOB_DIR = $DATA_DIR . '/blobs';
 $MAX_BODY = 32 * 1024 * 1024; // 32 MB — a big FIT/GPX is a few MB; cap abuse.
 $STORE_MODE = isset($CONFIG['store']) ? (string)$CONFIG['store'] : 'json'; // json | sqlite | shadow
 $SQLITE_PATH = isset($CONFIG['sqlite_path']) ? (string)$CONFIG['sqlite_path'] : ($DATA_DIR . '/sommet.db');
-$COLLECTIONS = ['activities', 'gear', 'gear_reminder', 'gear_assignment', 'activity_gear'];
+// weight: one reading per day (uid = the date), so a device without intervals.icu still has them.
+$COLLECTIONS = ['activities', 'gear', 'gear_reminder', 'gear_assignment', 'activity_gear', 'weight'];
 
 // ---- helpers ------------------------------------------------------------------------------
 function fail($code, $msg) {

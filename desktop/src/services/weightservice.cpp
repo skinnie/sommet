@@ -2,6 +2,8 @@
 #include "backenderror.h"
 
 #include <QDate>
+#include <QDateTime>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -52,6 +54,10 @@ WeightService::WeightService(QObject *parent) : QObject(parent)
         m_scaleTimer.start();
     // Learn the backend's scale state once at start (it remembers the scale between runs).
     QTimer::singleShot(1500, this, &WeightService::pollScale);
+    // The NAS's readings as last seen, so they show at once (and offline) before a refresh.
+    for (const auto &v : QJsonDocument::fromJson(
+             settings.value(QStringLiteral("weight/nasCache")).toString().toUtf8()).array())
+        m_nasSeries.append(v.toObject().toVariantMap());
 }
 
 void WeightService::setSource(const QString &s)
@@ -83,7 +89,8 @@ bool WeightService::connected() const
         && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
     const bool garmin = s.value(QStringLiteral("connections/garmin/connected"), false).toBool();
     const bool scale = s.value(QStringLiteral("weight/scale/enabled"), false).toBool();
-    return intervals || garmin || scale || !loadManual().isEmpty();
+    return intervals || garmin || scale || !loadManual().isEmpty()
+        || nasConfigured() || !m_nasSeries.isEmpty();
 }
 
 double WeightService::latestWeightKg() const
@@ -131,8 +138,10 @@ void WeightService::refresh(int days)
 
     const bool haveScale = s.value(QStringLiteral("weight/scale/enabled"), false).toBool();
     m_scaleSeries.clear();
+    const bool haveNas = nasConfigured();
 
-    m_pending = (haveIntervals ? 1 : 0) + (haveGarmin ? 1 : 0) + (haveScale ? 1 : 0);
+    m_pending = (haveIntervals ? 1 : 0) + (haveGarmin ? 1 : 0) + (haveScale ? 1 : 0)
+              + (haveNas ? 1 : 0);
     if (m_pending == 0) {          // manual-only (or nothing) - merge immediately
         rebuild();
         return;
@@ -140,6 +149,7 @@ void WeightService::refresh(int days)
     setLoading(true);
     if (haveIntervals) fetchIntervals(days);
     if (haveGarmin) fetchGarmin(days);
+    if (haveNas) fetchNas();
     if (haveScale) {
         // The scale's body-fat estimate needs the height: fetch the profile first when
         // intervals.icu is connected (it refreshes the cached value), else use what is cached.
@@ -194,11 +204,130 @@ void WeightService::rebuild()
         consider(m_garminSeries);
     consider(m_scaleSeries);
     consider(loadManual());
+    // Last, so a live source wins a tie; each reading keeps the source it came from.
+    consider(m_nasSeries);
 
     m_series.clear();
     for (auto it = best.constBegin(); it != best.constEnd(); ++it)  // QMap iterates keys sorted
         m_series.append(it.value());
     emit changed();
+    pushNas();
+}
+
+// ── Sommet Sync: weight readings on the NAS (André, 2026-11-20: "can't we have weight figures
+// saved on the NAS, so if intervals.icu is not connected we still have the readings?") ──────
+// One record per day, uid = the date, the merged reading of that day with the source it came
+// from. Pulled in full each time (a reading a day is a few thousand small records at most).
+
+bool WeightService::nasConfigured() const
+{
+    const QSettings s;
+    return !s.value(QStringLiteral("connections/sommet_sync/url")).toString().isEmpty()
+        && !s.value(QStringLiteral("connections/sommet_sync/token")).toString().isEmpty();
+}
+
+static QVariantMap nasReading(const QJsonObject &r)
+{
+    QVariantMap m = r.toVariantMap();
+    m.remove(QStringLiteral("uid"));
+    m.remove(QStringLiteral("srv"));
+    m.remove(QStringLiteral("updated_at"));
+    return m;
+}
+
+void WeightService::saveNasCache() const
+{
+    QJsonArray arr;
+    for (const QVariant &v : m_nasSeries)
+        arr.append(QJsonObject::fromVariantMap(v.toMap()));
+    QSettings().setValue(QStringLiteral("weight/nasCache"),
+                         QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+}
+
+void WeightService::fetchNas()
+{
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("c"), QStringLiteral("weight"));
+    q.addQueryItem(QStringLiteral("since"), QStringLiteral("0"));
+    u.setQuery(q);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+            m_nasSeries.clear();
+            for (const auto &v : root.value(QStringLiteral("records")).toArray()) {
+                const QVariantMap m = nasReading(v.toObject());
+                if (!m.value(QStringLiteral("date")).toString().isEmpty()
+                    && m.value(QStringLiteral("weightKg")).toDouble() > 0)
+                    m_nasSeries.append(m);
+            }
+            m_nasPulled = true;
+            saveNasCache();
+        }
+        // Unreachable: keep the cached copy loaded at start, and don't push this session.
+        oneSourceDone();
+    });
+}
+
+void WeightService::pushNas()
+{
+    if (!m_nasPulled || !nasConfigured())
+        return;
+    QHash<QString, QVariantMap> have;
+    for (const QVariant &v : std::as_const(m_nasSeries)) {
+        const QVariantMap m = v.toMap();
+        have.insert(m.value(QStringLiteral("date")).toString(), m);
+    }
+    QJsonArray records;
+    QVariantList sent;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (const QVariant &v : std::as_const(m_series)) {
+        const QVariantMap m = v.toMap();
+        const QString date = m.value(QStringLiteral("date")).toString();
+        if (date.isEmpty() || m.value(QStringLiteral("weightKg")).toDouble() <= 0
+            || have.value(date) == m)
+            continue;                                  // the server holds exactly this one
+        QJsonObject r = QJsonObject::fromVariantMap(m);
+        r.insert(QStringLiteral("uid"), date);
+        r.insert(QStringLiteral("updated_at"), now);
+        records.append(r);
+        sent.append(m);
+    }
+    if (records.isEmpty())
+        return;
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/url")).toString());
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("c"), QStringLiteral("weight"));
+    u.setQuery(q);
+    QNetworkRequest req(u);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/token")).toString().toUtf8());
+    const QByteArray body = QJsonDocument(QJsonObject{
+        {QStringLiteral("records"), records}, {QStringLiteral("deleted"), QJsonArray()}})
+        .toJson(QJsonDocument::Compact);
+    QNetworkReply *reply = m_network.post(req, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, sent]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError)
+            return;                                    // sent again on the next refresh
+        QHash<QString, int> at;
+        for (int i = 0; i < m_nasSeries.size(); ++i)
+            at.insert(m_nasSeries.at(i).toMap().value(QStringLiteral("date")).toString(), i);
+        for (const QVariant &v : sent) {
+            const QString date = v.toMap().value(QStringLiteral("date")).toString();
+            if (at.contains(date)) m_nasSeries[at.value(date)] = v;
+            else m_nasSeries.append(v);
+        }
+        saveNasCache();
+    });
 }
 
 void WeightService::fetchIntervals(int days)
