@@ -89,6 +89,10 @@ static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 ActivityService::ActivityService(QObject *parent) : QObject(parent)
 {
     openDatabase();
+    // The watch the last read was about, kept across launches: without it the first read of
+    // a session asked with known_count 0, and over Bluetooth that re-read the whole move log
+    // (~430 KB, several minutes) to find one new move (P5Q, 2026-11-21).
+    m_lastDevice = QSettings().value(QStringLiteral("activities/lastDevice")).toString();
     QFile cfg(QStringLiteral(":/qt/qml/SommetUi/assets/activity_view.json"));
     if (cfg.open(QIODevice::ReadOnly))
         m_viewConfig = QJsonDocument::fromJson(cfg.readAll()).object().toVariantMap();
@@ -659,9 +663,12 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
         if (!alreadyRetried && knownCount > 0 && !device.isEmpty()
             && device != m_lastDevice) {
             m_lastDevice = device;
+            QSettings().setValue(QStringLiteral("activities/lastDevice"), device);
             requestActivities(dbKnownCount(device), true);
             return;
         }
+        if (device != m_lastDevice)
+            QSettings().setValue(QStringLiteral("activities/lastDevice"), device);
         m_lastDevice = device;
 
         const int totalEntries = root.value(QStringLiteral("total_entries")).toInt();

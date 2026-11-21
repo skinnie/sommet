@@ -28,6 +28,11 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
     service stops when Sommet closes.
   - Once a watch has paired over Bluetooth, Sommet starts the Bluetooth service quietly at
     every launch, so "Sync now" on the watch is heard without pressing Pair.
+  - A read whose reply comes back damaged is asked for again (reads only, never a write).
+  - The watch the last read was about is remembered across launches, so the first sync of a
+    session reads only the new moves instead of the whole log.
+  - Home's button reads "Pair / sync by Bluetooth"; the README says to prefer the cable on the
+    desktop.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
   is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
   doesn't work this way people tell us"). A saved "off" from the old switch is ignored.
