@@ -144,6 +144,21 @@ def watch_identity(link):
     return serial, f"{fw[0]}.{fw[1]}.{fw[2] | (fw[3] << 8)}"
 
 
+def stored(serial, fw):
+    """A whole stored descriptor for exactly this serial + firmware (our cache, SuuntoLink's
+    folder, assets/), or None. No watch is asked."""
+    if not serial or not fw:
+        return None
+    for folder in [CACHE_DIR, *suuntolink_dirs(), ASSETS]:
+        path = folder / f"descr+{serial}+{fw}"
+        try:
+            if path.is_file() and is_complete(path.read_bytes()):
+                return path
+        except OSError:
+            continue
+    return None
+
+
 def for_link(link):
     """The schema descriptor of the watch `link` is open on. Looks for this exact serial +
     firmware in our own cache, then SuuntoLink's folder, then assets/; failing all three it

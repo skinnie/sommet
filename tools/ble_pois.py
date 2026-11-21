@@ -26,6 +26,36 @@ from write_nav import (
 )
 
 
+def descriptor_for_ble(link):
+    """The schema that names this watch's SBEM entries, over Bluetooth: the stored copy for
+    the serial + firmware of the watch's hello, else read from the watch itself (0x1104) and
+    cached. None when neither works; the caller then falls back to what it used before.
+
+    Until 2026-11-21 the Bluetooth readers only looked in SuuntoLink's data folder, so on a
+    computer without SuuntoLink (the P5Q's Windows) POIs came back as "CANNOT DECIDE: the
+    SuuntoLink descriptor is missing" and the POIs page stayed empty, while the cable path
+    (write_nav.schema_for_link) had read the watch's own since 2026-10-05."""
+    import sbem_schema                                       # noqa: PLC0415
+    info = getattr(link, "device_info", None)
+    if info is None and hasattr(link, "status"):
+        try:
+            info = link.status().get("device_info")
+        except Exception:                                    # noqa: BLE001
+            info = None
+    info = info or {}
+    path = sbem_schema.stored(info.get("serial"), info.get("fw_version"))
+    if path is not None:
+        return path
+    if getattr(link, "dry_run", False):
+        return None
+    try:
+        return sbem_schema.for_link(link)
+    except Exception as exc:                                 # noqa: BLE001
+        print(f"  note: schema not readable from the watch over Bluetooth ({exc})",
+              file=sys.stderr)
+        return None
+
+
 def read_pois_summary(link):
     """The BLE path for GET /api/pois. `show_entries()` prints rather than returns, same
     as the USB path's `write_nav.py pois` output that `_handle_pois_read` already forwards
@@ -34,7 +64,7 @@ def read_pois_summary(link):
     reply = read_pois(link)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        show_entries(reply, F.POI_ENTRIES)
+        show_entries(reply, F.POI_ENTRIES, descriptor=descriptor_for_ble(link))
     return buf.getvalue()
 
 

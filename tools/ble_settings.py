@@ -46,11 +46,21 @@ def product_id_from_model(model):
     return _MODEL_PRODUCT_ID.get(model)
 
 
+def _descriptor(link, product_id):
+    """The family's own stored descriptor (Kailash, Traverse, Vertical), else the connected
+    watch's own (ble_pois.descriptor_for_ble: stored for its serial + firmware, or read from
+    it), else SuuntoLink's folder as before. The watch's own was missing here, so Settings
+    over Bluetooth only worked on a computer with SuuntoLink's data folder."""
+    from ble_pois import descriptor_for_ble                  # noqa: PLC0415
+    return (descriptor_for_product_id(product_id) or descriptor_for_ble(link)
+            or sbem_schema.default_descriptor())
+
+
 def read_settings(link, model=None):
     """Real 0x1100 read - settings_write.py's own CLI never simulates this even in its
     dry-run mode (only the WRITE step there is optional), so this doesn't either."""
     product_id = product_id_from_model(model)
-    descriptor = descriptor_for_product_id(product_id) or sbem_schema.default_descriptor()
+    descriptor = _descriptor(link, product_id)
     payload = link.command(CMD_SETTINGS_READ, b"\0\0\0\0")
     return read_all(payload, descriptor, product_id)
 
@@ -60,7 +70,7 @@ def write_setting(link, key, value, model=None):
     unchanged, hardware-verified logic. `ok` is only true if write_one()'s own re-read
     confirms the change actually landed - never just that a write was accepted."""
     product_id = product_id_from_model(model)
-    descriptor = descriptor_for_product_id(product_id) or sbem_schema.default_descriptor()
+    descriptor = _descriptor(link, product_id)
     return write_one(link, descriptor, key, value, product_id=product_id)
 
 

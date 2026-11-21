@@ -178,12 +178,14 @@ class Reorder:
 
     def _find(self, chunks, s, middles, e):
         head, tail = chunks[s], chunks[e]
-        if s < e and frame_ok(head + tail):    # a short frame inside a long one
+        if frame_ok(head + tail):              # a short frame, also inside a long one
             return [s, e]
         # A frame's middles are every middle chunk waiting (frames come one at a time: the
         # watch answers one request before the next is sent). Arrival order first.
         if frame_ok(head + b"".join(chunks[m] for m in middles) + tail):
             return [s, *middles, e]
+        if not self._all_here(head, [chunks[m] for m in middles], tail):
+            return None                        # chunks still to come: nothing to search yet
         n = len(middles)
         for i in range(n):
             for j in range(max(0, i - self.MAX_MOVE), min(n, i + self.MAX_MOVE + 1)):
@@ -193,7 +195,33 @@ class Reorder:
                 trial.insert(j, middles[i])
                 if frame_ok(head + b"".join(chunks[m] for m in trial) + tail):
                     return [s, *trial, e]
-        return None
+        # Two separate swaps in one 1 KB reply (P5Q, 2026-11-21, twice in one evening).
+        # Neighbours first: what was seen, and far fewer tries than the wider swaps.
+        swaps = [(i, i + 1) for i in range(n - 1)]
+        swaps += [(i, j) for i in range(n) for j in range(i + 2, min(n, i + self.MAX_MOVE + 1))]
+        for x in range(len(swaps)):
+            a, b2 = swaps[x]
+            for c, d in swaps[x + 1:]:
+                trial = list(middles)
+                trial[a], trial[b2] = trial[b2], trial[a]
+                trial[c], trial[d] = trial[d], trial[c]
+                if frame_ok(head + b"".join(chunks[m] for m in trial) + tail):
+                    return [s, *trial, e]
+        # Every byte is here and no order found: hand it on as it came, now, so the damaged
+        # reply is known at once and the read is asked again (not after a 20 s wait).
+        return [s, *middles, e]
+
+    @staticmethod
+    def _all_here(head, middles, tail):
+        """Whether these chunks hold exactly the bytes the frame's header announces."""
+        # Counted without joining: an escape pair (0x7d + one byte) cut over two chunks only
+        # unescapes when those two are in the right order, which is what is not known yet.
+        start = _slip_unescape(head[1:])
+        if len(start) < 12:
+            return False
+        data = b"".join(middles) + tail[:-1]
+        raw_len = len(head) - 1 + len(data) - (head[1:] + data).count(0x7D)
+        return raw_len == 12 + struct.unpack_from("<I", start, 8)[0] + 4
 
     def _send(self, order, chunks):
         for i in order:
@@ -300,6 +328,11 @@ class Agent:
         self._ready.set()
 
 
+HINT_ADAPTER_STUCK = ("Windows sees the watch but its Bluetooth adapter refuses to connect. "
+                      "Unplug the Bluetooth adapter and plug it back in (or turn Bluetooth off "
+                      "and on in Windows), then choose “Sync now” on the watch.")
+
+
 class LinkState:
     """What `status` reports about the link (the fields ble_server.LinkState gives)."""
 
@@ -344,9 +377,13 @@ def from_buffer(streams, buf):
 class NotifyChannel:
     """The `notify_chrc` ServerLink drives: `.notify(chunk)` and `.notifying`."""
 
-    def __init__(self, chrc, streams, loop, verbose=False):
+    DEAD_AFTER = 2                 # sends in a row that reached no one
+
+    def __init__(self, chrc, streams, loop, verbose=False, on_dead=None):
         self.chrc = chrc
         self.verbose = verbose
+        self._on_dead = on_dead
+        self._misses = 0
         self._streams = streams
         self._loop = loop
         self._queue = collections.deque()
@@ -383,6 +420,13 @@ class NotifyChannel:
                           for r in o.get_results()]
                 if self.verbose or any(st != "SUCCESS" for st in states):
                     print(f"  TX {len(chunk):3d} B  {chunk.hex()}  -> {', '.join(states) or 'no client'}")
+                # The watch left without Windows telling us (P5Q, 2026-11-21: 20 minutes of
+                # UNREACHABLE sends, the link never dropped, so the watch was never dialed again).
+                self._misses = 0 if "SUCCESS" in states else self._misses + 1
+                if self._misses >= self.DEAD_AFTER and self._on_dead is not None:
+                    self._misses = 0
+                    self._queue.clear()
+                    self._loop.call_soon_threadsafe(self._on_dead)
             except Exception as exc:                       # noqa: BLE001
                 print(f"  notify failed: {exc}")
             self._loop.call_soon_threadsafe(self._send_next)
@@ -407,6 +451,7 @@ class WinHost:
         self.known = set()            # addresses of watches already paired with this computer
         self.watcher = None
         self.dialing = False
+        self.fast_fails = 0            # dials in a row refused at once (dial)
         self._reorder = Reorder(self._on_chunk)
         self._order = InOrder(self._reorder.feed)
 
@@ -428,7 +473,8 @@ class WinHost:
         for r, what in ((n, "notify"), (w, "write")):
             if r.error != self.BtError.SUCCESS:
                 raise RuntimeError(f"{what} characteristic: {r.error.name}")
-        self.notify_chrc = NotifyChannel(n.characteristic, self.streams, self.loop, self.verbose)
+        self.notify_chrc = NotifyChannel(n.characteristic, self.streams, self.loop, self.verbose,
+                                         on_dead=lambda: self.drop("the watch is out of reach"))
         self.link = ServerLink(self.notify_chrc, self.timers)
         n.characteristic.add_subscribed_clients_changed(self._on_subscribed)
         w.characteristic.add_write_requested(self._on_write)
@@ -554,7 +600,8 @@ class WinHost:
                 return
             self.device = dev
             self.state.path = dev.name or address_text(address)
-            self.state.pairing_hint = None
+            if self.fast_fails < 3:
+                self.state.pairing_hint = None
             dev.add_connection_status_changed(self._on_connection)
             pairing = dev.device_information.pairing
             print(f"  device '{dev.name}', paired: {pairing.is_paired}")
@@ -571,10 +618,23 @@ class WinHost:
                     await asyncio.sleep(0.1)
                 print(f"  link before pairing: {dev.connection_status.name}")
                 await self.pair(dev)
+            began = time.monotonic()
             res = await dev.get_gatt_services_async(self.CacheMode.UNCACHED)
+            took = time.monotonic() - began
             print(f"  link: {dev.connection_status.name}; the watch's own services: "
-                  f"{len(res.services) if res.services else 0}")
+                  f"{len(res.services) if res.services else 0} ({res.status.name}, {took:.1f} s)")
             self.known.add(address)
+            if dev.connection_status != self.ConnStatus.CONNECTED:
+                # Refused at once, again and again: the adapter is stuck, not the watch out of
+                # reach (that takes Windows several seconds). P5Q, 2026-11-21: after BTHUSB's
+                # "A command sent to the adapter has timed out", every dial failed in under a
+                # second while the watch's adverts still came in.
+                self.fast_fails = self.fast_fails + 1 if took < 2.0 else 0
+                if self.fast_fails >= 3:
+                    self.state.pairing_hint = HINT_ADAPTER_STUCK
+                self.drop(f"could not connect ({res.status.name})", dev)
+                return
+            self.fast_fails = 0
             self.loop.call_later(EMPTY_LINK_S, self._check_empty, dev)
         except Exception as exc:                           # noqa: BLE001
             print(f"  dial failed: {exc}")

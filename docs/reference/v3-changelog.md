@@ -33,6 +33,15 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
     session reads only the new moves instead of the whole log.
   - Home's button reads "Pair / sync by Bluetooth"; the README says to prefer the cable on the
     desktop.
+  - POIs and Settings over Bluetooth name their entries with the watch's own schema (stored
+    for its serial and firmware, or read from the watch), as the cable path does. They only
+    looked in SuuntoLink's data folder, so POIs stayed empty on a computer without SuuntoLink.
+  - Windows: two separate chunk swaps in one reply are repaired; a reply that cannot be
+    repaired is known at once and asked again; a link the watch has left is dropped after two
+    sends reach nobody (it was kept for 20 minutes); a dial refused at once three times in a
+    row shows "unplug the Bluetooth adapter and plug it back in" (the P5Q's CSR stick hung:
+    BTHUSB "A command sent to the adapter has timed out", cleared by replugging).
+  - Choosing a device in the Pair dialog no longer also opens Activities.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
   is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
   doesn't work this way people tell us"). A saved "off" from the old switch is ignored.

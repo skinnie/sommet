@@ -1297,6 +1297,11 @@ PageFlickable {
                                     HoverHandler { id: choiceHover; cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
                                         enabled: modelData.enabled
+                                        // Takes the tap for itself. With the default policy the
+                                        // same tap also reached the Last Activity card lying
+                                        // under the dialog, which opens Activities (André,
+                                        // 2026-11-21: "when I clicked pair, it went to activities").
+                                        gesturePolicy: TapHandler.ReleaseWithinBounds
                                         onTapped: {
                                             pairDialog.close();
                                             if (modelData.kind === "watch") DeviceService.connectBle(false);

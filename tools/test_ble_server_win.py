@@ -126,6 +126,32 @@ def test_reorder_slow_long_reply():
     assert [m.command for m in got if m.crc_ok][-1] == 0x0002
 
 
+def test_reorder_two_swaps_and_an_unrepairable_reply():
+    """Two separate neighbour swaps in one 1 KB reply, one beside an escape pair cut over two
+    chunks (the P5Q, 2026-11-21, 21:32 and 22:24: each ended a move sync). And a reply with
+    every byte here but no order that fits goes on at once, so the read is asked again."""
+    import random
+    rnd = random.Random(11)
+    payload = bytes(rnd.randrange(256) for _ in range(1032))
+    frame = encode_nsp_frame(0x0B17, payload, 0x0A, 9, 0x21)
+    chunks = [frame[i:i + 20] for i in range(0, len(frame), 20)]
+    cut = next(i for i, c in enumerate(chunks[1:-2], 1) if c[-1] == 0x7D) if any(
+        c[-1] == 0x7D for c in chunks[1:-2]) else 16
+    shuffled = list(chunks)
+    shuffled[cut], shuffled[cut + 1] = shuffled[cut + 1], shuffled[cut]
+    far = 40 if cut < 30 else 5
+    shuffled[far], shuffled[far + 1] = shuffled[far + 1], shuffled[far]
+    got = _reassembled(shuffled)
+    assert len(got) == 1 and got[0].crc_ok and got[0].payload == payload
+    # a middle chunk with one byte changed: complete, unrepairable, handed on without waiting
+    broken = list(chunks)
+    broken[10] = bytes([broken[10][0] ^ 0x01]) + broken[10][1:]
+    if 0x7E in broken[10] or 0x7D in broken[10] or 0x7D in chunks[10]:
+        broken[10] = chunks[10][::-1]
+    got = _reassembled(broken)
+    assert len(got) == 1 and got[0].crc_ok is False and got[0].command == 0x0B17
+
+
 def test_reorder_gives_up_on_a_damaged_frame():
     now = [0.0]
     asm, got = NspAssembler(), []
@@ -209,6 +235,7 @@ if __name__ == "__main__":
     test_reorder_real_opener()
     test_reorder_long_frame()
     test_reorder_slow_long_reply()
+    test_reorder_two_swaps_and_an_unrepairable_reply()
     test_reorder_gives_up_on_a_damaged_frame()
     test_is_watch()
     test_tcp_control_through_the_bridge()
