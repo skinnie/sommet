@@ -20,6 +20,8 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   and logged a warning for each one: 2,194 of 10,774 log lines in one P5Q run, poured out each
   time a page opened (the 0.6-1.2 s freezes when opening a page). The app now uses the Fusion
   style everywhere, as Linux already did (Linux screenshots unchanged).
+- Cycling and Indoor cycling icons redrawn (André: "kinda bizarre"): a road bike with saddle and
+  handlebar, and a spin bike with flywheel and floor bar. Desktop and Android share them.
 
 ## 2026-11-20: Watch read with nothing new skips the log
 
