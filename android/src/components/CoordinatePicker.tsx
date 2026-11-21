@@ -40,7 +40,8 @@ export function CoordinatePicker({
     if (visible) { setLat(initialLat); setLon(initialLon); }
   }, [visible, initialLat, initialLon]);
 
-  // A tap moves the marker and posts the coordinate back. Nothing is written to the watch here -
+  // A double-tap moves the marker and posts the coordinate back (André, 2026-11-21: same as the
+  // POI map; a single tap went off while dragging). Double-tap zoom is off, pinch zooms. Nothing is written to the watch here -
   // the caller still has to confirm, matching this app's "explicit tap for any write" rule.
   const html = `<!DOCTYPE html>
 <html><head>
@@ -51,12 +52,12 @@ export function CoordinatePicker({
 </head><body>
 <div id="map"></div>
 <script>
-  var map = L.map('map', { zoomControl: true });
+  var map = L.map('map', { zoomControl: true, doubleClickZoom: false });
   ${mapTileLayersJs(provider, TILE_CACHE_DIR_URI)}
   map.setView([${initialLat || 0}, ${initialLon || 0}], ${initialLat || initialLon ? 13 : 2});
 
   var marker = L.marker([${initialLat || 0}, ${initialLon || 0}]).addTo(map);
-  map.on('click', function(e) {
+  map.on('dblclick', function(e) {
     marker.setLatLng(e.latlng);
     window.ReactNativeWebView.postMessage(JSON.stringify({
       type: 'PICK', lat: e.latlng.lat, lon: e.latlng.lng
@@ -106,6 +107,7 @@ export function CoordinatePicker({
           <Text style={[styles.coord, { color: t.text }]}>
             {lat.toFixed(6)}, {lon.toFixed(6)}
           </Text>
+          <Text style={{ color: t.mutedText, fontSize: v3Type.caption }}>Double-tap the map to choose the point.</Text>
           <View style={styles.actions}>
             <TouchableOpacity
               onPress={onCancel}

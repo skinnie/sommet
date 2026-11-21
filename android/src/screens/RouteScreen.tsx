@@ -17,6 +17,7 @@ import { Card } from '../components/ui/Card';
 import { Button, Dropdown, EmptyState, StatusNote } from '../components/ui/primitives';
 import { buildRoutePins } from '../services/RoutePins';
 import { TrackPreview } from '../components/TrackPreview';
+import { LockableScrollView } from '../components/ScrollLock';
 import { SortBar } from '../components/ui/SortBar';
 import { getViewMode, setViewMode as persistViewMode, sortItems, sortKeysFor, SortKey, ViewMode } from '../services/ListViewPrefs';
 import { ViewModeToggle } from '../components/ui/ViewModeToggle';
@@ -335,7 +336,7 @@ export default function RouteScreen() {
   }
 
   return (
-    <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content}>
+    <LockableScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.content}>
 
       {/* Route-planner help dialog - the tools that produce a GPX this screen can import.
           Links open in the browser (Linking.openURL), matching desktop's RoutesPage. */}
@@ -527,7 +528,7 @@ export default function RouteScreen() {
         </Pressable>
       </Modal>
 
-    </ScrollView>
+    </LockableScrollView>
   );
 }
 

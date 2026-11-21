@@ -509,6 +509,7 @@ const fr = {
   poiRemoveLegacy: 'Retirer un POI n’est pas encore possible sur l’Ambit1 et l’Ambit2.',
   poiItemAddBtn: 'Ajouter',
   poiCoords: (lat: number, lon: number) => `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+  poiMapHint: 'Maintenez la carte pour la déplacer, pincez pour zoomer, touchez deux fois pour y placer le POI.',
 
   // SettingsScreen — Ambit3 Settings (2026-08-08)
   ambitSettingsSection: 'Réglages de la montre',
@@ -1447,6 +1448,7 @@ const en: typeof fr = {
   poiRemoveLegacy: 'Removing a POI is not available on the Ambit1 and Ambit2 yet.',
   poiItemAddBtn: 'Add',
   poiCoords: (lat: number, lon: number) => `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+  poiMapHint: 'Hold the map still to drag it, pinch to zoom, double-tap to put the POI there.',
 
   // SettingsScreen — Ambit3 Settings (2026-08-08)
   ambitSettingsSection: 'Watch settings',

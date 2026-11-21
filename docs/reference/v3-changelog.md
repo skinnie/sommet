@@ -7,6 +7,20 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-21: Android: maps inside pages move by touch; POI by double-tap
+
+- Maps inside a page (POIs, Routes, Kailash places, Garmin POIs and routes) were fixed pictures.
+  A quick swipe still scrolls the page; a finger held still for 0.3 s grabs the map (green
+  frame), the page stops scrolling and the drag moves the map; two fingers pinch-zoom (André:
+  "press and drag"). Activity cards stay pictures: a long-press there deletes the move.
+- POI form: the map is bigger, opens on the weather place before a POI is chosen, and a
+  double-tap puts the POI there. The Kailash home picker also picks by double-tap now (a single
+  tap went off while dragging); pinch zooms.
+- Sommet Sync banner: "Checking with your server" while comparing, "Sending" only for what goes
+  (it said "Sending 3,600 / 4,696" on every sync while nothing was sent).
+- Checked on the tablet: hold (frame shows, no zoom change) and hold-drag on a Routes map.
+  Pinch and double-tap only by unit tests (adb sends one finger; the POI page needs the watch).
+
 ## 2026-11-21: Desktop: map drag in scrolling pages on Windows; POI picker uses right-click
 
 - On the Windows build (Qt 6.10) the Routes and POI maps showed the drag hand but the page still

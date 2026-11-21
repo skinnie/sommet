@@ -71,6 +71,7 @@ import { useV3Theme } from '../theme/v3';
 import { Card } from '../components/ui/Card';
 import { WeatherCard } from '../components/WeatherCard';
 import { TrackPreview } from '../components/TrackPreview';
+import { LockableScrollView } from '../components/ScrollLock';
 import { NavShell, NavShellItem } from '../navigation/NavShell';
 import { useNavMenu } from '../navigation/MenuContext';
 import { menuBottomRoom } from '../navigation/MenuHost';
@@ -1270,7 +1271,7 @@ export default function HomeScreen() {
 
   return (
     <NavShell items={navItems} selectedId="home">
-    <ScrollView
+    <LockableScrollView
       style={styles.scroll}
       // Home is the only screen with headerShown:false (App.tsx), so nothing else reserves
       // the top safe area for it. On a notched/Dynamic-Island iPhone (e.g. the 13 mini,
@@ -1838,7 +1839,7 @@ export default function HomeScreen() {
         ? <StatusNote text={statusText} tone={statusNoteTone} style={{ width: '100%', maxWidth: roomy ? 960 : CONTENT_MAX_WIDTH }} />
         : <StatusLine text={statusText} tone={statusTone} />)}
 
-    </ScrollView>
+    </LockableScrollView>
     </NavShell>
   );
 }

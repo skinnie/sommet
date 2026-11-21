@@ -40,7 +40,7 @@ export function ActivityThumbnail({ gpxPath, height = 90, sport, seed }: {
 
   if (points === null) return null;
   if (points.length === 0) return <SportPicture sport={sport} seed={seed ?? gpxPath} height={height} />;
-  return <TrackPreview points={points} height={height} />;
+  return <TrackPreview points={points} height={height} interactive={false} />;   // a long-press on the card deletes
 }
 
 // Light library (sync/13): an older move whose Track is kept on the server. Its sport shows

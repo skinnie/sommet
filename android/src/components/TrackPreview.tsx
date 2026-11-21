@@ -1,11 +1,21 @@
-import React, { useCallback, useState } from 'react';
-import { View, Image, Text, StyleSheet, LayoutChangeEvent } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Image, Text, StyleSheet, LayoutChangeEvent, PanResponder, GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { useV3Theme } from '../theme/v3';
 import { getMapProvider, MapProvider } from '../services/MapProviderService';
 import { fitBoundsMosaic, centeredPointMosaic, tileUrl, TileMosaic, TRACK_COLOR, TILE_HEADERS } from '../services/MapTile';
 import { t } from '../i18n';
+import { MapView as PanZoomView, layoutView, panView, viewFromMosaic, zoomView } from '../services/MapPanZoom';
+import { useScrollLock } from './ScrollLock';
+
+// Touch (André, 2026-11-21: "press and drag and for poi, double tap"). A quick swipe on the map
+// still scrolls the page; a finger held still for HOLD_MS grabs the map (a green frame shows
+// it), the page stops scrolling and the drag moves the map. Two fingers pinch-zoom. A
+// double-tap calls onDoubleTap with the point (the POI form puts the POI there).
+const HOLD_MS = 300;
+const SLOP = 10;
+const DOUBLE_TAP_MS = 300;
 
 // v3.0 UI port, revised 2026-08-10 ("apply the same fix as we did on the desktop, centering
 // the gpx for POIs and Routes on the maps. for routes allow the cards to have different
@@ -23,7 +33,13 @@ import { t } from '../i18n';
 // pick a zoom/scale) renders on the next pass.
 export function TrackPreview({
   points, height = 100, markerOnly = false, variableHeight = false, multiMarker = false,
+  interactive = true, onDoubleTap, fallbackCenter,
 }: {
+  // No point yet (the POI form before a place is chosen): show the map here, without a pin.
+  fallbackCenter?: { lat: number; lon: number };
+  // false: a fixed picture (activity cards, where a long-press already deletes the move).
+  interactive?: boolean;
+  onDoubleTap?: (lat: number, lon: number) => void;
   points: { lat: number; lon: number }[];
   height?: number;
   markerOnly?: boolean;
@@ -50,6 +66,87 @@ export function TrackPreview({
   useFocusEffect(useCallback(() => { getMapProvider().then(setProvider); }, []));
   const [boxWidth, setBoxWidth] = useState<number | null>(null);
 
+  // ---- pan and pinch (null view = the fitted picture, until the first grab) ----
+  const scrollLock = useScrollLock();
+  const [view, setView] = useState<PanZoomView | null>(null);
+  const [grabbed, setGrabbed] = useState(false);
+  const viewRef = useRef<PanZoomView | null>(null);
+  const fittedRef = useRef<PanZoomView | null>(null);
+  const layoutRef = useRef<ReturnType<typeof layoutView> | null>(null);
+  const g = useRef({ armed: false, locked: false, timer: null as ReturnType<typeof setTimeout> | null,
+                     x0: 0, y0: 0, t0: 0, moved: false, lastX: 0, lastY: 0,
+                     pinchD0: 0, pinchZ0: 0, lastTapT: 0, lastTapX: 0, lastTapY: 0 }).current;
+  const pointsKey = points.map(p => `${p.lat},${p.lon}`).join(';');
+  useEffect(() => { viewRef.current = null; setView(null); }, [pointsKey]);   // new data: fit again
+  const setV = (v: PanZoomView) => { viewRef.current = v; setView(v); };
+  const release = () => {
+    if (g.timer) { clearTimeout(g.timer); g.timer = null; }
+    g.armed = false; g.pinchD0 = 0;
+    if (g.locked) { g.locked = false; scrollLock.unlock(); }
+    setGrabbed(false);
+  };
+  const grab = () => {
+    g.armed = true;
+    if (!g.locked) { g.locked = true; scrollLock.lock(); }
+    if (!viewRef.current && fittedRef.current) setV(fittedRef.current);
+    setGrabbed(true);
+  };
+  useEffect(() => () => { if (g.timer) clearTimeout(g.timer); if (g.locked) scrollLock.unlock(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const spread = (e: GestureResponderEvent) => {
+    const ts = e.nativeEvent.touches;
+    return ts.length < 2 ? 0 : Math.hypot(ts[0].pageX - ts[1].pageX, ts[0].pageY - ts[1].pageY);
+  };
+  const responder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: () => g.armed,
+    onMoveShouldSetPanResponderCapture: () => g.armed,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (_e, gs) => { g.lastX = gs.moveX; g.lastY = gs.moveY; },
+    onPanResponderMove: (e, gs) => {
+      const v = viewRef.current; if (!v) return;
+      const d = spread(e);
+      if (d > 0) {
+        if (!g.pinchD0) { g.pinchD0 = d; g.pinchZ0 = v.zf; }
+        setV(zoomView(v, g.pinchZ0, d / g.pinchD0));
+      } else {
+        g.pinchD0 = 0;
+        setV(panView(v, gs.moveX - g.lastX, gs.moveY - g.lastY));
+      }
+      g.lastX = gs.moveX; g.lastY = gs.moveY;
+    },
+    onPanResponderRelease: () => release(),
+    onPanResponderTerminate: () => release(),
+  }), []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const touchHandlers = interactive ? {
+    onTouchStart: (e: GestureResponderEvent) => {
+      const ts = e.nativeEvent.touches;
+      if (ts.length >= 2) { grab(); return; }
+      g.x0 = e.nativeEvent.pageX; g.y0 = e.nativeEvent.pageY; g.t0 = Date.now(); g.moved = false;
+      if (g.timer) clearTimeout(g.timer);
+      g.timer = setTimeout(() => { g.timer = null; if (!g.moved) grab(); }, HOLD_MS);
+    },
+    onTouchMove: (e: GestureResponderEvent) => {
+      if (Math.hypot(e.nativeEvent.pageX - g.x0, e.nativeEvent.pageY - g.y0) > SLOP) {
+        g.moved = true;
+        if (!g.armed && g.timer) { clearTimeout(g.timer); g.timer = null; }   // a swipe: the page scrolls
+      }
+    },
+    onTouchEnd: (e: GestureResponderEvent) => {
+      if (e.nativeEvent.touches.length > 0) return;
+      const wasArmed = g.armed;
+      const quickTap = !g.moved && Date.now() - g.t0 < HOLD_MS;
+      release();
+      if (wasArmed || !quickTap || !onDoubleTap) return;
+      const now = Date.now(), x = e.nativeEvent.locationX, y = e.nativeEvent.locationY;
+      if (now - g.lastTapT < DOUBLE_TAP_MS && Math.hypot(x - g.lastTapX, y - g.lastTapY) < 40) {
+        g.lastTapT = 0;
+        const at = layoutRef.current ? layoutRef.current.latLonAt(x, y) : null;
+        if (at) onDoubleTap(at.lat, at.lon);
+      } else { g.lastTapT = now; g.lastTapX = x; g.lastTapY = y; }
+    },
+    onTouchCancel: () => release(),
+  } : {};
+
   // Real bug, found live (2026-08-10) - some real synced activities carry a garbage GPS fix
   // (an out-of-range or non-finite lat/lon - the watch's own GPS chip emitting a value
   // before it has a real lock). Math.tan()/Math.log() on an out-of-range latitude produces
@@ -69,7 +166,9 @@ export function TrackPreview({
   // data, soft color to not hurt the rest") - was a flat, empty box; a real placeholder now,
   // the same map-shaped visual language (rounded card, a faint terrain-line glyph) instead
   // of just nothing.
-  if (!hasMultiPoint && !hasSinglePoint && !hasMultiMarker) {
+  const centerOnly = !hasMultiPoint && !hasSinglePoint && !hasMultiMarker && !!fallbackCenter
+    && Number.isFinite(fallbackCenter.lat) && Number.isFinite(fallbackCenter.lon);
+  if (!hasMultiPoint && !hasSinglePoint && !hasMultiMarker && !centerOnly) {
     return (
       <View style={[styles.box, styles.noDataBox, { height, backgroundColor: theme.background }]}>
         <Svg width={30} height={30} viewBox="0 0 24 24">
@@ -95,25 +194,34 @@ export function TrackPreview({
     return <View style={[styles.box, { height, backgroundColor: theme.background }]} onLayout={onLayout} />;
   }
 
-  const mosaic: TileMosaic = hasSinglePoint
+  const mosaic: TileMosaic = centerOnly
+    ? centeredPointMosaic(fallbackCenter!.lat, fallbackCenter!.lon, boxWidth, height, 13)
+    : hasSinglePoint
     ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, 15)
     : hasMultiMarker && validPoints.length === 1
     ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, 6)
     : fitBoundsMosaic(validPoints, boxWidth, variableHeight ? {} : { targetHeight: height });
 
-  const projected = validPoints.map(p => mosaic.project(p.lat, p.lon));
+  fittedRef.current = viewFromMosaic(mosaic);
+  // Once grabbed, the owner's view; before that, the fitted picture (the same view, to the pixel).
+  const lay = layoutView(view ?? fittedRef.current, mosaic.contentWidth, mosaic.contentHeight);
+  layoutRef.current = lay;
+  const drawn = view ? { z: lay.z, tiles: lay.tiles, project: lay.project } : mosaic;
+  const projected = validPoints.map(p => drawn.project(p.lat, p.lon));
 
   return (
-    <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}>
-      {mosaic.tiles.map(tile => (
+    <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}
+          {...touchHandlers} {...(interactive ? responder.panHandlers : {})}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {drawn.tiles.map(tile => (
         <Image
-          key={`${mosaic.z}-${tile.x}-${tile.y}`}
-          source={{ uri: tileUrl(provider, mosaic.z, tile.x, tile.y), headers: TILE_HEADERS }}
+          key={'key' in tile ? (tile as { key: string }).key : `${drawn.z}-${tile.x}-${tile.y}`}
+          source={{ uri: tileUrl(provider, drawn.z, tile.x, tile.y), headers: TILE_HEADERS }}
           style={{ position: 'absolute', left: tile.left, top: tile.top, width: tile.size, height: tile.size }}
         />
       ))}
       <Svg width={mosaic.contentWidth} height={mosaic.contentHeight} style={StyleSheet.absoluteFill}>
-        {hasMultiMarker ? (
+        {centerOnly ? null : hasMultiMarker ? (
           projected.map((p, i) => (
             <React.Fragment key={i}>
               <Circle cx={p.x} cy={p.y} r={12} fill={TRACK_COLOR} opacity={0.18} />
@@ -151,6 +259,8 @@ export function TrackPreview({
           </>
         )}
       </Svg>
+      {grabbed && <View style={[StyleSheet.absoluteFill, styles.grabbed]} />}
+      </View>
     </View>
   );
 }
@@ -159,4 +269,5 @@ const styles = StyleSheet.create({
   box: { width: '100%', borderRadius: 12, overflow: 'hidden' },
   noDataBox: { alignItems: 'center', justifyContent: 'center', gap: 6 },
   noDataText: { fontSize: 11, fontWeight: '600' },
+  grabbed: { borderWidth: 2, borderColor: TRACK_COLOR, borderRadius: 12 },
 });

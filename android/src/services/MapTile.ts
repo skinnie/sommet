@@ -52,7 +52,7 @@ export function tileUrl(provider: MapProvider, z: number, x: number, y: number):
 // the same formula every slippy map uses (MapView.qml's own header comment calls it "the
 // same formula every slippy map uses"; IGN's WMTS TILEMATRIXSET=PM is the same
 // Pseudo-Mercator XYZ scheme, see MapHtml.ts).
-function worldPixel(lat: number, lon: number, z: number): { x: number; y: number } {
+export function worldPixel(lat: number, lon: number, z: number): { x: number; y: number } {
   const latRad = (lat * Math.PI) / 180;
   const world = TILE_SIZE * 2 ** z;
   return {
@@ -68,6 +68,18 @@ export interface TileMosaic {
   tiles: { x: number; y: number; left: number; top: number; size: number }[];
   // Real lat/lon -> display-pixel coordinates within [0,contentWidth] x [0,contentHeight].
   project: (lat: number, lon: number) => { x: number; y: number };
+  // The view's centre in world pixels at zoom z, and display pixels per world pixel: where a
+  // map the owner pans and pinches (TrackPreview) starts from.
+  centerWorld: { x: number; y: number };
+  scale: number;
+}
+
+/** World pixel at zoom z -> lat/lon (the inverse of worldPixel). */
+export function worldToLatLon(x: number, y: number, z: number): { lat: number; lon: number } {
+  const world = TILE_SIZE * 2 ** z;
+  const lon = (x / world) * 360 - 180;
+  const n = Math.PI * (1 - (2 * y) / world);
+  return { lat: (Math.atan(Math.sinh(n)) * 180) / Math.PI, lon };
 }
 
 interface FitOpts {
@@ -123,6 +135,8 @@ function buildMosaic(
 
   return {
     z, contentWidth, contentHeight, tiles,
+    centerWorld: { x: originX + contentWidth / 2 / scale, y: originY + contentHeight / 2 / scale },
+    scale,
     project: (lat, lon) => {
       const p = worldPixel(lat, lon, z);
       return toDisplay(p.x, p.y);

@@ -13,6 +13,7 @@ import type { RootStackParamList } from '../../App';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Button, ExportedFileRow, Section, WarningNote, StatusNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
+import { LockableScrollView } from '../components/ScrollLock';
 import { buildEtrexGpx } from '../services/EtrexExport';
 
 /*
@@ -130,7 +131,7 @@ export default function GarminRouteScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <LockableScrollView style={styles.root} contentContainerStyle={styles.content}>
 
       {/* ── Send a route to the device (SD card only) ── */}
       <Section title={t.garminRouteSendSection} description={t.garminRouteSendDesc}>
@@ -217,7 +218,7 @@ export default function GarminRouteScreen() {
         ))}
       </Section>
 
-    </ScrollView>
+    </LockableScrollView>
   );
 }
 

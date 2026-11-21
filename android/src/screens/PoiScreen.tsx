@@ -13,6 +13,8 @@ import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
 import { Button, FieldRow } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
+import { LockableScrollView } from '../components/ScrollLock';
+import { getWeatherLocation } from '../services/WeatherService';
 import { getViewMode, setViewMode as persistViewMode, ViewMode } from '../services/ListViewPrefs';
 import { ViewModeToggle } from '../components/ui/ViewModeToggle';
 
@@ -216,7 +218,7 @@ export default function PoiScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <LockableScrollView style={styles.root} contentContainerStyle={styles.content}>
 
       {/* ── Add a POI ── */}
       {/* POI note dialog: what happens to POIs sent to the watch (André, 2026-08-17), same
@@ -267,10 +269,16 @@ export default function PoiScreen() {
           ))}
         </ScrollView>
         <View style={{ marginTop: v3Spacing.small }}>
+          {/* Hold still to grab and drag the map, pinch to zoom, double-tap to put the POI
+              there (André, 2026-11-21). Before a place is chosen it opens on the weather place. */}
           <TrackPreview
             points={hasValidCoords ? [{ lat: parsedLat, lon: parsedLon }] : []}
             markerOnly
+            height={220}
+            fallbackCenter={{ lat: getWeatherLocation().latitude, lon: getWeatherLocation().longitude }}
+            onDoubleTap={(lat, lon) => { setPoiLat(lat.toFixed(6)); setPoiLon(lon.toFixed(6)); }}
           />
+          <Text style={styles.itemStats}>{t.poiMapHint}</Text>
         </View>
         <Button label={t.poiAddBtn} variant="filled" loading={poiBusy} disabled={poiBusy} onPress={handleAddPoi} style={{ marginTop: v3Spacing.small }} />
       </Card>
@@ -337,7 +345,7 @@ export default function PoiScreen() {
         ))}
       </Card>
 
-    </ScrollView>
+    </LockableScrollView>
   );
 }
 
