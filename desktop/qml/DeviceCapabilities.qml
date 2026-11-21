@@ -59,6 +59,8 @@ QtObject {
     // through write_nav.py delpoi/delroute (the Android app's own removal, ported). Ambit1/2
     // keep theirs in the legacy waypoint region, which this does not write.
     property bool supportsNavRemove: !_isKailash && !_isLegacy
+    // Ambit1/2 POIs too: the whole waypoint list is rewritten without the POI (2026-11-21).
+    property bool supportsPoiRemove: !_isKailash
 
     // ---- POI types: the list the connected watch knows -------------------------------------
     // The type byte of a POI is the icon the watch draws. The Ambit3 family has 18 (0-17, Lars's

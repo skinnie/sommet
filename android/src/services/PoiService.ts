@@ -2,6 +2,7 @@ import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connect, disconnect, addPoi, pickGpxFile, readPoiListRaw, saveToDownloads, getDeviceInfo, readLegacyNav, setPoiListRaw } from '../native/AmbitUsbModule';
 import { isAmbit12 } from './AmbitSettingsService';
+import { removeLegacyPois } from './AmbitLegacyNav';
 import { parseGpxWaypoints } from './RouteGpxParser';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { saveWatchBackup } from './WatchBackup';
@@ -191,7 +192,13 @@ export async function removePoisFromWatch(targets: WatchPoi[]): Promise<RemovePo
   await connect();
   try {
     const info = await getDeviceInfo();
-    if (isAmbit12(info.name)) throw new Error(t.poiRemoveLegacy);
+    if (isAmbit12(info.name)) {
+      // Ambit1/2: the whole waypoint list is rewritten without them, as SuuntoLink does.
+      const r = await removeLegacyPois(targets, json =>
+        saveWatchBackup('POIs', bytesToBase64(Uint8Array.from(json, c => c.charCodeAt(0) & 0xff)), info.serial ?? ''));
+      console.log(`[pois] Ambit1/2 copy saved before removing: ${r.backupPath}`);
+      return { left: r.left, emptyCleared: 0, backupPath: r.backupPath };
+    }
     const b64 = (await readPoiListRaw()) ?? '';
     const bytes = b64 ? base64ToBytes(b64) : new Uint8Array(0);
     const { keep, empty } = poisToKeep(poiEntries(bytes), targets);

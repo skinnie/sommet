@@ -782,7 +782,7 @@ PageFlickable {
 
                             RoundedButton {
                                 id: poiRemoveButton
-                                visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsNavRemove
+                                visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsPoiRemove
                                 enabled: !PoiService.removing
                                 text: qsTr("Remove")
                                 danger: true

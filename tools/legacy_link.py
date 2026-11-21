@@ -283,6 +283,59 @@ def waypoints_restore(waypoints):
     return info
 
 
+def waypoints_without(waypoints, name, lat, lon, tol=1e-5):
+    """The waypoint list with ONE POI taken out: the first standalone waypoint (no route, or a
+    route name only it carries - the same rule as the server's _legacy_route_groups) whose name
+    and position match. Route turn-points are never removed here. Returns (keep, removed);
+    removed is None when nothing matched."""
+    counts = {}
+    for w in waypoints:
+        rn = str(w.get("route_name", "")).strip()
+        if rn:
+            counts[rn] = counts.get(rn, 0) + 1
+    keep, removed = [], None
+    for w in waypoints:
+        rn = str(w.get("route_name", "")).strip()
+        standalone = not rn or counts.get(rn, 0) < 2
+        if (removed is None and standalone and str(w.get("name", "")) == name
+                and abs(float(w.get("lat", 0.0)) - lat) < tol
+                and abs(float(w.get("lon", 0.0)) - lon) < tol):
+            removed = w
+            continue
+        keep.append(w)
+    return keep, removed
+
+
+def poi_remove(name, lat, lon, backup_dir):
+    """Remove one POI from an Ambit1/2, keeping every other waypoint (André, 2026-11-21).
+    SuuntoLink itself manages this family's POIs by rewriting the whole list - write_start,
+    0x0b04 empties it, one 0x0b05 per waypoint (assets/pcap/ambit2_suuntolink_settings_
+    sportmodes.pcap) - so removing one is that same write without it: a copy of the list goes
+    to <backup_dir>/POIs/ambit1-2/ first, the rest is written back (waypoints_restore), the
+    list is re-read and checked, and on a failed check the copy is written back once."""
+    info = waypoints()
+    if not info.get("ok"):
+        raise RuntimeError(info.get("error", "could not read the POIs"))
+    wps = info.get("waypoints", [])
+    keep, removed = waypoints_without(wps, name, lat, lon)
+    if removed is None:
+        raise RuntimeError(f"no POI named {name!r} at that position on the watch")
+    import time                                              # noqa: PLC0415
+    folder = pathlib.Path(backup_dir) / "POIs" / "ambit1-2"
+    folder.mkdir(parents=True, exist_ok=True)
+    backup = folder / time.strftime("waypoints-%Y%m%d-%H%M%S.json")
+    backup.write_text(json.dumps(wps, indent=1))
+    waypoints_restore(keep)
+    back = waypoints()
+    got = back.get("waypoints", []) if back.get("ok") else None
+    if got is None or len(got) != len(keep):
+        waypoints_restore(wps)
+        raise RuntimeError("the watch did not keep the new list; the copy was written back "
+                           f"({backup})")
+    return {"ok": True, "removed": removed.get("name", ""), "left": len(keep),
+            "backup": str(backup)}
+
+
 def read_route_region():
     """The raw route-region bytes (used extent only), for a byte-exact backup. Returns None when
     the watch has no routes (no head magic). Mirrors routes() but returns the raw blob, not a

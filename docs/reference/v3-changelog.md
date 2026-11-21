@@ -7,6 +7,20 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-21: Remove a POI on the Ambit1 and Ambit2
+
+- It said "not available yet" on desktop and tablet. SuuntoLink itself rewrites this family's
+  whole POI list every time (write_start, 0x0b04 empties it, one 0x0b05 per waypoint: the Ambit2
+  capture), so removing one is that same write without it: a copy of the list is saved first,
+  route turn-points stay, the routes are kept, the list is read back and checked, and on a failed
+  check the copy goes back. Desktop: legacy_link.poi_remove; tablet: AmbitLegacyNav.removeLegacyPois.
+- Checked without a watch: from the 33 waypoints SuuntoLink sent the Ambit2, one removed, the
+  other 32 pack byte for byte as SuuntoLink sent them (tools/test_legacy_poi_remove.py). The
+  list write is the one proven on a real Ambit1 and Ambit2 on 2026-08-27 (backup/restore); a
+  removal itself has not been seen on a watch.
+- Desktop: the hand cursor now shows on the Activities maps (a full-page mouse-Back catcher set
+  the cursor there). The firmware page's coverage note is gone (André).
+
 ## 2026-11-21: Android: maps inside pages move by touch; POI by double-tap
 
 - Maps inside a page (POIs, Routes, Kailash places, Garmin POIs and routes) were fixed pictures.

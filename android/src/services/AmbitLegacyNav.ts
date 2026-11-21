@@ -154,6 +154,22 @@ export async function backupLegacyWaypoints(): Promise<LegacyWaypoint[] | null> 
   }
 }
 
+/** Writes the whole waypoint list, keeping the routes (the list write's 0x0b04 may clear them):
+ * snapshots the route region, writes the waypoints, re-writes the routes, then checks the count
+ * read back. The connection must be open. */
+async function writeWaypointsKeepingRoutes(wps: LegacyWaypoint[]): Promise<void> {
+  const routeSnap = await readLegacyRouteRegion().catch(() => null);
+  const n = await writeLegacyWaypoints(bytesToBase64(encodeWaypoints(wps)));
+  if (n < 0) throw new Error('The watch did not accept the waypoint write.');
+  if (routeSnap) {
+    const ok = await writeLegacyRegion(ROUTE_REGION, bytesToBase64(routeSnap.bytes), ROUTE_COMMIT_EXTRA);
+    if (!ok) throw new Error('POIs written, but re-writing the routes failed - check the watch.');
+  }
+  const back = JSON.parse(await readLegacyNav());
+  const got = (back?.waypoints ?? []).length;
+  if (got !== wps.length) throw new Error(`Waypoints did not read back (${got}/${wps.length}).`);
+}
+
 /** Restore waypoints (POIs) to the connected Ambit1/2 (destructive: replaces all POIs). Route-safe:
  * snapshots the route region, writes the waypoints (which clears the whole nav list), then re-writes
  * the routes so they survive. Verifies the waypoint count read back. */
@@ -161,24 +177,50 @@ export async function restoreLegacyWaypoints(wps: LegacyWaypoint[]): Promise<{ c
   const overBle = isBleTransportActive();
   if (!overBle) await connect();
   try {
-    // 1. snapshot current routes (the waypoint write's 0x0b04 may clear them)
-    const routeSnap = await readLegacyRouteRegion().catch(() => null);
-    // 2. write the waypoints (write_start + nav_memory_delete + per-waypoint)
-    const n = await writeLegacyWaypoints(bytesToBase64(encodeWaypoints(wps)));
-    if (n < 0) throw new Error('The watch did not accept the waypoint write.');
-    // 3. re-write the routes we snapshotted, so restoring POIs never destroys routes
-    if (routeSnap) {
-      const ok = await writeLegacyRegion(ROUTE_REGION, bytesToBase64(routeSnap.bytes), ROUTE_COMMIT_EXTRA);
-      if (!ok) throw new Error('POIs restored, but re-writing the routes failed - check the watch.');
-    }
-    // 4. verify: re-read the nav list, confirm the waypoint count matches
-    const back = JSON.parse(await readLegacyNav());
-    const got = (back?.waypoints ?? []).length;
-    if (got !== wps.length) throw new Error(`Waypoints did not read back (${got}/${wps.length}).`);
+    await writeWaypointsKeepingRoutes(wps);
     return { count: wps.length };
   } finally {
     if (!overBle) await disconnect().catch(() => {});
   }
+}
+
+/** The list without the given POIs: each target takes the first standalone waypoint (no route,
+ * or a route name no other waypoint shares - the POI screen's own rule) with its name and
+ * position. Route turn-points are never taken. Same rule as desktop legacy_link.waypoints_without. */
+export function legacyWaypointsWithout(
+  wps: LegacyWaypoint[], targets: { name: string; latitude: number; longitude: number }[],
+): { keep: LegacyWaypoint[]; removed: number } {
+  const rn = new Map<string, number>();
+  for (const w of wps) { const r = w.routeName.trim(); if (r) rn.set(r, (rn.get(r) ?? 0) + 1); }
+  const taken = new Set<number>();
+  for (const tg of targets) {
+    const i = wps.findIndex((w, k) => !taken.has(k)
+      && (!w.routeName.trim() || (rn.get(w.routeName.trim()) ?? 0) < 2)
+      && (w.name || 'POI') === tg.name
+      && Math.abs(w.lat_e7 / 1e7 - tg.latitude) < 1e-5 && Math.abs(w.lon_e7 / 1e7 - tg.longitude) < 1e-5);
+    if (i >= 0) taken.add(i);
+  }
+  return { keep: wps.filter((_w, k) => !taken.has(k)), removed: taken.size };
+}
+
+/** Removes POIs from the connected Ambit1/2 (André, 2026-11-21). SuuntoLink itself rewrites this
+ * family's whole list (write_start, 0x0b04, one 0x0b05 each - the Ambit2 capture), so a removal is
+ * that write without them. `saveCopy` keeps the list first; a failed write puts it back once. */
+export async function removeLegacyPois(
+  targets: { name: string; latitude: number; longitude: number }[],
+  saveCopy: (json: string) => Promise<string>,
+): Promise<{ left: number; backupPath: string }> {
+  const wps = listedWaypoints(JSON.parse(await readLegacyNav()));
+  const { keep, removed } = legacyWaypointsWithout(wps, targets);
+  if (removed === 0) throw new Error('That POI is not on the watch any more.');
+  const backupPath = await saveCopy(JSON.stringify(wps));
+  try {
+    await writeWaypointsKeepingRoutes(keep);
+  } catch (e: any) {
+    try { await writeWaypointsKeepingRoutes(wps); } catch { /* the copy stays on the phone */ }
+    throw e;
+  }
+  return { left: keep.length, backupPath };
 }
 
 // ─── Route send (2026-10-19) ─────────────────────────────────────────────────────────────────

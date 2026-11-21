@@ -4612,8 +4612,8 @@ class Handler(BaseHTTPRequestHandler):
         """Body: {"name", "lat", "lon"}, the POI as /api/pois lists it. Removes that one POI and
         keeps every other one byte for byte (write_nav.remove_pois: a copy of the list goes to
         BACKUP_DIR/POIs/<serial>/ first, 0x0b04 empties the list, the rest goes back and the
-        count is checked; a failed write puts the copy back). Never touches the routes. Ambit3
-        family only, like the Android twin PoiService.removePoisFromWatch()."""
+        count is checked; a failed write puts the copy back). Never touches the routes. Ambit1/2:
+        legacy_link.poi_remove, the same whole-list write SuuntoLink uses."""
         name = body.get("name") or ""
         try:
             lat = float(body.get("lat"))
@@ -4642,8 +4642,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if selected_is_legacy():
-            self._send_json(409, {"ok": False, "error":
-                                  "Removing a POI is not available on the Ambit1 and Ambit2 yet."})
+            # Ambit1/2: the whole list is rewritten without that POI, as SuuntoLink does
+            # (legacy_link.poi_remove: copy first, re-read check, copy back on failure).
+            sys.path.insert(0, str(TOOLS_DIR))
+            import legacy_link                               # noqa: PLC0415
+            try:
+                result = legacy_link.poi_remove(name, lat, lon, BACKUP_DIR)
+            except (RuntimeError, OSError, ValueError) as exc:
+                self._send_json(502, {"ok": False, "error": str(exc)})
+                return
+            self._send_json(200, result)
             return
         code, out, err = run_tool("write_nav.py", [
             "delpoi", "--name", name, "--lat", f"{lat:.7f}", "--lon", f"{lon:.7f}",
