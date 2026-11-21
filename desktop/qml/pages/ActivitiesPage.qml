@@ -20,18 +20,11 @@ Item {
     // The mouse's Back button returns from an open activity to the list (André, 2026-08-25).
     // Only accepts the Back/Forward side buttons, so normal left/right clicks fall straight
     // through to the rows and cards underneath.
-    MouseArea {
-        anchors.fill: parent
-        z: 1000
-        acceptedButtons: Qt.BackButton | Qt.ForwardButton
-        onPressed: (mouse) => {
-            if (mouse.button === Qt.BackButton && root.selectedActivity !== null) {
-                root.selectedActivity = null
-                mouse.accepted = true
-            } else {
-                mouse.accepted = false
-            }
-        }
+    // A TapHandler, not a full-page MouseArea on top: that MouseArea set the cursor for the
+    // whole page, so the maps' open/closed hand never showed on Activities (André, 2026-11-21).
+    TapHandler {
+        acceptedButtons: Qt.BackButton
+        onTapped: if (root.selectedActivity !== null) root.selectedActivity = null
     }
 
     // In-page sort. `activitySortKey` is "uploaded" (backend order, newest first), "name", or

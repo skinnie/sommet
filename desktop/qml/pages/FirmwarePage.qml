@@ -590,19 +590,7 @@ PageFlickable {
             }
         }
 
-        // Honest coverage note - fully tested (real hardware flash) on the Ambit3 Peak and,
-        // 2026-08-22, the Ambit1 (Bluebird) - same command sequence, real per-family BSL
-        // difference found and handled (see LEGACY_BSL_PID in firmware_write.py). The rest
-        // of the Ambit3 generation share the identical process (verified for Kailash and
-        // Traverse from captures). Ambit2 not yet confirmed - same legacy family as Ambit1,
-        // untested hardware.
-        Text {
-            width: parent.width
-            wrapMode: Text.WordWrap
-            color: Theme.mutedText
-            font.pixelSize: Theme.fontSizeCaption
-            text: qsTr("Hardware-tested on the Ambit3 Peak and the Ambit1. The other Ambit3-family, "
-                       + "Traverse and Kailash watches use the same firmware process. Ambit2 not yet confirmed.")
-        }
+        // (A coverage note "Hardware-tested on ... Ambit2 not yet confirmed" was here; removed at
+        // André's request, 2026-11-21. Tested: Ambit3 Peak and Ambit1 (Bluebird) on real hardware.)
     }
 }
