@@ -386,10 +386,34 @@ Item {
     property bool dragPan: true
 
     // Arms the wheel on press without taking the press away from the owner's own tap/drag.
+    // While the button is held it also switches off the drag of every scrolling page or list
+    // around the map, so a drag on the map moves the map. grabPermissions alone was not
+    // enough: in the Windows build (Qt 6.10) the page still took the drag (André,
+    // 2026-11-21, Routes and POIs), while Qt 6.12 on Linux gave it to the map.
+    property var _pausedFlicks: []
+    function _pauseFlicks(on) {
+        if (on) {
+            const list = []
+            for (let p = root.parent; p; p = p.parent) {
+                if (p.interactive === true && typeof p.flick === "function") {
+                    p.interactive = false
+                    list.push(p)
+                }
+            }
+            _pausedFlicks = list
+        } else {
+            for (const f of _pausedFlicks) f.interactive = true
+            _pausedFlicks = []
+        }
+    }
+    Component.onDestruction: _pauseFlicks(false)
     PointHandler {
         enabled: root.inScrollingPage
         acceptedButtons: Qt.LeftButton
-        onActiveChanged: if (active) root._wheelArmed = true
+        onActiveChanged: {
+            if (active) root._wheelArmed = true
+            root._pauseFlicks(active)
+        }
     }
     HoverHandler {
         enabled: root.inScrollingPage

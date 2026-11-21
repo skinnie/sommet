@@ -175,8 +175,8 @@ PageFlickable {
                 Text {
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    text: qsTr("Drag the map to put the POI under the crosshair, or click " +
-                                "a point. Scroll to zoom.")
+                    text: qsTr("Drag the map to move it, right-click a spot and choose " +
+                                "Point here. Click the map, then scroll to zoom.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSizeBody
                 }
@@ -360,78 +360,36 @@ PageFlickable {
                         // scrollZoom because there is no page to scroll past them.
                         // 2026-11-20: wheel zoom on, after a click (inScrollingPage).
                         inScrollingPage: true
-                        dragPan: false   // its own drag picks the point on release
+                        // Left drag moves the map (MapView's own drag); right-click opens
+                        // "Point here" (André, 2026-11-21: "click to drag, right click, menu
+                        // point here for pointing the poi"). The pin sits on the POI itself,
+                        // not the map's centre, so it stays put while the map moves.
                         anchors.fill: parent
                         clip: true
                         latitude: root.poiLat
                         longitude: root.poiLon
                         zoomLevel: 15
-                        showMarker: true
+                        markers: [{ lat: root.poiLat, lon: root.poiLon }]
 
                         TapHandler {
+                            acceptedButtons: Qt.RightButton
                             onTapped: (event) => {
-                                // Through the map's own inverse projection - the same maths
-                                // the tiles are drawn with.
-                                root.poiLat = addMap.latAtY(event.position.y)
-                                root.poiLon = addMap.lonAtX(event.position.x)
-                                addMap.resetView()
+                                pointMenu.lat = addMap.latAtY(event.position.y)
+                                pointMenu.lon = addMap.lonAtX(event.position.x)
+                                pointMenu.popup()
                             }
                         }
-                        DragHandler {
-                            id: addMapPanner
-                            target: null
-                            grabPermissions: PointerHandler.CanTakeOverFromAnything
-                            property real lastX: 0
-                            property real lastY: 0
-                            onActiveChanged: {
-                                if (active) {
-                                    lastX = centroid.position.x
-                                    lastY = centroid.position.y
-                                } else {
-                                    // Drag-to-pick, same as the Kailash home picker: on
-                                    // release, the point under the crosshair IS the choice.
-                                    root.poiLat = addMap.latAtY(addMap.height / 2)
-                                    root.poiLon = addMap.lonAtX(addMap.width / 2)
-                                    addMap.resetView()
+                        ThemedMenu {
+                            id: pointMenu
+                            property real lat: 0
+                            property real lon: 0
+                            ThemedMenuItem {
+                                text: qsTr("Point here")
+                                onTriggered: {
+                                    root.poiLat = pointMenu.lat
+                                    root.poiLon = pointMenu.lon
+                                    addMap.resetView()   // centre on the new POI
                                 }
-                                addMap.userControlled = true
-                            }
-                            onCentroidChanged: {
-                                if (!active)
-                                    return
-                                addMap.panX -= centroid.position.x - lastX
-                                addMap.panY -= centroid.position.y - lastY
-                                lastX = centroid.position.x
-                                lastY = centroid.position.y
-                            }
-                        }
-                        HoverHandler {
-                            cursorShape: addMapPanner.active ? Qt.ClosedHandCursor
-                                                             : Qt.CrossCursor
-                        }
-
-                        // The crosshair the drag aims at. Ignores input so it never eats a
-                        // click meant for the map underneath.
-                        Item {
-                            anchors.centerIn: parent
-                            width: 26
-                            height: 26
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: 2; height: parent.height
-                                color: Theme.mapAccent
-                            }
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: parent.width; height: 2
-                                color: Theme.mapAccent
-                            }
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: 12; height: 12; radius: 6
-                                color: "transparent"
-                                border.width: 2
-                                border.color: Theme.mapAccent
                             }
                         }
                     }

@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-21: Desktop: map drag in scrolling pages on Windows; POI picker uses right-click
+
+- On the Windows build (Qt 6.10) the Routes and POI maps showed the drag hand but the page still
+  took the drag (André, P5Q). While the mouse button is held on a map, every scrolling page or
+  list around it now stops dragging, so the map gets it on any Qt version. The Routes import map
+  uses the map's own drag instead of a copy of it.
+- POI picker: left drag moves the map, right-click a spot and choose "Point here" to place the
+  POI (André: "click to drag, right click, menu point here"). The pin stays on the POI while the
+  map moves; the crosshair and drag-to-pick are gone. Checked on Linux (Qt 6.12) only.
+
 ## 2026-11-20: Watch read with nothing new skips the log
 
 - A watch read when nothing is new read the whole activity log every time (430 KB, 11.6 of 13.5

@@ -728,29 +728,8 @@ PageFlickable {
                         trackPoints: RouteService.pendingRoute.track || []
                         // Moved by dragging, zoomed by + and - or the wheel after a click.
                         showZoomControls: true
-                        inScrollingPage: true
-                        dragPan: false
+                        inScrollingPage: true   // MapView's own drag moves it
                         TapHandler { onTapped: root.showBig({ name: RouteService.pendingRoute.name, track: RouteService.pendingRoute.track }) }
-                        DragHandler {
-                            id: importMapPanner
-                            target: null
-                            grabPermissions: PointerHandler.CanTakeOverFromAnything
-                            property real lastX: 0
-                            property real lastY: 0
-                            onActiveChanged: {
-                                lastX = centroid.position.x
-                                lastY = centroid.position.y
-                                if (active) importMap.userControlled = true
-                            }
-                            onCentroidChanged: {
-                                if (!active) return
-                                importMap.panX -= centroid.position.x - lastX
-                                importMap.panY -= centroid.position.y - lastY
-                                lastX = centroid.position.x
-                                lastY = centroid.position.y
-                            }
-                        }
-                        HoverHandler { cursorShape: importMapPanner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
                     }
                 }
                 Text {
