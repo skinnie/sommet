@@ -99,6 +99,33 @@ def test_reorder_long_frame():
     assert [m.command for m in got] == [0x1201, 0x0002, 0x1200] and all(m.crc_ok for m in got)
 
 
+def test_reorder_slow_long_reply():
+    """A 1 KB reply arriving over 7 s with two neighbours swapped and a 0x1201 notice in the
+    middle (the P5Q, 2026-11-21: given up after 3 s, read as damaged, the move sync stalled).
+    The real chunks hold a move's samples, so they stay out of this public repo; this is the
+    same shape."""
+    import random
+    payload = bytes(random.Random(3).randrange(256) for _ in range(1032))
+    frame = encode_nsp_frame(0x0B17, payload, 0x0A, 9, 0x7F)
+    chunks = [frame[i:i + 20] for i in range(0, len(frame), 20)]
+    chunks[-4], chunks[-3] = chunks[-3], chunks[-4]
+    shuffled = chunks[:20] + OPENER[::-1] + chunks[20:]       # the notice, itself swapped
+    now = [0.0]
+    asm, got = NspAssembler(), []
+    r = w.Reorder(lambda c: got.extend(asm.feed(c)), clock=lambda: now[0])
+    for c in shuffled:
+        now[0] += 7.0 / len(shuffled)
+        r.feed(c)
+    assert sorted((m.command, m.crc_ok) for m in got) == [(0x0B17, True), (0x1201, True)], got
+    # after a quiet link, what waited goes on (damaged) and the next frame is still whole
+    r.feed(chunks[0])
+    now[0] += 5
+    frame2 = encode_nsp_frame(0x0002, b"y" * 30, 0x0A, 9, 2)
+    for i in range(0, len(frame2), 20):
+        r.feed(frame2[i:i + 20])
+    assert [m.command for m in got if m.crc_ok][-1] == 0x0002
+
+
 def test_reorder_gives_up_on_a_damaged_frame():
     now = [0.0]
     asm, got = NspAssembler(), []
@@ -181,6 +208,7 @@ if __name__ == "__main__":
     test_chunks_in_order()
     test_reorder_real_opener()
     test_reorder_long_frame()
+    test_reorder_slow_long_reply()
     test_reorder_gives_up_on_a_damaged_frame()
     test_is_watch()
     test_tcp_control_through_the_bridge()

@@ -9,6 +9,23 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ## 2026-11-21: Ambit3 Bluetooth on Windows (Windows' own Bluetooth)
 
+- Bluetooth move sync, after the first sync tests on the P5Q:
+  - Only new moves are read: the newest entries are found from the log's own index, walking
+    back, and each is read alone. A sync read the whole log before (about 430 KB on André's
+    Peak, some 7 minutes at 1 KB a second); a new move is now 40-80 KB. Checked against the
+    whole-log read on a Peak log and a wrapped Traverse log.
+  - One Bluetooth job at a time: every Bluetooth handler takes the watch lock (now re-entrant).
+    Home's device check answers at once from what is known while a long job runs, instead of
+    queueing and timing out (the cause of Home flickering between Bluetooth and USB, and of
+    the POIs page leaving the sidebar).
+  - Windows: a long reply arriving slowly is no longer given up after 3 s (a 1 KB block took
+    7 s and came out damaged); the watch's notices in the middle of a reply are passed on.
+  - The watch's Sync request waits up to 20 minutes for the job ahead (was 40 s, then
+    dropped), and every new link reads new moves first.
+  - Home shows "Reading the new move over Bluetooth: 12 of 40 KB".
+  - A failed pairing or a dropped link says so instead of "No watch found".
+  - Windows: the code is typed in Windows' own pop-up, and Home says so; the Bluetooth
+    service stops when Sommet closes.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
   is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
   doesn't work this way people tell us"). A saved "off" from the old switch is ignored.

@@ -294,7 +294,9 @@ ApplicationWindow {
         repeat: true
         onTriggered: {
             if (window._runWatchSync()) return
-            if (++tries >= 20) {       // 40 s
+            // 20 min, not 40 s: over Bluetooth the job ahead (POIs, settings) can take minutes,
+            // and a dropped request left the new move on the watch (P5Q, 2026-11-21).
+            if (++tries >= 600) {
                 stop()
                 console.info("[ble] the watch's sync request lapsed: another watch job ran too long")
             }

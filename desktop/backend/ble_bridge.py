@@ -178,7 +178,9 @@ class BleBridge:
             log_file = open(self._log_path, "a", encoding="utf-8")  # noqa: SIM115 - lives as long as _proc
             self._proc = subprocess.Popen(
                 args, cwd=str(TOOLS_DIR), stdout=log_file, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1",
+                                       # the Windows service stops when this backend has gone
+                                       "SOMMET_PARENT_PID": str(os.getpid())},
                 **_detached())
         self._wait_for_socket()
 

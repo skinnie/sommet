@@ -17,7 +17,8 @@ import struct
 import sys
 
 from exercise_log import (
-    EXERCISE_LOG_BASE, EXERCISE_LOG_SIZE, parse_master_header, to_fit, to_gpx, walk_entries,
+    EXERCISE_LOG_BASE, EXERCISE_LOG_SIZE, WRAP_START_OFFSET, parse_master_header,
+    read_entry_at, to_fit, to_gpx, walk_entries,
 )
 from write_nav import read_flash
 
@@ -44,11 +45,103 @@ def sync_lock(link, on):
         return False
 
 
-def read_activities(link, known_count=0):
+WRAP_MARGIN = 0x10000          # as walk_entries() / openambit's pmem20.c
+
+
+PIECE = 8192                   # read in pieces so progress can be told between them
+
+
+def _spans(mem_start, mem_size, start, end):
+    """The one or two plain address ranges from `start` to `end`, round the circular region's
+    end to WRAP_START_OFFSET when end <= start."""
+    stop = mem_start + mem_size
+    if end > start:
+        return [(start, end)]
+    return [(start, stop), (mem_start + WRAP_START_OFFSET, end)]
+
+
+def _read_logical(link, mem_start, mem_size, start, end, buf, tick=None):
+    """Reads the log from absolute address `start` up to `end` into `buf` (indexed from
+    mem_start); tick(n) after every piece of n bytes."""
+    for a, b in _spans(mem_start, mem_size, start, end):
+        while a < b:
+            n = min(PIECE, b - a)
+            buf[a - mem_start:a - mem_start + n] = read_flash(link, a, n, label="ExerciseLog")
+            a += n
+            if tick:
+                tick(n)
+
+
+def read_new_activities(link, known_count, mem_start=EXERCISE_LOG_BASE,
+                        mem_size=EXERCISE_LOG_SIZE, probe=None, progress=None):
+    """Only the moves after the first `known_count`, read entry by entry (Bluetooth reads
+    about 1 KB a second: the whole log was ~430 KB on André's Peak, 2026-11-21, so every sync
+    took minutes before a new move showed). The newest entry is the master header's
+    last_entry; each entry's header holds its previous one, so the new ones are found walking
+    back, and each is read from its own address to the next one's (next_free_address for the
+    newest). Returns (master, entries) like read_activities(), or None when the chain does not
+    add up (the caller then reads the whole log). progress(done_bytes, total_bytes, moves)
+    is called as the new moves come in."""
+    if probe is None:
+        probe = read_flash(link, mem_start, 1024, label="ExerciseLog (header)")
+    master = parse_master_header(probe)
+    new = master["entries"] - known_count
+    if new <= 0:
+        return master, []
+    if known_count <= 0:
+        return None
+    stop = mem_start + mem_size
+    addrs, addr = [], master["last_entry"]
+    for _ in range(new):
+        if not mem_start <= addr < stop:
+            return None
+        head = read_flash(link, addr, min(12, stop - addr), label="ExerciseLog (entry)")
+        if len(head) < 12 or head[:4] != b"PMEM":
+            return None
+        addrs.append((addr, int.from_bytes(head[4:8], "little")))
+        addr = int.from_bytes(head[8:12], "little")
+    addrs.reverse()
+    # Each entry's next must be the following one, and the newest's next_free_address.
+    for (a, nxt), following in zip(addrs, [x for x, _ in addrs[1:]] + [None]):
+        if following is not None and nxt != following:
+            return None
+    buf = bytearray(b"\xff" * (mem_size + WRAP_MARGIN))
+    ends = [x for x, _ in addrs[1:]] + [master["next_free_address"]]
+    total = sum(b - a for (s, _), e in zip(addrs, ends) for a, b in _spans(mem_start, mem_size, s, e))
+    done = [0]
+
+    def tick(n):
+        done[0] += n
+        if progress:
+            progress(done[0], total, len(addrs))
+    if progress:
+        progress(0, total, len(addrs))
+    wrapped = False
+    for (a, _), e in zip(addrs, ends):
+        _read_logical(link, mem_start, mem_size, a, e, buf, tick)
+        wrapped |= e <= a
+    if wrapped:
+        margin = min(WRAP_MARGIN, mem_size - WRAP_START_OFFSET)
+        buf[mem_size:mem_size + margin] = buf[WRAP_START_OFFSET:WRAP_START_OFFSET + margin]
+    data = bytes(buf)
+    entries = []
+    for a, _ in addrs:
+        header, samples, _n, _p = read_entry_at(data, mem_size, a, mem_start)
+        entries.append((header, samples))
+    return master, entries
+
+
+def read_activities(link, known_count=0, progress=None):
     """Returns (master, entries) - same shape `exercise_log.py main()`'s own watch-reading
     branch produces. `entries` is a list of (header, samples) tuples; pass each to
     `to_gpx()`/`to_fit()` for export, same as the USB CLI does."""
     probe = read_flash(link, EXERCISE_LOG_BASE, 1024, label="ExerciseLog (header)")
+    try:
+        quick = read_new_activities(link, known_count, probe=probe, progress=progress)
+    except (ValueError, IndexError, struct.error, RuntimeError):
+        quick = None
+    if quick is not None:
+        return quick
     probe_master = parse_master_header(probe)
     needed = probe_master["next_free_address"] - EXERCISE_LOG_BASE + 8192
     needed = max(1024, min(EXERCISE_LOG_SIZE, needed))

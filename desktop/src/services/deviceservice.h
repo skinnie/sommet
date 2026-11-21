@@ -120,6 +120,11 @@ class DeviceService : public QObject
     Q_PROPERTY(bool bleAttempting READ bleAttempting NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleSubscribed READ bleSubscribed NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleHandshakeDone READ bleHandshakeDone NOTIFY bleStateChanged)
+    // New moves coming in over Bluetooth (the backend's reading_moves): bytes so far, bytes in
+    // all, and how many moves. Total 0 = no move read running.
+    Q_PROPERTY(int bleMovesDone READ bleMovesDone NOTIFY bleMovesProgressChanged)
+    Q_PROPERTY(int bleMovesTotal READ bleMovesTotal NOTIFY bleMovesProgressChanged)
+    Q_PROPERTY(int bleMovesCount READ bleMovesCount NOTIFY bleMovesProgressChanged)
     // Non-empty while a fresh pairing needs a human to read the watch's own displayed
     // passkey and report it back (LE Legacy Passkey Entry - this watch family has no way to
     // confirm pairing any other way, see ble_server.py's Agent docstring). The UI shows a
@@ -269,6 +274,9 @@ public:
     bool bleAttempting() const { return m_bleAttempting; }
     bool bleSubscribed() const { return m_bleSubscribed; }
     bool bleHandshakeDone() const { return m_bleHandshakeDone; }
+    int bleMovesDone() const { return m_bleMovesDone; }
+    int bleMovesTotal() const { return m_bleMovesTotal; }
+    int bleMovesCount() const { return m_bleMovesCount; }
     QString blePendingPasskeyDevice() const { return m_blePendingPasskeyDevice; }
     QString bleError() const { return m_bleError; }
     // Real request, 2026-08-13 (André, live testing: "it is still on 'connecting'...
@@ -334,6 +342,7 @@ signals:
     void suuntoT6ExperimentEnabledChanged();
     void demoModeChanged();
     void bleStateChanged();
+    void bleMovesProgressChanged();
     // The watch asked to sync over Bluetooth: "Sync now" on the watch, or its own check every
     // 30 min while linked (0x1201 notices, answered by the daemon). Main.qml runs the sync,
     // as the tablet does (🟣38).
@@ -404,6 +413,9 @@ private:
     bool m_bleAttempting = false;
     bool m_bleSubscribed = false;
     bool m_bleHandshakeDone = false;
+    int m_bleMovesDone = 0;
+    int m_bleMovesTotal = 0;
+    int m_bleMovesCount = 0;
     QString m_blePendingPasskeyDevice;
     QString m_bleError;
     int m_bleAttemptSeconds = 0;

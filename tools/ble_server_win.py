@@ -131,9 +131,12 @@ class Reorder:
     chunk starting with 0x7e opens a frame, one ending with it closes it, any other is a middle
     one, and only one order of the middles gives the length and the CRC32 the frame carries.
 
-    Tried: arrival order, then every middle moved up to MAX_MOVE places (a race between threads
-    swaps neighbours, it does not shuffle a whole frame). A frame still not whole after
-    GIVE_UP_S goes on in arrival order, and the assembler drops it as damaged, as before."""
+    Tried: a short frame with no middles (the watch's 0x1201 notices arrive in the middle of a
+    long reply), arrival order, then every middle moved up to MAX_MOVE places (a race between
+    threads swaps neighbours, it does not shuffle a whole frame). Chunks still waiting when the
+    link has been quiet for GIVE_UP_S go on in arrival order, and the assembler drops them as
+    damaged, as before. Quiet, not old: a 1 KB reply took 7 s to arrive on the P5Q
+    (2026-11-21) and was given up while its last chunks were still coming."""
 
     MAX_MOVE = 3
     GIVE_UP_S = 3.0
@@ -147,15 +150,14 @@ class Reorder:
         self._pool.clear()
 
     def feed(self, chunk):
-        self._pool.append((self._clock(), bytes(chunk)))
+        now = self._clock()
+        if self._pool and now - self._pool[-1][0] > self.GIVE_UP_S:
+            for _, c in self._pool:            # the link was quiet: what waited is not whole
+                self._emit(c)
+            self._pool = []
+        self._pool.append((now, bytes(chunk)))
         while self._take_frame():
             pass
-        now = self._clock()
-        stale = [c for t, c in self._pool if now - t > self.GIVE_UP_S]
-        if stale:
-            for c in stale:
-                self._emit(c)
-            self._pool = [(t, c) for t, c in self._pool if now - t <= self.GIVE_UP_S]
 
     def _take_frame(self):
         chunks = [c for _, c in self._pool]
@@ -176,6 +178,8 @@ class Reorder:
 
     def _find(self, chunks, s, middles, e):
         head, tail = chunks[s], chunks[e]
+        if s < e and frame_ok(head + tail):    # a short frame inside a long one
+            return [s, e]
         # A frame's middles are every middle chunk waiting (frames come one at a time: the
         # watch answers one request before the next is sent). Arrival order first.
         if frame_ok(head + b"".join(chunks[m] for m in middles) + tail):
@@ -619,8 +623,13 @@ class WinHost:
                 kinds, e.DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION)
             print(f"  pairing result: {r.status.name} ({int(r.status)}), level "
                   f"{r.protection_level_used.name}; link now {dev.connection_status.name}")
-            if r.status not in (e.DevicePairingResultStatus.PAIRED,
-                                e.DevicePairingResultStatus.ALREADY_PAIRED):
+            # OPERATION_ALREADY_IN_PROGRESS: the watch asked to pair as soon as it was linked
+            # and Windows' own pop-up took it (that pop-up is where the code is typed on
+            # Windows, André 2026-11-21); the pairing goes on there.
+            if r.status == e.DevicePairingResultStatus.OPERATION_ALREADY_IN_PROGRESS:
+                print("  pairing: Windows' own pop-up asks for the code the watch shows")
+            elif r.status not in (e.DevicePairingResultStatus.PAIRED,
+                                  e.DevicePairingResultStatus.ALREADY_PAIRED):
                 self.state.pairing_hint = (f"Pairing did not finish ({r.status.name}). Choose "
                                            "“Pair with app” on the watch again.")
         finally:
@@ -694,10 +703,42 @@ def _watchdog(loop, stall_s=5.0):
     threading.Thread(target=watch, daemon=True).start()
 
 
+def _parent_alive(pid):
+    """Whether process `pid` still runs (Windows: OpenProcess + WaitForSingleObject)."""
+    import ctypes                                          # noqa: PLC0415
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x00100000, False, pid)       # SYNCHRONIZE
+    if not handle:
+        return False
+    try:
+        return k32.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _exit_with_parent():
+    """Stops this service when the Sommet that started it is gone (SOMMET_PARENT_PID, set by
+    ble_bridge). It runs detached, so before this it outlived Sommet, and an updated Sommet
+    kept talking to the old service (P5Q, 2026-11-21)."""
+    pid = int(os.environ.get("SOMMET_PARENT_PID") or 0)
+    if not pid:
+        return
+
+    def watch():
+        while _parent_alive(pid):
+            time.sleep(5)
+        print(f"  Sommet (pid {pid}) has closed: stopping")
+        sys.stdout.flush()
+        os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 async def _listen(verbose, timeout, forget, serve_socket):
     if serve_socket and other_daemon():
         raise RuntimeError("another Sommet Bluetooth service is already running")
     _watchdog(asyncio.get_running_loop())
+    _exit_with_parent()
     host = WinHost(verbose)
     await host.host()
     if forget:

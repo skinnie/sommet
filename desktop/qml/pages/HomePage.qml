@@ -1245,7 +1245,11 @@ PageFlickable {
                                             // watch should start pairing - its window is short.
                                             : Qt.platform.os === "linux"
                                               ? qsTr("Type your password if asked, then “Pair with app” (first time) or “Sync now” on the watch")
-                                              : qsTr("Start “Pair with app” or “Sync now” on the watch"),
+                                              // Windows' own pop-up asks for the code (André,
+                                              // 2026-11-21: the way pairing works there).
+                                              : Qt.platform.os === "windows"
+                                                ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows in the Windows pop-up")
+                                                : qsTr("Start “Pair with app” or “Sync now” on the watch"),
                                       // Only blocked while a watch is ALREADY connected over
                                       // Bluetooth - a watch on USB doesn't stop pairing one (André,
                                       // 2026-09-26: "greyed out even if the watch is in pair mode").
@@ -1322,8 +1326,12 @@ PageFlickable {
                               ? qsTr("Type your password first if Sommet asks for it, then choose " +
                                      "“Pair with app” (first time) or “Sync now” on the watch — " +
                                      "its window is short")
-                              : qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
-                                     "watch now — its window is short")
+                              : Qt.platform.os === "windows"
+                                ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
+                                       "watch now — its window is short. The first time, " +
+                                       "Windows shows a pop-up: type the code the watch shows there")
+                                : qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
+                                       "watch now — its window is short")
                         wrapMode: Text.WordWrap
                         width: parent.width
                         color: Theme.mutedText
@@ -2485,7 +2493,16 @@ PageFlickable {
                     color: Theme.mutedText
                     text: HomeViewModel.isKailash
                         ? qsTr("Reading the passive GPS track off the watch...")
-                        : qsTr("Reading activities off the watch...")
+                        // Over Bluetooth a new move takes about a minute (1 KB a second), so
+                        // say how far it is (André, 2026-11-21: "not sure the app is refreshing").
+                        : DeviceService.bleMovesTotal > 0
+                          ? (DeviceService.bleMovesCount === 1
+                               ? qsTr("Reading the new move over Bluetooth: %1 of %2 KB")
+                               : qsTr("Reading %3 new moves over Bluetooth: %1 of %2 KB")
+                                     .replace("%3", DeviceService.bleMovesCount))
+                                .arg(Math.round(DeviceService.bleMovesDone / 1024))
+                                .arg(Math.max(1, Math.round(DeviceService.bleMovesTotal / 1024)))
+                          : qsTr("Reading activities off the watch...")
                 }
 
                 Text {

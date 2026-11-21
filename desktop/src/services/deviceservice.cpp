@@ -680,10 +680,31 @@ void DeviceService::pollBleStatus()
         // tear the daemon down - it keeps scanning in the background regardless, so a late
         // connection still completes; this only frees the UI to let the person retry or
         // use Forget instead of staring at a stuck button.
+        // The watch was found but pairing or the link failed: say that, not "no watch found"
+        // (André, 2026-11-21: a pairing Windows refused read "No watch found").
+        const QString hint = obj.value(QStringLiteral("pairing_hint")).toString();
+        const QJsonObject drop = obj.value(QStringLiteral("last_drop")).toObject();
+        if (!m_bleSubscribed && !hint.isEmpty()) {
+            m_bleAttempting = false;
+            m_bleError = hint;
+            emit bleStateChanged();
+            m_bleWatching = true;
+            m_blePollTimer.start(kBleWatchIntervalMs);
+            return;
+        }
         if (!m_bleSubscribed && m_bleAttemptSeconds >= kBleSearchTimeoutS) {
             m_bleAttempting = false;
-            m_bleError = tr("No watch found within %1s - check it's on the Bluetooth pairing "
-                             "screen and try again").arg(kBleSearchTimeoutS);
+            if (!drop.isEmpty())
+                // Windows names the reason ("why"); Linux gives only the device.
+                m_bleError = tr("The watch was found, but the link dropped%1. Choose “Pair with "
+                                "app” or “Sync now” on the watch and try again.")
+                                 .arg(drop.value(QStringLiteral("why")).toString().isEmpty()
+                                          ? QString()
+                                          : QStringLiteral(" (%1)").arg(
+                                                drop.value(QStringLiteral("why")).toString()));
+            else
+                m_bleError = tr("No watch found within %1s - check it's on the Bluetooth pairing "
+                                "screen and try again").arg(kBleSearchTimeoutS);
             emit bleStateChanged();
             // The daemon keeps looking: a watch that links later is still picked up.
             m_bleWatching = true;
@@ -725,7 +746,21 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
         if (cameBack) {
             refresh();                 // linked late, or called back by itself: read it again
             checkGpsOrbitStatus();
+            // New moves first on every new link (André, 2026-11-21: POIs and settings were
+            // read for minutes while the new move waited). Over Bluetooth only the moves the
+            // library lacks are read, so with none new this is one 1 KB read.
+            emit bleSyncRequested();
         }
+    }
+    const QJsonObject moves = obj.value(QStringLiteral("reading_moves")).toObject();
+    const int movesDone = moves.value(QStringLiteral("done")).toInt();
+    const int movesTotal = moves.value(QStringLiteral("total")).toInt();
+    const int movesCount = moves.value(QStringLiteral("moves")).toInt();
+    if (movesDone != m_bleMovesDone || movesTotal != m_bleMovesTotal || movesCount != m_bleMovesCount) {
+        m_bleMovesDone = movesDone;
+        m_bleMovesTotal = movesTotal;
+        m_bleMovesCount = movesCount;
+        emit bleMovesProgressChanged();
     }
     // last_sync_notice_at is null until the watch first asks; toDouble() reads that as 0.
     const double noticeAt = obj.value(QStringLiteral("last_sync_notice_at")).toDouble();

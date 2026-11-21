@@ -207,10 +207,16 @@ class _WatchLock:
         self._cond = threading.Condition()
         self._held = False
         self._waiting_fg = 0
+        self._owner = None     # re-entrant per thread: a Bluetooth job holds it around the
+        self._depth = 0        # tools it runs (with_watch_lock below), which take it again
 
     def acquire(self):
+        me = threading.get_ident()
         fg = getattr(_REQUEST_CTX, "foreground", False)
         with self._cond:
+            if self._held and self._owner == me:
+                self._depth += 1
+                return True
             if fg:
                 self._waiting_fg += 1
             try:
@@ -219,12 +225,27 @@ class _WatchLock:
             finally:
                 if fg:
                     self._waiting_fg -= 1
-            self._held = True
+            self._held, self._owner, self._depth = True, me, 1
         return True
+
+    def try_acquire(self):
+        """Takes the lock only when it is free right now (or already this thread's)."""
+        me = threading.get_ident()
+        with self._cond:
+            if self._held and self._owner == me:
+                self._depth += 1
+                return True
+            if self._held or self._waiting_fg > 0:
+                return False
+            self._held, self._owner, self._depth = True, me, 1
+            return True
 
     def release(self):
         with self._cond:
-            self._held = False
+            self._depth -= 1
+            if self._depth > 0:
+                return
+            self._held, self._owner = False, None
             self._cond.notify_all()
 
     def __enter__(self):
@@ -237,6 +258,8 @@ class _WatchLock:
 
 _REQUEST_CTX = threading.local()   # per request thread: .foreground
 WATCH_LOCK = _WatchLock()
+_BLE_LAST_BATTERY = [None]
+_BLE_MOVES_PROGRESS = [None]  # {done, total (bytes), moves} while new moves come in over Bluetooth   # the last battery the watch gave over Bluetooth (_handle_device_ble)
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
 
 # Per watch, the ExerciseLog index signature of its last full read, so a read with nothing new
@@ -3990,7 +4013,11 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ble_bridge.bridge.set_dry_run(False)
                 locked = ble_activities.sync_lock(ble_bridge.bridge, True)
-                master, entries = ble_activities.read_activities(ble_bridge.bridge, known_count)
+
+                def progress(done, total, moves):
+                    _BLE_MOVES_PROGRESS[0] = {"done": done, "total": total, "moves": moves}
+                master, entries = ble_activities.read_activities(ble_bridge.bridge, known_count,
+                                                                 progress=progress)
             except ble_bridge.BleBridgeError as exc:
                 self._send_json(502, {"ok": False, "error": str(exc)})
                 return
@@ -4001,6 +4028,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_activities_ble(ble_activities, master, entries, known_count, mark_synced,
                                       clock_set)
         finally:
+            _BLE_MOVES_PROGRESS[0] = None
             if locked:
                 ble_activities.sync_lock(ble_bridge.bridge, False)
 
@@ -5247,7 +5275,8 @@ class Handler(BaseHTTPRequestHandler):
         heartbeat. "subscribed" is the real "transport is live" signal (the watch has
         subscribed to our notify characteristic) - same meaning as
         AmbitBleModule.kt's nativeInitStarted gate on the Android side."""
-        self._send_json(200, {**ble_bridge.bridge.status(), "bt_privacy": _BT_PRIVACY["state"]})
+        self._send_json(200, {**ble_bridge.bridge.status(), "bt_privacy": _BT_PRIVACY["state"],
+                              "reading_moves": _BLE_MOVES_PROGRESS[0]})
 
     def _handle_ble_logs_summary(self):
         """GET /api/ble/logs/summary - the first real post-handshake 0x1200 request in the
@@ -5531,11 +5560,20 @@ class Handler(BaseHTTPRequestHandler):
         here is safe once we already know the handshake completed."""
         status = ble_bridge.bridge.status()
         info = dict(status.get("device_info") or {})
+        # Home asks every few seconds. While another Bluetooth job holds the link (a move read
+        # takes minutes), answer from what is known instead of queueing behind it: queued, the
+        # answer came too late and Home showed the watch gone and back (P5Q, 2026-11-21).
+        if not WATCH_LOCK.try_acquire():
+            if _BLE_LAST_BATTERY[0] is not None:
+                info["battery_percent"] = _BLE_LAST_BATTERY[0]
+            self._send_json(200, {"ok": True, "transport": "ble", "busy": True, **info})
+            return
         try:
             ble_bridge.bridge.set_dry_run(False)
             battery_reply = ble_bridge.bridge.command(0x0306, b"")
             if len(battery_reply) >= 2:
                 info["battery_percent"] = battery_reply[1]
+                _BLE_LAST_BATTERY[0] = battery_reply[1]
             # The serial stays the hello's (the cable's and the Android app's serial for this
             # watch). The short number 0x0b1e returns ("1849100781", also in the watch's
             # Bluetooth name) used to replace it, so the same watch had two names (2026-10-26).
@@ -5545,6 +5583,8 @@ class Handler(BaseHTTPRequestHandler):
         except (RuntimeError, TimeoutError) as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
+        finally:
+            WATCH_LOCK.release()
         self._send_json(200, {"ok": True, "transport": "ble", **info})
 
     def _handle_firmware_check(self):
@@ -10044,6 +10084,23 @@ class Handler(BaseHTTPRequestHandler):
             out_lines.append(f"Route region restored: {rr.get('written', 0)} bytes")
         return 0, "\n".join(out_lines) + "\n", "", True
 
+
+# One Bluetooth job at a time (P5Q, 2026-11-21): the request threads ran the move read, the POI
+# read and the device read at once over the one link, each block got read three times, the
+# waits passed the bridge's 20 s and the sync was given up half way. Every in-process
+# Bluetooth handler now holds WATCH_LOCK, the same lock the cable tools take (re-entrant, so
+# the tools a handler runs take it again without waiting), with its foreground-first queue.
+def _with_watch_lock(fn):
+    def run(self, *args, **kwargs):
+        with WATCH_LOCK:
+            return fn(self, *args, **kwargs)
+    run.__name__, run.__doc__ = fn.__name__, fn.__doc__
+    return run
+
+
+for _name in [n for n in vars(Handler) if n.startswith("_handle_") and n.endswith("_ble")
+              and n != "_handle_device_ble"]:          # takes it only when free (its own doc)
+    setattr(Handler, _name, _with_watch_lock(getattr(Handler, _name)))
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
