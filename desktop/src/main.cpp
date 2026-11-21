@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QQmlNetworkAccessManagerFactory>
 
 #include "services/apppaths.h"
@@ -94,6 +95,11 @@ int main(int argc, char *argv[])
     qputenv("QSG_DISTANCEFIELD_ANTIALIASING", "gray");
 
     QGuiApplication app(argc, argv);
+    // One control style on every platform. Windows picked its native style, which ignores our
+    // custom button/box backgrounds and logged a warning for each one (2,194 lines in one P5Q
+    // run, 2026-11-21), every time a page was built. Fusion is what Linux already used.
+    if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
+        QQuickStyle::setStyle(QStringLiteral("Fusion"));
     app.setOrganizationName(QStringLiteral("Sommet"));
     app.setApplicationName(QStringLiteral("Sommet"));
     // Surfaces to QML as Qt.application.version (used by the About card) so the

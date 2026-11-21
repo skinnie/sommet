@@ -16,6 +16,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 - POI picker: left drag moves the map, right-click a spot and choose "Point here" to place the
   POI (André: "click to drag, right click, menu point here"). The pin stays on the POI while the
   map moves; the crosshair and drag-to-pick are gone. Checked on Linux (Qt 6.12) only.
+- Windows used its native control style, which ignores the app's own button and box backgrounds
+  and logged a warning for each one: 2,194 of 10,774 log lines in one P5Q run, poured out each
+  time a page opened (the 0.6-1.2 s freezes when opening a page). The app now uses the Fusion
+  style everywhere, as Linux already did (Linux screenshots unchanged).
 
 ## 2026-11-20: Watch read with nothing new skips the log
 
