@@ -31,8 +31,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   - A read whose reply comes back damaged is asked for again (reads only, never a write).
   - The watch the last read was about is remembered across launches, so the first sync of a
     session reads only the new moves instead of the whole log.
-  - Home's button reads "Pair / sync by Bluetooth"; the README says to prefer the cable on the
-    desktop.
+  - The README says to prefer the cable on the desktop. (Home's button was "Pair / sync by
+    Bluetooth" for a day; it is "Pair another device by Bluetooth" again, since a paired
+    watch links by itself.)
   - POIs and Settings over Bluetooth name their entries with the watch's own schema (stored
     for its serial and firmware, or read from the watch), as the cable path does. They only
     looked in SuuntoLink's data folder, so POIs stayed empty on a computer without SuuntoLink.
