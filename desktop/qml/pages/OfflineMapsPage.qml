@@ -92,6 +92,7 @@ Item {
             latitude: 40; longitude: -3; zoomLevel: 4
 
             DragHandler {
+                id: offlinePanner
                 target: null
                 property real lastX: 0
                 property real lastY: 0
@@ -107,7 +108,7 @@ Item {
                     lastY = centroid.position.y
                 }
             }
-            HoverHandler { cursorShape: Qt.OpenHandCursor }
+            HoverHandler { cursorShape: offlinePanner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
 
             Connections {
                 target: map

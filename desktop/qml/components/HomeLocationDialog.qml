@@ -145,7 +145,7 @@ ThemedDialog {
                     }
                 }
                 HoverHandler {
-                    cursorShape: panner.active ? Qt.ClosedHandCursor : Qt.CrossCursor
+                    cursorShape: panner.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor   // a hand on every map (André, 2026-11-21)
                 }
 
                 // The crosshair the drag aims at. Drawn over the map, ignoring input so it
