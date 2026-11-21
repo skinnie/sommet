@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-21: Ambit3 Bluetooth on Windows (Windows' own Bluetooth)
+
+- New tools/ble_server_win.py: the watch service Linux runs through BlueZ, on Windows' own
+  GATT server (WinRT, the winrt packages bleak already ships). No driver change: Windows keeps
+  its Bluetooth, so headphones, mice and pens keep working. The service is published without
+  advertising (the computer dials the watch, as on Linux and Android), which also works on
+  adapters that fail Windows' "peripheral role" check, such as the CSR8510 sticks.
+- Seen on the P5Q (Windows 10, CSR8510 stick) with the Ambit3 Peak, read only: the watch linked
+  in 4 s, handshake, compact serial (25 B) and the log summary (670 B, as in the Suunto app's
+  capture), every frame with a good CRC. Not yet: a full move sync, writes, a fresh pairing
+  typed in Sommet (the watch was already paired with Windows), the app itself driving it.
+- Windows hands the watch's chunks over on several threads (the watch uses Write Command, no
+  reply), so they can arrive in the wrong order; they are put back by the frame's own 0x7e ends
+  and CRC. Write requests and notifications go through WinRT's Completed callbacks: awaiting
+  them on the asyncio loop froze it inside Windows.
+- Same control requests as Linux, over TCP 127.0.0.1 with a token (Windows' Python has no Unix
+  sockets). The packaged download also launched the Bluetooth daemon wrongly on every platform
+  (no "--tool", wrong tools folder): fixed in desktop/backend/ble_bridge.py.
+
 ## 2026-11-21: Remove a POI on the Ambit1 and Ambit2
 
 - It said "not available yet" on desktop and tablet. SuuntoLink itself rewrites this family's

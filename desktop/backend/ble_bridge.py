@@ -14,10 +14,9 @@ Same shape as the Android side of this project: `AmbitBleModule` owns one persis
 connection, and every other call (`AmbitBleDeviceProvider`, in-app `getLogs`/etc.) just
 reaches into it - a Unix socket standing in here for that shared in-process state.
 
-LINUX ONLY, for now. `ble_server.py` hosts the GATT server via BlueZ's D-Bus API, which has
-no equivalent on macOS or Windows - each of those needs its own peripheral-mode backend
-(CoreBluetooth on macOS, WinRT's GATT server APIs on Windows) behind this same client
-interface. Nothing here is Linux-specific by construction; only `ble_server.py` itself is.
+Linux: `ble_server.py` (BlueZ over D-Bus). Windows: `ble_server_win.py` (Windows' own GATT
+server through WinRT, 2026-11-21), same requests over TCP instead of a Unix socket. macOS has
+no daemon yet (CoreBluetooth would be its own back end behind this same client interface).
 
 DRY-RUN BY DEFAULT, matching every other watch-writing path in this project
 (`write_nav.py`, `sgee.py`, `server.py`'s own WATCH_LOCK'd endpoints): connecting only reads
@@ -26,6 +25,7 @@ DRY-RUN BY DEFAULT, matching every other watch-writing path in this project
 """
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -33,8 +33,24 @@ import threading
 import time
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
+# Frozen (the packaged download): tools/ is unpacked under sys._MEIPASS and PYTHON is the
+# backend's own executable, which runs a script only behind its "--tool" sentinel
+# (frozen_entry.py) - the same rule as server.py's run_tool(). Before 2026-11-21 this file
+# ran "<exe> -u <repo>/tools/ble_server.py", which in a download is neither a tool call nor a
+# real path.
+FROZEN = getattr(sys, "frozen", False)
+if FROZEN:
+    TOOLS_DIR = Path(sys._MEIPASS) / "tools"  # type: ignore[attr-defined]
+else:
+    TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
 PYTHON = sys.executable
+
+# Windows has its own daemon (tools/ble_server_win.py, Windows' Bluetooth through WinRT) and no
+# Unix sockets in its Python: the control socket is TCP on 127.0.0.1, its port and a token in
+# PORT_FILE (same requests otherwise).
+WINDOWS = os.name == "nt"
+DAEMON_SCRIPT = "ble_server_win.py" if WINDOWS else "ble_server.py"
+PORT_FILE = Path.home() / ".cache" / "Sommet" / "ble.port"
 
 LOG_ROLL_BYTES = 5 * 1024 * 1024
 
@@ -46,6 +62,32 @@ SOCKET_PATH = Path.home() / ".cache" / "Sommet" / "ble.sock"
 # Local process startup (Python interpreter + dbus/GLib imports), not a BLE operation - a few
 # seconds is generous, not a value tuned against the watch's own timing.
 _STARTUP_TIMEOUT_S = 10.0
+
+
+def _detached():
+    """Popen options that let the daemon outlive whatever started it. Real bug, hit live
+    2026-08-11 testing a fresh pairing: in the SAME process group as the shell that launched it,
+    the daemon died with that shell mid-pairing. POSIX: its own session. Windows: its own
+    process group, and no console window flashing up."""
+    if WINDOWS:
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    return {"start_new_session": True}
+
+
+def _daemon_endpoint_exists():
+    return (PORT_FILE if WINDOWS else SOCKET_PATH).exists()
+
+
+def _open_control():
+    """A connected socket to the daemon, and the token every request carries (Windows)."""
+    if WINDOWS:
+        try:
+            info = json.loads(PORT_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise BleBridgeError(f"BLE daemon is not running ({exc})") from exc
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        return sock, ("127.0.0.1", int(info["port"])), info.get("token", "")
+    return socket.socket(socket.AF_UNIX, socket.SOCK_STREAM), str(SOCKET_PATH), None
 
 
 class BleBridgeError(RuntimeError):
@@ -126,7 +168,9 @@ class BleBridge:
             # (bond forgetting, "watch found", "watch subscribed") sat in the child's
             # buffer instead of reaching this log file, making a live session look stalled
             # when it wasn't. Nothing here needs it fast; it needs it AT ALL while running.
-            args = [PYTHON, "-u", str(TOOLS_DIR / "ble_server.py"), "listen"]
+            script = str(TOOLS_DIR / DAEMON_SCRIPT)
+            args = ([PYTHON, "--tool", script, "listen"] if FROZEN
+                    else [PYTHON, "-u", script, "listen"])
             if forget:
                 args.append("--forget")
             if verbose:
@@ -134,15 +178,8 @@ class BleBridge:
             log_file = open(self._log_path, "a", encoding="utf-8")  # noqa: SIM115 - lives as long as _proc
             self._proc = subprocess.Popen(
                 args, cwd=str(TOOLS_DIR), stdout=log_file, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                # Fully detach into its own session - real bug, hit live 2026-08-11 testing
-                # a fresh pairing: without this, the daemon is still in the SAME process
-                # group as whatever shell launched it (a terminal, or - while testing this -
-                # a backgrounded `&` job), and that shell exiting/being reaped can take the
-                # daemon down with it mid-pairing, well before any BLE timeout would. The
-                # whole point of this being a persistent daemon (see this module's own
-                # docstring) is that it outlives the process that started it.
-                start_new_session=True)
+                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                **_detached())
         self._wait_for_socket()
 
     def stop(self):
@@ -161,7 +198,7 @@ class BleBridge:
     def _wait_for_socket(self):
         deadline = time.monotonic() + _STARTUP_TIMEOUT_S
         while time.monotonic() < deadline:
-            if SOCKET_PATH.exists():
+            if _daemon_endpoint_exists():
                 try:
                     self._request({"op": "status"}, timeout=2.0)
                     return
@@ -176,12 +213,14 @@ class BleBridge:
             f"ble_server.py did not open its control socket within {_STARTUP_TIMEOUT_S}s")
 
     def _request(self, payload, timeout=20.0):
-        if not SOCKET_PATH.exists():
+        if not _daemon_endpoint_exists():
             raise BleBridgeError("BLE daemon is not running (connect first)")
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock, address, token = _open_control()
+        if token is not None:
+            payload = {**payload, "token": token}
         sock.settimeout(timeout)
         try:
-            sock.connect(str(SOCKET_PATH))
+            sock.connect(address)
             sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             buf = b""
             while not buf.endswith(b"\n"):
