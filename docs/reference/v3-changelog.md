@@ -42,6 +42,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
     row shows "unplug the Bluetooth adapter and plug it back in" (the P5Q's CSR stick hung:
     BTHUSB "A command sent to the adapter has timed out", cleared by replugging).
   - Choosing a device in the Pair dialog no longer also opens Activities.
+  - Every Bluetooth command from the backend now waits its turn, not only the handlers named
+    "_ble": time sync, steps and orbit status still ran in the middle of a move read.
+  - Seen on the P5Q with the Peak (2026-11-21, 23:02): a sync with no new move takes 1.5 s
+    (one 1 KB read); the same sync read the whole log in 4 minutes before.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
   is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
   doesn't work this way people tell us"). A saved "off" from the old switch is ignored.

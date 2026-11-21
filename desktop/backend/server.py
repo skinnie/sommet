@@ -10098,6 +10098,21 @@ def _with_watch_lock(fn):
     return run
 
 
+# ... and every single Bluetooth command sent from this process waits for that lock too. A
+# dozen handlers talk to the watch without "_ble" in their name (time sync, steps, orbit
+# status, the 0x1200 summary, removals): on the P5Q their requests still ran in the middle of
+# a move read (2026-11-21, 22:55). A job that holds the lock passes straight through.
+def _serialize_bridge(bridge):
+    send = bridge.command
+
+    def command(*args, **kwargs):
+        with WATCH_LOCK:
+            return send(*args, **kwargs)
+    bridge.command = command
+
+
+_serialize_bridge(ble_bridge.bridge)
+
 for _name in [n for n in vars(Handler) if n.startswith("_handle_") and n.endswith("_ble")
               and n != "_handle_device_ble"]:          # takes it only when free (its own doc)
     setattr(Handler, _name, _with_watch_lock(getattr(Handler, _name)))
