@@ -335,6 +335,40 @@ def test_sync_lock():
     assert sync_lock(silent, True) is False and silent.calls == [(0x0b19, b"")]
 
 
+def _damaged(command, pkt):
+    """A frame of `command`/`pkt` whose CRC fails, as handle_rx sees one."""
+    m = watch(command, b"x" * 40, pkt=pkt)
+    m.crc_ok = False
+    return m
+
+
+def test_a_damaged_read_is_asked_again():
+    """P5Q, 2026-11-21: one damaged 1 KB reply ended a whole move sync. A read (0x0b17) whose
+    reply fails its CRC is sent again at once, as a new packet; a write is never resent."""
+    link, chrc, loop = linked()
+    thread, result, first = start(link, loop, 0x0b17, b"\x01" * 8, timeout=5)
+    began = time.monotonic()
+    link.on_damaged(_damaged(0x0b17, first.pkt_num))
+    for _ in range(200):
+        loop.pump()
+        if len(sent(chrc)) == 2:
+            break
+        time.sleep(0.01)
+    again = sent(chrc)[-1]
+    assert again.command == 0x0b17 and again.payload == first.payload
+    assert again.pkt_num == first.pkt_num + 1
+    link.on_message(watch(0x0b17, b"good", pkt=again.pkt_num))
+    thread.join(2)
+    assert result == [b"good"] and time.monotonic() - began < 2, result
+    # a write's damaged reply: not resent, it waits for its own answer or times out
+    chrc.out.clear()
+    thread, result, w = start(link, loop, 0x0b25, b"\x01" * 30, timeout=0.5)
+    link.on_damaged(_damaged(0x0b25, w.pkt_num))
+    thread.join(2)
+    loop.pump()
+    assert len(sent(chrc)) == 1, "a write was sent twice"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

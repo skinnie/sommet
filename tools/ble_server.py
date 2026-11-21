@@ -601,6 +601,7 @@ class ServerLink:
         # pktNums of requests that timed out: their reply, if it still comes, is not taken as
         # the answer to a later request (every logged reply echoes its request's pktNum).
         self._late_pkts = collections.deque(maxlen=32)
+        self._damaged = False      # the reply being waited for came back damaged (on_damaged)
         # Frames waiting to go out, as 20-byte chunks. Only the GLib loop touches it, so a
         # sync-notice answer can never land in the middle of a command's chunks.
         self._tx = collections.deque()
@@ -666,6 +667,17 @@ class ServerLink:
                   f"the request was {self._pending_pkt}")
         self._reply = message
         self._reply_ready.set()
+
+    def on_damaged(self, message):
+        """A frame that failed its CRC. When it is the reply being waited for (same command
+        and packet, as far as its header can be read), wake command() at once instead of
+        letting it wait out its timeout, so a read can be asked again (P5Q, 2026-11-21: one
+        damaged 1 KB block ended a whole move sync)."""
+        if (self._expecting is not None and self._pending_pkt is not None
+                and message.command == REPLY_COMMAND.get(self._expecting, self._expecting)
+                and message.pkt_num == self._pending_pkt):
+            self._damaged = True
+            self._reply_ready.set()
 
     def _answer_sync_notice(self, message):
         """An empty 0x1201, flags 0x09, same pktNum: what the Suunto app and protocol_ble.c
@@ -796,24 +808,45 @@ class ServerLink:
         self.sequence += 1
         if self.dry_run or not expect_reply:
             return b""
-        self._reply = None
-        self._reply_ready.clear()
-        self._pending_pkt = pkt
-        self._expecting = command
-        self._send(frame)
-        got = self._reply_ready.wait(timeout)
+        for attempt in range(READ_RETRIES + 1):
+            self._reply = None
+            self._damaged = False
+            self._reply_ready.clear()
+            self._pending_pkt = pkt
+            self._expecting = command
+            self._send(frame)
+            got = self._reply_ready.wait(timeout)
+            if not (got and self._damaged and command in RETRY_SAFE and attempt < READ_RETRIES):
+                break
+            # A read changes nothing on the watch: ask again, as a new packet.
+            print(f"  0x{command:04x} came back damaged: asking again ({attempt + 1}/{READ_RETRIES})")
+            pkt = self._pkt_num & 0xFFFF
+            frame = encode_nsp_frame(command, payload,
+                                     self.DRIVER_FLAGS if flags is None else flags,
+                                     self._conn_id, pkt)
+            self.sent.append((command, payload, frame))
+            self._pkt_num = (pkt + 1) & 0xFFFF
+            self.sequence += 1
         reply = self._reply
         self._expecting = None
         self._pending_pkt = None
         if not got:
             self._late_pkts.append(pkt)
             raise TimeoutError(f"no reply to 0x{command:04x} within {timeout}s")
+        if self._damaged:
+            raise RuntimeError(f"0x{command:04x} came back damaged {READ_RETRIES + 1} times")
         if reply is None:
             raise RuntimeError(f"the watch disconnected before answering 0x{command:04x}")
         if reply.err_flags:
             raise WatchRefused(f"the watch refused 0x{command:04x} {name} "
                                f"(error flags 0x{reply.err_flags:02x})")
         return reply.payload
+
+
+# Reads that may be asked again when their reply comes back damaged: they change nothing on
+# the watch. Never a write.
+RETRY_SAFE = {0x0B17}          # flash read (read_flash: moves, POIs, settings, backups)
+READ_RETRIES = 3
 
 
 def handle_rx(assembler, link, chunk, verbose=False):
@@ -834,6 +867,9 @@ def handle_rx(assembler, link, chunk, verbose=False):
                   f"{' ...' if len(message.payload) > 64 else ''}")
         if message.crc_ok is not True:
             print("        dropped: damaged frame")
+            on_damaged = getattr(link, "on_damaged", None)
+            if on_damaged is not None:
+                on_damaged(message)
             continue
         link.on_message(message)
 

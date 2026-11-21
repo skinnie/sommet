@@ -58,8 +58,10 @@ From the [Releases](https://github.com/skinnie/sommet/releases) page:
 Step by step, with the udev rule: [Install Sommet](docs/how-to/install.md). To build it
 yourself: [BUILDING.md](BUILDING.md).
 
-Bluetooth is switched on in Settings. It works on Android; on the desktop it's experimental,
-tested on Linux with mixed results and not on macOS or Windows.
+On the desktop, use the cable when you can. Bluetooth works on Linux and Windows, but how well
+depends a lot on the operating system and the Bluetooth adapter, and it's slow: a new move
+takes about a minute, a first full read several. On Android, Bluetooth works well. macOS
+Bluetooth isn't tested.
 
 ## More
 

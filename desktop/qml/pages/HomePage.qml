@@ -1743,7 +1743,11 @@ PageFlickable {
                         text: DeviceService.bleAttempting
                             ? qsTr("Connecting… (%1s)").arg(DeviceService.bleAttemptSeconds)
                             : root.mageneScanning || root.brytonScanning ? qsTr("Searching…")
-                                                  : qsTr("Pair another device by Bluetooth")
+                                                  // "Pair / sync" (André, 2026-11-21): it also
+                                                  // starts a sync with a watch already paired.
+                                                  // Check later whether it is still needed now
+                                                  // that the service starts at launch.
+                                                  : qsTr("Pair / sync by Bluetooth")
                         enabled: !DeviceService.bleAttempting && !root.mageneScanning && !root.brytonScanning
                         onClicked: pairDialog.open()
                     }
