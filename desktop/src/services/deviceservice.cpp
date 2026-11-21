@@ -20,9 +20,10 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
 {
     // Restore the persisted "Ephemeris GPS only" choice on launch.
     m_ephemerisGpsOnly = QSettings().value(QStringLiteral("ephemeris/gpsOnly"), false).toBool();
-    // Off by default - real decision, 2026-08-11 (see this property's own header comment).
-    m_bleExperimentEnabled =
-        QSettings().value(QStringLiteral("experimental/bluetooth"), false).toBool();
+    // Always on since 2026-11-21 (André: "let's make bluetooth always available, if it doesn't
+    // work this way people tell us"). It was an opt-in switch in Settings from 2026-08-11; a
+    // saved "off" from that switch is ignored, so everyone gets the Pair button.
+    m_bleExperimentEnabled = true;
     // Off by default - see this property's own header comment. Opt-in write-back of the
     // watch's per-move synced flag.
     m_markSyncedEnabled =

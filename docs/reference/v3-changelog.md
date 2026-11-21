@@ -9,6 +9,9 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ## 2026-11-21: Ambit3 Bluetooth on Windows (Windows' own Bluetooth)
 
+- Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
+  is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
+  doesn't work this way people tell us"). A saved "off" from the old switch is ignored.
 - New tools/ble_server_win.py: the watch service Linux runs through BlueZ, on Windows' own
   GATT server (WinRT, the winrt packages bleak already ships). No driver change: Windows keeps
   its Bluetooth, so headphones, mice and pens keep working. The service is published without

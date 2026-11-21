@@ -1550,36 +1550,14 @@ PageFlickable {
                 SettingsSection {
                     id: experimentalSection
                     title: qsTr("Experimental features")
-                    summary: qsTr("Bluetooth: %1 · mark synced workouts: %2")
-                        .arg((DeviceService.bleExperimentEnabled ? qsTr("on") : qsTr("off")))
+                    summary: qsTr("Mark synced workouts: %1")
                         .arg((DeviceService.markSyncedEnabled ? qsTr("on") : qsTr("off")))
                     glyph: Icons.watch
                     expanded: root.sectionOpen("experimental")
                     onToggleRequested: root.setSectionOpen("experimental", !expanded)
 
-                    Text {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        text: qsTr("Bluetooth connectivity (Linux and Windows). Still being hardened - " +
-                                    "cable stays the reliable default. Turning this on adds a " +
-                                    "\"Connect via Bluetooth\" option to the Home screen.")
-                        color: Theme.mutedText
-                        font.pixelSize: Theme.fontSizeBody
-                    }
-                    Row {
-                        spacing: Theme.spacingSmall
-                        RoundedSwitch {
-                            anchors.verticalCenter: parent.verticalCenter
-                            checked: DeviceService.bleExperimentEnabled
-                            onToggled: DeviceService.bleExperimentEnabled = checked
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: DeviceService.bleExperimentEnabled ? qsTr("On") : qsTr("Off")
-                            color: DeviceService.bleExperimentEnabled ? Theme.primary : Theme.mutedText
-                            font.pixelSize: Theme.fontSizeBody
-                        }
-                    }
+                    // Bluetooth has no switch any more: it is always on (André, 2026-11-21: "let's
+                    // make bluetooth always available, if it doesn't work this way people tell us").
 
                     // --- Mark synced workouts. Opt-in, OFF by default (André, 2026-08-16).
                     // Writes the watch's own per-move synced flag after this app reads a
