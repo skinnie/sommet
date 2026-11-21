@@ -344,6 +344,8 @@ ApplicationWindow {
             Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
             currentPage: "home"
             onPageSelected: (pageId) => currentPage = pageId
+            // Speed test: names the page before any [STALL] its building causes (SommetPerf4).
+            onCurrentPageChanged: console.log("[PAGE] " + currentPage)
             onCollapseRequested: window.navExpanded = false
 
             // Pages navigating on their own (Home's Last Activity -> Activities, This
