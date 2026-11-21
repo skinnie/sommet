@@ -815,6 +815,13 @@ async def _listen(verbose, timeout, forget, serve_socket):
                                    link_state=host.state, forget=do_forget)
         sock = control.bind()
         threading.Thread(target=control.serve_forever, args=(sock,), daemon=True).start()
+    # A watch paired before is dialed at once: Windows links as soon as it next advertises.
+    # Waiting for a scan burst to see it first cost up to 10 s (bursts of 3 s every 10 s; the
+    # P5Q, 2026-11-21: 11 s from "hosted" to "watch calling"). The scan stays as the way back.
+    for address in list(host.known)[:1]:
+        host.dialing = True
+        print("  dialing the watch paired before")
+        asyncio.ensure_future(host.dial(address))
     host.start_scanning()
     print('  now choose "Pair with app" (first time) or "Sync now" on the watch')
     try:

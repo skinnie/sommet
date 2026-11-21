@@ -120,6 +120,8 @@ class DeviceService : public QObject
     Q_PROPERTY(bool bleAttempting READ bleAttempting NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleSubscribed READ bleSubscribed NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleHandshakeDone READ bleHandshakeDone NOTIFY bleStateChanged)
+    // The first half minute after launch while a watch paired before is being looked for.
+    Q_PROPERTY(bool bleAutoSearching READ bleAutoSearching NOTIFY bleStateChanged)
     // New moves coming in over Bluetooth (the backend's reading_moves): bytes so far, bytes in
     // all, and how many moves. Total 0 = no move read running.
     Q_PROPERTY(int bleMovesDone READ bleMovesDone NOTIFY bleMovesProgressChanged)
@@ -274,6 +276,7 @@ public:
     bool bleAttempting() const { return m_bleAttempting; }
     bool bleSubscribed() const { return m_bleSubscribed; }
     bool bleHandshakeDone() const { return m_bleHandshakeDone; }
+    bool bleAutoSearching() const { return m_bleAutoSearching; }
     int bleMovesDone() const { return m_bleMovesDone; }
     int bleMovesTotal() const { return m_bleMovesTotal; }
     int bleMovesCount() const { return m_bleMovesCount; }
@@ -416,6 +419,9 @@ private:
     bool m_bleAttempting = false;
     bool m_bleSubscribed = false;
     bool m_bleHandshakeDone = false;
+    bool m_bleAutoSearching = false;
+    static constexpr int kBleAutoSearchMs = 30000;
+    static constexpr int kBleAutoPollMs = 500;
     int m_bleMovesDone = 0;
     int m_bleMovesTotal = 0;
     int m_bleMovesCount = 0;

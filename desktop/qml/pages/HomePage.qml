@@ -993,13 +993,19 @@ PageFlickable {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 2
                             Text {
-                                text: qsTr("No watch connected")
+                                // A watch paired before is looked for from launch (André,
+                                // 2026-11-21: say so at once, not "No watch connected").
+                                text: DeviceService.bleAutoSearching
+                                      ? qsTr("Looking for your watch over Bluetooth…")
+                                      : qsTr("No watch connected")
                                 font.pixelSize: Theme.fontSizeTitle
                                 font.bold: true
                                 color: Theme.text
                             }
                             Text {
-                                text: DeviceService.bleExperimentEnabled
+                                text: DeviceService.bleAutoSearching
+                                    ? qsTr("It links by itself when it is near. The cable works too.")
+                                    : DeviceService.bleExperimentEnabled
                                     ? qsTr("Plug it in via USB, or search for your adventure " +
                                            "buddy over Bluetooth below.")
                                     : qsTr("Plug it in via USB to get started.")

@@ -44,6 +44,10 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   - Choosing a device in the Pair dialog no longer also opens Activities.
   - Every Bluetooth command from the backend now waits its turn, not only the handlers named
     "_ble": time sync, steps and orbit status still ran in the middle of a move read.
+  - Faster link at launch: the Bluetooth service is started as Sommet opens (was 3 s later,
+    with a 5 s retry), the Windows service dials the watch paired before at once instead of
+    waiting for a scan burst (up to 10 s), and Home says "Looking for your watch over
+    Bluetooth…" meanwhile. It took 21 s on the P5Q before; not timed with the watch yet.
   - Seen on the P5Q with the Peak (2026-11-21, 23:02): a sync with no new move takes 1.5 s
     (one 1 KB read); the same sync read the whole log in 4 minutes before.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch

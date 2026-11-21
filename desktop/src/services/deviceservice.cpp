@@ -28,8 +28,19 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
     // now" is heard without pressing Pair (André, 2026-11-21: the service stopped with Sommet
     // and a restarted Sommet heard nothing). Only after a pairing, so a fresh install never
     // starts Bluetooth (nor Linux's privacy prompt) on its own.
-    if (QSettings().value(QStringLiteral("bluetooth/watchPaired"), false).toBool())
-        QTimer::singleShot(3000, this, [this] { resumeBle(0); });
+    // At once, and Home says "Looking for your watch" meanwhile (André, 2026-11-21: after 8 s
+    // with nothing on screen one wonders "is this working?"; it took 21 s that evening: a 3 s
+    // wait here, a 5 s retry while the backend was starting, then 11 s for a scan burst).
+    if (QSettings().value(QStringLiteral("bluetooth/watchPaired"), false).toBool()) {
+        m_bleAutoSearching = true;
+        QTimer::singleShot(0, this, [this] { resumeBle(0); });
+        QTimer::singleShot(kBleAutoSearchMs, this, [this] {
+            if (m_bleAutoSearching) {
+                m_bleAutoSearching = false;       // not around: back to the plain text
+                emit bleStateChanged();
+            }
+        });
+    }
     // Off by default - see this property's own header comment. Opt-in write-back of the
     // watch's per-move synced flag.
     m_markSyncedEnabled =
@@ -635,13 +646,13 @@ void DeviceService::resumeBle(int tries)
         if (m_bleAttempting || m_bleWatching)
             return;
         if (reply->error() != QNetworkReply::NoError || !obj.value(QStringLiteral("ok")).toBool()) {
-            if (tries < 12)            // the backend still starting: try for about a minute
-                QTimer::singleShot(5000, this, [this, tries] { resumeBle(tries + 1); });
+            if (tries < 120)           // the backend still starting: try for about a minute
+                QTimer::singleShot(500, this, [this, tries] { resumeBle(tries + 1); });
             return;
         }
         m_bleWatching = true;
         m_bleLastNoticeAt = QDateTime::currentMSecsSinceEpoch() / 1000.0;
-        m_blePollTimer.start(kBleWatchIntervalMs);
+        m_blePollTimer.start(kBleAutoPollMs);
     });
 }
 
@@ -775,6 +786,7 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
         m_blePendingPasskeyDevice = pending;
         if (cameBack) {
             m_bleError.clear();        // "No watch found" no longer holds
+            m_bleAutoSearching = false;
             QSettings().setValue(QStringLiteral("bluetooth/watchPaired"), true);
         }
         emit bleStateChanged();
@@ -804,7 +816,7 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
         if (m_bleHandshakeDone)
             emit bleSyncRequested();
     }
-    m_blePollTimer.start(kBleWatchIntervalMs);
+    m_blePollTimer.start(m_bleAutoSearching ? kBleAutoPollMs : kBleWatchIntervalMs);
 }
 
 void DeviceService::disconnectBle()
