@@ -554,10 +554,19 @@ class WinHost:
             dev.add_connection_status_changed(self._on_connection)
             pairing = dev.device_information.pairing
             print(f"  device '{dev.name}', paired: {pairing.is_paired}")
-            if not pairing.is_paired and pairing.can_pair:
-                await self.pair(dev)
+            # Link first, pairing second, as in the Suunto app capture (btsnoop_suuntoapp_
+            # 2026-08-09: connected, then the watch's Security Request, then pairing). Paired
+            # straight away, Windows' pairing-only link was down by the time the code was
+            # typed (P5Q 2026-11-21, status 19, link DISCONNECTED at the hand-over).
             self.session = await self.gatt.GattSession.from_device_id_async(dev.bluetooth_device_id)
             self.session.maintain_connection = True
+            if not pairing.is_paired and pairing.can_pair:
+                for _ in range(50):                        # up to 5 s for the link
+                    if dev.connection_status == self.ConnStatus.CONNECTED:
+                        break
+                    await asyncio.sleep(0.1)
+                print(f"  link before pairing: {dev.connection_status.name}")
+                await self.pair(dev)
             res = await dev.get_gatt_services_async(self.CacheMode.UNCACHED)
             print(f"  link: {dev.connection_status.name}; the watch's own services: "
                   f"{len(res.services) if res.services else 0}")
@@ -578,6 +587,7 @@ class WinHost:
 
         def on_request(_c, args):
             kind = args.pairing_kind
+            print(f"  pairing: Windows asks for {kind.name}")
             if kind == K.PROVIDE_PIN:
                 deferral = args.get_deferral()
 
@@ -585,7 +595,11 @@ class WinHost:
                     print("  pairing: the watch shows a 6-digit code - type it in Sommet (60 s)")
                     value = self.agent.wait(self.state.path)
                     if value is not None:
-                        args.accept_with_pin(f"{value:06d}")
+                        print("  pairing: code typed, handing it to Windows")
+                        try:
+                            args.accept_with_pin(f"{value:06d}")
+                        except Exception as exc:           # noqa: BLE001
+                            print(f"  pairing: Windows refused the code: {exc!r}")
                     else:
                         print("  pairing: no code typed")
                     deferral.complete()
@@ -603,7 +617,8 @@ class WinHost:
             kinds = K.PROVIDE_PIN | K.CONFIRM_ONLY | K.DISPLAY_PIN | K.CONFIRM_PIN_MATCH
             r = await custom.pair_with_protection_level_async(
                 kinds, e.DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION)
-            print(f"  pairing result: {r.status.name}, level {r.protection_level_used.name}")
+            print(f"  pairing result: {r.status.name} ({int(r.status)}), level "
+                  f"{r.protection_level_used.name}; link now {dev.connection_status.name}")
             if r.status not in (e.DevicePairingResultStatus.PAIRED,
                                 e.DevicePairingResultStatus.ALREADY_PAIRED):
                 self.state.pairing_hint = (f"Pairing did not finish ({r.status.name}). Choose "
