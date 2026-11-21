@@ -1560,7 +1560,7 @@ PageFlickable {
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
-                        text: qsTr("Bluetooth connectivity (Linux only). Still being hardened - " +
+                        text: qsTr("Bluetooth connectivity (Linux and Windows). Still being hardened - " +
                                     "cable stays the reliable default. Turning this on adds a " +
                                     "\"Connect via Bluetooth\" option to the Home screen.")
                         color: Theme.mutedText
