@@ -29,6 +29,7 @@ Rectangle {
     function stageText() {
         if (stage === "moves") return qsTr("Saving activities")
         if (stage === "tracks") return qsTr("Fetching tracks")
+        if (stage === "checking") return qsTr("Checking with your server")   // Android only today
         if (stage === "sending") return qsTr("Sending to your server")
         return ""
     }

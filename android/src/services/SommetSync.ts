@@ -211,9 +211,10 @@ async function pushBlob(url: string, token: string, uid: string, gpx: string): P
 let runSommetSyncInFlight: Promise<SommetSyncResult> | null = null;
 // ── Progress (sync/12) ─────────────────────────────────────────────────────────────────────
 // What the sync is doing, for the banner on every screen. stage '' = idle; 'moves' = saving the
-// activities pulled from the server (and fetching their tracks); 'sending' = sending ours.
+// activities pulled from the server (and fetching their tracks); 'checking' = comparing ours
+// with what the server holds; 'sending' = sending the ones it lacks.
 // first = nothing pulled before, which takes minutes. error = the last run failed.
-export interface SommetSyncProgress { stage: '' | 'moves' | 'sending'; done: number; total: number; first: boolean; error: string; }
+export interface SommetSyncProgress { stage: '' | 'moves' | 'checking' | 'sending'; done: number; total: number; first: boolean; error: string; }
 let progress: SommetSyncProgress = { stage: '', done: 0, total: 0, first: false, error: '' };
 const progressListeners = new Set<(p: SommetSyncProgress) => void>();
 export function getSommetSyncProgress(): SommetSyncProgress { return progress; }
@@ -386,7 +387,9 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   // 200, each recorded once the server accepts it, so an interrupted sync resumes where it stopped.
   const acts = await getAllActivities();
   const ledger = await getSommetLedger();
-  setProgress({ stage: 'sending', done: 0, total: acts.length });
+  // Most syncs send nothing: say "Checking" while comparing, "Sending" only for what goes
+  // (André, 2026-11-21: the banner said "Sending 3,600 / 4,696" when nothing was sent).
+  setProgress({ stage: 'checking', done: 0, total: acts.length });
   let readCount = 0;
   const records: any[] = [];
   const blobsToPush: { uid: string; gpx: string }[] = [];
@@ -431,6 +434,8 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
 
   const deletions = Array.from(tombstones).filter(u => !deletedSent.has(u));
   let sentCount = 0;
+  if (records.length > 0 || deletions.length > 0 || blobsToPush.length > 0)
+    setProgress({ stage: 'sending', done: 0, total: records.length + blobsToPush.length });
   for (let i = 0; i < records.length || (i === 0 && deletions.length > 0); i += 200) {
     const batch = records.slice(i, i + 200);
     const dels = i === 0 ? deletions : [];
@@ -439,12 +444,14 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
     await markSommetSent(batch.map(r => ({ uid: r.uid, updatedAt: r.updated_at })));
     await markSommetDeletedSent(dels);
     sentCount += batch.length;
-    setProgress({ done: Math.min(acts.length, sentCount) });
+    setProgress({ done: sentCount });
     await yieldToUi();
   }
 
+  let blobsDone = 0;
   for (const b of blobsToPush) {
     if (await pushBlob(url, token, b.uid, b.gpx)) pushed.add(b.uid);
+    setProgress({ done: sentCount + ++blobsDone });
   }
   await AsyncStorage.setItem(PUSHED_KEY, JSON.stringify(Array.from(pushed)));
 

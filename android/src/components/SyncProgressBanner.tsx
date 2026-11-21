@@ -10,6 +10,7 @@ import {
 
 function stageText(stage: SommetSyncProgress['stage']): string {
   if (stage === 'moves') return 'Saving activities';
+  if (stage === 'checking') return 'Checking with your server';
   if (stage === 'sending') return 'Sending to your server';
   return '';
 }
