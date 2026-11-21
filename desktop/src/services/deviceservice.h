@@ -297,6 +297,9 @@ public:
     // not something to do from this app on every connect tap, since a bond just
     // established is what lets a plain reconnect work next time.
     Q_INVOKABLE void connectBle(bool forget = false);
+    // Starts the Bluetooth service quietly at launch once a watch was paired (no searching
+    // state, no "No watch found"); retries while the backend is still starting.
+    void resumeBle(int tries);
     // Tears the daemon down; leaves the watch's own bond alone.
     Q_INVOKABLE void disconnectBle();
     // Reports the passkey a human read off the watch's screen back to the pairing agent -

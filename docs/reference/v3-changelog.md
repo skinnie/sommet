@@ -26,6 +26,8 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   - A failed pairing or a dropped link says so instead of "No watch found".
   - Windows: the code is typed in Windows' own pop-up, and Home says so; the Bluetooth
     service stops when Sommet closes.
+  - Once a watch has paired over Bluetooth, Sommet starts the Bluetooth service quietly at
+    every launch, so "Sync now" on the watch is heard without pressing Pair.
 - Bluetooth is always on in the desktop app: the "Experimental features > Bluetooth" switch
   is gone, and Home always offers pairing a watch by Bluetooth next to USB (André: "if it
   doesn't work this way people tell us"). A saved "off" from the old switch is ignored.

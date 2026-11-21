@@ -24,6 +24,12 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
     // work this way people tell us"). It was an opt-in switch in Settings from 2026-08-11; a
     // saved "off" from that switch is ignored, so everyone gets the Pair button.
     m_bleExperimentEnabled = true;
+    // A watch paired over Bluetooth before: listen for it from launch, quietly, so its "Sync
+    // now" is heard without pressing Pair (André, 2026-11-21: the service stopped with Sommet
+    // and a restarted Sommet heard nothing). Only after a pairing, so a fresh install never
+    // starts Bluetooth (nor Linux's privacy prompt) on its own.
+    if (QSettings().value(QStringLiteral("bluetooth/watchPaired"), false).toBool())
+        QTimer::singleShot(3000, this, [this] { resumeBle(0); });
     // Off by default - see this property's own header comment. Opt-in write-back of the
     // watch's per-move synced flag.
     m_markSyncedEnabled =
@@ -614,6 +620,31 @@ void DeviceService::connectBle(bool forget)
     });
 }
 
+void DeviceService::resumeBle(int tries)
+{
+    if (m_bleAttempting || m_bleWatching)
+        return;                        // Pair was pressed meanwhile: that flow owns it
+    QJsonObject body;
+    body[QStringLiteral("forget")] = false;
+    QNetworkRequest request(backendUrl(QStringLiteral("/api/ble/connect")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, tries] {
+        reply->deleteLater();
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (m_bleAttempting || m_bleWatching)
+            return;
+        if (reply->error() != QNetworkReply::NoError || !obj.value(QStringLiteral("ok")).toBool()) {
+            if (tries < 12)            // the backend still starting: try for about a minute
+                QTimer::singleShot(5000, this, [this, tries] { resumeBle(tries + 1); });
+            return;
+        }
+        m_bleWatching = true;
+        m_bleLastNoticeAt = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+        m_blePollTimer.start(kBleWatchIntervalMs);
+    });
+}
+
 void DeviceService::pollBleStatus()
 {
     QNetworkReply *reply =
@@ -652,7 +683,9 @@ void DeviceService::pollBleStatus()
             // right away instead of waiting for its own next scheduled tick.
             m_bleAttempting = false;
             emit bleStateChanged();
+            QSettings().setValue(QStringLiteral("bluetooth/watchPaired"), true);   // resumeBle()
             refresh();
+            emit bleSyncRequested();   // new moves first (see watchBleStatus)
             // Real bug, found live 2026-08-11: GPS orbit status is only ever checked once,
             // from HomePage.qml's own Component.onCompleted - if that ran before a BLE
             // connection existed (the normal case: the page loads with nothing connected,
@@ -740,8 +773,10 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
         m_bleHandshakeDone = done;
         m_bleSubscribed = subscribed;
         m_blePendingPasskeyDevice = pending;
-        if (cameBack)
+        if (cameBack) {
             m_bleError.clear();        // "No watch found" no longer holds
+            QSettings().setValue(QStringLiteral("bluetooth/watchPaired"), true);
+        }
         emit bleStateChanged();
         if (cameBack) {
             refresh();                 // linked late, or called back by itself: read it again
@@ -790,6 +825,7 @@ void DeviceService::disconnectBle()
 
 void DeviceService::forgetBle()
 {
+    QSettings().setValue(QStringLiteral("bluetooth/watchPaired"), false);
     m_blePollTimer.stop();
     m_bleWatching = false;
     m_bleAttempting = false;
