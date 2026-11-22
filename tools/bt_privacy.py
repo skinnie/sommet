@@ -16,6 +16,12 @@ off for about a second, so a mouse or keyboard reconnects.
 
     ./tools/bt_privacy.py check     -> {"ok", "needed", "reason"}   (read-only)
     ./tools/bt_privacy.py window    turn it on, wait for Enter, turn it off (by hand)
+    ./tools/bt_privacy.py always    -> {"ok", "always"}             (read-only)
+
+Always on (André, 2026-11-22: the watch's offer to pair is shorter than typing a password): the
+system's own setting, `Privacy = device` in /etc/bluetooth/main.conf, changed once through
+set_always() with one password prompt. A pairing then needs no prompt at all. The price is in
+the how-to: a Bluetooth mouse or keyboard paired before may need pairing again.
 """
 
 import json
@@ -32,6 +38,43 @@ MAX_WINDOW_S = 1800         # the root script turns privacy off by itself after 
 # The root script, its own file so the password prompt names it ("sommet-bluetooth-privacy")
 # instead of /bin/bash. Runs under pkexec; prints ALREADY | ON | FAILED, then OFF at the end.
 ROOT_SCRIPT = pathlib.Path(__file__).resolve().parent / "sommet-bluetooth-privacy"
+ALWAYS_SCRIPT = pathlib.Path(__file__).resolve().parent / "sommet-bluetooth-privacy-always"
+MAIN_CONF = pathlib.Path("/etc/bluetooth/main.conf")
+
+
+def always_on(conf=None):
+    """True when the system keeps Bluetooth privacy on (`Privacy = device` or `on`, not
+    commented out, in main.conf). Read-only, no root."""
+    import re                                                # noqa: PLC0415
+    try:
+        text = pathlib.Path(conf or MAIN_CONF).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return re.search(r"^[ \t]*Privacy[ \t]*=[ \t]*(device|on|network/on|limited-network)\b", text,
+                     re.M | re.I) is not None
+
+
+def set_always(on, prompt_timeout=180):
+    """Turns the system's setting on or off: one password prompt (pkexec), Bluetooth restarts.
+    Returns {"ok", "always", "error"?}. Blocks while the prompt is up."""
+    if platform.system() != "Linux":
+        return {"ok": False, "always": False, "error": "this is a Linux setting"}
+    if not shutil.which("pkexec"):
+        return {"ok": False, "always": always_on(), "error": "pkexec is not installed"}
+    try:
+        done = subprocess.run(["pkexec", str(ALWAYS_SCRIPT), "on" if on else "off"],
+                              capture_output=True, text=True, timeout=prompt_timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "always": always_on(), "error": "the password was not typed in time"}
+    except OSError as exc:
+        return {"ok": False, "always": always_on(), "error": f"could not start pkexec ({exc})"}
+    word = (done.stdout or "").strip().splitlines()[-1:] or [""]
+    if done.returncode == 126:
+        return {"ok": False, "always": always_on(), "error": "cancelled"}
+    if word[0] not in ("ON", "OFF"):
+        return {"ok": False, "always": always_on(),
+                "error": "the Bluetooth setting could not be changed"}
+    return {"ok": True, "always": word[0] == "ON"}
 
 
 def suunto_paired():
@@ -53,6 +96,8 @@ def check():
             return False, f"{tool} is not installed"
     if suunto_paired():
         return False, "a Suunto watch is already paired with this computer"
+    if always_on():
+        return False, "Bluetooth privacy is always on on this computer"
     return True, "fresh pairing on Linux"
 
 
@@ -199,7 +244,10 @@ def main(argv=None):
             input("Pair the watch now, then press Enter to turn privacy off again... ")
             w.close()
         return 0
-    print("usage: bt_privacy.py check | window")
+    if a == ["always"]:
+        print(json.dumps({"ok": True, "always": always_on()}))
+        return 0
+    print("usage: bt_privacy.py check | window | always")
     return 1
 
 

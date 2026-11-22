@@ -7,6 +7,30 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: the first Bluetooth sync reads the log once, not three times; pairing on Linux without the password
+
+From the first sync with the Linux download on the P5Q (André: "pois took huge time, same for
+routes but work").
+
+- The routes (6 s) and POIs were quick; they waited behind the activity log, which was read
+  three times in a row: 16 minutes instead of 5. Three pages each asked "everything" while the
+  first read ran, the app asked "anything new?" in between, and the backend kept only the last
+  answer, so each later "everything" read the whole 535 KB again.
+  - Backend: one answer is kept per question for 2 minutes, not only the last one
+    (`_handle_activities_ble`).
+  - App: while a read of the watch's activities is under way, a page that opens does not start
+    another (`ActivityService`, `m_watchReadsInFlight`).
+- Settings, Experimental features, Linux only: **Pair a watch by Bluetooth without the
+  password**. It keeps the system's Bluetooth privacy on for good (`Privacy = device` in
+  `/etc/bluetooth/main.conf`, a copy of the file kept as `main.conf.before-sommet`): the system
+  asks for the password once, when the switch is turned on, and a pairing then asks for
+  nothing. Off by default, and the text says the price: a Bluetooth mouse or keyboard paired
+  before may need pairing again. Turning it off puts the setting back.
+  (`tools/bt_privacy.py` `set_always`, `tools/sommet-bluetooth-privacy-always`.)
+- Checked by tests (the file edit runs on a scratch copy) and the switch seen on a test
+  display. Not turned on on a real system by me: it changes a system setting and is the
+  owner's to press.
+
 ## 2026-11-22: Bluetooth in the Linux download (it asked for the password, then failed)
 
 André on the P5Q (Mint): "it asks me sudo password ... and then it fails".

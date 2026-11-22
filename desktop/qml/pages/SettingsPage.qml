@@ -1559,6 +1559,92 @@ PageFlickable {
                     // Bluetooth has no switch any more: it is always on (André, 2026-11-21: "let's
                     // make bluetooth always available, if it doesn't work this way people tell us").
 
+                    // --- Linux only: keep Bluetooth privacy on, so pairing a watch never asks for
+                    // the password (André, 2026-11-22: the watch's offer to pair is shorter than
+                    // typing one). It is the system's own setting (tools/bt_privacy.py
+                    // set_always): changing it asks for the password once, here, and restarts
+                    // Bluetooth. Off by default: a Bluetooth mouse or keyboard paired before may
+                    // need pairing again. ---
+                    Column {
+                        id: btPrivacy
+                        visible: Qt.platform.os === "linux"
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        property bool always: false
+                        property bool busy: false
+                        property string note: ""
+                        function ask(method, body) {
+                            const xhr = new XMLHttpRequest()
+                            xhr.onreadystatechange = function () {
+                                if (xhr.readyState !== XMLHttpRequest.DONE) return
+                                btPrivacy.busy = false
+                                let r = null
+                                try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
+                                if (!r) { btPrivacy.note = qsTr("No answer from Sommet's helper."); return }
+                                btPrivacy.always = !!r.always
+                                if (method === "POST")
+                                    btPrivacy.note = r.ok ? "" : r.error === "cancelled" ? ""
+                                        : qsTr("Couldn't change it: %1").arg(r.error || "")
+                            }
+                            xhr.open(method, "http://127.0.0.1:8766/api/ble/privacy")
+                            if (body) xhr.setRequestHeader("Content-Type", "application/json")
+                            xhr.send(body ? JSON.stringify(body) : null)
+                        }
+                        Component.onCompleted: if (visible) ask("GET", null)
+                        Item { width: 1; height: Theme.spacingSmall }
+                        Text {
+                            text: qsTr("Pair a watch by Bluetooth without the password")
+                            font.bold: true
+                            font.pixelSize: Theme.fontSizeBody
+                            color: Theme.text
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: qsTr("On Linux, the first time a watch pairs, Sommet asks for your " +
+                                       "password to switch Bluetooth privacy on for that pairing; " +
+                                       "without it the watch refuses this computer after its first " +
+                                       "sleep. Turn this on to keep privacy on for good: your " +
+                                       "system asks for the password once, now, and Bluetooth " +
+                                       "restarts. After that a pairing asks for nothing. A " +
+                                       "Bluetooth mouse or keyboard paired before may need " +
+                                       "pairing again.")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeBody
+                        }
+                        Row {
+                            spacing: Theme.spacingSmall
+                            RoundedSwitch {
+                                anchors.verticalCenter: parent.verticalCenter
+                                enabled: !btPrivacy.busy
+                                checked: btPrivacy.always
+                                Accessible.name: qsTr("Keep Bluetooth privacy on")
+                                onToggled: {
+                                    btPrivacy.busy = true
+                                    btPrivacy.note = ""
+                                    btPrivacy.ask("POST", { always: checked })
+                                    // Shows the real state again once the answer is in (a
+                                    // cancelled prompt leaves it as it was).
+                                    checked = Qt.binding(() => btPrivacy.always)
+                                }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: btPrivacy.busy ? qsTr("Type your password in the system window…")
+                                    : btPrivacy.always ? qsTr("On") : qsTr("Off")
+                                color: btPrivacy.always && !btPrivacy.busy ? Theme.primary : Theme.mutedText
+                                font.pixelSize: Theme.fontSizeBody
+                            }
+                        }
+                        StatusNote {
+                            width: parent.width
+                            text: btPrivacy.note
+                            tone: "error"
+                        }
+                    }
+
                     // --- Mark synced workouts. Opt-in, OFF by default (André, 2026-08-16).
                     // Writes the watch's own per-move synced flag after this app reads a
                     // workout, so the official Suunto app / SuuntoLink treat it as already

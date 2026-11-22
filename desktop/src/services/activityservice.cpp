@@ -334,6 +334,10 @@ void ActivityService::refreshAllWatches()
         if (!netOk || !root.value(QStringLiteral("ok")).toBool() || watches.isEmpty()) {
             // No enumerable USB watches (BLE handshake, no watch, or backend error): keep the
             // original single-read behaviour, which also covers the BLE path server-side.
+            // One at a time: the read under way ends with the list up to date, and whoever
+            // asked meanwhile sees that (m_watchReadsInFlight).
+            if (m_watchReadsInFlight > 0)
+                return;
             requestActivities(dbKnownCount(m_lastDevice), false);
             return;
         }
@@ -617,9 +621,11 @@ void ActivityService::requestActivities(int knownCount, bool alreadyRetried)
             QUrl::toPercentEncoding(pair));
     }
     const QUrl url(kBackendBase + path);
+    ++m_watchReadsInFlight;
     QNetworkReply *reply = m_network.get(QNetworkRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply, knownCount, alreadyRetried] {
         reply->deleteLater();
+        --m_watchReadsInFlight;
 
         if (reply->error() != QNetworkReply::NoError) {
             setLoading(false);

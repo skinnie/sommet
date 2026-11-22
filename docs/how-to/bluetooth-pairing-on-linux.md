@@ -8,6 +8,12 @@ Sommet handles this for you when you pair from the app: it asks for your passwor
 
 ## Fix it once: turn on Bluetooth privacy
 
+The easy way: in Sommet, **Settings → Experimental features → Pair a watch by Bluetooth without
+the password**. It does the steps below for you (your system asks for the password once) and
+keeps a copy of the file as `/etc/bluetooth/main.conf.before-sommet`. Turning the switch off
+puts the setting back. By hand:
+
+
 1. Check the current setting:
 
    ```sh

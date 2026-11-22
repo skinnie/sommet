@@ -260,10 +260,11 @@ _REQUEST_CTX = threading.local()   # per request thread: .foreground
 WATCH_LOCK = _WatchLock()
 _BLE_LAST_BATTERY = [None]
 _BLE_ROUTE_PROGRESS = [None]  # {stage, done, total (bytes)} while a route goes to the watch over Bluetooth
-# The last good answer of a Bluetooth activities read, for the page visits right after it
-# (_handle_activities_ble). One at a time: a second request waits for the first.
+# The good answers of the last Bluetooth activities reads, for the requests right after them
+# (_handle_activities_ble): {(known_count, mark_synced): {"at": time, "payload": answer}}, each
+# kept BLE_ACTIVITIES_REUSE_S. One read at a time: a second request waits for the first.
 _BLE_ACTIVITIES_LOCK = threading.Lock()
-_BLE_ACTIVITIES_LAST = {"key": None, "at": 0.0, "payload": None}
+_BLE_ACTIVITIES_LAST = {}
 BLE_ACTIVITIES_REUSE_S = 120
 _BLE_MOVES_PROGRESS = [None]  # {done, total (bytes), moves} while new moves come in over Bluetooth   # the last battery the watch gave over Bluetooth (_handle_device_ble)
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
@@ -1688,6 +1689,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_devices_list()
         elif self.path == "/api/ble/status":
             self._handle_ble_status()
+        elif self.path == "/api/ble/privacy":
+            self._handle_ble_privacy(None)
         elif self.path == "/api/ble/logs/summary":
             self._handle_ble_logs_summary()
         elif self.path == "/api/suuntolink/status":
@@ -1803,6 +1806,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ble_passkey(body)
         elif self.path == "/api/ble/forget":
             self._handle_ble_forget()
+        elif self.path == "/api/ble/privacy":
+            self._handle_ble_privacy(body or {})
         elif self.path == "/api/bt/forget":
             self._handle_bt_forget(body)
         elif self.path == "/api/routes":
@@ -4062,19 +4067,26 @@ class Handler(BaseHTTPRequestHandler):
         cable that costs little. Over Bluetooth each one was a whole sync - clock set, the
         watch's sync lock, the log header - and at launch six of them ran within a minute, with
         every other job waiting behind them (P5Q, 2026-11-22: clock set six times in 55 s, and the
-        GPS data check failed meanwhile). So the last good answer is given again when the same
+        GPS data check failed meanwhile). So a good answer is given again when the same
         question comes back within BLE_ACTIVITIES_REUSE_S, on the same link, and the watch has
         not asked to sync since ("Sync now" on the watch always gets a real read). Requests that
-        arrive together wait for the first one and then get its answer."""
+        arrive together wait for the first one and then get its answer.
+
+        One answer is kept per question, not only the last one (2026-11-22, P5Q Linux): on a
+        first sync three pages each asked "everything" (known_count 0) while the first read ran,
+        five minutes for 535 KB. The app asked "anything new?" (known_count N) in between, which
+        replaced the one answer kept, so the second and third "everything" each read the whole
+        log again: 16 minutes, with POIs and routes waiting behind."""
         key = (int(known_count), bool(mark_synced))
         with _BLE_ACTIVITIES_LOCK:
-            last = _BLE_ACTIVITIES_LAST
+            kept = _BLE_ACTIVITIES_LAST
+            now = time.time()
+            for old in [k for k, v in kept.items() if now - v["at"] >= BLE_ACTIVITIES_REUSE_S]:
+                del kept[old]
             status = ble_bridge.bridge.status()
             asked_at = status.get("last_sync_notice_at") or 0
-            if (last["payload"] is not None and last["key"] == key
-                    and status.get("handshake_done")
-                    and time.time() - last["at"] < BLE_ACTIVITIES_REUSE_S
-                    and asked_at <= last["at"]):
+            last = kept.get(key)
+            if last is not None and status.get("handshake_done") and asked_at <= last["at"]:
                 self._send_json(200, {**last["payload"], "reused": True})
                 return
             sent = []
@@ -4089,9 +4101,9 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 self._send_json = send
             if sent and sent[-1][0] == 200 and isinstance(sent[-1][1], dict) and sent[-1][1].get("ok"):
-                last.update(key=key, at=time.time(), payload=sent[-1][1])
+                kept[key] = {"at": time.time(), "payload": sent[-1][1]}
             else:
-                last.update(key=None, at=0.0, payload=None)
+                kept.pop(key, None)
 
     def _read_activities_ble(self, known_count, mark_synced=False):
         """The BLE path for GET /api/activities - tools/ble_activities.py. Same real
@@ -5464,6 +5476,21 @@ class Handler(BaseHTTPRequestHandler):
             _watch_bt_privacy_window()
         self._send_json(200, {"ok": True, **ble_bridge.bridge.status(),
                               "bt_privacy": _BT_PRIVACY["state"]})
+
+    def _handle_ble_privacy(self, body):
+        """Linux: the system's own Bluetooth privacy setting (tools/bt_privacy.py).
+        GET -> {ok, linux, always}: whether privacy is always on (`Privacy = device` in
+        /etc/bluetooth/main.conf); with it a pairing never asks for the password.
+        POST {always: bool} -> {ok, always, error?}: changes it; the system asks for the
+        password once (pkexec) and Bluetooth restarts. Blocks while that prompt is up."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import bt_privacy                                    # noqa: PLC0415
+        linux = sys.platform.startswith("linux")
+        if body is None:
+            self._send_json(200, {"ok": True, "linux": linux,
+                                  "always": bool(linux and bt_privacy.always_on())})
+            return
+        self._send_json(200, {"linux": linux, **bt_privacy.set_always(bool(body.get("always")))})
 
     def _handle_ble_disconnect(self):
         """POST /api/ble/disconnect - tears the daemon down. Leaves the watch's bond alone;

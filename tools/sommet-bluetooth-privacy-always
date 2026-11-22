@@ -1,0 +1,29 @@
+#!/bin/bash
+# Sommet: keep Bluetooth privacy on, or put the system's setting back.
+# Run as root by tools/bt_privacy.py through pkexec (set_always). $1 = on | off.
+# on : "Privacy = device" in /etc/bluetooth/main.conf (what docs/how-to/
+#      bluetooth-pairing-on-linux.md has by hand), a copy of the file kept once as
+#      main.conf.before-sommet, then Bluetooth restarted.
+# off: the line back to "#Privacy = off", Bluetooth restarted.
+# Prints ON | OFF | FAILED. The file is fixed: as root nothing else is ever edited. Not as
+# root (the tests), SOMMET_BT_CONF names a scratch file and nothing is restarted.
+set -u
+CONF=/etc/bluetooth/main.conf
+RESTART=1
+if [ "$(id -u)" != "0" ] && [ -n "${SOMMET_BT_CONF:-}" ]; then CONF="$SOMMET_BT_CONF"; RESTART=0; fi
+[ -f "$CONF" ] || { echo FAILED; exit 1; }
+case "${1:-}" in
+  on)
+    [ -e "$CONF.before-sommet" ] || cp -p "$CONF" "$CONF.before-sommet"
+    sed -i 's/^#\?[[:space:]]*Privacy[[:space:]]*=.*/Privacy = device/' "$CONF"
+    grep -q '^Privacy = device' "$CONF" || sed -i '/^\[General\]/a Privacy = device' "$CONF"
+    grep -q '^Privacy = device' "$CONF" || { echo FAILED; exit 1; }
+    WORD=ON ;;
+  off)
+    sed -i 's/^Privacy[[:space:]]*=.*/#Privacy = off/' "$CONF"
+    grep -q '^Privacy[[:space:]]*=' "$CONF" && { echo FAILED; exit 1; }
+    WORD=OFF ;;
+  *) echo "on or off" >&2; exit 2 ;;
+esac
+if [ "$RESTART" = 1 ]; then timeout 30 systemctl restart bluetooth >/dev/null 2>&1 || { echo FAILED; exit 1; }; fi
+echo "$WORD"

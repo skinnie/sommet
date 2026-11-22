@@ -34,7 +34,7 @@ class Case(unittest.TestCase):
         self.saved = (server.ble_bridge.bridge, server.Handler._read_activities_ble)
         self.bridge = Bridge()
         server.ble_bridge.bridge = self.bridge
-        server._BLE_ACTIVITIES_LAST.update(key=None, at=0.0, payload=None)
+        server._BLE_ACTIVITIES_LAST.clear()
         self.reads = []
         self.answer = (200, {"ok": True, "activities": [], "total": 12})
         case = self
@@ -47,7 +47,7 @@ class Case(unittest.TestCase):
 
     def tearDown(self):
         server.ble_bridge.bridge, server.Handler._read_activities_ble = self.saved
-        server._BLE_ACTIVITIES_LAST.update(key=None, at=0.0, payload=None)
+        server._BLE_ACTIVITIES_LAST.clear()
 
     def ask(self, known_count=12, mark_synced=False):
         sent = []
@@ -84,9 +84,16 @@ class Case(unittest.TestCase):
         self.ask(known_count=13, mark_synced=True)
         self.assertEqual(len(self.reads), 3)
 
+    def test_everything_asked_three_times_with_anything_new_in_between_is_one_read_of_everything(self):
+        """The first sync on the P5Q's Linux side, 2026-11-22: full, quick, full, quick, full."""
+        for known_count in (0, 12, 0, 12, 0):
+            self.ask(known_count=known_count)
+        self.assertEqual(self.reads, [(0, False), (12, False)])
+
     def test_an_old_answer_is_not_given_again(self):
         self.ask()
-        server._BLE_ACTIVITIES_LAST["at"] -= server.BLE_ACTIVITIES_REUSE_S + 1
+        for v in server._BLE_ACTIVITIES_LAST.values():
+            v["at"] -= server.BLE_ACTIVITIES_REUSE_S + 1
         self.ask()
         self.assertEqual(len(self.reads), 2)
 

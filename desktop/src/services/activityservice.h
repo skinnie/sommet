@@ -353,6 +353,11 @@ private:
     int dbKnownCount(const QString &device);
     void dbClear(const QString &device);
     QString m_lastDevice;
+    // /api/activities requests under way (requestActivities). While one is, a page that opens
+    // does not start another: over Bluetooth a first read takes minutes, and each page opened
+    // meanwhile used to queue one more read of the whole log (P5Q Linux, 2026-11-22: three in a
+    // row, 16 minutes).
+    int m_watchReadsInFlight = 0;
     // Deleted-activity tombstones (start-time|name). Loaded once from the `deleted_activities`
     // table in openDatabase(); dbLoadAll() skips any row whose key is in here, so a deleted
     // move never re-appears however it gets re-inserted (watch re-sync, intervals/Garmin

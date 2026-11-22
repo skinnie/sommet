@@ -108,6 +108,92 @@ def test_not_needed_with_a_watch_already_paired(monkeypatch=None):
         P.suunto_paired = real
 
 
+
+CONF = """[General]
+#Name = BlueZ
+# Default: "off"
+#Privacy = off
+
+[Policy]
+AutoEnable=true
+"""
+
+
+def _conf(tmp, text=CONF):
+    conf = tmp / "main.conf"
+    conf.write_text(text)
+    os.environ["SOMMET_BT_CONF"] = str(conf)       # the root script takes it only when not root
+    return conf
+
+
+def test_always_on_is_read_from_the_systems_file():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        conf = _conf(tmp)
+        assert P.always_on(conf) is False
+        conf.write_text(CONF.replace("#Privacy = off", "Privacy = device"))
+        assert P.always_on(conf) is True
+        conf.write_text(CONF.replace("#Privacy = off", "  privacy=on"))
+        assert P.always_on(conf) is True
+        conf.write_text(CONF.replace("#Privacy = off", "Privacy = off"))
+        assert P.always_on(conf) is False
+        assert P.always_on(tmp / "missing.conf") is False
+
+
+def test_set_always_on_then_off_changes_one_line_and_keeps_a_copy():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        fake_tools(tmp)
+        conf = _conf(tmp)
+        saved, P.MAIN_CONF = P.MAIN_CONF, conf
+        try:
+            r = P.set_always(True, prompt_timeout=10)
+            assert r == {"ok": True, "always": True}, r
+            assert conf.read_text() == CONF.replace("#Privacy = off", "Privacy = device")
+            assert (tmp / "main.conf.before-sommet").read_text() == CONF
+            assert P.always_on() is True
+            paired, which = P.suunto_paired, P.shutil.which
+            P.suunto_paired = lambda: False               # as on a computer with no watch paired
+            P.shutil.which = lambda tool, *a, **k: "/usr/bin/" + tool
+            try:
+                needed, reason = P.check()
+            finally:
+                P.suunto_paired, P.shutil.which = paired, which
+            assert needed is False and "always on" in reason, reason
+            r = P.set_always(False, prompt_timeout=10)
+            assert r == {"ok": True, "always": False}, r
+            assert conf.read_text() == CONF
+            assert (tmp / "main.conf.before-sommet").read_text() == CONF       # the first copy stays
+        finally:
+            P.MAIN_CONF = saved
+
+
+def test_set_always_on_a_file_with_no_privacy_line_adds_one_under_general():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        fake_tools(tmp)
+        conf = _conf(tmp, "[General]\nName = x\n\n[Policy]\nAutoEnable=true\n")
+        saved, P.MAIN_CONF = P.MAIN_CONF, conf
+        try:
+            assert P.set_always(True, prompt_timeout=10)["ok"]
+            assert conf.read_text() == "[General]\nPrivacy = device\nName = x\n\n[Policy]\nAutoEnable=true\n"
+        finally:
+            P.MAIN_CONF = saved
+
+
+def test_a_cancelled_prompt_changes_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        fake_tools(tmp, pkexec_code=126)
+        conf = _conf(tmp)
+        saved, P.MAIN_CONF = P.MAIN_CONF, conf
+        try:
+            r = P.set_always(True, prompt_timeout=10)
+            assert r["ok"] is False and r["error"] == "cancelled" and r["always"] is False, r
+            assert conf.read_text() == CONF
+        finally:
+            P.MAIN_CONF = saved
+
 def main():
     path = os.environ["PATH"]
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("test_")):
