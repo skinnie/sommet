@@ -54,5 +54,14 @@ altitude when a POI has one.
 ## Where the library is kept
 
 On a computer: the `Routes` and `Pois` folders inside `SommetBackups` in your home folder. On a
-tablet or phone: inside the app's own storage. Today each computer or tablet has its own
-library; a route or POI saved on one is not on the other yet.
+tablet or phone: inside the app's own storage.
+
+## One library on all your devices
+
+With Sommet Sync set up (your own server, Settings), the library is the same on every computer,
+tablet and phone: a route or POI you save, rename or delete on one reaches the others. It is
+sent a few seconds after the change, and fetched when the app starts or when you open Routes
+or POIs. Without Sommet Sync each device keeps its own library.
+
+The same route imported on two devices, or the same POI made on both, ends up once. A delete
+in the library reaches your other devices, and still leaves every watch as it is.

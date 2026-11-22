@@ -7,6 +7,26 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: the route library and the POI library are shared between devices (Sommet Sync)
+
+André: "these two should be similar and also synced to the nas", and the library is one, the
+same on every Sommet install, apart from what is on a watch.
+
+- With Sommet Sync set up, a route or POI saved, renamed or deleted in the library on one
+  device reaches the others. Nothing here ever touches a watch.
+- The rules, the same on the desktop (`tools/library_sync.py`) and Android (`LibrarySync.ts`):
+  the newer change wins; a delete is remembered so it does not come back; the same thing saved
+  on two devices before they met (a route with the same GPX, a POI with the same name within
+  10 m) ends up once, the older one. A route's GPX travels with it.
+- When: when the app starts and every 15 minutes with the rest of the sync, when Routes or
+  POIs is opened, and a few seconds after a change in a library.
+- A server whose `sync.php` predates this is skipped without an error; replace `sync.php` on
+  the NAS to turn it on.
+- Checked by tests: two stand-in devices against the test server on both platforms, one file of
+  cases for both (`librarySync.fixture.json`, with the SHA-1 Android now works out as the
+  desktop does), and the real backend route against the test server. Not yet run against the
+  NAS or between two real devices.
+
 ## 2026-11-22: Bluetooth: one sync at launch instead of six, and a failed GPS data update can be tried again
 
 Read from the P5Q's log after André's test ("failed to get gps... there is no way to try again,

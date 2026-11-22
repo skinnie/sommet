@@ -1965,6 +1965,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_bryton_workout_native(body)
         elif self.path == "/api/bryton/grid":
             self._handle_bryton_grid(body)
+        elif self.path == "/api/library/sync":
+            self._handle_library_sync(body or {})
         elif self.path in ("/api/library/save", "/api/library/get", "/api/library/rename",
                            "/api/library/delete"):
             self._handle_library(self.path.rsplit("/", 1)[1], body or {})
@@ -2607,6 +2609,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if info.get("ok") else 400, info)
 
     POI_LIBRARY_DIR = str(BACKUP_DIR / "Pois")
+
+    def _handle_library_sync(self, body):
+        """POST /api/library/sync {url, token}: the route library and the POI library against
+        Sommet Sync (tools/library_sync.py). The app passes the address and the token it keeps;
+        nothing of them is stored or printed here. Never touches a watch.
+        -> {ok, routes: {changed, sent, deleted_sent, older_server?}, pois: {...}} or {ok: false,
+        error}. An older server (no `routes`/`pois` yet) is ok with older_server: true."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import library_sync                                  # noqa: PLC0415
+        info = library_sync.sync_all(self.ROUTE_LIBRARY_DIR, self.POI_LIBRARY_DIR,
+                                     str(body.get("url") or ""), str(body.get("token") or ""))
+        self._send_json(200, info)
 
     def _handle_poi_library(self, action, body):
         """The POIs page's library (tools/poi_library.py, ~/SommetBackups/Pois). It is Sommet's

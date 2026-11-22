@@ -1,6 +1,7 @@
 import { AppState, AppStateStatus } from 'react-native';
 import { runSommetSync } from './SommetSync';
 import { runSommetGearSync } from './SommetGearSync';
+import { syncLibrariesNow } from './LibrarySyncRun';
 import { trimOldTracks } from './LightLibrary';
 import { downloadRecentTiles, startRecentTiles } from './RecentTiles';
 
@@ -20,6 +21,7 @@ export async function syncNowIfDue(now = Date.now()): Promise<boolean> {
   lastRun = now;
   const r = await runSommetSync().catch(() => null);
   await runSommetGearSync().catch(() => {});
+  await syncLibrariesNow().catch(() => {});   // the route and POI libraries too
   // Light library (sync/13): older Tracks the server holds leave this device. Also runs with no
   // Sommet Sync (intervals.icu only); a watch-only setup keeps everything.
   await trimOldTracks().catch(() => {});

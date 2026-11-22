@@ -81,7 +81,16 @@ PageFlickable {
         if (root.legacyWatch)
             root.api("GET", "/api/legacy/settings", null, r => root.legacyRoutes = r.ok ? (r.routes || []) : [])
     }
-    Component.onCompleted: refresh()
+    Component.onCompleted: { refresh(); RouteService.syncLibraries() }
+    // The library is shared between devices through Sommet Sync (tools/library_sync.py): read
+    // it again when a sync brought something from another device. A change made here is sent
+    // a few seconds later (RouteService.syncLibrariesSoon).
+    Connections {
+        target: RouteService
+        function onLibrariesSynced(changed) {
+            if (changed) root.api("GET", "/api/library", null, r => root.saved = r.ok ? r.routes : root.saved)
+        }
+    }
     // Re-read just the chosen source when the drop-down changes (the watch's is a USB round
     // trip, so only on an explicit pick, never on every source).
     function refreshSource(key) {
@@ -321,7 +330,7 @@ PageFlickable {
             // The name the import card shows (the GPX's own, else the file's), not the file name.
             const name = PlanStore.routeNameOf(gpx, selectedFile).replace(/\.gpx$/i, "")
             root.api("POST", "/api/library/save", { name: name, gpx: gpx }, r => {
-                if (r.ok) root.pendingLibraryId = r.id
+                if (r.ok) { root.pendingLibraryId = r.id; RouteService.syncLibrariesSoon() }
                 root.api("GET", "/api/library", null, l => root.saved = l.ok ? l.routes : root.saved)
             })
         }
@@ -443,7 +452,7 @@ PageFlickable {
             const n = renameField.text.trim()
             if (!item || !n) return
             if (item.src === "saved")
-                root.api("POST", "/api/library/rename", { id: item.id, name: n }, r => r.ok ? root.refresh() : root.msg = r.error)
+                root.api("POST", "/api/library/rename", { id: item.id, name: n }, r => { if (r.ok) { root.refresh(); RouteService.syncLibrariesSoon() } else root.msg = r.error })
             else if (item.src === "bryton")
                 root.api("POST", "/api/bryton/tracks/rename", { name: item.name, newName: n }, r => r.ok ? root.refresh() : root.msg = r.error)
         }
@@ -470,7 +479,7 @@ PageFlickable {
         onAccepted: {
             if (!item) return
             if (item.src === "saved")
-                root.api("POST", "/api/library/delete", { id: item.id }, r => r.ok ? root.refresh() : root.msg = r.error)
+                root.api("POST", "/api/library/delete", { id: item.id }, r => { if (r.ok) { root.refresh(); RouteService.syncLibrariesSoon() } else root.msg = r.error })
             else if (item.src === "bryton")
                 root.api("POST", "/api/bryton/tracks/delete", { name: item.name }, r => r.ok ? root.refresh() : root.msg = r.error)
             else if (item.src === "etrex")

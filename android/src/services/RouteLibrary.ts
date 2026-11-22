@@ -20,6 +20,10 @@ export interface LibraryRoute {
   ascentMeters: number;
   hash: string;
   preview: { lat: number; lon: number }[];
+  /** When it was last renamed (ms); absent = never. For the library shared through Sommet Sync. */
+  updated?: number;
+  /** SHA-1 of the GPX text, as the desktop keeps it: how two devices know the same route. */
+  sha1?: string;
 }
 
 async function readIndex(): Promise<LibraryRoute[]> {
@@ -62,6 +66,28 @@ function thin(points: { lat: number; lon: number }[]): { lat: number; lon: numbe
   return out;
 }
 
+// For LibrarySync.ts (the library shared through Sommet Sync): the raw index, the GPX files, and
+// the list of what was deleted here ([{id, at}] in seconds, as on the desktop) until the server
+// knows.
+const DELETED = `${DIR}/deleted.json`;
+export const readRouteIndex = readIndex;
+export const writeRouteIndex = writeIndex;
+export const routeGpxPath = (id: string) => `${DIR}/${id}.gpx`;
+export const thinPreview = thin;
+export async function readRouteDeleted(): Promise<{ id: string; at: number }[]> {
+  try {
+    if (!(await RNFS.exists(DELETED))) return [];
+    const v = JSON.parse(await RNFS.readFile(DELETED, 'utf8'));
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+export async function writeRouteDeleted(items: { id: string; at: number }[]): Promise<void> {
+  if (!(await RNFS.exists(DIR))) await RNFS.mkdir(DIR);
+  await RNFS.writeFile(DELETED, JSON.stringify(items), 'utf8');
+}
+
 /** Every saved route, newest first. */
 export async function listLibrary(): Promise<LibraryRoute[]> {
   const items = await readIndex();
@@ -97,8 +123,9 @@ export async function getLibraryGpx(id: string): Promise<string> {
 export async function renameLibraryRoute(id: string, name: string): Promise<void> {
   const items = await readIndex();
   const r = items.find(x => x.id === id);
-  if (!r || !name.trim()) return;
+  if (!r || !name.trim() || r.name === name.trim()) return;
   r.name = name.trim();
+  r.updated = Date.now();
   await writeIndex(items);
 }
 
@@ -106,6 +133,9 @@ export async function deleteLibraryRoute(id: string): Promise<void> {
   const items = await readIndex();
   await writeIndex(items.filter(x => x.id !== id));
   await RNFS.unlink(`${DIR}/${id}.gpx`).catch(() => {});
+  if (items.some(x => x.id === id)) {
+    await writeRouteDeleted([...(await readRouteDeleted()), { id, at: Math.floor(Date.now() / 1000) }]);
+  }
 }
 
 /** Route points as a minimal GPX (a route from the planner or the watch, to keep or re-parse). */

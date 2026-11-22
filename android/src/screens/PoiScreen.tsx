@@ -10,6 +10,7 @@ import {
   LibraryPoi, PoiToKeep, listLibraryPois, saveLibraryPois, renameLibraryPoi, deleteLibraryPoi, countKept,
 } from '../services/PoiLibrary';
 import { useDemo } from '../config/DemoContext';
+import { syncLibrariesNow, syncLibrariesSoon } from '../services/LibrarySyncRun';
 import { demoPois, demoAddPoi, demoRemovePoi } from '../services/DemoData';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
@@ -69,6 +70,11 @@ export default function PoiScreen() {
     listLibraryPois(typeList).then(setLibrary).catch(() => {});
   }, [typeList]);
   useFocusEffect(refreshLibrary);
+  // The library is shared between devices through Sommet Sync: fetch what the others saved when
+  // the screen opens, and send a change made here a few seconds after it.
+  useFocusEffect(useCallback(() => {
+    syncLibrariesNow().then(changed => { if (changed) refreshLibrary(); }).catch(() => {});
+  }, [refreshLibrary]));
   // The list card's source: the watch when one is here, else the Library (always there).
   const [source, setSource] = useState<number>(watchHere ? 0 : 1);   // 0 = on the watch, 1 = Library
   useEffect(() => { if (!watchHere) setSource(1); }, [watchHere]);
@@ -83,6 +89,7 @@ export default function PoiScreen() {
     try {
       const c = countKept(await saveLibraryPois(items));
       refreshLibrary();
+      if (c.saved > 0) syncLibrariesSoon(refreshLibrary);
       if (c.failed) return { text: `Couldn't save to the library: ${c.failed}`, tone: 'error' };
       if (c.saved === 0) {
         return { text: items.length === 1 ? 'Already in the library.' : 'All of them are already in the library.', tone: 'success' };
@@ -308,6 +315,7 @@ export default function PoiScreen() {
       { text: t.cancel, style: 'cancel' },
       { text: t.delete, style: 'destructive', onPress: async () => {
         const ok = await deleteLibraryPoi(p.id);
+        if (ok) syncLibrariesSoon(refreshLibrary);
         setNote(ok ? { text: 'Deleted from the library.', tone: 'success' } : { text: 'That POI is no longer in the library.', tone: 'error' });
         refreshLibrary();
       } },
@@ -519,7 +527,7 @@ export default function PoiScreen() {
               <Button label={t.cancel} variant="text" grow={false} onPress={() => setRenaming(null)} />
               <Button label="OK" variant="text" grow={false} onPress={() => {
                 const x = renaming; setRenaming(null);
-                if (x) renameLibraryPoi(x.id, x.value).then(refreshLibrary);
+                if (x) renameLibraryPoi(x.id, x.value).then(ok => { refreshLibrary(); if (ok) syncLibrariesSoon(refreshLibrary); });
               }} />
             </View>
           </Pressable>

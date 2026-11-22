@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QXmlStreamReader>
 
 static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
@@ -14,6 +15,9 @@ static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 RouteService::RouteService(QObject *parent) : QObject(parent)
 {
     m_uploadPoll.setInterval(1000);
+    m_librarySyncSoon.setSingleShot(true);
+    m_librarySyncSoon.setInterval(5000);
+    connect(&m_librarySyncSoon, &QTimer::timeout, this, &RouteService::syncLibraries);
     connect(&m_uploadPoll, &QTimer::timeout, this, &RouteService::pollUploadProgress);
 }
 
@@ -308,5 +312,45 @@ void RouteService::exportRoute(int index)
                                                               : QStringLiteral("Export failed"));
         }
         emit exportedGpxChanged();
+    });
+}
+
+void RouteService::syncLibrariesSoon()
+{
+    m_librarySyncSoon.start();
+}
+
+void RouteService::syncLibraries()
+{
+    QSettings settings;
+    const QString url = settings.value(QStringLiteral("connections/sommet_sync/url")).toString();
+    const QString token = settings.value(QStringLiteral("connections/sommet_sync/token")).toString();
+    if (url.isEmpty() || token.isEmpty())
+        return;                         // Sommet Sync is not set up: each device keeps its own
+    if (m_librarySyncRunning) {
+        m_librarySyncAgain = true;
+        return;
+    }
+    m_librarySyncRunning = true;
+    QNetworkRequest request(QUrl(kBackendBase + QStringLiteral("/api/library/sync")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QJsonObject body;
+    body.insert(QStringLiteral("url"), url);
+    body.insert(QStringLiteral("token"), token);     // to our own backend on this computer only
+    QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        m_librarySyncRunning = false;
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const int changed = obj.value(QStringLiteral("routes")).toObject().value(QStringLiteral("changed")).toInt()
+                          + obj.value(QStringLiteral("pois")).toObject().value(QStringLiteral("changed")).toInt();
+        if (!obj.value(QStringLiteral("ok")).toBool())
+            qInfo().noquote() << "[library-sync]" << obj.value(QStringLiteral("error")).toString(
+                QStringLiteral("no answer from the backend"));
+        emit librariesSynced(changed > 0);
+        if (m_librarySyncAgain) {
+            m_librarySyncAgain = false;
+            syncLibraries();
+        }
     });
 }

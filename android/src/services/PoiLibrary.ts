@@ -155,6 +155,25 @@ function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** For LibrarySync.ts: the library's data, changed in place by `change`, stored after. */
+export function editPoiLibrary<T>(change: (data: PoiLibraryData) => T): Promise<T> {
+  return oneAtATime(async () => {
+    const data = await load();
+    const out = change(data);
+    await store(data);
+    return out;
+  });
+}
+
+/** Same name (whatever the capitals) within SAME_PLACE_M: the same POI. */
+export function samePoiPlace(a: { name: string; lat: number; lon: number },
+                             b: { name?: any; lat?: any; lon?: any }): boolean {
+  const lat = Number(b.lat), lon = Number(b.lon);
+  if (b.lat == null || b.lon == null || Number.isNaN(lat) || Number.isNaN(lon)) return false;
+  return a.name.trim().toLowerCase() === String(b.name ?? '').trim().toLowerCase()
+    && metres(a.lat, a.lon, lat, lon) <= SAME_PLACE_M;
+}
+
 export async function listLibraryPois(forList?: PoiTypeList): Promise<LibraryPoi[]> {
   return listFrom(await load(), forList);
 }

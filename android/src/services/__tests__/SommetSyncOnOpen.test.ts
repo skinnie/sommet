@@ -6,6 +6,7 @@ jest.mock('react-native', () => ({
 jest.mock('../SommetSync', () => ({ runSommetSync: () => mockRun() }));
 jest.mock('../SommetGearSync', () => ({ runSommetGearSync: () => mockGear() }));
 jest.mock('../LightLibrary', () => ({ trimOldTracks: async () => {} }));
+jest.mock('../LibrarySyncRun', () => ({ syncLibrariesNow: async () => false }));   // the route and POI libraries: their own test
 const mockTiles = jest.fn(async () => 0);
 jest.mock('../RecentTiles', () => ({ downloadRecentTiles: () => mockTiles(), startRecentTiles: () => () => {} }));
 

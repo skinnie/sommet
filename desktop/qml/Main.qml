@@ -329,11 +329,11 @@ ApplicationWindow {
     }
     Timer {   // periodic cloud sync
         interval: 15 * 60 * 1000; running: true; repeat: true
-        onTriggered: { window.autoIntervalsCloudSync(); ActivityService.sommetSyncNow(); GearService.sommetGearSyncNow() }
+        onTriggered: { window.autoIntervalsCloudSync(); ActivityService.sommetSyncNow(); GearService.sommetGearSyncNow(); RouteService.syncLibraries() }
     }
     Timer {   // one sync shortly after launch, once the backend is up
         interval: 20000; running: true; repeat: false
-        onTriggered: { window.autoIntervalsCloudSync(); ActivityService.sommetSyncNow(); GearService.sommetGearSyncNow() }
+        onTriggered: { window.autoIntervalsCloudSync(); ActivityService.sommetSyncNow(); GearService.sommetGearSyncNow(); RouteService.syncLibraries() }
     }
 
     Row {

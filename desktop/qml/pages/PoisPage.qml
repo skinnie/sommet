@@ -23,6 +23,13 @@ PageFlickable {
             PoiService.refresh()
         GarminService.refreshDeviceGpx()
         root.refreshLibrary()
+        RouteService.syncLibraries()      // what other devices saved since (Sommet Sync)
+    }
+    // The library is shared between devices through Sommet Sync: read it again when a sync
+    // brought something, and send a change here a few seconds after it is made.
+    Connections {
+        target: RouteService
+        function onLibrariesSynced(changed) { if (changed) root.refreshLibrary() }
     }
     // A watch that connects while this page is open: read its POIs then.
     Connections {
@@ -81,7 +88,7 @@ PageFlickable {
     // Keep POIs ({name, lat, lon, ele?, type?, typeList?}) in the library; done(r) gets the answer.
     function keep(items, done) {
         root.api("POST", "/api/poilibrary/save", { pois: items }, r => {
-            if (r.ok) root.refreshLibrary()
+            if (r.ok) { root.refreshLibrary(); RouteService.syncLibrariesSoon() }
             if (done) done(r)
         })
     }
@@ -192,6 +199,7 @@ PageFlickable {
                 root.libraryTone = r.ok ? "success" : "error"
                 root.libraryNote = r.ok ? "" : (r.error || qsTr("Renaming failed."))
                 root.refreshLibrary()
+                if (r.ok) RouteService.syncLibrariesSoon()
             })
         }
     }
@@ -217,6 +225,7 @@ PageFlickable {
                 root.libraryTone = r.ok ? "success" : "error"
                 root.libraryNote = r.ok ? qsTr("Deleted from the library.") : (r.error || qsTr("Deleting failed."))
                 root.refreshLibrary()
+                if (r.ok) RouteService.syncLibrariesSoon()
             })
         }
     }

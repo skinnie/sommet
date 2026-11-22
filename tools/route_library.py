@@ -12,6 +12,10 @@ Storage: one <id>.gpx per route plus index.json [{id, name, created, distanceMet
 ascentMeters, sha1}] in <dir> (the backend passes ~/SommetBackups/Routes). Saving the same GPX
 again (same content hash) doesn't add a second copy - it returns the existing entry (renamed if a
 new name is given), so importing a file twice never duplicates it. stdlib only.
+
+For the library shared through Sommet Sync (tools/library_sync.py, 2026-11-22): an entry carries
+`updated` (seconds; set when it is renamed, else its `created`), and deleted.json next to the
+index remembers what was deleted here ([{id, at}]) until the server knows.
 """
 
 import hashlib
@@ -26,6 +30,7 @@ import time
 import ambit_format
 
 INDEX = "index.json"
+DELETED = "deleted.json"
 # How ascentMeters/descentMeters were worked out. Entries saved with an older rule are
 # recomputed on the next list (only those numbers change; names and files stay as they are).
 CLIMB_RULE = "route_elevation_m"
@@ -118,8 +123,28 @@ def save(d, name, gpx):
     return {"ok": True, "id": rid, "existed": False}
 
 
+def deleted(d):
+    """[{id, at}] of the routes deleted here (seconds)."""
+    try:
+        with open(os.path.join(d, DELETED), encoding="utf-8") as f:
+            v = json.load(f)
+        return v if isinstance(v, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def write_deleted(d, items):
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(items, f)
+    os.replace(tmp, os.path.join(d, DELETED))
+
+
 def _find(d, rid):
-    if not re.fullmatch(r"[0-9a-f-]+", rid or ""):
+    # Letters too: a route that came from the tablet through Sommet Sync keeps the id it was
+    # given there (base 36). Still nothing that could leave the folder.
+    if not re.fullmatch(r"[0-9a-z-]{1,64}", rid or ""):
         raise ValueError("bad id")
     items = _index(d)
     for r in items:
@@ -136,8 +161,11 @@ def get(d, rid):
 
 def rename(d, rid, name):
     items, r = _find(d, rid)
-    r["name"] = (name or r["name"]).strip()[:80] or r["name"]
-    _write_index(d, items)
+    new = (name or r["name"]).strip()[:80] or r["name"]
+    if new != r["name"]:
+        r["name"] = new
+        r["updated"] = int(time.time())
+        _write_index(d, items)
     return {"ok": True}
 
 
@@ -149,6 +177,7 @@ def delete(d, rid):
     except OSError:
         pass
     _write_index(d, items)
+    write_deleted(d, deleted(d) + [{"id": rid, "at": int(time.time())}])
     return {"ok": True}
 
 

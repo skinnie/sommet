@@ -195,6 +195,37 @@ def delete_poi(d, poi_id):
     return {"ok": True}
 
 
+class edit:
+    """`with poi_library.edit(d) as data:` - the library's data, to change in place; stored when
+    the block ends without an error. For tools/library_sync.py."""
+
+    def __init__(self, d):
+        self.d = d
+
+    def __enter__(self):
+        _LOCK.acquire()
+        self.data = _load(self.d)
+        return self.data
+
+    def __exit__(self, exc_type, _exc, _tb):
+        try:
+            if exc_type is None:
+                _store(self.d, self.data)
+        finally:
+            _LOCK.release()
+        return False
+
+
+def clean(item):
+    """_clean() for a record that came from elsewhere: (name, lat, lon, ele, type, typeList)."""
+    return _clean(item.get("name"), item.get("lat"), item.get("lon"), item.get("ele"),
+                  item.get("type"), item.get("typeList"))
+
+
+def same_place(p, name, lat, lon):
+    return _same(p, str(name or "").strip(), float(lat), float(lon))
+
+
 def main(argv):
     if len(argv) < 3:
         print(__doc__)

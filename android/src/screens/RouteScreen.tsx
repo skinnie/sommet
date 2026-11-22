@@ -9,6 +9,7 @@ import {
 import {
   LibraryRoute, listLibrary, saveToLibrary, getLibraryGpx, renameLibraryRoute, deleteLibraryRoute, pointsToGpx,
 } from '../services/RouteLibrary';
+import { syncLibrariesNow, syncLibrariesSoon } from '../services/LibrarySyncRun';
 import { WatchRoute, navigationToGpx } from '../services/RouteReader';
 import { exportRoutesToDownloads } from '../services/ExportAll';
 import { t } from '../i18n';
@@ -91,6 +92,11 @@ export default function RouteScreen() {
   const [library, setLibrary] = useState<LibraryRoute[]>([]);
   const refreshLibrary = useCallback(() => { listLibrary().then(setLibrary).catch(() => {}); }, []);
   useFocusEffect(refreshLibrary);
+  // The library is shared between devices through Sommet Sync (LibrarySync.ts): fetch what the
+  // others saved when the screen opens, and send a change made here a few seconds after it.
+  useFocusEffect(useCallback(() => {
+    syncLibrariesNow().then(changed => { if (changed) refreshLibrary(); }).catch(() => {});
+  }, [refreshLibrary]));
   // The list card's source: the watch when one is here, else the Library (always there).
   const [source, setSource] = useState<number>(watchHere ? 0 : 1);   // 0 = on the watch, 1 = Library
   useEffect(() => { if (!watchHere) setSource(1); }, [watchHere]);
@@ -98,7 +104,7 @@ export default function RouteScreen() {
 
   function keep(route: PendingRoute, gpx: string) {
     saveToLibrary(route.name, gpx, { distanceM: route.distanceM, ascentM: route.ascentM, points: route.points })
-      .then(refreshLibrary).catch(() => {});
+      .then(() => { refreshLibrary(); syncLibrariesSoon(refreshLibrary); }).catch(() => {});
   }
   function openInPlanner(name: string, points: { lat: number; lon: number; ele?: number | null }[]) {
     navigation.navigate('RouteWeather', { route: points.map(p => ({ lat: p.lat, lon: p.lon, ele: p.ele ?? null })), name });
@@ -461,7 +467,7 @@ export default function RouteScreen() {
               <Button label="Delete" variant="text" danger grow={false} onPress={() => Alert.alert(
                 'Delete route', `Remove “${r.name}” from the Library?`, [
                   { text: t.cancel, style: 'cancel' },
-                  { text: t.delete, style: 'destructive', onPress: () => deleteLibraryRoute(r.id).then(refreshLibrary) },
+                  { text: t.delete, style: 'destructive', onPress: () => deleteLibraryRoute(r.id).then(() => { refreshLibrary(); syncLibrariesSoon(refreshLibrary); }) },
                 ])} />
             </View>
           </View>
@@ -521,7 +527,7 @@ export default function RouteScreen() {
               <Button label={t.cancel} variant="text" grow={false} onPress={() => setRenaming(null)} />
               <Button label="OK" variant="text" grow={false} onPress={() => {
                 const x = renaming; setRenaming(null);
-                if (x) renameLibraryRoute(x.id, x.value).then(refreshLibrary);
+                if (x) renameLibraryRoute(x.id, x.value).then(() => { refreshLibrary(); syncLibrariesSoon(refreshLibrary); });
               }} />
             </View>
           </Pressable>

@@ -1,0 +1,363 @@
+{
+ "about": "Made by tools/test_library_sync.py --write-fixture. The desktop (tools/library_sync.py) and Android (LibrarySync.ts) must both give this.",
+ "pulls": [
+  {
+   "about": "nothing here, two new records",
+   "local": [],
+   "tombstones": [],
+   "records": [
+    {
+     "uid": "a",
+     "updated_at": 5000,
+     "created": 5,
+     "name": "A"
+    },
+    {
+     "uid": "b",
+     "updated_at": 6000,
+     "created": 6,
+     "name": "B"
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {
+     "a": {
+      "uid": "a",
+      "updated_at": 5000,
+      "created": 5,
+      "name": "A"
+     },
+     "b": {
+      "uid": "b",
+      "updated_at": 6000,
+      "created": 6,
+      "name": "B"
+     }
+    },
+    "remove": [],
+    "kill": [],
+    "forget_tombstones": []
+   }
+  },
+  {
+   "about": "newer wins, older and equal do not",
+   "local": [
+    {
+     "uid": "a",
+     "updated_at": 2000,
+     "created": 1
+    },
+    {
+     "uid": "b",
+     "updated_at": 2000,
+     "created": 1
+    },
+    {
+     "uid": "c",
+     "updated_at": 2000,
+     "created": 1
+    }
+   ],
+   "tombstones": [],
+   "records": [
+    {
+     "uid": "a",
+     "updated_at": 3000,
+     "name": "new"
+    },
+    {
+     "uid": "b",
+     "updated_at": 1000
+    },
+    {
+     "uid": "c",
+     "updated_at": 2000
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {
+     "a": {
+      "uid": "a",
+      "updated_at": 3000,
+      "name": "new"
+     }
+    },
+    "remove": [],
+    "kill": [],
+    "forget_tombstones": []
+   }
+  },
+  {
+   "about": "deleted here: stays deleted, unless changed elsewhere after",
+   "local": [],
+   "tombstones": [
+    {
+     "id": "a",
+     "at": 10
+    },
+    {
+     "id": "b",
+     "at": 10
+    },
+    {
+     "id": "c",
+     "at": 10
+    }
+   ],
+   "records": [
+    {
+     "uid": "a",
+     "updated_at": 9000
+    },
+    {
+     "uid": "b",
+     "updated_at": 10000
+    },
+    {
+     "uid": "c",
+     "updated_at": 10001
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {
+     "c": {
+      "uid": "c",
+      "updated_at": 10001
+     }
+    },
+    "remove": [],
+    "kill": [],
+    "forget_tombstones": [
+     "c"
+    ]
+   }
+  },
+  {
+   "about": "deleted elsewhere",
+   "local": [
+    {
+     "uid": "a",
+     "updated_at": 1,
+     "created": 1
+    },
+    {
+     "uid": "b",
+     "updated_at": 1,
+     "created": 1
+    }
+   ],
+   "tombstones": [
+    {
+     "id": "a",
+     "at": 1
+    }
+   ],
+   "records": [],
+   "deleted": [
+    "a",
+    "zz"
+   ],
+   "plan": {
+    "put": {},
+    "remove": [
+     "a"
+    ],
+    "kill": [],
+    "forget_tombstones": [
+     "a"
+    ]
+   }
+  },
+  {
+   "about": "the same thing twice: the older stays",
+   "local": [
+    {
+     "uid": "m",
+     "updated_at": 1,
+     "created": 100,
+     "key": "k"
+    }
+   ],
+   "tombstones": [],
+   "records": [
+    {
+     "uid": "t",
+     "updated_at": 1,
+     "created": 50,
+     "key": "k"
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {
+     "t": {
+      "uid": "t",
+      "updated_at": 1,
+      "created": 50,
+      "key": "k"
+     }
+    },
+    "remove": [
+     "m"
+    ],
+    "kill": [
+     "m"
+    ],
+    "forget_tombstones": []
+   }
+  },
+  {
+   "about": "the same thing twice: ours is older",
+   "local": [
+    {
+     "uid": "m",
+     "updated_at": 1,
+     "created": 100,
+     "key": "k"
+    }
+   ],
+   "tombstones": [],
+   "records": [
+    {
+     "uid": "t",
+     "updated_at": 1,
+     "created": 200,
+     "key": "k"
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {},
+    "remove": [],
+    "kill": [
+     "t"
+    ],
+    "forget_tombstones": []
+   }
+  },
+  {
+   "about": "the same thing twice, same second: the smaller uid stays",
+   "local": [
+    {
+     "uid": "m",
+     "updated_at": 1,
+     "created": 100,
+     "key": "k"
+    }
+   ],
+   "tombstones": [],
+   "records": [
+    {
+     "uid": "a",
+     "updated_at": 1,
+     "created": 100,
+     "key": "k"
+    },
+    {
+     "uid": "z",
+     "updated_at": 1,
+     "created": 100,
+     "key": "k"
+    }
+   ],
+   "deleted": [],
+   "plan": {
+    "put": {
+     "a": {
+      "uid": "a",
+      "updated_at": 1,
+      "created": 100,
+      "key": "k"
+     }
+    },
+    "remove": [
+     "m"
+    ],
+    "kill": [
+     "m",
+     "z"
+    ],
+    "forget_tombstones": []
+   }
+  },
+  {
+   "about": "a record with no uid is skipped; a delete and a record of the same uid in one pull",
+   "local": [
+    {
+     "uid": "a",
+     "updated_at": 1,
+     "created": 1
+    }
+   ],
+   "tombstones": [],
+   "records": [
+    {
+     "updated_at": 9
+    },
+    {
+     "uid": "a",
+     "updated_at": 9,
+     "created": 1
+    }
+   ],
+   "deleted": [
+    "a"
+   ],
+   "plan": {
+    "put": {
+     "a": {
+      "uid": "a",
+      "updated_at": 9,
+      "created": 1
+     }
+    },
+    "remove": [
+     "a"
+    ],
+    "kill": [],
+    "forget_tombstones": []
+   }
+  }
+ ],
+ "sha1": [
+  {
+   "text": "",
+   "hex": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+  },
+  {
+   "text": "abc",
+   "hex": "a9993e364706816aba3e25717850c26c9cd0d89d"
+  },
+  {
+   "text": "Refuge du Goûter",
+   "hex": "240b7f36b03c6988852212a48c8f5a9eb5737d1f"
+  },
+  {
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "hex": "c1c8bbdc22796e28c0e15163d20899b65621d65a"
+  },
+  {
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "hex": "c2db330f6083854c99d4b5bfb6e8f29f201be699"
+  },
+  {
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "hex": "0098ba824b5c16427bd7a1122a5a442a25ec644d"
+  },
+  {
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "hex": "291e9a6c66994949b57ba5e650361e98fc36b1ba"
+  },
+  {
+   "text": "<gpx version=\"1.1\"><trk><trkseg><trkpt lat=\"46\" lon=\"7\"/></trkseg></trk></gpx>",
+   "hex": "0ccdccec29329b59efe14760d68578b3ba2c3def"
+  },
+  {
+   "text": "日本 🏔",
+   "hex": "7731fc5829f85d3764870723bbe9de6058febec5"
+  }
+ ]
+}

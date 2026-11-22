@@ -84,6 +84,13 @@ public:
     // "Upload" - confirm=false rehearses (real dry-run through write_nav.py, nothing sent),
     // confirm=true actually writes. Matches backend/server.py's own safety default.
     Q_INVOKABLE void uploadPendingRoute(bool confirm);
+    // The route library and the POI library shared between devices through Sommet Sync
+    // (tools/library_sync.py; André, 2026-11-22). It is Sommet's own library on every install:
+    // nothing here reads or writes a watch. A quiet no-op when Sommet Sync is not set up or the
+    // server predates the two collections. syncLibrariesSoon(): a few seconds after a change in
+    // a library, so several changes in a row make one run.
+    Q_INVOKABLE void syncLibraries();
+    Q_INVOKABLE void syncLibrariesSoon();
     // Same, to one specific plugged watch (Routes' "Send to device" lists each one) - pinned by
     // USB product id + serial for this write only, so two Ambit3 Peaks can be told apart.
     Q_INVOKABLE void uploadPendingRouteTo(int productId, const QString &serial);
@@ -100,6 +107,9 @@ signals:
     void pendingRouteChanged();
     void uploadResultChanged();
     void uploadingChanged();
+    // A library sync ended; `changed`: this device's libraries got something new, renamed or
+    // deleted from another device, so the pages showing them read them again.
+    void librariesSynced(bool changed);
     void uploadProgressChanged();
     void exportedGpxChanged();
     void exportingChanged();
@@ -119,6 +129,9 @@ private:
     int m_uploadDone = 0;
     int m_uploadTotal = 0;
     QTimer m_uploadPoll;          // asks /api/ble/status once a second while a route is sent
+    QTimer m_librarySyncSoon;     // syncLibrariesSoon()
+    bool m_librarySyncRunning = false;
+    bool m_librarySyncAgain = false;   // asked for while one was running
 
     void setUploadProgress(const QString &stage, int done, int total);
     void pollUploadProgress();
