@@ -11,10 +11,21 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 Found on the first write tests over Bluetooth on Windows (André's Peak).
 
-- A route with a point below sea level was never sent. One point at -1 m (a coast road, in a
-  207 km route) made the route builder fail, on the cable and over Bluetooth, and over Bluetooth
-  the page showed nothing at all: no error, no result. Such a point now goes as 0 m
-  (`ambit_format.route_point_altitude`). Only checked without a watch so far.
+- A route with a point below sea level was never sent from the desktop. One point at -1 m (a
+  coast road, in a 207 km route) made the route builder fail, on the cable and over Bluetooth,
+  and over Bluetooth the page showed nothing at all: no error, no result. The altitude of a
+  route point is a signed number on the watch (30000 = none), so a route below sea level now
+  keeps its altitudes: a start at -100 m is written as -100 m. Read from Suunto's own code:
+  SuuntoLink stores it as a signed 16-bit value after rounding, and the Peak firmware adds 500
+  to it before use, so -500 m is the floor (`ambit_format.route_point_altitude` names the
+  places). Desktop and Android now agree:
+  - desktop: writes and reads the field signed, and rounds like SuuntoLink (it cut the
+    decimals off before);
+  - Android and iOS: the writer already wrote these bits; the reader took a point below sea
+    level for 65,436 m and now reads -100 m; the same rounding and floor.
+  - One file checks both: the desktop builds a route that starts at -100 m, and the Android
+    reader's test decodes those same bytes (`routeBelowSea.fixture.json`).
+  Only checked without a watch so far.
 - Routes page: while a route goes to the watch the button is busy and a note says where it is.
   Over Bluetooth: reading what is on the watch, "Sending the route over Bluetooth: 3.2 of
   10.1 KB", putting the POIs back. Then "Route sent to the watch." and the watch's list is read

@@ -190,7 +190,10 @@ export function decodeNavigation(waypointsB64: string, routesB64: string): Watch
         if (poff + 12 > rRegion.length) break;
         const x = readI32(rRegion, poff);
         const y = readI32(rRegion, poff + 4);
-        const altRaw = readU16(rRegion, poff + 8);
+        // An int16: a point below sea level is negative (0xFF9C = -100 m), 30000 = none.
+        // Read unsigned until 2026-11-22, so such a point came back as 65436 m.
+        const altU16 = readU16(rRegion, poff + 8);
+        const altRaw = altU16 >= 0x8000 ? altU16 - 0x10000 : altU16;
         // Inverse of ambit3_nav_relative_xy() in device_driver_ambit3_navigation.c.
         const latitude = midLatDeg + ((y / ROUTE_RADIUS_M) * 180) / Math.PI;
         const longitude = midLon / 1e7 + ((x / (ROUTE_RADIUS_M * cosMid)) * 180) / Math.PI;

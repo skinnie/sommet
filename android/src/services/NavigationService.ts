@@ -152,7 +152,12 @@ export function routeFromGpx(xml: string, fallbackName: string): PendingRoute {
     points: simplifiedPoints.map(p => ({
       lat: p.latitude,
       lon: p.longitude,
-      alt: p.elevation !== null ? Math.round(p.elevation) : null,
+      // Whole metres, half away from zero, never under -500 m: what SuuntoLink writes and
+      // the watch reads (an int16, 30000 = none). Same rule as tools/ambit_format.py's
+      // route_point_altitude(), which names where both facts were read.
+      alt: p.elevation !== null
+        ? Math.max(-500, Math.min(29999, Math.sign(p.elevation) * Math.round(Math.abs(p.elevation))))
+        : null,
     })),
     waypoints,
     distanceM,

@@ -128,7 +128,7 @@ EARTH_RADIUS_RELDIST_M = 6378100.0  # calculateRelativeDistance() in route.js
 
 ROUTE_HEADER = struct.Struct("<HBBHHIHH")          # 16 useful bytes out of 32
 ROUTE_DESCRIPTOR = struct.Struct("<16sIHIiiiiHHHHH")  # 52 B
-ROUTE_POINT = struct.Struct("<iiHH")                # 12 B
+ROUTE_POINT = struct.Struct("<iihH")                # 12 B; the altitude is an int16
 WAYPOINT_DESCRIPTOR = struct.Struct("<ii16s16s12s")  # 52 B
 WAYPOINT_DESCRIPTOR_ALT = struct.Struct("<iih16s16s12s")  # 54 B, Traverse: + altitude
 WAYPOINT_TAIL = struct.Struct("<HBBBBBBB3s")        # 12 B, descriptor tail
@@ -448,14 +448,28 @@ class RouteDescriptor:
 
 
 def route_point_altitude(elevation_m):
-    """The altitude field of a route point for a GPX <ele> in metres: ALTITUDE_NONE without
-    one, else whole metres kept inside 0..29999. The field is packed unsigned here ("<iiHH")
-    and nothing we hold shows the watch reading it as signed, so a point below sea level goes
-    as 0 m. Until 2026-11-22 a single point at -1 m (a coast road) made the whole route fail
-    with struct.error, and over Bluetooth the page said nothing at all."""
+    """The altitude field of a route point for a GPX <ele> in metres: ALTITUDE_NONE (30000)
+    without one, else an int16 of whole metres, rounded half away from zero, so a route below
+    sea level keeps its altitudes (a start at -100 m is -100, André 2026-11-22).
+
+    From Suunto's own code, read 2026-11-22:
+    - SuuntoLink (SDSApplicationServer.exe, BluebirdDevice::saveRoutes): the route point field
+      table at 0x9ba078 gives `altitude` offset 8, type 4, size 2, and type 4 is the signed
+      16-bit one (its reader does movzx + cwde); the value is stored after boost::math::round,
+      with no range check.
+    - Ambit3 Peak firmware 2.4.17: the readers (0x3dd08 navigation, 0x3000a route preview)
+      hand the raw word to FUN_0001e148, which skips 30000 and adds 500 before using it, so
+      0xFFFF is one metre below 0 m and the floor is -500 m; the watch's own route generator
+      copies a signed log altitude into the same field (0x1d11c).
+    So -500 m is the lowest value written (the lowest land on Earth is about -430 m).
+    The Android and iOS writer (shared/libambit, put16 of the int32) always wrote these bits;
+    the desktop packed the field unsigned and truncated, so until 2026-11-22 a single point
+    at -1 m (a coast road) made the whole route fail with struct.error, and over Bluetooth
+    the page said nothing at all."""
     if elevation_m is None:
         return ALTITUDE_NONE
-    return max(0, min(ALTITUDE_NONE - 1, int(elevation_m)))
+    metres = int(math.floor(abs(elevation_m) + 0.5)) * (-1 if elevation_m < 0 else 1)
+    return max(-500, min(ALTITUDE_NONE - 1, metres))
 
 
 class RoutePoint:
