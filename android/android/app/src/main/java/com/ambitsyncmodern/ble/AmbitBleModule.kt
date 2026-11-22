@@ -2,6 +2,7 @@ package com.ambitsyncmodern.ble
 
 import android.Manifest
 import android.util.Log
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
@@ -413,6 +414,7 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
+        pairingQuestionInFront(adapter)
         connectPromise = promise
         // Scan UNFILTERED (2026-08-09) and match in the callback. The watch
         // advertises the NSP service as a *solicitation* ("connect to me if you
@@ -474,6 +476,60 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
             mainHandler.removeCallbacks(timeoutRunnable)
             connectPromise = null
             promise.reject("PERMISSION_DENIED", e.message)
+        }
+    }
+
+    // ─── Android's "Pair with ...?" question, in front ────────────────────────
+    // A watch that is not paired with this phone starts pairing by itself as soon as it
+    // connects, and Android then asks the user to agree (PAIRING_VARIANT_CONSENT, which only
+    // the system may confirm - see the receiver below). Android's Settings decides where that
+    // question goes: a pop-up in front, or only a notification. On André's tablet, 2026-11-22
+    // 21:02 and 21:03, it was the notification ("LocalBluetoothPreferences: Found no reason
+    // to show the dialog"), nobody answered, and the watch left 16 s and 13 s later
+    // (SMP_CONN_TOUT): "I can't even connect the watch".
+    // Read in that tablet's own Settings.apk (Android 14,
+    // LocalBluetoothPreferences.shouldShowDialogInForeground): the pop-up comes in front when
+    // the adapter is discovering, or stopped discovering less than 60 s ago. So an attempt
+    // that can end in a pairing starts a discovery and cancels it as soon as it has started:
+    // nothing is looked for, it only tells Settings that the user is pairing something now.
+    // Not for a picked watch that is already paired, and never for the standing reconnect.
+    private var discoveryMarkReceiver: BroadcastReceiver? = null
+
+    private fun clearDiscoveryMark() {
+        discoveryMarkReceiver?.let {
+            try { reactContext.unregisterReceiver(it) } catch (_: IllegalArgumentException) {}
+        }
+        discoveryMarkReceiver = null
+    }
+
+    private fun pairingQuestionInFront(adapter: BluetoothAdapter) {
+        val target = scanTargetAddress
+        try {
+            if (target != null && adapter.getRemoteDevice(target).bondState == BluetoothDevice.BOND_BONDED) return
+            if (adapter.isDiscovering) return      // something is pairing already: Settings knows
+            clearDiscoveryMark()
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    clearDiscoveryMark()
+                    try { adapter.cancelDiscovery() } catch (_: SecurityException) {}
+                }
+            }
+            discoveryMarkReceiver = receiver
+            ContextCompat.registerReceiver(reactContext, receiver,
+                IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_STARTED), ContextCompat.RECEIVER_EXPORTED)
+            val started = adapter.startDiscovery()
+            Log.d("AmbitBleModule", "pairing question in front: discovery mark started=$started")
+            // Whatever happens, no discovery is left running behind the scan for the watch.
+            mainHandler.postDelayed({
+                if (discoveryMarkReceiver === receiver) {
+                    clearDiscoveryMark()
+                    try { adapter.cancelDiscovery() } catch (_: SecurityException) {}
+                }
+            }, 2000)
+        } catch (e: Exception) {
+            // Without the mark the pairing still works from the notification; say so in the log.
+            Log.w("AmbitBleModule", "pairing question in front: not marked (${e.message})")
+            clearDiscoveryMark()
         }
     }
 
@@ -614,8 +670,11 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
                         // reads like a normal connect race, not a failed pairing attempt).
                         clearBondTimeout()
                         bondingInProgress = false
+                        // In the user's words: this text is what the screen shows.
                         failConnect("DISCONNECTED_DURING_BONDING",
-                            "Watch disconnected while pairing/bonding was in progress (status=$status)")
+                            "The watch stopped waiting before pairing finished. Choose \"Pair with app\" " +
+                            "on the watch again. When Android asks, tap Pair (if no pop-up shows, look in " +
+                            "the notifications), then type the code the watch shows.")
                     } else {
                         // Disconnected before we ever went live — surface it as the connect failure.
                         failConnect("DISCONNECTED", "Watch disconnected before subscribing (status=$status)")
@@ -915,6 +974,18 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
                         // needs BLUETOOTH_PRIVILEGED (system-only). Leave the broadcast alone so
                         // Android's own (privileged) system dialog confirms it — the fix that
                         // finally got bonding to complete, 2026-08-09, see HANDOFF.md item 7.
+                        // Android may still show that question only as a notification (see
+                        // pairingQuestionInFront), and the watch waits about 15 s: say where
+                        // to look.
+                        else if (variant == 2 || variant == 3) {
+                            mainHandler.post {
+                                try {
+                                    android.widget.Toast.makeText(reactContext,
+                                        "Android asks to pair with the watch: tap Pair. No pop-up? Look in the notifications.",
+                                        android.widget.Toast.LENGTH_LONG).show()
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
                 }
             }

@@ -7,6 +7,28 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: Android: the "Pair?" question comes in front when a watch pairs
+
+André, on the tablet: "I can't even connect the watch". The watch had been paired with the
+P5Q in the afternoon, and the tablet no longer had a pairing with it, so it had to pair again.
+
+- Tablet log, 21:02 and 21:03: the watch connects and starts pairing; Android has to ask the
+  user to agree, and its Settings put that question in a notification, not in a pop-up
+  (`LocalBluetoothPreferences: Found no reason to show the dialog`). Nobody answered and the
+  watch left after 16 s and 13 s (`SMP_CONN_TOUT`). No Sommet byte had been exchanged yet, so
+  the changes of that day to the Bluetooth protocol code are not involved.
+- The rule, read in that tablet's own Settings (Android 14,
+  `LocalBluetoothPreferences.shouldShowDialogInForeground`): the pop-up comes in front when
+  the Bluetooth adapter is discovering, or stopped less than 60 s ago. A connect that can end
+  in a pairing now starts a discovery and cancels it as soon as it has started
+  (`AmbitBleModule.kt` `pairingQuestionInFront`). Nothing is looked for; it only tells Android
+  that the user is pairing something now. Not done for a picked watch that is already paired,
+  nor for the standing reconnect.
+- When Android asks, the app also says where to look ("No pop-up? Look in the notifications"),
+  and a pairing the watch gave up on now ends with words about what to do, not "Watch
+  disconnected while pairing/bonding was in progress (status=0)".
+- Android only: the desktop types the code in its own way on Linux and in Windows' pop-up.
+
 ## 2026-11-22: the first Bluetooth sync reads the log once, not three times; pairing on Linux without the password
 
 From the first sync with the Linux download on the P5Q (André: "pois took huge time, same for
