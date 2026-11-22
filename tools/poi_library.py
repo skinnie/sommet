@@ -73,7 +73,8 @@ def _metres(lat1, lon1, lat2, lon2):
 
 
 def _same(p, name, lat, lon):
-    return (p.get("name", "").strip().casefold() == name.casefold()
+    # lower(), not casefold(): the Android twin has only toLowerCase(), and the two must agree.
+    return (p.get("name", "").strip().lower() == name.lower()
             and _metres(p["lat"], p["lon"], lat, lon) <= SAME_PLACE_M)
 
 
@@ -97,7 +98,7 @@ def _clean(name, lat, lon, ele, type_id, type_list):
     except (TypeError, ValueError):
         raise ValueError("the position is not a number") from None
     if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
-        raise ValueError(f"{lat}, {lon} is not a coordinate on Earth")
+        raise ValueError("that position is not a place on Earth")
     if type_list not in LISTS:
         type_list = "ambit"
     known = (ambit_format.TRAVERSE_WAYPOINT_TYPES if type_list == "traverse"
@@ -123,7 +124,7 @@ def list_pois(d, for_list=None):
     with _LOCK:
         pois = _load(d)["pois"]
     out = []
-    for p in sorted(pois, key=lambda x: (str(x.get("name", "")).casefold(), x.get("created", 0))):
+    for p in sorted(pois, key=lambda x: (str(x.get("name", "")).lower(), x.get("created", 0))):
         p = dict(p)
         if for_list in LISTS:
             p["typeHere"] = type_in(p.get("type"), p.get("typeList", "ambit"), for_list)

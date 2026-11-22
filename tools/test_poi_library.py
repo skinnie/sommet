@@ -56,7 +56,7 @@ class Store(unittest.TestCase):
 
     def test_what_cannot_be_a_poi_is_refused_in_words(self):
         self.assertIn("name", L.save_poi(self.d, "   ", 46.0, 7.0)["error"])
-        self.assertIn("coordinate", L.save_poi(self.d, "x", 91.0, 7.0)["error"])
+        self.assertIn("Earth", L.save_poi(self.d, "x", 91.0, 7.0)["error"])
         self.assertIn("number", L.save_poi(self.d, "x", "north", 7.0)["error"])
         self.assertEqual(L.list_pois(self.d), [])
 
@@ -104,6 +104,54 @@ class Store(unittest.TestCase):
         self.assertEqual([r["ok"] for r in res], [True, False, True])
         self.assertTrue(res[2]["existed"])
         self.assertEqual(len(L.list_pois(self.d)), 1)
+
+
+FIXTURE = HERE.parent / "android" / "src" / "services" / "__tests__" / "poiLibrary.fixture.json"
+
+# One list of saves, in order, for both apps: what each answers and what the library then holds.
+SHARED_SAVES = [
+    {"name": "  Refuge  ", "lat": 45.9237, "lon": 6.8694, "ele": 2702.4, "type": 10},
+    {"name": "refuge", "lat": 45.92375, "lon": 6.8694},                      # 5.6 m: the same
+    {"name": "Refuge", "lat": 45.9247, "lon": 6.8694},                       # 111 m: another
+    {"name": "Camp", "lat": 46.0, "lon": 7.0, "type": 2, "typeList": "ambit"},
+    {"name": "Car park", "lat": 46.1, "lon": 7.1, "type": 2, "typeList": "traverse"},
+    {"name": "Hide", "lat": 46.2, "lon": 7.2, "type": 41, "typeList": "traverse", "ele": 0},
+    {"name": "Odd type", "lat": 46.3, "lon": 7.3, "type": 99},
+    {"name": "Odd list", "lat": 46.4, "lon": 7.4, "type": 3, "typeList": "garmin"},
+    {"name": "", "lat": 46.0, "lon": 7.0},
+    {"name": "Nowhere", "lat": 91, "lon": 7.0},
+    {"name": "No number", "lat": None, "lon": 7.0},
+    {"name": "Äiguille", "lat": 45.8, "lon": 6.9, "ele": None},
+    {"name": "aiguille", "lat": 45.8, "lon": 6.9},
+    {"name": "Seven decimals", "lat": 45.123456789, "lon": -6.987654321},
+]
+
+
+def shared_cases():
+    """What poi_library.py answers for SHARED_SAVES, without the ids and the times."""
+    with tempfile.TemporaryDirectory() as d:
+        results = L.save_pois(d, SHARED_SAVES)
+        ids = {}
+        for r in results:
+            if r.get("ok"):
+                ids.setdefault(r["id"], len(ids))
+        answers = [{"ok": True, "entry": ids[r["id"]], "existed": r["existed"]} if r.get("ok")
+                   else {"ok": False, "error": r["error"]} for r in results]
+        keep = ("name", "lat", "lon", "ele", "type", "typeList")
+        listed = {key: [{**{k: p[k] for k in keep}, "typeHere": p["typeHere"]}
+                        for p in L.list_pois(d, key)] for key in L.LISTS}
+    between = {f"{a}>{b}": [L.type_in(t, a, b) for t in range(-1, 51)]
+               for a in L.LISTS for b in L.LISTS}
+    return {"about": "Made by tools/test_poi_library.py --write-fixture. The desktop "
+                     "(tools/poi_library.py) and Android (PoiLibrary.ts) must both give this.",
+            "saves": SHARED_SAVES, "answers": answers, "listed": listed,
+            "typeBetweenFromMinus1To50": between}
+
+
+class SharedWithAndroid(unittest.TestCase):
+    def test_the_fixture_android_is_tested_against_is_what_the_desktop_gives(self):
+        self.assertEqual(json.loads(FIXTURE.read_text(encoding="utf-8")), shared_cases(),
+                         "run: python3 tools/test_poi_library.py --write-fixture")
 
 
 class Routes(unittest.TestCase):
@@ -158,4 +206,9 @@ class Routes(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--write-fixture" in sys.argv:
+        FIXTURE.write_text(json.dumps(shared_cases(), ensure_ascii=False, indent=1) + "\n",
+                           encoding="utf-8")
+        print("wrote", FIXTURE)
+        sys.exit(0)
     unittest.main()

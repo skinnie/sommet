@@ -1,17 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable, TextInput } from 'react-native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import {
   addPoiToWatch, AddPoiState, readOnWatchPois, getCachedPois, exportSinglePoiToGpx, pickAndParseWaypoints,
   WatchPoi, removePoisFromWatch, getCachedPoiWatchModel,
 } from '../services/PoiService';
-import { poiTypesFor, poiTypeDefaultFor, poiTypeOf, isTraverseWatch } from '../services/PoiTypes';
+import { poiTypesFor, poiTypeDefaultFor, poiTypeOf, isTraverseWatch, poiTypeListFor, poiTypeIn } from '../services/PoiTypes';
+import {
+  LibraryPoi, PoiToKeep, listLibraryPois, saveLibraryPois, renameLibraryPoi, deleteLibraryPoi, countKept,
+} from '../services/PoiLibrary';
 import { useDemo } from '../config/DemoContext';
 import { demoPois, demoAddPoi, demoRemovePoi } from '../services/DemoData';
 import { t } from '../i18n';
 import { useV3Theme, v3Spacing, v3Type } from '../theme/v3';
 import { Card } from '../components/ui/Card';
-import { Button, FieldRow } from '../components/ui/primitives';
+import { Button, Dropdown, FieldRow, StatusNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
 import { LockableScrollView } from '../components/ScrollLock';
 import { getWeatherLocation } from '../services/WeatherService';
@@ -32,9 +35,19 @@ import { ViewModeToggle } from '../components/ui/ViewModeToggle';
 // POI types (the icon the watch shows) come from services/PoiTypes.ts: the Ambit3's 18, or the
 // 48 of a Traverse / Traverse Alpha, which are numbered differently. The list offered is the one
 // of the watch the POI list was last read from.
+//
+// The library (André, 2026-11-22: "we have a library for the routes but not for the POIs... these
+// two should be similar"), twin of the desktop's POIs page: the list card shows one source, the
+// watch or the Library (services/PoiLibrary.ts). The library is Sommet's own list and what is on
+// a watch is another: nothing here changes a watch until a POI is sent to it, and deleting here
+// leaves the watch as it is. What goes in: "Save to library" on the Add card, every POI sent to
+// the watch from that card, every POI of an imported GPX, and "Save to library" on a watch's POI.
+// The screen is in the menu without a watch too (Home passes `watch`), as Routes is.
+// Its new words are in English only for now, like the route library's.
 export default function PoiScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
+  const params = useRoute<any>().params || {};
 
   const [poiName, setPoiName] = useState('');
   const [poiLat, setPoiLat]   = useState('');
@@ -46,6 +59,44 @@ export default function PoiScreen() {
   const [readModel, setWatchModel] = useState('');
   const watchModel = demo.enabled ? demo.variant : readModel;
   const traverse = isTraverseWatch(watchModel);
+  // A watch to read and send to: Home says so; Testing mode's sample watch counts.
+  const watchHere: boolean = demo.enabled || (params.watch ?? true);
+  const typeList = poiTypeListFor(watchModel);
+
+  // ---- The library ---------------------------------------------------------------------------
+  const [library, setLibrary] = useState<LibraryPoi[]>([]);
+  const refreshLibrary = useCallback(() => {
+    listLibraryPois(typeList).then(setLibrary).catch(() => {});
+  }, [typeList]);
+  useFocusEffect(refreshLibrary);
+  // The list card's source: the watch when one is here, else the Library (always there).
+  const [source, setSource] = useState<number>(watchHere ? 0 : 1);   // 0 = on the watch, 1 = Library
+  useEffect(() => { if (!watchHere) setSource(1); }, [watchHere]);
+  const [note, setNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [formNote, setFormNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [importNote, setImportNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+
+  /** Keeps POIs in the library and says what happened, in the words the desktop uses. */
+  async function keep(items: PoiToKeep[]): Promise<{ text: string; tone: 'success' | 'error' }> {
+    try {
+      const c = countKept(await saveLibraryPois(items));
+      refreshLibrary();
+      if (c.failed) return { text: `Couldn't save to the library: ${c.failed}`, tone: 'error' };
+      if (c.saved === 0) {
+        return { text: items.length === 1 ? 'Already in the library.' : 'All of them are already in the library.', tone: 'success' };
+      }
+      return { text: c.saved === 1 ? 'Saved to the library.' : `${c.saved} POIs saved to the library.`, tone: 'success' };
+    } catch (e: any) {
+      return { text: `Couldn't save to the library: ${e?.message ?? t.unknownError}`, tone: 'error' };
+    }
+  }
+  // A POI of the watch's list, as the library keeps it (its type is a number in that watch's list).
+  const fromWatch = (poi: WatchPoi): PoiToKeep => ({
+    name: poi.name, lat: poi.latitude, lon: poi.longitude, ele: poi.elevation ?? null,
+    type: poi.type ?? null, typeList,
+  });
   // The type BYTE written to the watch; starts at that watch's plain type (17, or 26 on a Traverse).
   const [poiType, setPoiType] = useState(17);
   // Another kind of watch: a number picked from the other list means something else there.
@@ -81,6 +132,7 @@ export default function PoiScreen() {
       setOnWatch(demoPois(demo.variant));
       return;
     }
+    if (!watchHere) return;          // nothing to read: the screen shows the library
     const cached = await getCachedPois();
     setWatchModel(await getCachedPoiWatchModel());
     if (cached) {
@@ -99,7 +151,7 @@ export default function PoiScreen() {
     } finally {
       setOnWatchLoading(false);
     }
-  }, [demo.enabled, demo.variant]);
+  }, [demo.enabled, demo.variant, watchHere]);
 
   useFocusEffect(useCallback(() => { loadOnWatch(); }, [loadOnWatch]));
 
@@ -108,16 +160,31 @@ export default function PoiScreen() {
   const hasValidCoords = Number.isFinite(parsedLat) && parsedLat >= -90 && parsedLat <= 90
     && Number.isFinite(parsedLon) && parsedLon >= -180 && parsedLon <= 180;
 
-  async function handleAddPoi() {
-    if (poiBusy) return;
+  function formIsValid(): boolean {
     if (!poiName.trim()) {
       Alert.alert(t.poiInvalid, t.poiNameRequired);
-      return;
+      return false;
     }
     if (!hasValidCoords) {
       Alert.alert(t.poiInvalid, t.poiCoordsInvalid);
-      return;
+      return false;
     }
+    return true;
+  }
+  const formItem = (): PoiToKeep => ({ name: poiName.trim(), lat: parsedLat, lon: parsedLon, type: poiType, typeList });
+
+  // Keeps the POI in Sommet only; the fields stay, so it can still be sent to the watch.
+  async function handleSaveToLibrary() {
+    if (poiBusy || !formIsValid()) return;
+    setFormNote(await keep([formItem()]));
+  }
+
+  async function handleAddPoi() {
+    if (poiBusy || !formIsValid()) return;
+    setFormNote(null);
+    // Every POI made here is kept (the library and the watch then live their own lives).
+    const item = formItem();
+    keep([item]).then(r => { if (r.tone === 'error') setFormNote(r); });
     if (demo.enabled) {
       setOnWatch(demoAddPoi(demo.variant, { name: poiName.trim(), latitude: parsedLat, longitude: parsedLon, type: poiType }));
       setPoiName(''); setPoiLat(''); setPoiLon('');
@@ -147,7 +214,14 @@ export default function PoiScreen() {
     setImportPicking(true);
     try {
       const wps = await pickAndParseWaypoints();
-      if (wps) setImported(wps);
+      if (wps) {
+        setImported(wps);
+        setImportNote(null);
+        // An imported GPX is kept in the library straight away; each POI can then go to the watch.
+        if (wps.length > 0) {
+          setImportNote(await keep(wps.map(w => ({ name: w.name, lat: w.latitude, lon: w.longitude, ele: w.elevation ?? null }))));
+        }
+      }
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
     } finally {
@@ -201,6 +275,41 @@ export default function PoiScreen() {
           setRemovingIndex(null);
           loadOnWatch();
         }
+      } },
+    ]);
+  }
+
+  // One library POI to the watch: its type as a number in this watch's list, and its altitude.
+  async function handleSendFromLibrary(p: LibraryPoi) {
+    if (sendingId !== null || poiBusy) return;
+    setNote(null);
+    if (demo.enabled) {
+      setOnWatch(demoAddPoi(demo.variant, { name: p.name, latitude: p.lat, longitude: p.lon, type: p.typeHere }));
+      setNote({ text: `“${p.name}” sent to the watch.`, tone: 'success' });
+      return;
+    }
+    setSendingId(p.id);
+    try {
+      let failure: string | undefined;
+      await addPoiToWatch(p.name, p.lat, p.lon, st => {
+        if (st.phase === 'error') failure = st.error ?? t.unknownError;
+      }, p.typeHere ?? -1, p.ele ?? undefined);
+      if (failure) setNote({ text: failure, tone: 'error' });
+      else { setNote({ text: `“${p.name}” sent to the watch.`, tone: 'success' }); loadOnWatch(); }
+    } catch (e: any) {
+      setNote({ text: e?.message ?? t.unknownError, tone: 'error' });
+    } finally {
+      setSendingId(null);
+    }
+  }
+
+  function handleDeleteFromLibrary(p: LibraryPoi) {
+    Alert.alert('Delete from the library', `Delete “${p.name}” from your saved POIs? A watch that has it keeps it.`, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.delete, style: 'destructive', onPress: async () => {
+        const ok = await deleteLibraryPoi(p.id);
+        setNote(ok ? { text: 'Deleted from the library.', tone: 'success' } : { text: 'That POI is no longer in the library.', tone: 'error' });
+        refreshLibrary();
       } },
     ]);
   }
@@ -280,7 +389,14 @@ export default function PoiScreen() {
           />
           <Text style={styles.itemStats}>{t.poiMapHint}</Text>
         </View>
-        <Button label={t.poiAddBtn} variant="filled" loading={poiBusy} disabled={poiBusy} onPress={handleAddPoi} style={{ marginTop: v3Spacing.small }} />
+        {/* "Save to library" keeps it in Sommet only; a send to the watch keeps a copy too. */}
+        <View style={[styles.row, { flexWrap: 'wrap' }]}>
+          <Button label="Save to library" variant={watchHere ? 'outline' : 'filled'} grow={false} disabled={poiBusy} onPress={handleSaveToLibrary} />
+          {watchHere && (
+            <Button label={t.poiAddBtn} variant="filled" grow={false} loading={poiBusy} disabled={poiBusy} onPress={handleAddPoi} />
+          )}
+        </View>
+        {formNote && <StatusNote text={formNote.text} tone={formNote.tone} closable />}
       </Card>
 
       {/* ── Import from GPX ── */}
@@ -288,6 +404,7 @@ export default function PoiScreen() {
         <Text style={styles.cardTitle}>{t.poiImportSection}</Text>
         <Text style={styles.itemStats}>{t.poiImportDesc}</Text>
         <Button label={t.poiImportBtn} variant="filled" loading={importPicking} disabled={importPicking} onPress={handleImportPick} style={{ marginTop: v3Spacing.small }} />
+        {importNote && <StatusNote text={importNote.text} tone={importNote.tone} closable />}
 
         {imported && imported.map((wp, i) => (
           <View key={`${wp.name}-${i}`} style={styles.row}>
@@ -295,55 +412,119 @@ export default function PoiScreen() {
               <Text style={styles.itemName} numberOfLines={1}>{wp.name}</Text>
               <Text style={styles.itemStats}>{t.poiCoords(wp.latitude, wp.longitude)}</Text>
             </View>
-            <TouchableOpacity style={styles.exportBtn} disabled={addingIndex !== null} onPress={() => handleAddImported(wp, i)}>
-              <Text style={styles.exportBtnText}>{addingIndex === i ? '…' : t.poiItemAddBtn}</Text>
-            </TouchableOpacity>
+            {watchHere && (
+              <TouchableOpacity style={styles.exportBtn} disabled={addingIndex !== null} onPress={() => handleAddImported(wp, i)}>
+                <Text style={styles.exportBtnText}>{addingIndex === i ? '…' : t.poiItemAddBtn}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ))}
       </Card>
 
-      {/* ── On the watch ── */}
+      {/* ── One source at a time: the watch or the Library (desktop's drop-down) ── */}
       <Card style={{ width: '100%' }}>
-        {/* Title + map/list view dropdown, right after the title on the left (moved here from
-            Settings, André 2026-08-16; matches desktop). */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Text style={styles.cardTitle}>{t.poiOnWatchSection}</Text>
-          {!onWatchLoading && onWatch && onWatch.length > 0 && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {watchHere
+            ? <Dropdown value={source} onSelect={v => { setSource(v); setNote(null); if (v === 1) refreshLibrary(); }}
+                choices={[{ value: 0, label: t.poiOnWatchSection }, { value: 1, label: 'Library' }]} />
+            : <Text style={styles.cardTitle}>Library</Text>}
+          {(source === 1 ? library.length > 0 : (!onWatchLoading && onWatch && onWatch.length > 0)) && (
             <ViewModeToggle mode={viewMode} onChange={changeViewMode} />
           )}
+          {source === 0 && !onWatchLoading && onWatch && onWatch.length > 0 && (
+            <TouchableOpacity hitSlop={8} accessibilityLabel="Save all POIs to the library"
+              onPress={async () => setNote(await keep(onWatch.map(fromWatch)))}>
+              <Text style={styles.linkText}>Save all to library</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        {note && <StatusNote text={note.text} tone={note.tone} closable />}
 
-        {onWatchLoading && <Text style={styles.itemStats}>{t.poiOnWatchReading}</Text>}
-        {!onWatchLoading && onWatchError && (
-          <Text style={[styles.itemStats, { color: theme.error }]}>{t.poiOnWatchError(onWatchError)}</Text>
+        {/* ── Library ── */}
+        {source === 1 && library.length === 0 && (
+          <Text style={styles.itemStats}>Nothing saved yet. A POI you add or import here is kept in the library, and so is one you save from a watch.</Text>
         )}
-        {!onWatchLoading && onWatchError && onWatch && onWatch.length > 0 && (
-          <Text style={styles.itemStats}>{t.poiOnWatchStale}</Text>
+        {source === 1 && library.length > 0 && (
+          <Text style={styles.itemStats}>Your POIs, kept in Sommet. A watch has its own list: send it the ones you want there. Deleting here leaves the watch as it is.</Text>
         )}
-        {!onWatchLoading && !onWatchError && onWatch && onWatch.length === 0 && (
-          <Text style={styles.itemStats}>{t.poiOnWatchEmpty}</Text>
-        )}
-
-        {!onWatchLoading && onWatch && onWatch.map((poi, i) => (
-          <View key={`${poi.name}-${i}`} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-            {viewMode === 'map' && <TrackPreview points={[{ lat: poi.latitude, lon: poi.longitude }]} markerOnly height={90} />}
+        {source === 1 && library.map((p, i) => (
+          <View key={p.id} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
+            {viewMode === 'map' && <TrackPreview points={[{ lat: p.lat, lon: p.lon }]} markerOnly height={90} />}
             <View style={styles.row}>
-              {/* The POI's own watch icon and the name of its type in that watch's list. */}
-              <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeOf(poi.type, watchModel).glyph}</Text>
+              {/* The icon and its name, from the list the POI's type number is in. */}
+              <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeIn(p.typeList, p.type).glyph}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.itemName} numberOfLines={1}>{poi.name}</Text>
-                <Text style={styles.itemStats}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
+                <Text style={styles.itemName} numberOfLines={1}>{p.name}</Text>
+                <Text style={styles.itemStats}>{poiTypeIn(p.typeList, p.type).name} · {t.poiCoords(p.lat, p.lon)}</Text>
               </View>
-              <TouchableOpacity style={styles.exportBtn} disabled={exportingIndex !== null} onPress={() => handleExportItem(poi, i)}>
-                <Text style={styles.exportBtnText}>{exportingIndex === i ? '…' : t.poiItemExportBtn}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.exportBtn} disabled={removingIndex !== null || onWatchLoading} onPress={() => handleRemoveItem(poi, i)}>
-                <Text style={styles.exportBtnText}>{removingIndex === i ? '…' : t.poiItemRemoveBtn}</Text>
-              </TouchableOpacity>
+            </View>
+            <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
+              {watchHere && (
+                <Button label={t.poiAddBtn} variant="text" grow={false} busy={sendingId === p.id}
+                  disabled={sendingId !== null || poiBusy} onPress={() => handleSendFromLibrary(p)} />
+              )}
+              <Button label={t.poiItemExportBtn} variant="text" grow={false} disabled={exportingIndex !== null}
+                onPress={() => handleExportItem({ name: p.name, latitude: p.lat, longitude: p.lon, elevation: p.ele ?? undefined }, i)} />
+              <Button label="Rename" variant="text" grow={false} onPress={() => setRenaming({ id: p.id, value: p.name })} />
+              <Button label="Delete" variant="text" danger grow={false} onPress={() => handleDeleteFromLibrary(p)} />
             </View>
           </View>
         ))}
+
+        {/* ── On the watch ── */}
+        {source === 0 && watchHere && (<>
+          {onWatchLoading && <Text style={styles.itemStats}>{t.poiOnWatchReading}</Text>}
+          {!onWatchLoading && onWatchError && (
+            <Text style={[styles.itemStats, { color: theme.error }]}>{t.poiOnWatchError(onWatchError)}</Text>
+          )}
+          {!onWatchLoading && onWatchError && onWatch && onWatch.length > 0 && (
+            <Text style={styles.itemStats}>{t.poiOnWatchStale}</Text>
+          )}
+          {!onWatchLoading && !onWatchError && onWatch && onWatch.length === 0 && (
+            <Text style={styles.itemStats}>{t.poiOnWatchEmpty}</Text>
+          )}
+
+          {!onWatchLoading && onWatch && onWatch.map((poi, i) => (
+            <View key={`${poi.name}-${i}`} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
+              {viewMode === 'map' && <TrackPreview points={[{ lat: poi.latitude, lon: poi.longitude }]} markerOnly height={90} />}
+              <View style={styles.row}>
+                {/* The POI's own watch icon and the name of its type in that watch's list. */}
+                <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeOf(poi.type, watchModel).glyph}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName} numberOfLines={1}>{poi.name}</Text>
+                  <Text style={styles.itemStats}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
+                </View>
+              </View>
+              {/* Under the name, so three buttons fit a phone (as the route library's rows). */}
+              <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
+                <Button label={t.poiItemExportBtn} variant="text" grow={false} busy={exportingIndex === i}
+                  disabled={exportingIndex !== null} onPress={() => handleExportItem(poi, i)} />
+                <Button label="Save to library" variant="text" grow={false}
+                  onPress={async () => setNote(await keep([fromWatch(poi)]))} />
+                <Button label={t.poiItemRemoveBtn} variant="text" danger grow={false} busy={removingIndex === i}
+                  disabled={removingIndex !== null || onWatchLoading} onPress={() => handleRemoveItem(poi, i)} />
+              </View>
+            </View>
+          ))}
+        </>)}
       </Card>
+
+      <Modal visible={renaming != null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setRenaming(null)}>
+          <Pressable style={[styles.dialogCard, { paddingBottom: 16 }]} onPress={() => {}}>
+            <Text style={styles.dialogTitle}>Rename POI</Text>
+            <TextInput style={styles.renameInput} autoFocus value={renaming?.value ?? ''}
+              onChangeText={v => setRenaming(x => x && { ...x, value: v })} placeholderTextColor={theme.mutedText} />
+            <View style={[styles.row, { justifyContent: 'flex-end' }]}>
+              <Button label={t.cancel} variant="text" grow={false} onPress={() => setRenaming(null)} />
+              <Button label="OK" variant="text" grow={false} onPress={() => {
+                const x = renaming; setRenaming(null);
+                if (x) renameLibraryPoi(x.id, x.value).then(refreshLibrary);
+              }} />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
     </LockableScrollView>
   );
@@ -370,6 +551,9 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
     backgroundColor: t.primary + '1F', borderWidth: 1, borderColor: t.primary,
   },
   exportBtnText: { color: t.primary, fontWeight: '600', fontSize: v3Type.label },
+  linkText: { fontSize: v3Type.label, color: t.mutedText, fontWeight: '700' },
+  renameInput: { borderWidth: 1, borderColor: t.mutedText + '55', borderRadius: 10, color: t.text,
+                 paddingHorizontal: 12, paddingVertical: 8, fontSize: v3Type.body, marginVertical: v3Spacing.small },
   typeLabel: { fontSize: v3Type.label, color: t.mutedText, marginTop: v3Spacing.small, marginBottom: 4 },
   typeChipRow: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

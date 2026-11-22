@@ -65,7 +65,7 @@ export type RootStackParamList = {
   Map: { activity: ActivityRecord };
   // section: open Settings on one section, e.g. 'connections' (Settings split, 2026-10-21).
   Settings: { section?: string } | undefined;
-  Poi: undefined;
+  Poi: { watch?: boolean } | undefined;
   // watch = a route-writable watch is connected; send = a route handed back by the planner's "Send to…"
   Route: { watch?: boolean; pins?: boolean; legacy?: boolean; send?: { name: string; points: Array<{ lat: number; lon: number; ele?: number | null }> } } | undefined;
   // v2.3.2 beta: HomeScreen connects to the Garmin device itself (see its

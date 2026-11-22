@@ -53,5 +53,6 @@ altitude when a POI has one.
 
 ## Where the library is kept
 
-On a computer: the `Routes` and `Pois` folders inside `SommetBackups` in your home folder. Today
-each computer or tablet has its own library; a route saved on one is not on the other yet.
+On a computer: the `Routes` and `Pois` folders inside `SommetBackups` in your home folder. On a
+tablet or phone: inside the app's own storage. Today each computer or tablet has its own
+library; a route or POI saved on one is not on the other yet.

@@ -1,0 +1,561 @@
+{
+ "about": "Made by tools/test_poi_library.py --write-fixture. The desktop (tools/poi_library.py) and Android (PoiLibrary.ts) must both give this.",
+ "saves": [
+  {
+   "name": "  Refuge  ",
+   "lat": 45.9237,
+   "lon": 6.8694,
+   "ele": 2702.4,
+   "type": 10
+  },
+  {
+   "name": "refuge",
+   "lat": 45.92375,
+   "lon": 6.8694
+  },
+  {
+   "name": "Refuge",
+   "lat": 45.9247,
+   "lon": 6.8694
+  },
+  {
+   "name": "Camp",
+   "lat": 46.0,
+   "lon": 7.0,
+   "type": 2,
+   "typeList": "ambit"
+  },
+  {
+   "name": "Car park",
+   "lat": 46.1,
+   "lon": 7.1,
+   "type": 2,
+   "typeList": "traverse"
+  },
+  {
+   "name": "Hide",
+   "lat": 46.2,
+   "lon": 7.2,
+   "type": 41,
+   "typeList": "traverse",
+   "ele": 0
+  },
+  {
+   "name": "Odd type",
+   "lat": 46.3,
+   "lon": 7.3,
+   "type": 99
+  },
+  {
+   "name": "Odd list",
+   "lat": 46.4,
+   "lon": 7.4,
+   "type": 3,
+   "typeList": "garmin"
+  },
+  {
+   "name": "",
+   "lat": 46.0,
+   "lon": 7.0
+  },
+  {
+   "name": "Nowhere",
+   "lat": 91,
+   "lon": 7.0
+  },
+  {
+   "name": "No number",
+   "lat": null,
+   "lon": 7.0
+  },
+  {
+   "name": "Äiguille",
+   "lat": 45.8,
+   "lon": 6.9,
+   "ele": null
+  },
+  {
+   "name": "aiguille",
+   "lat": 45.8,
+   "lon": 6.9
+  },
+  {
+   "name": "Seven decimals",
+   "lat": 45.123456789,
+   "lon": -6.987654321
+  }
+ ],
+ "answers": [
+  {
+   "ok": true,
+   "entry": 0,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 0,
+   "existed": true
+  },
+  {
+   "ok": true,
+   "entry": 1,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 2,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 3,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 4,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 5,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 6,
+   "existed": false
+  },
+  {
+   "ok": false,
+   "error": "a POI needs a name"
+  },
+  {
+   "ok": false,
+   "error": "that position is not a place on Earth"
+  },
+  {
+   "ok": false,
+   "error": "the position is not a number"
+  },
+  {
+   "ok": true,
+   "entry": 7,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 8,
+   "existed": false
+  },
+  {
+   "ok": true,
+   "entry": 9,
+   "existed": false
+  }
+ ],
+ "listed": {
+  "ambit": [
+   {
+    "name": "aiguille",
+    "lat": 45.8,
+    "lon": 6.9,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 17
+   },
+   {
+    "name": "Camp",
+    "lat": 46.0,
+    "lon": 7.0,
+    "ele": null,
+    "type": 2,
+    "typeList": "ambit",
+    "typeHere": 2
+   },
+   {
+    "name": "Car park",
+    "lat": 46.1,
+    "lon": 7.1,
+    "ele": null,
+    "type": 2,
+    "typeList": "traverse",
+    "typeHere": 3
+   },
+   {
+    "name": "Hide",
+    "lat": 46.2,
+    "lon": 7.2,
+    "ele": 0.0,
+    "type": 41,
+    "typeList": "traverse",
+    "typeHere": 17
+   },
+   {
+    "name": "Odd list",
+    "lat": 46.4,
+    "lon": 7.4,
+    "ele": null,
+    "type": 3,
+    "typeList": "ambit",
+    "typeHere": 3
+   },
+   {
+    "name": "Odd type",
+    "lat": 46.3,
+    "lon": 7.3,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 17
+   },
+   {
+    "name": "Refuge",
+    "lat": 45.9237,
+    "lon": 6.8694,
+    "ele": 2702.4,
+    "type": 10,
+    "typeList": "ambit",
+    "typeHere": 10
+   },
+   {
+    "name": "Refuge",
+    "lat": 45.9247,
+    "lon": 6.8694,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 17
+   },
+   {
+    "name": "Seven decimals",
+    "lat": 45.1234568,
+    "lon": -6.9876543,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 17
+   },
+   {
+    "name": "Äiguille",
+    "lat": 45.8,
+    "lon": 6.9,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 17
+   }
+  ],
+  "traverse": [
+   {
+    "name": "aiguille",
+    "lat": 45.8,
+    "lon": 6.9,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 26
+   },
+   {
+    "name": "Camp",
+    "lat": 46.0,
+    "lon": 7.0,
+    "ele": null,
+    "type": 2,
+    "typeList": "ambit",
+    "typeHere": 4
+   },
+   {
+    "name": "Car park",
+    "lat": 46.1,
+    "lon": 7.1,
+    "ele": null,
+    "type": 2,
+    "typeList": "traverse",
+    "typeHere": 2
+   },
+   {
+    "name": "Hide",
+    "lat": 46.2,
+    "lon": 7.2,
+    "ele": 0.0,
+    "type": 41,
+    "typeList": "traverse",
+    "typeHere": 41
+   },
+   {
+    "name": "Odd list",
+    "lat": 46.4,
+    "lon": 7.4,
+    "ele": null,
+    "type": 3,
+    "typeList": "ambit",
+    "typeHere": 2
+   },
+   {
+    "name": "Odd type",
+    "lat": 46.3,
+    "lon": 7.3,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 26
+   },
+   {
+    "name": "Refuge",
+    "lat": 45.9237,
+    "lon": 6.8694,
+    "ele": 2702.4,
+    "type": 10,
+    "typeList": "ambit",
+    "typeHere": 9
+   },
+   {
+    "name": "Refuge",
+    "lat": 45.9247,
+    "lon": 6.8694,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 26
+   },
+   {
+    "name": "Seven decimals",
+    "lat": 45.1234568,
+    "lon": -6.9876543,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 26
+   },
+   {
+    "name": "Äiguille",
+    "lat": 45.8,
+    "lon": 6.9,
+    "ele": null,
+    "type": 17,
+    "typeList": "ambit",
+    "typeHere": 26
+   }
+  ]
+ },
+ "typeBetweenFromMinus1To50": {
+  "ambit>ambit": [
+   17,
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17
+  ],
+  "ambit>traverse": [
+   26,
+   0,
+   31,
+   4,
+   2,
+   21,
+   23,
+   24,
+   6,
+   20,
+   25,
+   9,
+   30,
+   16,
+   22,
+   27,
+   29,
+   12,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26,
+   26
+  ],
+  "traverse>ambit": [
+   17,
+   0,
+   0,
+   3,
+   3,
+   2,
+   2,
+   7,
+   7,
+   7,
+   10,
+   10,
+   10,
+   16,
+   16,
+   16,
+   16,
+   12,
+   12,
+   12,
+   12,
+   8,
+   4,
+   13,
+   5,
+   6,
+   9,
+   17,
+   14,
+   14,
+   15,
+   11,
+   1,
+   17,
+   17,
+   12,
+   16,
+   17,
+   17,
+   17,
+   8,
+   8,
+   17,
+   13,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17,
+   17
+  ],
+  "traverse>traverse": [
+   26,
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   40,
+   41,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   26,
+   26,
+   26
+  ]
+ }
+}

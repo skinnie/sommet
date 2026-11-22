@@ -91,8 +91,44 @@ export const AMBIT_TO_TRAVERSE_POI_TYPE: Record<number, number> = {
   12: 16, 13: 22, 14: 27, 15: 29, 16: 12, 17: 26,
 };
 
+// The Ambit3 type that draws each Traverse type's icon (the third column of ambit_format.py
+// TRAVERSE_WAYPOINT_TYPES). A Traverse type that is not listed has an icon the Ambit3 lacks and
+// becomes the plain type there.
+export const TRAVERSE_TO_AMBIT_POI_TYPE: Record<number, number> = {
+  0: 0, 1: 0, 2: 3, 3: 3, 4: 2, 5: 2, 6: 7, 7: 7, 8: 7, 9: 10, 10: 10, 11: 10, 12: 16, 13: 16,
+  14: 16, 15: 16, 16: 12, 17: 12, 18: 12, 19: 12, 20: 8, 21: 4, 22: 13, 23: 5, 24: 6, 25: 9,
+  26: 17, 27: 14, 28: 14, 29: 15, 30: 11, 31: 1, 34: 12, 35: 16, 37: 17, 39: 8, 40: 8, 42: 13,
+};
+
 export const AMBIT_POI_TYPE_DEFAULT = 17;       // "Waypoint"
 export const TRAVERSE_POI_TYPE_DEFAULT = 26;    // "POI", the Traverse's plain flag
+
+/** Which list a type number is in: the Ambit3 family's 18 or the Traverse's 48. */
+export type PoiTypeList = 'ambit' | 'traverse';
+
+export function poiTypeListFor(model: string | null | undefined): PoiTypeList {
+  return isTraverseWatch(model) ? 'traverse' : 'ambit';
+}
+
+/** The entry for a type number in the given list; an unknown number reads as that list's plain type. */
+export function poiTypeIn(list: PoiTypeList, id: number | null | undefined): PoiType {
+  const types = list === 'traverse' ? TRAVERSE_POI_TYPES : AMBIT_POI_TYPES;
+  const plain = list === 'traverse' ? TRAVERSE_POI_TYPE_DEFAULT : AMBIT_POI_TYPE_DEFAULT;
+  return types.find(t => t.id === id) ?? types.find(t => t.id === plain)!;
+}
+
+/** The type number for a POI that goes from one kind of watch to the other: unchanged inside a
+ *  list, else the type that draws the same icon there (ambit_format.py waypoint_type_between). */
+export function poiTypeBetween(id: number | null | undefined, from: PoiTypeList, to: PoiTypeList): number {
+  const plain = to === 'traverse' ? TRAVERSE_POI_TYPE_DEFAULT : AMBIT_POI_TYPE_DEFAULT;
+  if (id == null || !Number.isInteger(id)) return plain;
+  if (from === to) {
+    const types = to === 'traverse' ? TRAVERSE_POI_TYPES : AMBIT_POI_TYPES;
+    return types.some(t => t.id === id) ? id : plain;
+  }
+  if (to === 'traverse') return AMBIT_TO_TRAVERSE_POI_TYPE[id] ?? plain;
+  return TRAVERSE_TO_AMBIT_POI_TYPE[id] ?? plain;
+}
 
 /** True for a Traverse or Traverse Alpha, by the name the watch gives itself ("Jabiru", "Loon")
  *  or the product name. */

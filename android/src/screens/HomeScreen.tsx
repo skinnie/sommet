@@ -1170,7 +1170,7 @@ export default function HomeScreen() {
     // André 2026-09-24), not as a top-level item.
     // Routes is always there (André, 2026-09-25): it's where any device gets a route (watch, Bryton,
     // Magene) and a GPX can be imported with nothing connected. eTrex keeps its own routes screen;
-    // the watch parts of Route only show with a route-capable watch. POIs stay watch-only.
+    // the watch parts of Route only show with a route-capable watch.
     ...(connected && deviceType === 'garmin' && !edgeVol
       ? [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const, onPress: () => garminInfo && navigation.navigate('GarminRoute', { info: garminInfo }), group: 'watch' as const },
@@ -1179,9 +1179,10 @@ export default function HomeScreen() {
       : [
           { id: 'routes', label: t.homeRoutesBtn, icon: 'route' as const,
             onPress: () => navigation.navigate('Route', { watch: connected && deviceType === 'ambit' && !isKailash(ambitInfo), pins: connected && deviceType === 'ambit' && ['Emu', 'Finch', 'Ibisbill', 'Kaka', 'Jabiru', 'Loon', 'Bluebird', 'Duck', 'Colibri', 'Greentit'].includes(ambitInfo?.model ?? ''), legacy: connected && deviceType === 'ambit' && isAmbit12(ambitInfo) }), group: 'watch' as const },
-          ...(connected && !edgeVol && !isKailash(ambitInfo)
-            ? [{ id: 'pois', label: t.homePoisBtn, icon: 'poi' as const, onPress: () => navigation.navigate('Poi'), group: 'watch' as const }]
-            : []),
+          // POIs is always in the menu too (2026-11-22): the screen has a library of its own, and
+          // its watch parts show only when a watch that has POIs is connected.
+          { id: 'pois', label: t.homePoisBtn, icon: 'poi' as const,
+            onPress: () => navigation.navigate('Poi', { watch: connected && !edgeVol && !isKailash(ambitInfo) }), group: 'watch' as const },
         ]),
     // Backup & restore lives in Settings (desktop parity — moved out of the menu with Offline
     // maps, André 2026-08-31 / ported 2026-09-25), not as a top-level item.

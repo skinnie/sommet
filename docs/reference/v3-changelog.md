@@ -30,8 +30,15 @@ similar", and "library is one thing, device library is another.. independent".
 - Seen working on a test display with a scratch library: save, the same POI twice, rename,
   delete, save all from the sample watch, the drop-down. Sending a library POI to a real watch
   uses the Add card's own write and has not been seen on a watch yet.
-- Not there yet: the same on Android, and the library shared between devices through the NAS
-  (ticket routes/08, stages A2 and B).
+- Android has the same (`PoiLibrary.ts`, POIs screen): the drop-down (On the watch / Library),
+  Save to library on the Add card, a copy kept on every send, an imported GPX kept, Save to
+  library and Save all to library on the watch's list, and Send to watch, Export, Rename and
+  Delete in the library. POIs is in the menu without a watch. The library file has the
+  desktop's layout, and one file of cases (`poiLibrary.fixture.json`) is checked by both: the
+  same saves give the same answers, and a type goes to the other watch family by the same
+  icon. Its new words are in English only for now, like the route library's. Checked by tests
+  only: not yet seen on the tablet.
+- Not there yet: the library shared between devices through the NAS (ticket routes/08, stage B).
 
 ## 2026-11-22: the watch no longer drops out for a second right after a Bluetooth link
 
