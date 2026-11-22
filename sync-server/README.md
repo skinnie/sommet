@@ -58,7 +58,10 @@ tombstone). All must print `ok`.
 ## API
 
 Token in header `X-Sommet-Token`. Collections: `activities`, `gear`, `gear_reminder`,
-`gear_assignment`, `activity_gear`.
+`gear_assignment`, `activity_gear`. Since 2026-11-22 also `routes` and `pois`, the
+route library and the POI library (a route's GPX is a blob under the uid `route:<record uid>`).
+A server that has an older `sync.php` answers these two with 400 "unknown collection"; replace
+`sync.php` with the new one to hold them.
 
 | Call | Purpose |
 |---|---|

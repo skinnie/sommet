@@ -38,7 +38,10 @@ similar", and "library is one thing, device library is another.. independent".
   same saves give the same answers, and a type goes to the other watch family by the same
   icon. Its new words are in English only for now, like the route library's. Checked by tests
   only: not yet seen on the tablet.
-- Not there yet: the library shared between devices through the NAS (ticket routes/08, stage B).
+- Sommet Sync can hold both libraries: the server takes two new collections, `routes` and
+  `pois` (`sync-server/sync.php` and its Python twin; `tools/test_sync_library_collections.py`).
+  Nothing sends to them yet: the apps' side is next (ticket routes/08, stage B), and the NAS
+  needs the new `sync.php`.
 
 ## 2026-11-22: the watch no longer drops out for a second right after a Bluetooth link
 
