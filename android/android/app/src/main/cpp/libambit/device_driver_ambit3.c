@@ -651,7 +651,15 @@ static int gps_orbit_write(ambit_object_t *object, uint8_t *data, size_t datalen
 
     LOG_INFO("Writing GPS orbit data");
 
-    libambit_protocol_command(object, ambit_command_write_start, NULL, 0, NULL, NULL, 0);
+    /* No 0x0b1b here (removed 2026-11-22). openambit sent it first and called it "write_start"
+     * with the note "Really!? Just a guess..." (protocol.h). On the Ambit3 it is not a start of
+     * anything: it marks EVERY move in the logbook as synced. Peak firmware 2.4.17, handler
+     * FUN_0001a45c branch 0x1b -> FUN_0001935c (appExerciseLogger.c): a loop over the 1496-byte
+     * log records that sets byte 7 to 1 and writes each back; seen doing exactly that in the
+     * emulated watch (not-synced count 1 -> 0). SuuntoLink sends it only right after it has
+     * read and marked the moves, never near the orbit data: its orbit write is 0x0b15, 0x0b21,
+     * the 0x0b16 chunks, 0x0b18 (orbitsync and eight more captures, Peak, Run, Traverse,
+     * Kailash). Evidence: sommet-builds/re-ble-step2/FINDINGS.md, tracker watch-protocol/05. */
 
     if (object->driver->gps_orbit_header_read(object, header) == 0) {
         cmpheader[0] = data[7]; // Year, swap bytes
@@ -665,11 +673,13 @@ static int gps_orbit_write(ambit_object_t *object, uint8_t *data, size_t datalen
 
         // Check if new data differs
         if (memcmp(header, cmpheader, 8) != 0) {
-            // Per-device GpsSGEE base (memory_maps.gps): the Traverse keeps this region at a
-            // different offset than the Ambit3 Peak's PMEM20_GPS_ORBIT_START, and writing the
-            // wrong base resets the watch mid-write (re-enumerates to fw 0.0.0.0 / BSL). Resolve
-            // it from the watch's own 0x0b21 map, populating on demand; fall back to the Peak
-            // base only if the watch declares no GpsSGEE region.
+            // The GpsSGEE base comes from the watch's own 0x0b21 map, as SuuntoLink takes it
+            // (read on demand); the constant only if the watch declares no such region.
+            // Correction, 2026-11-22: this comment used to say the Traverse keeps the region at
+            // another offset and that the Peak's address reset it. Every model declares
+            // 0x0704E0 / 140000 (captures of Peak, Run, Traverse, Kailash, and each firmware's
+            // own table for Sport, Vertical, Traverse Alpha), so the cause of the 2026-08-17
+            // Traverse reset was something else and is not known.
             if (object->driver_data->memory_maps.initialized == 0) {
                 get_memory_maps(object);
             }

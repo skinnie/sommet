@@ -23,8 +23,9 @@ Traverse) the id is unknown, so this refuses to write rather than guess a wrong 
 BLE (UNVERIFIED): the real Suunto app never wrote this flag in any capture - it uses
 `EventBoard` events instead (see `tools/ble_schema.py`). `mark_ble()` sends the *same*
 0x1201/`log_synced_data_id` marker over the NSP transport by analogy with USB (the wire body
-is identical; only the framing differs), using `write_nav.SBEM_WRITE_PREFIX` - the RE'd
-phone-write header the app uses for its other BLE writes. This needs a live-watch check to
+is identical; only the framing differs), with the prefix SuuntoLink sends on the cable
+(`USB_SBEM_PREFIX`, ...01 00; until 2026-11-22 it used `write_nav.SBEM_WRITE_PREFIX`, ...01 01,
+which is not this message's - see the note at `USB_SBEM_PREFIX`). This needs a live-watch check to
 confirm it actually sets the shared synced flag; until then it is guarded the same way (GEN4
 id only) and clearly logged as experimental.
 
@@ -40,8 +41,13 @@ from write_nav import Link, PRODUCT_IDS, SBEM_WRITE_PREFIX, codename_for_pid  # 
 SBEM0102_MAGIC = b"SBEM0102"
 CMD_LOG_SYNCED = 0x1201
 # libambit's own libambit_sbem0102_command_request() header, byte-for-byte the prefix the
-# SuuntoLink USB capture sends before the magic (see set_time.py's own note). BLE writes use
-# write_nav.SBEM_WRITE_PREFIX (...01 01) instead.
+# SuuntoLink USB capture sends before the magic (see set_time.py's own note): 51 messages, e.g.
+# ambit3declination message 174. Used over Bluetooth too since 2026-11-22: Suunto's app never
+# marks a move over Bluetooth in any capture, the desktop sent ...01 01 there (the prefix of
+# the watch's own pushes and of SuuntoLink's POI and settings writes, not of this message),
+# and Android sends ...01 00. The Peak 2.4.17 program does not read these two bytes (in the
+# emulated watch 01 01, 01 00 and 00 00 each mark the move), so both worked; this is the one
+# with Suunto's own bytes behind it. sommet-builds/re-ble-step2/FINDINGS.md, Q3.
 USB_SBEM_PREFIX = bytes([0, 0, 0, 0, 1, 0])
 SYNCED_FIELD_LEN = 0x15   # 20-byte NUL-padded timestamp + 1 synced byte, per the capture
 TIMESTAMP_LEN = 0x14      # openambit's sbem0102_synced.timestamp[0x14]
@@ -188,7 +194,7 @@ def mark_ble(bridge, entries, quiet=False):
         print(f"  mark-synced (BLE, EXPERIMENTAL/unverified): {model} GEN4, entry 0x{data_id:02x}")
     marked = 0
     for header, _samples in entries:
-        payload = build_marker(timestamp_from_header(header), data_id, prefix=SBEM_WRITE_PREFIX)
+        payload = build_marker(timestamp_from_header(header), data_id, prefix=USB_SBEM_PREFIX)
         bridge.command(CMD_LOG_SYNCED, payload)
         marked += 1
     return {"ok": True, "marked": marked, "skipped": 0, "reason": "experimental-ble"}

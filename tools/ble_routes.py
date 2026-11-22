@@ -36,7 +36,7 @@ import sys
 import tempfile
 
 from write_nav import (
-    backup_pois_before_route_write, build_routes, check_memory_map, existing_routes_as_gpx,
+    backup_pois_before_route_write, build_routes, check_memory_map, existing_routes_as_gpx, nav_map_error,
     nav_summary_json, put_pois_back, put_pois_back_safely,
     read_memory_map, read_nav_flash, read_pois, remove_route, send_plan, waypoint_size,
 )
@@ -70,7 +70,13 @@ def write_route(link, gpx_paths, meta_capture=None, preserve_existing=True, seri
 
     tell("reading")
     pois = read_pois(link, meta_capture)
-    check_memory_map(read_memory_map(link))
+    found = read_memory_map(link)
+    check_memory_map(found)
+    # The two areas a route goes to must be where it is built for, before anything is written
+    # (write_nav.nav_map_error; the comparison used to be printed and the write went on).
+    problem = nav_map_error(found)
+    if problem and not link.dry_run:
+        raise RuntimeError(f"{problem}; nothing was written")
 
     temp_paths = []
     try:

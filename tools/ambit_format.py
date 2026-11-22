@@ -32,15 +32,14 @@ REGIONS = {
     WAYPOINT_BASE: ("Waypoints", WAYPOINT_REGION_SIZE, HASH_PADDED),
     ROUTE_BASE: ("Routes", ROUTE_REGION_SIZE, HASH_PADDED),
     SGEE_BASE: ("GpsSGEE", SGEE_REGION_SIZE, HASH_WRITTEN),
-    # UNVERIFIED hash mode, 2026-08-10: WRITTEN by direct analogy with GpsSGEE, which this
-    # region matches in every respect that can be checked without writing it - same
-    # length-prefixed blob shape, and the two source files (gpsorbit/binary and
-    # glonassorbit/binary) share a byte-identical 12-byte header (magic 62 12 37 09,
-    # version 7f 01, big-endian year + month + day). No capture of a real GlonassSGEE write
-    # exists anywhere: SuuntoLink's own Devices.xml gates the GLONASS download to exactly
-    # three devices (Ambit3 Vertical, Traverse, Traverse Alpha) and Kailash is not one of
-    # them, so this region has never been written on André's watch - read back as 4096/4096
-    # bytes of 0xff, i.e. erased flash.
+    # Hash mode WRITTEN, checked against a real write on 2026-11-22: in assets/pcap/
+    # traverseoldfirmwaretonew SuuntoLink writes this region on a Traverse twice (messages 292
+    # and 14710: 48 chunks from 0x1339E0, 48,302 bytes = a 4-byte length and the file), and the
+    # 64 hex characters of its closing 0x0b18 equal the SHA-256 of exactly those bytes, as for
+    # GpsSGEE in the same capture (sommet-builds/re-ble-step2/glonass_hash.py). Until then this
+    # was "unverified, by analogy with GpsSGEE" (2026-08-10). SuuntoLink's Devices.xml gates the
+    # GLONASS download to the Ambit3 Vertical, Traverse and Traverse Alpha; the Kailash declares
+    # the region too and is not in that list, so it has never been written on André's Kailash.
     GLONASS_SGEE_BASE: ("GlonassSGEE", GLONASS_SGEE_REGION_SIZE, HASH_WRITTEN),
     # UNVERIFIED, 2026-08-05: no capture in this project touches TrainingProgram, so neither
     # its presence here nor WRITTEN as its hash mode is confirmed against real bytes - it's an

@@ -95,6 +95,8 @@ typedef struct {
     int reply_ready;
     int reply_is_error;
     uint16_t reply_command;   /* (msgId<<8)|subId echoed in the reply header */
+    uint16_t reply_pkt;       /* the packet number in the reply header: the request's own */
+    int reply_damaged;        /* a frame arrived with a wrong CRC while a command waited */
     uint8_t *reply_payload;
     size_t reply_payload_len;
 
@@ -363,6 +365,7 @@ void ambit_ble_on_notify(ambit_object_t *object, const uint8_t *data, size_t len
                             if (payload_len) memcpy(ctx->reply_payload, ctx->rx_acc + BLE_HEADER_LEN, payload_len);
                             ctx->reply_payload_len = payload_len;
                             ctx->reply_command = ((uint16_t)msgId << 8) | subId;
+                            memcpy(&ctx->reply_pkt, ctx->rx_acc + 6, 2);
                             ctx->reply_is_error = (errFlags != 0);
                             ctx->reply_ready = 1;
                             pthread_cond_signal(&ctx->cond);
@@ -370,6 +373,13 @@ void ambit_ble_on_notify(ambit_object_t *object, const uint8_t *data, size_t len
                     } else {
                         LOGE("BLE frame CRC mismatch: got=%08x want=%08x len=%zu — dropped",
                              got, want, content_len);
+                        /* Its bytes are not the watch's, so it is never used; but the command
+                         * waiting for it is told now instead of after the 20 s timeout, as the
+                         * desktop does (tools/ble_server.py). A read is then asked again at
+                         * once by its caller; the late answer to the first ask, if it still
+                         * comes, has another packet number and is not taken (below). */
+                        ctx->reply_damaged = 1;
+                        pthread_cond_signal(&ctx->cond);
                     }
                 } else {
                     LOGE("BLE frame too short (%zu bytes) — dropped", ctx->rx_acc_len);
@@ -729,11 +739,15 @@ static int ble_command_one(ble_ctx_t *ctx, uint16_t command, uint8_t *data, size
 {
     pthread_mutex_lock(&ctx->lock);
     ctx->reply_ready = 0;
+    ctx->reply_damaged = 0;
     free(ctx->reply_payload);
     ctx->reply_payload = NULL;
     ctx->reply_payload_len = 0;
     pthread_mutex_unlock(&ctx->lock);
 
+    /* The packet number this request goes out with (ble_send_command uses and then increments
+     * it; commands are serialised by cmd_lock). The watch's reply carries the same number. */
+    uint16_t sent_pkt = ctx->pkt_num;
     if (ble_send_command(ctx, command, data, datalen) != 0) {
         LOGE("libambit_protocol_command_ble: send failed for command 0x%04x", command);
         return -1;
@@ -756,17 +770,26 @@ static int ble_command_one(ble_ctx_t *ctx, uint16_t command, uint8_t *data, size
      * with garbage/truncated data that got silently written into a log entry's buffer
      * - hardware-observed producing near-zero-duration, zero-distance junk activities
      * from a real BLE sync. Now: a mismatched command is dropped and we keep waiting
-     * for the real one, up to the same overall deadline. */
+     * for the real one, up to the same overall deadline.
+     *
+     * The packet number too (2026-11-22). The watch's reply carries the request's packet
+     * number (Suunto app capture ambit3pairand2activitiesnoorbit.pklg: request/reply frames
+     * 1977/1996 0x0b1e 1/1, 2016/2122 0x1200 4/4, 2132/2136 0x0b1a 6/6, 3214/3219 0x0b15
+     * 22/22; the same for nine commands in the emulated watch). Matching the command alone
+     * took a late answer to an earlier request for the answer to the next request of the
+     * same kind: a flash read is caught by the address its reply starts with, a count or a
+     * POI page is not. The desktop checks it the same way (tools/ble_server.py). */
     while (wait_ret == 0) {
-        while (!ctx->reply_ready && wait_ret == 0) {
+        while (!ctx->reply_ready && !ctx->reply_damaged && wait_ret == 0) {
             wait_ret = pthread_cond_timedwait(&ctx->cond, &ctx->lock, &deadline);
         }
         if (!ctx->reply_ready) {
             break;
         }
-        if (ctx->reply_command != command) {
-            LOGE("libambit_protocol_command_ble: got reply for 0x%04x while waiting for 0x%04x "
-                 "- discarding and continuing to wait", ctx->reply_command, command);
+        if (ctx->reply_command != command || ctx->reply_pkt != sent_pkt) {
+            LOGE("libambit_protocol_command_ble: got reply for 0x%04x (packet %u) while waiting for "
+                 "0x%04x (packet %u) - discarding and continuing to wait",
+                 ctx->reply_command, ctx->reply_pkt, command, sent_pkt);
             ctx->reply_ready = 0;
             free(ctx->reply_payload);
             ctx->reply_payload = NULL;
@@ -776,8 +799,13 @@ static int ble_command_one(ble_ctx_t *ctx, uint16_t command, uint8_t *data, size
         break;
     }
     if (!ctx->reply_ready) {
+        int damaged = ctx->reply_damaged;
         pthread_mutex_unlock(&ctx->lock);
-        LOGE("libambit_protocol_command_ble: timeout waiting for reply to 0x%04x", command);
+        if (damaged) {
+            LOGE("libambit_protocol_command_ble: the reply to 0x%04x came back damaged", command);
+        } else {
+            LOGE("libambit_protocol_command_ble: timeout waiting for reply to 0x%04x", command);
+        }
         return -1;
     }
     if (ctx->reply_is_error) {

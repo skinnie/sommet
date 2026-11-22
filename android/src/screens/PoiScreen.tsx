@@ -410,7 +410,9 @@ export default function PoiScreen() {
       {/* ── Import from GPX ── */}
       <Card style={{ width: '100%' }}>
         <Text style={styles.cardTitle}>{t.poiImportSection}</Text>
-        <Text style={styles.itemStats}>{t.poiImportDesc}</Text>
+        {/* Not t.poiImportDesc any more: it said every waypoint "is sent as a POI", and an import now
+            keeps them in the library first (seen on the tablet, 2026-11-22). */}
+        <Text style={styles.itemStats}>Choose a GPX file: every waypoint in it is kept in the library, and each can then be sent to the watch.</Text>
         <Button label={t.poiImportBtn} variant="filled" loading={importPicking} disabled={importPicking} onPress={handleImportPick} style={{ marginTop: v3Spacing.small }} />
         {importNote && <StatusNote text={importNote.text} tone={importNote.tone} closable />}
 

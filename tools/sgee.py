@@ -201,13 +201,13 @@ def main():
     ap.add_argument("--device", metavar="NAME",
                      help="same as write_nav.py's own --device - which watch to open when "
                           "more than one is connected (e.g. 'kailash'). Required in "
-                          "practice for --glonass, since the Ambit3 family has no such "
+                          "practice for --glonass, since a Peak, Sport or Run has no such "
                           "region and both watches may be plugged in at once.")
     ap.add_argument("--glonass", action="store_true",
                      help="write the file to the watch's GlonassSGEE region instead of "
-                          "GpsSGEE - only for a watch that declares one (Kailash does, the "
-                          "Ambit3 family does not). Pair with glonassorbit/binary, not "
-                          "gpsorbit/binary.")
+                          "GpsSGEE - only for a watch that declares one (Kailash, Traverse, "
+                          "Traverse Alpha and Ambit3 Vertical do; Peak, Sport and Run do "
+                          "not). Pair with glonassorbit/binary, not gpsorbit/binary.")
     args = ap.parse_args()
 
     from write_nav import resolve_product_id as _rpid

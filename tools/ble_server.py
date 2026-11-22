@@ -845,7 +845,22 @@ class ServerLink:
 
 # Reads that may be asked again when their reply comes back damaged: they change nothing on
 # the watch. Never a write.
-RETRY_SAFE = {0x0B17}          # flash read (read_flash: moves, POIs, settings, backups)
+# Each one checked in the Peak 2.4.17 firmware and in the emulated watch (asked three times, same
+# answer, nothing changed; sommet-builds/re-ble-step2/FINDINGS.md, Q4): the request carries all
+# it needs (a paged read's cursor comes from the request, not from the watch's memory). Until
+# 2026-11-22 only the flash read was here, and a damaged memory map at launch failed its job
+# quietly (P5Q, 2026-11-22 09:25:19). 0x0b1a (sets the sync lock) is a write and is not here.
+RETRY_SAFE = {
+    0x0B17,    # flash read (read_flash: moves, routes, sport modes, backups)
+    0x0B21,    # memory map
+    0x0B02,    # POI count
+    0x0306,    # status (battery)
+    0x1100,    # settings read
+    0x0B24,    # POI list page
+    0x1200,    # log headers
+    0x0B15,    # GPS orbit head
+    0x0B19,    # sync lock check
+}
 READ_RETRIES = 3
 
 

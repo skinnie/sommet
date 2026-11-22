@@ -1525,9 +1525,9 @@ def remove_route(link, name, serial=None, backup_dir=None):
         return {"ok": False, "error": "removing a route needs the watch: run it with --write"}
     info = link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
     pois = read_pois(link)
-    if not check_memory_map(read_memory_map(link)):
-        return {"ok": False, "error": "this watch's memory map is not the one Sommet writes "
-                "routes for; nothing was written"}
+    problem = nav_map_error(read_memory_map(link))
+    if problem:
+        return {"ok": False, "error": f"{problem}; nothing was written"}
     try:
         keep = routes_to_keep_as_gpx(read_nav_flash(link), name)
     except LookupError as e:
@@ -1624,6 +1624,29 @@ def check_memory_map(found):
               f"0x{start:06x} size {declared}"
               + ("" if good else f"  (reference 0x{base:06x} / {size})"))
     return ok
+
+
+def nav_map_error(found):
+    """None when a route write can go ahead on a watch with this memory map, else why not.
+
+    A route write goes to the Waypoints and Routes areas at the addresses this program builds
+    for. SuuntoLink reads the map before every route write and takes both areas from it by name
+    (SDSApplicationServer: findBinaryArea, EmuDevice::handleBinArea). Every model declares them at
+    the same place - Peak, Sport, Run, Vertical, Traverse, Traverse Alpha, Kailash: Waypoints
+    0x005000 / 16384, Routes 0x14C080 / 130000, from captures and each firmware's own table
+    (sommet-builds/re-ble-step2/FINDINGS.md, Q1 and Q6). So these two are looked at, and both
+    must be there: check_memory_map() skips an area the watch does not declare, and also looks
+    at areas a route write never touches (a Kailash has no CustomModes or Apps)."""
+    for base, (name, size, _) in F.REGIONS.items():
+        if name not in ("Waypoints", "Routes"):
+            continue
+        if name not in found:
+            return f"this watch does not declare a {name} area in its memory map"
+        start, declared = found[name]
+        if (start, declared) != (base, size):
+            return (f"this watch keeps {name} at 0x{start:06x} ({declared} bytes); Sommet writes "
+                    f"routes for 0x{base:06x} ({size} bytes)")
+    return None
 
 
 def refuse_bad_custom_modes(blob):
@@ -2141,7 +2164,14 @@ def main():
     # SuuntoLink reads the POI list here, before the memory map, and writes it back
     # after the commit. Skipping that is what erased André's POIs on 2026-08-04.
     pois = read_pois(link, args.compare or args.meta)
-    check_memory_map(read_memory_map(link))
+    found = read_memory_map(link)
+    check_memory_map(found)
+    # Before anything is written: the two areas a route goes to must be where it is built for
+    # (it used to print the comparison and write anyway).
+    problem = nav_map_error(found)
+    if problem:
+        print(f"\n  {problem}; nothing was written.", file=sys.stderr)
+        return 1
 
     wsize = waypoint_size(link)
     if wsize != F.WAYPOINT_SIZE:

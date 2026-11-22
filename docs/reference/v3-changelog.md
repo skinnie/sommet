@@ -7,6 +7,45 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: Bluetooth fixes read from Suunto's own material
+
+André: "fix for the traverse, fix the route, you have all firmwares and ghidra work, don't
+guess, fix everything". Each point below was settled from the packet captures, SuuntoLink's
+code and the watch programs before it was changed (ticket watch-protocol/05; the evidence is
+kept with its scripts in `sommet-builds/re-ble-step2/FINDINGS.md`).
+
+- **Android marked every move as synced whenever it updated the GPS data.** Before the orbit
+  data it sent 0x0b1b, which openambit called "write_start" with the note "Really!? Just a
+  guess...". In the Peak 2.4.17 program that command sets the synced mark on every move in the
+  logbook (handler FUN_0001a45c, branch 0x1b; seen doing it in the emulated watch). SuuntoLink
+  never sends it near the orbit data. Removed (`device_driver_ambit3.c` `gps_orbit_write`).
+- **The GPS data area is at the same address on every model**, Traverse and Traverse Alpha
+  included: 0x0704E0, from captures and each firmware's own table. Comments in five files said
+  the Traverse differs and that the Peak's address had reset one on 2026-08-17; they are
+  corrected. The cause of that reset is not known. The desktop over Bluetooth used the fixed
+  address (right on every model) and now reads it from the watch's memory map first, as the
+  cable path and SuuntoLink do (`ble_sgee.py`); a watch that declares another place is refused
+  in words.
+- **Route send and remove look at the two areas they write to** (Waypoints, Routes), which every
+  model declares at the same place. A send used to print the comparison and write anyway; a
+  watch without a Routes area passed the older check. Now both refuse before a byte when an
+  area is missing or elsewhere (`write_nav.nav_map_error`), on the cable and over Bluetooth,
+  as Android already did.
+- **More reads are asked again when a reply comes back damaged** (desktop): the memory map, the
+  POI count and POI pages, status, settings, log headers, the orbit head and the sync-lock
+  check, besides the flash read. Each was checked to carry all it needs in the request, so a
+  repeat changes nothing on the watch (`ble_server.py` `RETRY_SAFE`).
+- **Android checks which request a reply answers.** The watch's reply carries the request's
+  packet number; Android matched the command only, so a late answer to an earlier request could
+  be taken for the next one of the same kind. A damaged reply now also ends the wait at once
+  instead of after 20 s (`protocol_ble.c`), as on the desktop.
+- **Marking a move as synced over Bluetooth** (off by default) sends the bytes SuuntoLink sends
+  on the cable (`...01 00`); the desktop sent `...01 01` there. The watch program reads neither
+  byte, so both worked.
+- Checked by tests and, for the watch's side, in the emulated Peak. Nothing here was seen on
+  a real watch yet. Not looked at: what 0x0b1b does on an Ambit1/2 (their waypoint writes send
+  it, as openambit does) and on the Traverse, Vertical and Kailash programs.
+
 ## 2026-11-22: the route library and the POI library are shared between devices (Sommet Sync)
 
 André: "these two should be similar and also synced to the nas", and the library is one, the

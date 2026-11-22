@@ -6,10 +6,15 @@ import {
 } from './RouteReader';
 
 // Per-device navigation port (2026-08-15). The watch declares its own flash layout in the
-// 0x0b21 memory-map reply; different products put Waypoints/Routes/CustomModes/Apps at
-// different addresses (a Traverse is not an Ambit3 Peak). This decodes that reply so the
-// nav readers use the addresses the watch reports instead of the hardcoded Ambit3 bases -
-// the same move the desktop makes in tools/write_nav.py read_memory_map().
+// 0x0b21 memory-map reply. This decodes that reply so the nav readers use the addresses the
+// watch reports, as SuuntoLink does (it looks each area up by name) and as the desktop does in
+// tools/write_nav.py read_memory_map().
+// Correction, 2026-11-22: this used to say different products put Waypoints / Routes /
+// CustomModes / Apps at different addresses. They do not: every model declares Waypoints
+// 0x005000, Routes 0x14C080, CustomModes 0x002000 and Apps 0x0927C0 (the Kailash has no
+// CustomModes or Apps). What differs is the logs (ExerciseLog, TrackLog), the pairing record
+// and whether there is a GlonassSGEE or TrainingProgram area
+// (sommet-builds/re-ble-step2/FINDINGS.md, from captures and each firmware's own table).
 //
 // The reply is a run of "Name\0<hash-hex>\0<u32 start LE><u32 size LE>" entries embedded in
 // SBEM0102 framing. We scan for the region names (tolerant of the surrounding framing, just

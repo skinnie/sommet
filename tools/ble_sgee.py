@@ -30,25 +30,30 @@ def write_orbit(link, data_bytes, glonass=False):
     """Real write: `data_bytes` is a raw ephemeris file (no wrapper), same as `sgee.py`'s
     own CLI takes as a path - reuses `build_sgee_for_region()`'s bounds-checked plan
     construction and `send_plan()` unchanged (`commit=False`, matching `sgee.py`'s own
-    convention: this region gets no `CMD_NAV_COMMIT`, unlike Routes/Waypoints). GLONASS's
-    base/size come from the watch's own declared memory map (`read_memory_map()`, the same
-    0x0b21 driver-path read already proven working for routes) rather than a hardcoded
-    address - GpsSGEE's own base/size are already fixed constants (`F.SGEE_BASE`/
-    `F.SGEE_REGION_SIZE`), same as the USB path."""
+    convention: this region gets no `CMD_NAV_COMMIT`, unlike Routes/Waypoints). The region's
+    base and size come from the watch's own memory map (`read_memory_map()`, 0x0b21), for
+    GpsSGEE as for GlonassSGEE, as the cable path (`sgee.py`) and SuuntoLink do: its orbit
+    write is 0x0b15, 0x0b21, the 0x0b16 chunks, 0x0b18. A watch that does not declare the
+    region is refused. Until 2026-11-22 GpsSGEE used the fixed 0x0704E0 here; every model
+    declares exactly that (sommet-builds/re-ble-step2/FINDINGS.md, Q1 and Q2), so what goes to
+    a watch is the same and only the read of the map is new."""
     import tempfile
     with tempfile.NamedTemporaryFile("wb", suffix=".bin", delete=False) as f:
         f.write(data_bytes)
         path = f.name
     try:
-        if glonass:
-            declared = read_memory_map(link)
-            if "GlonassSGEE" not in declared:
-                raise RuntimeError("this watch declares no GlonassSGEE region")
-            base, size = declared["GlonassSGEE"]
-            flash, layout = build_sgee_for_region(path, base, size, "GlonassSGEE")
-        else:
-            flash, layout = build_sgee_for_region(path, F.SGEE_BASE, F.SGEE_REGION_SIZE,
-                                                   "GpsSGEE")
+        label = "GlonassSGEE" if glonass else "GpsSGEE"
+        declared = read_memory_map(link)
+        if label not in declared:
+            raise RuntimeError(f"this watch declares no {label} region")
+        base, size = declared[label]
+        # Every model declares GpsSGEE at 0x0704E0 and GlonassSGEE at 0x1339E0, and those are the
+        # addresses the closing hash is worked out for (ambit_format.REGIONS). A watch that
+        # says otherwise is one this program has never seen: refused in words, before a byte.
+        if base not in F.REGIONS or F.REGIONS[base][0] != label:
+            raise RuntimeError(f"this watch keeps {label} at 0x{base:06x}; Sommet only knows "
+                               "the place every Suunto firmware seen so far declares")
+        flash, layout = build_sgee_for_region(path, base, size, label)
         send_plan(link, flash, layout, commit=False)
     finally:
         import pathlib

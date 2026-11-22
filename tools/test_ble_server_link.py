@@ -369,6 +369,31 @@ def test_a_damaged_read_is_asked_again():
     assert len(sent(chrc)) == 1, "a write was sent twice"
 
 
+def test_every_read_that_changes_nothing_is_asked_again():
+    """The other reads too (2026-11-22; a damaged memory map at launch failed its job on the
+    P5Q). Each is asked again as a new packet with the same payload; the commands that write are
+    never in the list. Which reads are safe: sommet-builds/re-ble-step2/FINDINGS.md, Q4."""
+    reads = [0x0b21, 0x0b02, 0x0306, 0x1100, 0x0b24, 0x1200, 0x0b15, 0x0b19]
+    assert set(reads) | {0x0b17} == S.RETRY_SAFE, sorted(hex(c) for c in S.RETRY_SAFE)
+    for write in (0x0b16, 0x0b18, 0x0b04, 0x0b25, 0x0b1a, 0x0b1b, 0x1101, 0x1201, 0x0300, 0x0302):
+        assert write not in S.RETRY_SAFE, hex(write)
+    for command in reads:
+        link, chrc, loop = linked()
+        thread, result, first = start(link, loop, command, b"\x00" * 4, timeout=5)
+        link.on_damaged(_damaged(command, first.pkt_num))
+        for _ in range(200):
+            loop.pump()
+            if len(sent(chrc)) == 2:
+                break
+            time.sleep(0.01)
+        again = sent(chrc)[-1]
+        assert again.command == command and again.payload == first.payload, hex(command)
+        assert again.pkt_num == first.pkt_num + 1, hex(command)
+        link.on_message(watch(command, b"good", pkt=again.pkt_num))
+        thread.join(2)
+        assert result == [b"good"], (hex(command), result)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

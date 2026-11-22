@@ -605,11 +605,12 @@ int libambit_pmem20_gps_orbit_write(libambit_pmem20_t *object, const uint8_t *da
     sha256_ctx ctx;
     uint8_t hash[32];
     uint32_t *_sizeptr = (uint32_t*)&startheader[0];
-    /* Per-device GpsSGEE base: the Traverse keeps this region at a DIFFERENT offset than the
-     * Ambit3 Peak (PMEM20_GPS_ORBIT_START). Writing the hardcoded Peak base on a Traverse hit
-     * the wrong flash and RESET the watch mid-write (seen live 2026-08-17: re-enumerated to
-     * fw 0.0.0.0 / BSL during the orbit write). Caller resolves the real base from the 0x0b21
-     * memory map; only Ambit1/2 (no memory map) still pass the constant. */
+    /* The GpsSGEE base: the caller takes it from the watch's 0x0b21 memory map, as SuuntoLink
+     * does; only Ambit1/2 (no memory map) pass the constant. Correction, 2026-11-22: this used
+     * to say the Traverse keeps the region at a different offset and that the Peak's address
+     * reset it on 2026-08-17 (fw 0.0.0.0 / BSL mid-write). Every model, Traverse included,
+     * declares 0x0704E0 (captures and each firmware's own table), so that reset had another
+     * cause, not known. See sommet-builds/re-ble-step2/FINDINGS.md. */
     uint32_t address = start_address;
     size_t offset = 0;
 
