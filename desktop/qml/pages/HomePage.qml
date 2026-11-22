@@ -2658,8 +2658,8 @@ PageFlickable {
                 inputMethodHints: Qt.ImhDigitsOnly
                 validator: IntValidator { bottom: 0; top: 999999 }
                 placeholderText: qsTr("123456")
+                onAccepted: if (text.length > 0) blePasskeyDialog.accept()
             }
         }
     }
 }
-                onAccepted: if (text.length > 0) blePasskeyDialog.accept()
