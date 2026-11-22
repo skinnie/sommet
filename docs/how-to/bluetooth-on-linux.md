@@ -2,6 +2,18 @@
 
 Two things worth knowing when Sommet uses Bluetooth on Linux. To set Bluetooth privacy yourself, see [Keep a Bluetooth watch paired on Linux](bluetooth-pairing-on-linux.md).
 
+## Linux: what Bluetooth needs
+
+Two system packages: `python3-dbus` and `python3-gi`. Sommet talks to your system's Bluetooth
+(BlueZ) through them, and they belong to the system, so the download cannot carry its own.
+Ubuntu, Mint and Debian desktops install them by default. If they are missing, Sommet says so
+when you press **Pair**, before it asks for anything:
+
+- Debian, Ubuntu, Mint: `sudo apt install python3-dbus python3-gi`
+- Fedora: `sudo dnf install python3-dbus python3-gobject`
+
+The cable needs neither.
+
 ## Linux: pairing a watch over Bluetooth (the password prompt)
 
 **What you'll see.** The first time you pair a Suunto watch with Sommet over Bluetooth on

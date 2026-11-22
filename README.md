@@ -67,6 +67,12 @@ depends a lot on the operating system and the Bluetooth adapter, and it's slow: 
 takes about a minute, a first full read several. On Android, Bluetooth works well. macOS
 Bluetooth isn't tested.
 
+On Linux, Bluetooth needs two system packages, `python3-dbus` and `python3-gi` (most desktop
+installs have them). The first time you pair a watch, your system asks for your password once:
+Sommet switches Bluetooth privacy on for that pairing, because without it the watch refuses the
+computer after its first sleep and you would pair again every time. More in
+[Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
+
 ## More
 
 [F.A.Q.](docs/faq.md) · [Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md) ·

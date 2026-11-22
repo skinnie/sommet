@@ -26,6 +26,7 @@ DRY-RUN BY DEFAULT, matching every other watch-writing path in this project
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -88,6 +89,73 @@ def _open_control():
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         return sock, ("127.0.0.1", int(info["port"])), info.get("token", "")
     return socket.socket(socket.AF_UNIX, socket.SOCK_STREAM), str(SOCKET_PATH), None
+
+
+# ---- Linux, packaged download: the daemon runs on the computer's own Python ------------------
+#
+# tools/ble_server.py talks to BlueZ over D-Bus with the `dbus` and `gi` modules. They are not
+# pip packages that freeze well: they belong to the system (python3-dbus, python3-gi, present on
+# the usual desktop installs) and are tied to its D-Bus and GLib. The packaged backend never
+# held them, so in the Linux download the daemon died on "No module named 'dbus'" right after
+# the password prompt, and Bluetooth only ever worked from a source checkout (P5Q, Mint,
+# 2026-11-22: "it asks me sudo password and then it fails"). So the packaged backend starts
+# the daemon with the system's Python, which has them, on the tools/ it ships. The daemon needs
+# nothing else: the standard library and its own tools/ modules.
+LINUX_FROZEN = FROZEN and sys.platform.startswith("linux")
+DBUS_MODULES_HINT = (
+    "Bluetooth on Linux needs two system packages that are not installed here: python3-dbus "
+    "and python3-gi. On Debian, Ubuntu or Mint: sudo apt install python3-dbus python3-gi. "
+    "On Fedora: sudo dnf install python3-dbus python3-gobject. Then try again. The cable "
+    "works without them.")
+_SYSTEM_PYTHON = []          # [path or None], filled on first use
+
+
+def _system_env():
+    """The environment for the system's Python: none of the packaged app's library paths
+    (LD_LIBRARY_PATH points into the download, PYTHONHOME into the backend), which would make
+    it load the wrong GLib or no standard library at all."""
+    keep = ("HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ",
+            "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    return env
+
+
+def system_python_with_dbus():
+    """The system's Python 3 that can run the daemon (it imports dbus and GLib), or None."""
+    if _SYSTEM_PYTHON:
+        return _SYSTEM_PYTHON[0]
+    found = None
+    probe = "import dbus, dbus.mainloop.glib, dbus.service; from gi.repository import GLib"
+    for candidate in ("/usr/bin/python3", shutil.which("python3", path=_system_env()["PATH"])):
+        if not candidate or not os.path.exists(candidate):
+            continue
+        try:
+            ok = subprocess.run([candidate, "-c", probe], env=_system_env(), timeout=20,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        if ok:
+            found = candidate
+            break
+    _SYSTEM_PYTHON.append(found)
+    return found
+
+
+def daemon_command(script):
+    """(argv before "listen", environment) to start the daemon script, for this kind of install.
+    Raises BleBridgeError with words for the user when this computer cannot run it."""
+    extra = {"PYTHONUNBUFFERED": "1",
+             # the Windows service stops when this backend has gone
+             "SOMMET_PARENT_PID": str(os.getpid())}
+    if LINUX_FROZEN:
+        python = system_python_with_dbus()
+        if python is None:
+            raise BleBridgeError(DBUS_MODULES_HINT)
+        return [python, "-u", script], {**_system_env(), **extra}
+    if FROZEN:
+        return [PYTHON, "--tool", script], {**os.environ, **extra}
+    return [PYTHON, "-u", script], {**os.environ, **extra}
 
 
 class BleBridgeError(RuntimeError):
@@ -172,8 +240,8 @@ class BleBridge:
             # buffer instead of reaching this log file, making a live session look stalled
             # when it wasn't. Nothing here needs it fast; it needs it AT ALL while running.
             script = str(TOOLS_DIR / DAEMON_SCRIPT)
-            args = ([PYTHON, "--tool", script, "listen"] if FROZEN
-                    else [PYTHON, "-u", script, "listen"])
+            command, env = daemon_command(script)      # raises with words when it cannot run
+            args = command + ["listen"]
             if forget:
                 args.append("--forget")
             if verbose:
@@ -181,9 +249,7 @@ class BleBridge:
             log_file = open(self._log_path, "a", encoding="utf-8")  # noqa: SIM115 - lives as long as _proc
             self._proc = subprocess.Popen(
                 args, cwd=str(TOOLS_DIR), stdout=log_file, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1",
-                                       # the Windows service stops when this backend has gone
-                                       "SOMMET_PARENT_PID": str(os.getpid())},
+                stdin=subprocess.DEVNULL, env=env,
                 **_detached())
         self._wait_for_socket()
 

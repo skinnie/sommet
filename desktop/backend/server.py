@@ -5433,6 +5433,14 @@ class Handler(BaseHTTPRequestHandler):
         "pending_passkey_device" are exactly the states a connect UI needs to show."""
         fresh = not ble_bridge.bridge.status().get("running")
         if fresh:
+            # Can this computer run the Bluetooth daemon at all? Asked BEFORE the privacy step,
+            # which is the password prompt: on the Linux download it used to ask for the
+            # password and then fail (P5Q, 2026-11-22).
+            try:
+                ble_bridge.daemon_command("")
+            except ble_bridge.BleBridgeError as exc:
+                self._send_json(502, {"ok": False, "error": str(exc)})
+                return
             _open_bt_privacy_window()
         try:
             ble_bridge.bridge.start(forget=bool(body.get("forget", False)))

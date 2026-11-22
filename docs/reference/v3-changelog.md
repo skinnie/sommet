@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: Bluetooth in the Linux download (it asked for the password, then failed)
+
+André on the P5Q (Mint): "it asks me sudo password ... and then it fails".
+
+- The Bluetooth part on Linux (`tools/ble_server.py`) talks to BlueZ with the system's `dbus` and
+  `gi` modules. The packaged backend never held them, so in the download it stopped on "No
+  module named 'dbus'" right after the password prompt. Bluetooth on Linux had only ever worked
+  from a source checkout.
+- The packaged backend now starts that part with the system's own Python, which has the two
+  modules, on the tools it ships, and with none of the download's library paths
+  (`ble_bridge.daemon_command`).
+- When the two packages are missing, Pair says which ones and how to install them, before the
+  password prompt instead of after it.
+- README and `docs/how-to/bluetooth-on-linux.md` say what Bluetooth needs on Linux and why the
+  password is asked once.
+- Checked: the start rule by tests; on this computer the daemon came up in 0.4 s started the
+  way the download will; on the P5Q its system Python builds the daemon's classes and reaches
+  BlueZ. Not yet seen: the download itself pairing a watch on the P5Q.
+
 ## 2026-11-22: Bluetooth fixes read from Suunto's own material
 
 André: "fix for the traverse, fix the route, you have all firmwares and ghidra work, don't
