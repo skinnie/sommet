@@ -62,10 +62,11 @@ From the [Releases](https://github.com/skinnie/sommet/releases) page:
 Step by step, with the udev rule: [Install Sommet](docs/how-to/install.md). To build it
 yourself: [BUILDING.md](BUILDING.md).
 
-On the desktop, use the cable when you can. Bluetooth works on Linux and Windows, but how well
-depends a lot on the operating system and the Bluetooth adapter, and it's slow: a new move
-takes about a minute, a first full read several. On Android, Bluetooth works well. macOS
-Bluetooth isn't tested.
+On the desktop, use the cable when you can. Bluetooth works on Linux and Windows, but how fast
+and how steady it is depends a lot on the computer's Bluetooth chipset and its driver, so it
+can differ from one computer or USB adapter to the next. It's also slow next to the cable: a
+new move takes about a minute, a first full read several. On Android, Bluetooth works well.
+macOS Bluetooth isn't tested.
 
 On Linux, Bluetooth needs two system packages, `python3-dbus` and `python3-gi` (most desktop
 installs have them). The first time you pair a watch, your system asks for your password once:
