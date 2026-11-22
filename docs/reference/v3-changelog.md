@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: the watch no longer drops out for a second right after a Bluetooth link
+
+Seen on the P5Q (Windows, Orico stick): POIs left the side bar and came back, and in the first
+seconds Home said cable, then Bluetooth.
+
+- Cause: two reads of "which watch is connected" under way at once. Before the link is up the
+  backend looks for a watch on the cable, which takes seconds on a slow PC. The link comes up
+  meanwhile, the app asks again and gets "connected"; then the older read comes back "no watch"
+  and the app believed it. One second later the next read put the watch back. The same bounce
+  set the clock and sent the GPS orbit data a second time.
+- Desktop app: only the newest read counts (`DeviceService::refresh`, `m_refreshRound`).
+- Backend: a cable search that finds nothing answers over Bluetooth when a watch linked
+  meanwhile (`_handle_device`).
+- Checked without a watch: a stand-in backend that answers the first read late with "no watch"
+  while the link comes up. The old app asked again after 1 s and sent the clock twice; the new
+  one keeps the watch and sends it once. `tools/test_device_link_up_during_cable_search.py`
+  covers the backend. Not seen on the P5Q yet.
+- Android has no such read (no cable search behind its connection state), so nothing to carry.
+
 ## 2026-11-22: sending a route or a POI says what it is doing
 
 Found on the first write tests over Bluetooth on Windows (André's Peak).

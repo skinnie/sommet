@@ -378,6 +378,10 @@ private:
     QString m_lastError;
 
     bool m_deviceInfoOk = false;
+    // Counts refresh() calls. A reply is used only if it belongs to the newest one: refresh() is
+    // also called from outside its own timers (a Bluetooth link coming up, a visit to Home), so
+    // two reads can be under way at once. See refresh().
+    quint64 m_refreshRound = 0;
     QString m_model;
     QString m_serial;
     QString m_firmwareVersion;
@@ -456,7 +460,7 @@ private:
 
     void setLoading(bool value);
     void setLastError(const QString &friendlyMessage, const QString &technicalDetail);
-    void fetchDeviceInfo();
+    void fetchDeviceInfo(quint64 round);
     void logToFile(const QString &line);
 
     static QUrl backendUrl(const QString &path);

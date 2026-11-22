@@ -5471,6 +5471,12 @@ class Handler(BaseHTTPRequestHandler):
             code, out, err = run_tool("device_info.py", ["--json"])
             info = _parse_info(out) if code == 0 else None
         if info is None:
+            # Looking on the cable takes seconds on a slow PC. A Bluetooth link that came up
+            # meanwhile is the answer, not "no watch" (P5Q, 2026-11-22: POIs left the side bar
+            # for a second right after the link).
+            if use_ble():
+                self._handle_device_ble()
+                return
             keepalive_sync()  # reconcile handles (this or another watch may have unplugged)
             self._send_json(502, {"ok": False, "raw_output": out, "stderr": err})
             return

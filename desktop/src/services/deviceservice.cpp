@@ -188,9 +188,18 @@ void DeviceService::refresh()
     m_heartbeatTimer.stop();
     setLoading(true);
 
+    // Only the newest refresh() counts. Before the Bluetooth link is up, /api/device looks for a
+    // watch on the cable, which takes seconds on a slow PC. When the link comes up meanwhile,
+    // refresh() is called again and its read answers first ("connected"); the older read then
+    // came back "no watch" and took the watch away for a second: POIs left the side bar and came
+    // back, Home said cable then Bluetooth, and the clock was set a second time (P5Q, 2026-11-22).
+    const quint64 round = ++m_refreshRound;
+
     QNetworkReply *reply = m_network.get(QNetworkRequest(backendUrl(QStringLiteral("/api/health"))));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, round] {
         reply->deleteLater();
+        if (round != m_refreshRound)
+            return;                    // a newer refresh() is under way; its answer decides
         const bool reachable = (reply->error() == QNetworkReply::NoError);
         if (m_backendReachable != reachable) {
             m_backendReachable = reachable;
@@ -203,15 +212,17 @@ void DeviceService::refresh()
             m_pollTimer.start(kPollIntervalMs);
             return;
         }
-        fetchDeviceInfo();
+        fetchDeviceInfo(round);
     });
 }
 
-void DeviceService::fetchDeviceInfo()
+void DeviceService::fetchDeviceInfo(quint64 round)
 {
     QNetworkReply *reply = m_network.get(QNetworkRequest(backendUrl(QStringLiteral("/api/device"))));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, round] {
         reply->deleteLater();
+        if (round != m_refreshRound)
+            return;                    // an older read answering late (see refresh())
         setLoading(false);
 
         // Snapshot for change detection: this runs on every poll (1 s while searching, 10 s
