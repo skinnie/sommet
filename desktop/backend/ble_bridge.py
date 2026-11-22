@@ -122,6 +122,9 @@ class BleBridge:
         # wire bytes were already sent by the daemon, this is bookkeeping, not the
         # transport itself.
         self.dry_run = True
+        # About 1 KB a second: readers that can read less do (write_nav.read_nav_flash reads
+        # only the used part of the routes database instead of its whole 146 KB).
+        self.slow_link = True
         self.sent = []
 
     def is_running(self):

@@ -28,6 +28,9 @@ class PoiService : public QObject
     // green vs error red) instead of assuming every result is a failure, which was true
     // in the 501 era and isn't anymore.
     Q_PROPERTY(bool addOk READ addOk NOTIFY addResultChanged)
+    // True while a POI is on its way to the watch (André, 2026-11-22: over Bluetooth it takes
+    // seconds and nothing said it was being sent).
+    Q_PROPERTY(bool adding READ adding NOTIFY addResultChanged)
     // GPX <wpt> import - real, confirmed-working on the Android app (opensportsync-main's
     // "POI import (GPX file and manual coordinates)"), missing here until 2026-08-07. Each
     // entry: {name, lat, lon}; submitting one goes through the same real addPoi() write as
@@ -57,6 +60,7 @@ public:
     QString lastError() const { return m_lastError; }
     QString addResultText() const { return m_addResultText; }
     bool addOk() const { return m_addOk; }
+    bool adding() const { return m_adding; }
     QVariantList importedPois() const { return m_importedPois; }
     QString importError() const { return m_importError; }
     QVariantList onWatchPois() const { return m_onWatchPois; }
@@ -97,6 +101,7 @@ private:
     QString m_lastError;
     QString m_addResultText;
     bool m_addOk = false;
+    bool m_adding = false;
     QVariantList m_importedPois;
     QString m_importError;
     QVariantList m_onWatchPois;

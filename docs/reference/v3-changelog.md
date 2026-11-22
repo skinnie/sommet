@@ -7,6 +7,26 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: sending a route or a POI says what it is doing
+
+Found on the first write tests over Bluetooth on Windows (André's Peak).
+
+- A route with a point below sea level was never sent. One point at -1 m (a coast road, in a
+  207 km route) made the route builder fail, on the cable and over Bluetooth, and over Bluetooth
+  the page showed nothing at all: no error, no result. Such a point now goes as 0 m
+  (`ambit_format.route_point_altitude`). Only checked without a watch so far.
+- Routes page: while a route goes to the watch the button is busy and a note says where it is.
+  Over Bluetooth: reading what is on the watch, "Sending the route over Bluetooth: 3.2 of
+  10.1 KB", putting the POIs back. Then "Route sent to the watch." and the watch's list is read
+  again, or the error. The Bluetooth answer had no text, and its errors were never shown.
+- POIs page: "Sending the POI to the watch..." while it goes. A new add or remove clears the
+  last result, and "POI written" / "removed" close by themselves after 10 seconds.
+- Over Bluetooth the Routes page and every route sent read the whole routes database first
+  (146 KB, about 2.5 minutes at 1 KB a second), and everything else waited behind it. Now only
+  the used part is read, checked by the database's own CRC (10 KB for one long route; anything
+  that does not add up reads it all, as before). Same result as the whole read on the four
+  databases SuuntoLink wrote in the captures. The cable reads everything, as before.
+
 ## 2026-11-21: Ambit3 Bluetooth on Windows (Windows' own Bluetooth)
 
 - Bluetooth move sync, after the first sync tests on the P5Q:

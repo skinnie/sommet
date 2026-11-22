@@ -126,7 +126,7 @@ def serialize(routes, wpt_size=F.WAYPOINT_SIZE):
         reld = F.relative_distances([(p[0], p[1]) for p in route.points])
         records = b""
         for (x, y), point, rel in zip(xy, route.points, reld):
-            altitude = F.ALTITUDE_NONE if point[2] is None else int(point[2])
+            altitude = F.route_point_altitude(point[2])
             records += F.RoutePoint(x, y, altitude, rel).build()
 
         descriptors.append(F.RouteDescriptor(

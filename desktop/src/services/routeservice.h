@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QNetworkAccessManager>
+#include <QTimer>
 #include <QObject>
 #include <QQmlEngine>
 #include <QVariantList>
@@ -46,6 +47,14 @@ class RouteService : public QObject
 
     Q_PROPERTY(QString uploadResultText READ uploadResultText NOTIFY uploadResultChanged)
     Q_PROPERTY(bool uploadOk READ uploadOk NOTIFY uploadResultChanged)
+    // A route on its way to the watch (André, 2026-11-22: over Bluetooth a long route takes
+    // minutes and the page showed nothing, then no result). uploadStage is the backend's
+    // "writing_route" over Bluetooth: "reading" (what the watch holds), "sending" (uploadDone
+    // of uploadTotal bytes), "pois" (the POIs going back); empty over the cable.
+    Q_PROPERTY(bool uploading READ uploading NOTIFY uploadingChanged)
+    Q_PROPERTY(QString uploadStage READ uploadStage NOTIFY uploadProgressChanged)
+    Q_PROPERTY(int uploadDone READ uploadDone NOTIFY uploadProgressChanged)
+    Q_PROPERTY(int uploadTotal READ uploadTotal NOTIFY uploadProgressChanged)
 
 public:
     explicit RouteService(QObject *parent = nullptr);
@@ -64,6 +73,10 @@ public:
     QString pendingRouteGpxText() const { return m_pendingRouteGpxText; }
     QString uploadResultText() const { return m_uploadResultText; }
     bool uploadOk() const { return m_uploadOk; }
+    bool uploading() const { return m_uploading; }
+    QString uploadStage() const { return m_uploadStage; }
+    int uploadDone() const { return m_uploadDone; }
+    int uploadTotal() const { return m_uploadTotal; }
 
     Q_INVOKABLE void refresh();
     // fileUrl: a QUrl from a QML FileDialog's selectedFile - "Import GPX."
@@ -86,6 +99,8 @@ signals:
     void lastErrorChanged();
     void pendingRouteChanged();
     void uploadResultChanged();
+    void uploadingChanged();
+    void uploadProgressChanged();
     void exportedGpxChanged();
     void exportingChanged();
 
@@ -99,6 +114,14 @@ private:
     QString m_pendingRouteGpxText;
     QString m_uploadResultText;
     bool m_uploadOk = false;
+    bool m_uploading = false;
+    QString m_uploadStage;
+    int m_uploadDone = 0;
+    int m_uploadTotal = 0;
+    QTimer m_uploadPoll;          // asks /api/ble/status once a second while a route is sent
+
+    void setUploadProgress(const QString &stage, int done, int total);
+    void pollUploadProgress();
     QString m_exportedGpx;
     QString m_exportError;
     bool m_exporting = false;

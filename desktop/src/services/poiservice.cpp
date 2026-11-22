@@ -100,11 +100,21 @@ void PoiService::addPoi(const QString &name, double lat, double lon, int type, d
     if (!qIsNaN(ele))
         body[QStringLiteral("ele")] = ele;
 
+    // One result at a time on the page: a new add clears what the last remove said.
+    m_adding = true;
+    m_addResultText.clear();
+    emit addResultChanged();
+    if (!m_removing && !m_removeResultText.isEmpty()) {
+        m_removeResultText.clear();
+        emit removeResultChanged();
+    }
+
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/pois")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson());
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
+        m_adding = false;
         const auto doc = QJsonDocument::fromJson(reply->readAll());
         m_addOk = doc.object().value(QStringLiteral("ok")).toBool();
         if (m_addOk) {
@@ -135,6 +145,10 @@ void PoiService::removePoi(const QString &name, double lat, double lon)
     m_removing = true;
     m_removeResultText.clear();
     emit removeResultChanged();
+    if (!m_adding && !m_addResultText.isEmpty()) {     // and a remove clears the last add's
+        m_addResultText.clear();
+        emit addResultChanged();
+    }
 
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/pois/remove")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));

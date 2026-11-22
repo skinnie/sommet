@@ -386,6 +386,18 @@ PageFlickable {
         if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("Magene") })
         return out
     }
+    // What the watch write is doing now (RouteService.uploadStage, Bluetooth only).
+    function uploadingText() {
+        if (RouteService.uploadStage === "reading")
+            return qsTr("Reading what is on the watch first… keep the watch close.")
+        if (RouteService.uploadStage === "sending" && RouteService.uploadTotal > 0)
+            return qsTr("Sending the route over Bluetooth: %1 of %2 KB. Keep the watch close.")
+                .arg((RouteService.uploadDone / 1024).toFixed(1))
+                .arg((RouteService.uploadTotal / 1024).toFixed(1))
+        if (RouteService.uploadStage === "pois")
+            return qsTr("Route sent. Putting the POIs back on the watch…")
+        return qsTr("Sending the route to the watch…")
+    }
     function sendPendingTo(key) {
         if (key.startsWith("watch:")) {
             const w = HomeViewModel.routeWatches[parseInt(key.substring(6))]
@@ -704,9 +716,9 @@ PageFlickable {
                     RoundedButton {
                         id: sendButton
                         visible: root.hasPending
-                        enabled: root.sendTargets.length > 0 && !root.mageneSending
+                        enabled: root.sendTargets.length > 0 && !root.mageneSending && !RouteService.uploading
                         text: root.sendTargets.length > 1 ? qsTr("Send to device ▾") : qsTr("Send to device")
-                        busy: root.mageneSending || root.brytonSending
+                        busy: root.mageneSending || root.brytonSending || RouteService.uploading
                         onClicked: {
                             if (root.sendTargets.length === 1) root.sendPendingTo(root.sendTargets[0].key)
                             else sendMenu.popup(sendButton, 0, sendButton.height)
@@ -769,8 +781,11 @@ PageFlickable {
                              tone: root.edgeSending ? "working" : root.edgeOk ? "success" : "error" }
                 StatusNote { width: parent.width; text: root.mageneMsg
                              tone: root.mageneSending ? "working" : root.mageneOk ? "success" : "error" }
-                StatusNote { width: parent.width; text: RouteService.uploadResultText
-                             tone: RouteService.uploadOk ? "success" : "error" }
+                // While it goes, where it is: over Bluetooth a long route takes minutes.
+                StatusNote { width: parent.width
+                             text: RouteService.uploading ? root.uploadingText() : RouteService.uploadResultText
+                             tone: RouteService.uploading ? "working"
+                                 : RouteService.uploadOk ? "success" : "error" }
                 StatusNote { width: parent.width; tone: "error"
                              text: root.etrexHere ? GarminService.writeError : "" }
                 StatusNote { width: parent.width; tone: "success"

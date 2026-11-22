@@ -53,7 +53,7 @@ def read_nav_summary(link):
 
 
 def write_route(link, gpx_paths, meta_capture=None, preserve_existing=True, serial=None,
-                backup_dir=None):
+                backup_dir=None, progress=None):
     """Real route write flow, transport-agnostic - see this file's own docstring for what
     is and isn't proven over BLE specifically, and for why `preserve_existing` exists at
     all. `gpx_paths`: real GPX file paths, same as `write_nav.py route FILE...` - the
@@ -62,6 +62,13 @@ def write_route(link, gpx_paths, meta_capture=None, preserve_existing=True, seri
     protocol failure (a timeout, a short reply) the same way the USB tools already do -
     callers (server.py) catch that the same way they catch every other BLE command()
     failure."""
+    # `progress(stage, done, total)` tells the page where the write is: "reading" (what the
+    # watch holds now), "sending" (bytes done and in all), "pois" (the POIs going back).
+    def tell(stage, done=0, total=0):
+        if progress:
+            progress(stage, done, total)
+
+    tell("reading")
     pois = read_pois(link, meta_capture)
     check_memory_map(read_memory_map(link))
 
@@ -87,13 +94,15 @@ def write_route(link, gpx_paths, meta_capture=None, preserve_existing=True, seri
         # retries once from an empty store (write_nav.put_pois_back_safely).
         backup = backup_pois_before_route_write(link, pois, serial, backup_dir)
         try:
-            send_plan(link, flash, layout)
+            send_plan(link, flash, layout,
+                      progress=lambda done, total: tell("sending", done, total))
         except (RuntimeError, TimeoutError, OSError):
             if not link.dry_run:
                 put_pois_back_safely(link, pois, backup)
             raise
         # Several 0x0b25 of at most 254 bytes each, never the extended header that corrupted
         # the POI store (write_nav.poi_entry_payloads), then the count is checked.
+        tell("pois")
         _back, err = put_pois_back_safely(link, pois, backup)
         if err:
             raise RuntimeError(f"The route was written, but {err}")

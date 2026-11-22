@@ -18,8 +18,25 @@ Rectangle {
     property string tone: "success"
     property bool closable: tone !== "working"
     property bool _closed: false
+    // A "success" note closes by itself after this many ms; 0 keeps it until the × (the
+    // default). For results the page itself proves, like a POI that left the list below
+    // (André, 2026-11-22: "“POI 1” removed" stayed on the page for good).
+    property int autoHideMs: 0
 
-    onTextChanged: _closed = false
+    onTextChanged: { _closed = false; _arm() }
+    onToneChanged: _arm()
+    onAutoHideMsChanged: _arm()
+    Component.onCompleted: _arm()
+
+    function _arm() {
+        if (autoHideMs > 0 && tone === "success" && text.length > 0) autoHide.restart()
+        else autoHide.stop()
+    }
+    Timer {
+        id: autoHide
+        interval: Math.max(1, root.autoHideMs)
+        onTriggered: root._closed = true
+    }
 
     readonly property color toneColor: tone === "error" ? Theme.error
         : tone === "warning" ? Theme.warning

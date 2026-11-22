@@ -259,6 +259,7 @@ class _WatchLock:
 _REQUEST_CTX = threading.local()   # per request thread: .foreground
 WATCH_LOCK = _WatchLock()
 _BLE_LAST_BATTERY = [None]
+_BLE_ROUTE_PROGRESS = [None]  # {stage, done, total (bytes)} while a route goes to the watch over Bluetooth
 _BLE_MOVES_PROGRESS = [None]  # {done, total (bytes), moves} while new moves come in over Bluetooth   # the last battery the watch gave over Bluetooth (_handle_device_ble)
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
 
@@ -4903,10 +4904,15 @@ class Handler(BaseHTTPRequestHandler):
         two subprocesses can race for."""
         sys.path.insert(0, str(TOOLS_DIR))
         import ble_routes                                    # noqa: PLC0415
+        def progress(stage, done, total):
+            # For GET /api/ble/status ("writing_route"): the Routes page shows it while it waits.
+            _BLE_ROUTE_PROGRESS[0] = {"stage": stage, "done": done, "total": total}
+
         try:
             ble_bridge.bridge.set_dry_run(not confirm)
             result = ble_routes.write_route(ble_bridge.bridge, [gpx_path],
-                                            serial=ble_device_key(), backup_dir=BACKUP_DIR)
+                                            serial=ble_device_key(), backup_dir=BACKUP_DIR,
+                                            progress=progress if confirm else None)
         except ble_bridge.BleBridgeError as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
@@ -4916,6 +4922,14 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError) as exc:   # a GPX it can't read (no points, odd file)
             self._send_json(400, {"ok": False, "error": f"couldn't read this GPX: {exc}"})
             return
+        except Exception as exc:               # noqa: BLE001 - always an answer for the page
+            # A route the builder cannot pack ended the request with no answer, and the page
+            # showed nothing (2026-11-22, a point at -1 m). Whatever it is, say it.
+            self._send_json(502, {"ok": False,
+                                  "error": f"couldn't send this route: {type(exc).__name__}: {exc}"})
+            return
+        finally:
+            _BLE_ROUTE_PROGRESS[0] = None
         self._send_json(200, {"transport": "ble", "wrote": confirm, **result})
 
     def _parse_last_json_line(self, out):
@@ -5276,7 +5290,8 @@ class Handler(BaseHTTPRequestHandler):
         subscribed to our notify characteristic) - same meaning as
         AmbitBleModule.kt's nativeInitStarted gate on the Android side."""
         self._send_json(200, {**ble_bridge.bridge.status(), "bt_privacy": _BT_PRIVACY["state"],
-                              "reading_moves": _BLE_MOVES_PROGRESS[0]})
+                              "reading_moves": _BLE_MOVES_PROGRESS[0],
+                              "writing_route": _BLE_ROUTE_PROGRESS[0]})
 
     def _handle_ble_logs_summary(self):
         """GET /api/ble/logs/summary - the first real post-handshake 0x1200 request in the

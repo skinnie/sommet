@@ -447,6 +447,17 @@ class RouteDescriptor:
             self.unknown1, self.unknown2, self.unknown3, self.ascent, self.descent)
 
 
+def route_point_altitude(elevation_m):
+    """The altitude field of a route point for a GPX <ele> in metres: ALTITUDE_NONE without
+    one, else whole metres kept inside 0..29999. The field is packed unsigned here ("<iiHH")
+    and nothing we hold shows the watch reading it as signed, so a point below sea level goes
+    as 0 m. Until 2026-11-22 a single point at -1 m (a coast road) made the whole route fail
+    with struct.error, and over Bluetooth the page said nothing at all."""
+    if elevation_m is None:
+        return ALTITUDE_NONE
+    return max(0, min(ALTITUDE_NONE - 1, int(elevation_m)))
+
+
 class RoutePoint:
     __slots__ = ("x", "y", "altitude", "rel_distance")
 

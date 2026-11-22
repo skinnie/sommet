@@ -11,7 +11,38 @@
 
 static const QString kBackendBase = QStringLiteral("http://127.0.0.1:8766");
 
-RouteService::RouteService(QObject *parent) : QObject(parent) {}
+RouteService::RouteService(QObject *parent) : QObject(parent)
+{
+    m_uploadPoll.setInterval(1000);
+    connect(&m_uploadPoll, &QTimer::timeout, this, &RouteService::pollUploadProgress);
+}
+
+void RouteService::setUploadProgress(const QString &stage, int done, int total)
+{
+    if (stage == m_uploadStage && done == m_uploadDone && total == m_uploadTotal)
+        return;
+    m_uploadStage = stage;
+    m_uploadDone = done;
+    m_uploadTotal = total;
+    emit uploadProgressChanged();
+}
+
+// Where a Bluetooth route write is (the backend's "writing_route"); nothing over the cable.
+void RouteService::pollUploadProgress()
+{
+    QNetworkReply *reply = m_network.get(
+        QNetworkRequest(QUrl(kBackendBase + QStringLiteral("/api/ble/status"))));
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        reply->deleteLater();
+        if (!m_uploading || reply->error() != QNetworkReply::NoError)
+            return;
+        const QJsonObject w = QJsonDocument::fromJson(reply->readAll()).object()
+                                  .value(QStringLiteral("writing_route")).toObject();
+        setUploadProgress(w.value(QStringLiteral("stage")).toString(),
+                          w.value(QStringLiteral("done")).toInt(),
+                          w.value(QStringLiteral("total")).toInt());
+    });
+}
 
 void RouteService::setLoading(bool value)
 {
@@ -205,18 +236,48 @@ void RouteService::uploadPending(bool confirm, int productId, const QString &ser
     if (!serial.isEmpty())
         body[QStringLiteral("serial")] = serial;
 
+    if (m_uploading)
+        return;
+    m_uploading = true;
+    m_uploadResultText.clear();
+    setUploadProgress(QString(), 0, 0);
+    emit uploadingChanged();
+    emit uploadResultChanged();
+    m_uploadPoll.start();
+
     QNetworkRequest req(QUrl(kBackendBase + QStringLiteral("/api/routes")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply *reply = m_network.post(req, QJsonDocument(body).toJson());
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, confirm] {
         reply->deleteLater();
+        m_uploadPoll.stop();
+        m_uploading = false;
+        setUploadProgress(QString(), 0, 0);
+        emit uploadingChanged();
         const auto doc = QJsonDocument::fromJson(reply->readAll());
         const auto obj = doc.object();
         m_uploadOk = obj.value(QStringLiteral("ok")).toBool();
         const QString raw = obj.value(QStringLiteral("raw_output")).toString();
-        const QString err = obj.value(QStringLiteral("stderr")).toString();
-        m_uploadResultText = m_uploadOk ? raw : (err.isEmpty() ? raw : err);
+        if (m_uploadOk) {
+            // The Bluetooth answer has no text of its own: until 2026-11-22 a route sent that
+            // way ended with nothing on the page at all.
+            m_uploadResultText = !raw.isEmpty() ? raw
+                : confirm ? QStringLiteral("Route sent to the watch.") : QString();
+        } else {
+            // "error" is what the Bluetooth path answers with, "stderr" the cable path.
+            m_uploadResultText = obj.value(QStringLiteral("error")).toString();
+            if (m_uploadResultText.isEmpty())
+                m_uploadResultText = obj.value(QStringLiteral("stderr")).toString();
+            if (m_uploadResultText.isEmpty())
+                m_uploadResultText = raw;
+            if (m_uploadResultText.isEmpty())
+                m_uploadResultText = reply->error() != QNetworkReply::NoError
+                    ? backendErrorText(reply) : QStringLiteral("Sending the route failed.");
+        }
         emit uploadResultChanged();
+        // The proof: read the watch's routes again, so the new one shows under "On the watch".
+        if (m_uploadOk && confirm)
+            refresh();
     });
 }
 

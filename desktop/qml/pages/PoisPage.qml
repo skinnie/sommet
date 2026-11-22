@@ -418,7 +418,7 @@ PageFlickable {
 
                 RoundedButton {
                     text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Add")
-                    enabled: !HomeViewModel.isGarmin || GarminService.hasSdCard
+                    enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
                     onClicked: {
                         if (HomeViewModel.isGarmin) {
                             const safeName = (root.poiName || "poi").replace(/[\\/:*?"<>|]/g, "_")
@@ -433,8 +433,11 @@ PageFlickable {
 
                 StatusNote {
                     width: parent.width
-                    text: !HomeViewModel.isGarmin ? PoiService.addResultText : ""
-                    tone: PoiService.addOk ? "success" : "error"
+                    text: HomeViewModel.isGarmin ? ""
+                        : PoiService.adding ? qsTr("Sending the POI to the watch...")
+                        : PoiService.addResultText
+                    tone: PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
+                    autoHideMs: 10000
                 }
                 StatusNote {
                     width: parent.width
@@ -704,6 +707,7 @@ PageFlickable {
                         : PoiService.removing ? qsTr("Removing the POI from the watch...")
                         : PoiService.removeResultText
                     tone: PoiService.removing ? "working" : PoiService.removeOk ? "success" : "error"
+                    autoHideMs: 10000
                 }
 
                 Repeater {

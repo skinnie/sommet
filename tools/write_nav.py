@@ -620,12 +620,65 @@ def read_nav_flash(link):
     actually shows - was missed, so the page looked broken over BLE even though writes
     worked). Not the full `run_nav()` read (Apps/TrainingProgram/GpsSGEE excluded) - same
     "only what navigation actually needs" trim that function already applies."""
+    # Over Bluetooth (about 1 KB a second) the two whole regions are 146 KB, 2.5 minutes for
+    # every look at the Routes page and before every route sent (André's P5Q, 2026-11-22).
+    # There only the used part is read; anything that does not add up reads it all, as here.
+    if getattr(link, "slow_link", False) and not getattr(link, "dry_run", False):
+        flash = read_nav_flash_used(link)
+        if flash is not None:
+            return flash
     waypoints = read_flash(link, F.WAYPOINT_BASE, F.REGIONS[F.WAYPOINT_BASE][1],
                            label="Waypoints")
     routes = read_flash(link, F.ROUTE_BASE, F.REGIONS[F.ROUTE_BASE][1], label="Routes")
     flash = FlashImage()
     flash.write(F.WAYPOINT_BASE, waypoints)
     flash.write(F.ROUTE_BASE, routes)
+    return flash
+
+
+def read_nav_flash_used(link):
+    """read_nav_flash() without the empty space: the two headers say how many routes, points and
+    waypoints there are, so only those records and their index rows are read (a watch with three
+    routes: about 10 KB of the 146 KB). Returns None, for the caller to read everything, when a
+    header is unknown, a count is past what the watch holds, or a CRC does not match what was
+    read: a route written by this app or by SuuntoLink always passes, and a short read can never
+    be taken for the whole database (existing routes are rebuilt from this before a write)."""
+    flash = FlashImage()
+
+    def take(address, size, label):
+        if size > 0:
+            flash.write(address, read_flash(link, address, size, label=label))
+
+    take(F.WAYPOINT_BASE, F.WAYPOINT_DESC - F.WAYPOINT_BASE, "Waypoint header")
+    take(F.ROUTE_BASE, F.ROUTE_DESC - F.ROUTE_BASE, "Route header")
+    wh = F.WaypointHeader.parse(flash.read(F.WAYPOINT_BASE, 6))
+    header = F.RouteHeader.parse(flash.read(F.ROUTE_BASE, 32))
+    if header.magic != F.ROUTE_HEADER_MAGIC or F.waypoint_size_for_magic(wh.magic) is None:
+        return None
+    routes, waypoints = header.route_count, wh.count
+    if routes > F.MAX_ROUTES or waypoints > F.MAX_WAYPOINTS \
+            or header.point_count > F.MAX_TOTAL_ROUTE_POINTS:
+        return None
+
+    take(F.ROUTE_DESC, 52 * routes, "Route list")
+    points = header.point_count
+    for i in range(routes):
+        d = F.RouteDescriptor.parse(flash.read(F.ROUTE_DESC + 52 * i, 52))
+        points = max(points, d.start_index + d.point_count)
+    if points > F.MAX_TOTAL_ROUTE_POINTS:
+        return None
+    take(F.ROUTE_POINTS, 12 * points, "Route points")
+    take(F.ROUTE_INDEX, 20 * routes, "Route index")
+    take(F.WAYPOINT_DESC, wh.size * waypoints, "Waypoints")
+    take(F.WAYPOINT_INDEX, 4 * waypoints, "Waypoint index")
+
+    # The same check as show_navigation(): the route CRC covers the descriptors and the points.
+    body = flash.read(F.ROUTE_DESC, 52 * routes) + flash.read(F.ROUTE_POINTS, 12 * header.point_count)
+    crc = F.crc16_ccitt_false(body) if routes else 0
+    if crc != header.checksum:
+        print(f"  route CRC 0x{crc:04x} against 0x{header.checksum:04x} on the short read: "
+              "reading the whole regions")
+        return None
     return flash
 
 
@@ -1590,7 +1643,7 @@ def refuse_bad_custom_modes(blob):
         raise ValueError(f"refusing to write CustomModes: field Type/Shortcut invariant broken ({bad})")
 
 
-def send_plan(link, flash, layout, commit=True):
+def send_plan(link, flash, layout, commit=True, progress=None):
     """commit=False for GpsSGEE: confirmed against assets/ambit3 pcap/orbitsync, 2026-08-05
     - its data_write/data_tail_len pair is followed directly by unrelated queries, no
     CMD_NAV_COMMIT, unlike Routes/Waypoints which always need one.
@@ -1607,15 +1660,24 @@ def send_plan(link, flash, layout, commit=True):
                              "the watch's POI lists - pass commit=False for Apps/CustomModes")
         if name.startswith("CustomModes"):
             refuse_bad_custom_modes(blob)
-    for command, address, body in emit_packs(flash, layout):
+    # `progress(done, total)`: bytes of data sent so far and in all, after every pack. Over
+    # Bluetooth a long route takes minutes at about 1 KB a second, and the page showed
+    # nothing until it ended (André, 2026-11-22). The packs and their order are unchanged.
+    packs = emit_packs(flash, layout)
+    total = sum(len(body) for command, _address, body in packs if command == CMD_DATA_WRITE)
+    done = 0
+    for command, address, body in packs:
         if command == CMD_DATA_WRITE:
             head = address.to_bytes(4, "little") + len(body).to_bytes(2, "little") \
                 + b"\0\0"
             link.command(CMD_DATA_WRITE, head + body)
+            done += len(body)
         else:
             # [u32 address][u32 supplied by the application] + 64 hex characters
             head = address.to_bytes(4, "little") + b"\0\0\0\0"
             link.command(CMD_DATA_TAIL, head + body)
+        if progress:
+            progress(done, total)
     if commit:
         link.command(CMD_NAV_COMMIT)
 
