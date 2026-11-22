@@ -107,6 +107,10 @@ _Avoid_: map, trace, route (a route is a line to follow)
 One saved point on a watch, with a name.
 _Avoid_: waypoint (the word for a point inside a Route), favourite, location
 
+**Library**:
+Sommet's own collection of Routes and POIs, kept by Sommet and not on a watch. It is independent of what is on any watch: something reaches a watch only when it is sent there, and deleting on one side leaves the other as it is.
+_Avoid_: device library (what is on a watch is "the watch's list"), favourites, saved items
+
 **POI type**:
 The kind of a POI, which decides the icon the watch draws for it (Camp, Water, Big game ...). Each watch family has its own list and its own numbers: 18 on an Ambit3, 48 on a Traverse.
 _Avoid_: POI icon (the icon follows from the type), category

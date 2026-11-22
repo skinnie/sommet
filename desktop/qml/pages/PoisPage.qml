@@ -18,9 +18,120 @@ PageFlickable {
         // Real, 2026-08-22: Ambit1/2 predate the SBEM POI database PoiService reads - same
         // fix as Watch Settings/Sport Modes/Routes. Real waypoints for this family are
         // shown below instead, via /api/legacy/settings.
-        if (DeviceCapabilities.supportsPOIs)
+        // Only with a watch: the page is reachable without one now (it has the library).
+        if (HomeViewModel.connected && DeviceCapabilities.supportsPOIs)
             PoiService.refresh()
         GarminService.refreshDeviceGpx()
+        root.refreshLibrary()
+    }
+    // A watch that connects while this page is open: read its POIs then.
+    Connections {
+        target: HomeViewModel
+        function onConnectedChanged() {
+            if (HomeViewModel.connected && DeviceCapabilities.supportsPOIs)
+                PoiService.refresh()
+        }
+    }
+
+    // ---- The library: Sommet's own list of POIs (tools/poi_library.py; André, 2026-11-22: "we
+    // have a library for the routes but not for the POIs... these two should be similar"). It is
+    // one thing and what is on a watch is another: a POI kept here stays whatever happens on a
+    // watch, and nothing here changes a watch until a POI is sent to it. What goes in: every POI
+    // added or imported on this page, and "Save to library" on a watch's POI. ----
+    property var library: []
+    property string libraryNote: ""
+    property string libraryTone: "success"
+    property string formNote: ""            // under the Add card's buttons
+    property string formTone: "success"
+    property string importNote: ""          // in the Import card
+    // Something to send a POI to: a watch with POIs, or a Garmin (its SD card).
+    readonly property bool deviceHere: HomeViewModel.isGarmin
+                                       || (HomeViewModel.connected && DeviceCapabilities.supportsPOIs)
+    // The list card's source drop-down, as on the Routes page: the device when there is one,
+    // then the Library (always there).
+    readonly property var sources: {
+        const out = []
+        if (root.deviceHere)
+            out.push({ key: "device", label: HomeViewModel.isGarmin ? qsTr("On the device") : qsTr("On the watch") })
+        out.push({ key: "library", label: qsTr("Library (saved POIs)") })
+        return out
+    }
+    property string sourceKey: ""
+    readonly property string source: root.sources.some(x => x.key === root.sourceKey) ? root.sourceKey
+                                                                                      : root.sources[0].key
+
+    function api(method, path, body, cb) {
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            let r = null
+            try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
+            cb(r || { ok: false })
+        }
+        xhr.open(method, "http://127.0.0.1:8766" + path)
+        if (body) xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.send(body ? JSON.stringify(body) : null)
+    }
+    // `typeHere` is each POI's type as a number in the connected kind of watch's list: an Ambit3
+    // and a Traverse number their types differently, so a POI goes to the other kind by its icon.
+    function refreshLibrary() {
+        root.api("GET", "/api/poilibrary?for=" + DeviceCapabilities.poiTypeListKey, null,
+                 r => { if (r.ok) root.library = r.pois })
+    }
+    // Keep POIs ({name, lat, lon, ele?, type?, typeList?}) in the library; done(r) gets the answer.
+    function keep(items, done) {
+        root.api("POST", "/api/poilibrary/save", { pois: items }, r => {
+            if (r.ok) root.refreshLibrary()
+            if (done) done(r)
+        })
+    }
+    function keptText(r, count) {
+        if (!r.ok)
+            return qsTr("Couldn't save to the library: %1").arg(r.error || qsTr("no answer"))
+        if (r.saved === 0)
+            return count === 1 ? qsTr("Already in the library.") : qsTr("All of them are already in the library.")
+        return r.saved === 1 ? qsTr("Saved to the library.") : qsTr("%1 POIs saved to the library.").arg(r.saved)
+    }
+    // Where the last send was started, so its "sending / sent / failed" note shows next to the
+    // button that was pressed and not in both cards: "form" (Add and Import cards) or "list".
+    property string sentFrom: "form"
+    // One POI to the connected device: a watch write, or a GPX on a Garmin's SD card.
+    function sendToDevice(name, lat, lon, type, ele, from) {
+        root.sentFrom = from || "form"
+        if (HomeViewModel.isGarmin) {
+            const safeName = (name || "poi").replace(/[\\/:*?"<>|]/g, "_")
+            GarminService.writeGpxToDevice("Waypoints_" + safeName + ".gpx",
+                                           PoiService.buildWaypointGpx(name, lat, lon))
+        } else {
+            PoiService.addPoi(name, lat, lon, type, ele !== undefined && ele !== null ? ele : NaN)
+        }
+    }
+    // The Add card's POI, as the library keeps it (its type is a number in the picker's list).
+    function formItem() {
+        return { name: root.poiName, lat: root.poiLat, lon: root.poiLon,
+                 type: root.poiType, typeList: DeviceCapabilities.poiTypeListKey }
+    }
+    function exportPoi(poi) {
+        const safeName = (poi.name || "poi").replace(/[\\/:*?"<>|]/g, "_")
+        poiExportDialog.pendingGpx = PoiService.buildWaypointGpx(poi.name, poi.lat, poi.lon)
+        poiExportDialog.currentFile = LocalFileService.exportFolder + "/" + safeName + ".gpx"
+        poiExportDialog.open()
+    }
+    // A POI of the device's list, as the library keeps it.
+    function deviceItem(poi) {
+        return { name: poi.name, lat: poi.lat, lon: poi.lon, ele: poi.ele,
+                 type: poi.type, typeList: DeviceCapabilities.readPoiTypeListKey }
+    }
+    // A POI imported from a GPX: listed here, and kept in the library straight away.
+    Connections {
+        target: PoiService
+        function onImportedPoisChanged() {
+            const pois = PoiService.importedPois
+            root.importNote = ""
+            if (pois.length === 0) return
+            root.keep(pois.map(x => ({ name: x.name, lat: x.lat, lon: x.lon, ele: x.ele })),
+                      r => root.importNote = root.keptText(r, pois.length))
+        }
     }
 
     FileDialog {
@@ -64,6 +175,74 @@ PageFlickable {
                   : ""
         }
         onAccepted: if (poi) PoiService.removePoi(poi.name, poi.lat, poi.lon)
+    }
+
+    ThemedDialog {
+        id: renameLibraryDialog
+        property var poi: null
+        title: qsTr("Rename")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 380
+        contentItem: RoundedTextField { id: renameLibraryField; width: 340; onAccepted: renameLibraryDialog.accept() }
+        onOpened: { renameLibraryField.text = poi ? poi.name : ""; renameLibraryField.forceActiveFocus() }
+        onAccepted: {
+            const n = renameLibraryField.text.trim()
+            if (!poi || n.length === 0) return
+            root.api("POST", "/api/poilibrary/rename", { id: poi.id, name: n }, r => {
+                root.libraryTone = r.ok ? "success" : "error"
+                root.libraryNote = r.ok ? "" : (r.error || qsTr("Renaming failed."))
+                root.refreshLibrary()
+            })
+        }
+    }
+    ThemedDialog {
+        id: deleteLibraryDialog
+        property var poi: null
+        title: qsTr("Delete from the library")
+        standardButtons: Dialog.Yes | Dialog.No
+        width: 380
+        contentItem: Text {
+            width: 340
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontSizeBody
+            text: deleteLibraryDialog.poi
+                  ? qsTr("Delete “%1” from your saved POIs? A watch that has it keeps it.")
+                        .arg(deleteLibraryDialog.poi.name)
+                  : ""
+        }
+        onAccepted: {
+            if (!poi) return
+            root.api("POST", "/api/poilibrary/delete", { id: poi.id }, r => {
+                root.libraryTone = r.ok ? "success" : "error"
+                root.libraryNote = r.ok ? qsTr("Deleted from the library.") : (r.error || qsTr("Deleting failed."))
+                root.refreshLibrary()
+            })
+        }
+    }
+    // The ⋯ menu of one row, as on the Routes page.
+    ThemedMenu {
+        id: poiMenu
+        property var poi: ({})
+        property string src: ""
+        // Export is the row's own button when there is no device to send to.
+        property bool withExport: false
+        ThemedMenuItem { text: qsTr("Export…"); visible: poiMenu.src === "library" && poiMenu.withExport
+                         onTriggered: root.exportPoi(poiMenu.poi) }
+        ThemedMenuItem { text: qsTr("Rename…"); visible: poiMenu.src === "library"
+                         onTriggered: { renameLibraryDialog.poi = poiMenu.poi; renameLibraryDialog.open() } }
+        ThemedMenuItem { text: qsTr("Delete…"); visible: poiMenu.src === "library"
+                         onTriggered: { deleteLibraryDialog.poi = poiMenu.poi; deleteLibraryDialog.open() } }
+        ThemedMenuItem { text: qsTr("Save to library"); visible: poiMenu.src === "device"
+                         onTriggered: root.keep([root.deviceItem(poiMenu.poi)], r => {
+                             root.libraryTone = r.ok ? "success" : "error"
+                             root.libraryNote = root.keptText(r, 1)
+                         }) }
+        ThemedMenuItem { text: qsTr("Remove from the watch…")
+                         visible: poiMenu.src === "device" && !HomeViewModel.isGarmin
+                                  && DeviceCapabilities.supportsPoiRemove
+                         enabled: !PoiService.removing
+                         onTriggered: { removePoiDialog.poi = poiMenu.poi; removePoiDialog.open() } }
     }
 
     // POI note dialog - what happens to POIs sent to the watch (André, 2026-08-17), the same
@@ -120,7 +299,10 @@ PageFlickable {
     // there, so the picker goes back to the plain type.
     Connections {
         target: DeviceCapabilities
-        function onTraversePoiTypesChanged() { root.poiType = DeviceCapabilities.poiTypeDefault }
+        function onTraversePoiTypesChanged() {
+            root.poiType = DeviceCapabilities.poiTypeDefault
+            root.refreshLibrary()          // typeHere is per kind of watch
+        }
     }
 
     Column {
@@ -416,24 +598,42 @@ PageFlickable {
                                 "break your device.")
                 }
 
-                RoundedButton {
-                    text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Add")
-                    enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
-                    onClicked: {
-                        if (HomeViewModel.isGarmin) {
-                            const safeName = (root.poiName || "poi").replace(/[\\/:*?"<>|]/g, "_")
-                            GarminService.writeGpxToDevice(
-                                "Waypoints_" + safeName + ".gpx",
-                                PoiService.buildWaypointGpx(root.poiName, root.poiLat, root.poiLon))
-                        } else {
-                            PoiService.addPoi(root.poiName, root.poiLat, root.poiLon, root.poiType)
+                // "Save to library" keeps it in Sommet only. A send to a watch or SD card
+                // keeps a copy in the library too: every POI made here is kept (André,
+                // 2026-11-22), and the library and the watch then live their own lives.
+                Row {
+                    spacing: Theme.spacingSmall
+                    RoundedButton {
+                        text: qsTr("Save to library")
+                        onClicked: root.keep([root.formItem()], r => {
+                            root.formTone = r.ok ? "success" : "error"
+                            root.formNote = root.keptText(r, 1)
+                        })
+                    }
+                    RoundedButton {
+                        visible: root.deviceHere
+                        text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
+                        enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
+                        onClicked: {
+                            root.formNote = ""
+                            root.sendToDevice(root.poiName, root.poiLat, root.poiLon, root.poiType)
+                            if (root.poiName.trim().length > 0)
+                                root.keep([root.formItem()], r => {
+                                    if (!r.ok) { root.formTone = "error"; root.formNote = root.keptText(r, 1) }
+                                })
                         }
                     }
                 }
 
                 StatusNote {
                     width: parent.width
-                    text: HomeViewModel.isGarmin ? ""
+                    text: root.formNote
+                    tone: root.formTone
+                    autoHideMs: 10000
+                }
+                StatusNote {
+                    width: parent.width
+                    text: HomeViewModel.isGarmin || root.sentFrom !== "form" ? ""
                         : PoiService.adding ? qsTr("Sending the POI to the watch...")
                         : PoiService.addResultText
                     tone: PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
@@ -441,12 +641,12 @@ PageFlickable {
                 }
                 StatusNote {
                     width: parent.width
-                    text: HomeViewModel.isGarmin ? GarminService.writeError : ""
+                    text: HomeViewModel.isGarmin && root.sentFrom === "form" ? GarminService.writeError : ""
                     tone: "error"
                 }
                 StatusNote {
                     width: parent.width
-                    text: HomeViewModel.isGarmin && GarminService.writeOk
+                    text: HomeViewModel.isGarmin && root.sentFrom === "form" && GarminService.writeOk
                           && GarminService.writeError.length === 0 ? qsTr("Sent to the SD card.") : ""
                     tone: "success"
                 }
@@ -475,6 +675,11 @@ PageFlickable {
                     text: PoiService.importError
                     tone: "error"
                 }
+                StatusNote {
+                    width: parent.width
+                    text: root.importNote
+                    tone: root.importNote.indexOf(qsTr("Couldn't")) === 0 ? "error" : "success"
+                }
 
                 Repeater {
                     model: PoiService.importedPois
@@ -482,7 +687,7 @@ PageFlickable {
                         width: parent.width
                         spacing: Theme.spacingSmall
                         Text {
-                            width: parent.width - addImportedButton.width - Theme.spacingSmall
+                            width: parent.width - (addImportedButton.visible ? addImportedButton.width + Theme.spacingSmall : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             elide: Text.ElideRight
                             color: Theme.text
@@ -494,22 +699,13 @@ PageFlickable {
                         }
                         RoundedButton {
                             id: addImportedButton
-                            text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Add")
-                            enabled: !HomeViewModel.isGarmin || GarminService.hasSdCard
-                            onClicked: {
-                                if (HomeViewModel.isGarmin) {
-                                    const safeName = (modelData.name || "poi").replace(/[\\/:*?"<>|]/g, "_")
-                                    GarminService.writeGpxToDevice(
-                                        "Waypoints_" + safeName + ".gpx",
-                                        PoiService.buildWaypointGpx(modelData.name, modelData.lat, modelData.lon))
-                                } else {
-                                    // The watch's plain type (a number from the other family's
-                                    // list would draw another icon), and the file's elevation.
-                                    PoiService.addPoi(modelData.name, modelData.lat, modelData.lon,
-                                                      DeviceCapabilities.poiTypeDefault,
-                                                      modelData.ele !== undefined ? modelData.ele : NaN)
-                                }
-                            }
+                            visible: root.deviceHere
+                            text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
+                            enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
+                            // The watch's plain type (a number from the other family's list
+                            // would draw another icon), and the file's elevation.
+                            onClicked: root.sendToDevice(modelData.name, modelData.lat, modelData.lon,
+                                                         DeviceCapabilities.poiTypeDefault, modelData.ele)
                         }
                     }
                 }
@@ -639,38 +835,64 @@ PageFlickable {
             }
         }
 
+        // --- The POI list: ONE source at a time, picked in the drop-down, as on the Routes page:
+        // the connected device, or the Library (always there). ---
         Card {
             id: onDevicePoiCard
             width: parent.width
-            visible: HomeViewModel.isGarmin || DeviceCapabilities.supportsPOIs
-            readonly property bool loading:
-                HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading
+            readonly property bool fromDevice: root.source === "device"
+            readonly property bool loading: fromDevice
+                && (HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading)
             readonly property var onDevicePois:
                 HomeViewModel.isGarmin ? GarminService.onDevicePois : PoiService.onWatchPois
+            readonly property var items: fromDevice ? onDevicePois : root.library
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
-                // Title + the map/list view control (moved here from Settings, André 2026-08-16;
-                // still persisted via Theme.poisView). Text dropdown on the LEFT, right after the
-                // title, on the same horizontal line (André, 2026-08-16).
-                Item {
+                // The source drop-down, then the map/list view control (moved here from
+                // Settings, André 2026-08-16; still persisted via Theme.poisView).
+                Row {
                     width: parent.width
-                    height: Math.max(onWatchPoiTitle.implicitHeight, 26)
-                    Text {
-                        id: onWatchPoiTitle
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: HomeViewModel.isGarmin ? qsTr("On the device") : qsTr("On the watch")
-                        font.bold: true
-                        color: Theme.text
+                    spacing: Theme.spacingMedium
+                    RoundedComboBox {
+                        id: poiSourceBox
+                        width: 220
+                        model: root.sources.map(x => x.label)
+                        currentIndex: root.sources.findIndex(x => x.key === root.source)
+                        // A new model (a watch connecting) resets the index to 0 and drops
+                        // the binding (seen on the Routes page's own drop-down).
+                        onModelChanged: Qt.callLater(() => poiSourceBox.currentIndex = Qt.binding(
+                                            () => root.sources.findIndex(x => x.key === root.source)))
+                        onActivated: (i) => {
+                            root.sourceKey = root.sources[i].key
+                            root.libraryNote = ""
+                            if (root.sourceKey === "library") root.refreshLibrary()
+                        }
                     }
                     ViewModeToggle {
-                        anchors.left: onWatchPoiTitle.right
-                        anchors.leftMargin: Theme.spacingMedium
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: !onDevicePoiCard.loading && onDevicePoiCard.onDevicePois.length > 0
+                        visible: !onDevicePoiCard.loading && onDevicePoiCard.items.length > 0
                         mode: Theme.poisView
                         onChosen: (m) => Theme.poisView = m
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
+                                 && onDevicePoiCard.items.length > 0
+                        text: qsTr("Save all to library")
+                        color: saveAllHover.hovered ? Theme.primary : Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        font.bold: true
+                        HoverHandler { id: saveAllHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler {
+                            onTapped: {
+                                const pois = onDevicePoiCard.onDevicePois.map(x => root.deviceItem(x))
+                                root.keep(pois, r => {
+                                    root.libraryTone = r.ok ? "success" : "error"
+                                    root.libraryNote = root.keptText(r, pois.length)
+                                })
+                            }
+                        }
                     }
                 }
 
@@ -682,8 +904,8 @@ PageFlickable {
                 }
                 ErrorBanner {
                     width: parent.width
-                    detail: (!HomeViewModel.isGarmin && !PoiService.loading && !PoiService.ok)
-                            ? PoiService.lastError : ""
+                    detail: (onDevicePoiCard.fromDevice && !HomeViewModel.isGarmin
+                             && !PoiService.loading && !PoiService.ok) ? PoiService.lastError : ""
                     context: qsTr("reading POIs from the watch")
                     // Unplugging the watch mid-session is the usual cause here (real case,
                     // 2026-08-11) - plug it back in and this re-runs the same read.
@@ -691,10 +913,30 @@ PageFlickable {
                     onRetry: PoiService.refresh()
                 }
                 Text {
-                    visible: !onDevicePoiCard.loading && onDevicePoiCard.onDevicePois.length === 0
+                    visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
+                             && onDevicePoiCard.items.length === 0
                              && (HomeViewModel.isGarmin || PoiService.ok)
                     color: Theme.mutedText
                     text: qsTr("Nothing to sync.")
+                }
+                Text {
+                    visible: !onDevicePoiCard.fromDevice && onDevicePoiCard.items.length === 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    text: qsTr("Nothing saved yet. A POI you add or import here is kept in the " +
+                               "library, and so is one you save from a watch.")
+                }
+                // What the library is, in one line (André, 2026-11-22: "library is one thing,
+                // device library is another.. independent").
+                Text {
+                    visible: !onDevicePoiCard.fromDevice && onDevicePoiCard.items.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                    text: qsTr("Your POIs, kept in Sommet. A watch has its own list: send it the " +
+                               "ones you want there. Deleting here leaves the watch as it is.")
                 }
                 StatusNote {
                     width: parent.width
@@ -703,18 +945,45 @@ PageFlickable {
                 }
                 StatusNote {
                     width: parent.width
-                    text: HomeViewModel.isGarmin ? ""
+                    text: root.libraryNote
+                    tone: root.libraryTone
+                    autoHideMs: 10000
+                }
+                StatusNote {
+                    width: parent.width
+                    text: HomeViewModel.isGarmin || !onDevicePoiCard.fromDevice ? ""
                         : PoiService.removing ? qsTr("Removing the POI from the watch...")
                         : PoiService.removeResultText
                     tone: PoiService.removing ? "working" : PoiService.removeOk ? "success" : "error"
                     autoHideMs: 10000
                 }
+                // A POI sent from the library: the same notes as under the Add card, here
+                // where the button is.
+                StatusNote {
+                    width: parent.width
+                    text: onDevicePoiCard.fromDevice || root.sentFrom !== "list" ? ""
+                        : HomeViewModel.isGarmin
+                          ? (GarminService.writeError.length > 0 ? GarminService.writeError
+                             : GarminService.writeOk ? qsTr("Sent to the SD card.") : "")
+                        : PoiService.adding ? qsTr("Sending the POI to the watch...")
+                        : PoiService.addResultText
+                    tone: HomeViewModel.isGarmin
+                          ? (GarminService.writeError.length > 0 ? "error" : "success")
+                          : PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
+                    autoHideMs: 10000
+                }
 
                 Repeater {
-                    model: onDevicePoiCard.loading ? [] : onDevicePoiCard.onDevicePois
+                    model: onDevicePoiCard.loading ? [] : onDevicePoiCard.items
                     delegate: Column {
+                        id: poiRow
                         width: parent.width
                         spacing: Theme.spacingSmall
+                        // The icon and its name: a library POI keeps the list its number is in;
+                        // one read off the device is numbered in that device's own list.
+                        readonly property var typeInfo: onDevicePoiCard.fromDevice
+                            ? DeviceCapabilities.poiTypeOf(modelData.type)
+                            : DeviceCapabilities.poiTypeIn(modelData.typeList, modelData.type)
 
                         Item {
                             // Map hidden in "list" view (Settings -> POIs view) - André, 2026-08-16.
@@ -743,17 +1012,16 @@ PageFlickable {
                                 font.family: Icons.fontFamily
                                 font.pixelSize: Theme.fontSizeBody + 3
                                 color: Theme.primary
-                                text: DeviceCapabilities.poiTypeGlyph(modelData.type)
+                                text: poiRow.typeInfo.glyph
                                 // Hover: the type's name in the watch's own list.
-                                HoverHandler { id: poiTypeHover }
-                                ToolTip.visible: poiTypeHover.hovered
-                                ToolTip.text: DeviceCapabilities.poiTypeName(modelData.type)
+                                HoverHandler { id: poiRowTypeHover }
+                                ToolTip.visible: poiRowTypeHover.hovered
+                                ToolTip.text: poiRow.typeInfo.name
                             }
                             Text {
                                 width: parent.width - onWatchPoiGlyph.width - onWatchPoiType.width
-                                       - poiExportButton.width
-                                       - (poiRemoveButton.visible ? poiRemoveButton.width + Theme.spacingSmall : 0)
-                                       - Theme.spacingSmall * 3
+                                       - poiMainButton.width - poiMoreButton.width
+                                       - Theme.spacingSmall * 4
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
                                 text: modelData.name
@@ -765,34 +1033,36 @@ PageFlickable {
                             Text {
                                 id: onWatchPoiType
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: DeviceCapabilities.poiTypeName(modelData.type)
+                                text: poiRow.typeInfo.name
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.fontSizeCaption
                             }
 
+                            // On the device: Export. In the library: send it to the connected
+                            // device (Export is in the ⋯ menu), or Export when nothing is
+                            // connected.
                             RoundedButton {
-                                id: poiExportButton
-                                text: qsTr("Export")
+                                id: poiMainButton
+                                readonly property bool sends: !onDevicePoiCard.fromDevice && root.deviceHere
+                                text: !sends ? qsTr("Export")
+                                    : HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
+                                enabled: !sends ? true
+                                    : HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
                                 onClicked: {
-                                    const safeName = (modelData.name || "poi")
-                                        .replace(/[\\/:*?"<>|]/g, "_")
-                                    poiExportDialog.pendingGpx = PoiService.buildWaypointGpx(
-                                        modelData.name, modelData.lat, modelData.lon)
-                                    poiExportDialog.currentFile =
-                                        LocalFileService.exportFolder + "/" + safeName + ".gpx"
-                                    poiExportDialog.open()
+                                    if (!sends) { root.exportPoi(modelData); return }
+                                    root.libraryNote = ""
+                                    root.sendToDevice(modelData.name, modelData.lat, modelData.lon,
+                                                      modelData.typeHere, modelData.ele, "list")
                                 }
                             }
-
                             RoundedButton {
-                                id: poiRemoveButton
-                                visible: !HomeViewModel.isGarmin && DeviceCapabilities.supportsPoiRemove
-                                enabled: !PoiService.removing
-                                text: qsTr("Remove")
-                                danger: true
+                                id: poiMoreButton
+                                text: "⋯"
                                 onClicked: {
-                                    removePoiDialog.poi = modelData
-                                    removePoiDialog.open()
+                                    poiMenu.poi = modelData
+                                    poiMenu.src = root.source
+                                    poiMenu.withExport = poiMainButton.sends
+                                    poiMenu.popup(poiMoreButton, 0, poiMoreButton.height)
                                 }
                             }
                         }

@@ -7,6 +7,32 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: a POI library, like the route library (desktop)
+
+André: "we have a library for the routes but not for the POIs... for me these two should be
+similar", and "library is one thing, device library is another.. independent".
+
+- The POIs page has a library of its own (`tools/poi_library.py`, the `Pois` folder in
+  `SommetBackups`, routes `/api/poilibrary`). The list card has the Routes page's drop-down:
+  **On the watch** or **Library (saved POIs)**.
+- What goes in: **Save to library** on the Add card, every POI sent to a watch or SD card from
+  that card, every POI of an imported GPX, and **Save to library** / **Save all to library** on a
+  watch's list. The same POI twice (same name, within 10 m) is kept once.
+- In the library: **Send to watch** (or SD card), and Export, Rename, Delete under **⋯**. The
+  watch's rows moved to the same shape: Export, and **⋯** with Save to library and Remove from
+  the watch.
+- The library and a watch are independent: nothing reaches a watch until it is sent, and
+  deleting on one side leaves the other. Said on the page, in the README and in the new
+  `docs/how-to/routes-and-pois-library.md`; "Library" is in the glossary.
+- A library POI keeps which family's list its type number is from, and goes to the other
+  family by its icon (`ambit_format.waypoint_type_between`): Camp stays Camp on a Traverse.
+- **POIs** is always in the side bar now, as Routes is. It used to need a connected watch.
+- Seen working on a test display with a scratch library: save, the same POI twice, rename,
+  delete, save all from the sample watch, the drop-down. Sending a library POI to a real watch
+  uses the Add card's own write and has not been seen on a watch yet.
+- Not there yet: the same on Android, and the library shared between devices through the NAS
+  (ticket routes/08, stages A2 and B).
+
 ## 2026-11-22: the watch no longer drops out for a second right after a Bluetooth link
 
 Seen on the P5Q (Windows, Orico stick): POIs left the side bar and came back, and in the first

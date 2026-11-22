@@ -26,6 +26,10 @@ or Android, over USB or Bluetooth. It's free, needs no account and works offline
   watch.
 - **POIs:** add them from a map search or coordinates, remove them, export them. A Traverse gets
   its own 48 POI types.
+- **A library of your own:** Sommet keeps your routes and POIs in its own library, apart from
+  what is on a watch. Keep everything there and send each watch only what it needs: a 200 km
+  ride to one, a 5 km loop to another. Deleting in the library never touches a watch. See
+  [The library and your watches](docs/how-to/routes-and-pois-library.md).
 - **Sport modes and settings:** edit modes, data screens, apps, and the watch's settings, and
   copy them from one watch to another.
 - **Activities:** download them and see the map, charts, and heart-rate zones. Export GPX or FIT,

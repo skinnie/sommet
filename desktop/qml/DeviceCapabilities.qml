@@ -148,20 +148,25 @@ QtObject {
     // ("Waypoint" 17; on a Traverse its plain "POI" 26).
     readonly property var poiTypes: traversePoiTypes ? traversePoiTypeList : ambitPoiTypes
     readonly property int poiTypeDefault: traversePoiTypes ? 26 : 17
-    // The Ambit1/2 store the older Movescount numbers, which are the Traverse's 0-31 (openambit's
-    // movescount_waypoint_type list; an Ambit2 was seen with 26, "POI"): a POI READ from one is
-    // named from that list too.
-    readonly property var _readPoiTypes: (traversePoiTypes || _isLegacy) ? traversePoiTypeList : ambitPoiTypes
     function poiTypeIndex(id) {
         for (let i = 0; i < poiTypes.length; i++)
             if (poiTypes[i].id === id) return i
         return poiTypeIndex(poiTypeDefault)
     }
     // The entry for a type byte read off the watch; an unknown number reads as the plain type.
-    function poiTypeOf(id) {
-        const list = _readPoiTypes
+    function poiTypeOf(id) { return poiTypeIn(readPoiTypeListKey, id) }
+    // Which list a type number is in: "ambit" (the Ambit3 family's 18) or "traverse" (the 48).
+    // poiTypeListKey: the list the connected watch is sent. readPoiTypeListKey: the list a POI
+    // read from it is numbered in (the Ambit1/2 store the older Movescount numbers, which are the
+    // Traverse's 0-31: openambit's movescount_waypoint_type list; an Ambit2 was seen with 26,
+    // "POI", so a POI read from one is named from that list too). The POI library keeps the key next to the number, so a POI
+    // saved from one kind of watch shows its own icon whatever is connected (tools/poi_library.py).
+    readonly property string poiTypeListKey: traversePoiTypes ? "traverse" : "ambit"
+    readonly property string readPoiTypeListKey: (traversePoiTypes || _isLegacy) ? "traverse" : "ambit"
+    function poiTypeIn(listKey, id) {
+        const list = listKey === "traverse" ? traversePoiTypeList : ambitPoiTypes
         let plain = list[0]
-        const plainId = list === traversePoiTypeList ? 26 : 17
+        const plainId = listKey === "traverse" ? 26 : 17
         for (let i = 0; i < list.length; i++) {
             if (list[i].id === id) return list[i]
             if (list[i].id === plainId) plain = list[i]

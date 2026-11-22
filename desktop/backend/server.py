@@ -1636,6 +1636,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_wahoo_workouts("list", None)
         elif self.path == "/api/library":
             self._handle_library("list", {})
+        elif self.path == "/api/poilibrary" or self.path.startswith("/api/poilibrary?"):
+            self._handle_poi_library("list", {})
         elif self.path == "/api/bryton/tracks":
             self._handle_bryton_tracks("list", {})
         elif self.path == "/api/bryton/info":
@@ -1961,6 +1963,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path in ("/api/library/save", "/api/library/get", "/api/library/rename",
                            "/api/library/delete"):
             self._handle_library(self.path.rsplit("/", 1)[1], body or {})
+        elif self.path in ("/api/poilibrary/save", "/api/poilibrary/rename",
+                           "/api/poilibrary/delete"):
+            self._handle_poi_library(self.path.rsplit("/", 1)[1], body or {})
         elif self.path in ("/api/bryton/tracks/gpx", "/api/bryton/tracks/rename",
                            "/api/bryton/tracks/delete"):
             self._handle_bryton_tracks(self.path.rsplit("/", 1)[1], body or {})
@@ -2594,6 +2599,42 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
         info = self._parse_last_json_line(out) or {"ok": False, "error": (err or "no output").strip()[:200]}
+        self._send_json(200 if info.get("ok") else 400, info)
+
+    POI_LIBRARY_DIR = str(BACKUP_DIR / "Pois")
+
+    def _handle_poi_library(self, action, body):
+        """The POIs page's library (tools/poi_library.py, ~/SommetBackups/Pois). It is Sommet's
+        own list: nothing here reads or writes a watch.
+        GET /api/poilibrary[?for=ambit|traverse] -> {pois}; with `for`, each POI also carries
+        `typeHere`, its type as a number in that kind of watch's list.
+        POST /api/poilibrary/save {pois: [{name, lat, lon, ele?, type?, typeList?}]} (or one POI's
+        fields directly) -> {results: [{ok, id, existed} | {ok: false, error}], saved, existed};
+        /rename {id, name}; /delete {id}."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import poi_library                                   # noqa: PLC0415
+        d = self.POI_LIBRARY_DIR
+        try:
+            if action == "list":
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                info = {"ok": True, "pois": poi_library.list_pois(d, (query.get("for") or [None])[0])}
+            elif action == "save":
+                items = body.get("pois") if isinstance(body.get("pois"), list) else [body]
+                results = poi_library.save_pois(d, [i for i in items if isinstance(i, dict)])
+                failed = [r for r in results if not r.get("ok")]
+                info = {"ok": bool(results) and not failed, "results": results,
+                        "saved": sum(1 for r in results if r.get("ok") and not r.get("existed")),
+                        "existed": sum(1 for r in results if r.get("existed"))}
+                if failed:
+                    info["error"] = failed[0].get("error", "")
+                elif not results:
+                    info["error"] = "no POI given"
+            elif action == "rename":
+                info = poi_library.rename_poi(d, str(body.get("id") or ""), body.get("name"))
+            else:
+                info = poi_library.delete_poi(d, str(body.get("id") or ""))
+        except OSError as exc:
+            info = {"ok": False, "error": f"couldn't write the POI library: {exc}"}
         self._send_json(200 if info.get("ok") else 400, info)
 
     def _handle_bryton_tracks(self, action, body):

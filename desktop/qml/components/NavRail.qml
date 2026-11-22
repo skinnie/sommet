@@ -116,7 +116,10 @@ Rectangle {
             }
             NavItem {
                 width: parent.width
-                visible: (HomeViewModel.anyDevice && !DeviceService.bikeActive) && DeviceCapabilities.supportsPOIs
+                // Always there, like Routes, since the page has a library of its own (André,
+                // 2026-11-22: "we have a library for the routes but not for the POIs... these two
+                // should be similar"). It used to need a connected watch, and left the rail for a
+                // second whenever one read of the watch failed.
                 glyph: Icons.pois
                 label: qsTr("POIs")
                 selected: root.currentPage === "pois"
