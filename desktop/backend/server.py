@@ -4112,6 +4112,17 @@ class Handler(BaseHTTPRequestHandler):
         try:
             try:
                 ble_bridge.bridge.set_dry_run(False)
+                # The battery first: a first read of the log takes minutes, Home asks for the
+                # battery meanwhile and can only be given the last value known, and there was
+                # none yet ("battery not available yet" for the whole first sync, P5Q Linux,
+                # 2026-11-22). One short read that changes nothing on the watch.
+                if _BLE_LAST_BATTERY[0] is None:
+                    try:
+                        status_reply = ble_bridge.bridge.command(0x0306, b"")
+                        if len(status_reply) >= 2:
+                            _BLE_LAST_BATTERY[0] = status_reply[1]
+                    except (ble_bridge.BleBridgeError, RuntimeError, TimeoutError):
+                        pass                      # the sync itself will say what is wrong
                 locked = ble_activities.sync_lock(ble_bridge.bridge, True)
 
                 def progress(done, total, moves):

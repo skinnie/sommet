@@ -118,6 +118,12 @@ class DeviceService : public QObject
     // that - searching, a fresh pairing waiting on a passkey - which /api/device has no way
     // to express since it's a plain "is the watch there" query, not a connection process.
     Q_PROPERTY(bool bleAttempting READ bleAttempting NOTIFY bleStateChanged)
+    // The Bluetooth service is up and waits for the watch. False while the connect request is
+    // still out: on Linux that is the time of the password prompt (Bluetooth privacy), and the
+    // watch must not be put in pairing yet, its offer lasts less than typing a password
+    // (André, 2026-11-22: "the time to enter sudo password is more than the available on
+    // suunto to pair, so I always need to click a second time pair").
+    Q_PROPERTY(bool bleListening READ bleListening NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleSubscribed READ bleSubscribed NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleHandshakeDone READ bleHandshakeDone NOTIFY bleStateChanged)
     // The first half minute after launch while a watch paired before is being looked for.
@@ -274,6 +280,7 @@ public:
     Q_INVOKABLE void refreshDemoMode();
 
     bool bleAttempting() const { return m_bleAttempting; }
+    bool bleListening() const { return m_bleListening; }
     bool bleSubscribed() const { return m_bleSubscribed; }
     bool bleHandshakeDone() const { return m_bleHandshakeDone; }
     bool bleAutoSearching() const { return m_bleAutoSearching; }
@@ -421,6 +428,7 @@ private:
     static constexpr int kHeartbeatIntervalMs = 10000;
 
     bool m_bleAttempting = false;
+    bool m_bleListening = false;
     bool m_bleSubscribed = false;
     bool m_bleHandshakeDone = false;
     bool m_bleAutoSearching = false;

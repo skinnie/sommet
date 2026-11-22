@@ -614,6 +614,7 @@ QString DeviceService::currentTimeInZone(const QString &timezone) const
 void DeviceService::connectBle(bool forget)
 {
     m_bleAttempting = true;
+    m_bleListening = false;
     m_bleSubscribed = false;
     m_bleHandshakeDone = false;
     m_blePendingPasskeyDevice.clear();
@@ -638,6 +639,8 @@ void DeviceService::connectBle(bool forget)
             emit bleStateChanged();
             return;
         }
+        m_bleListening = true;         // the service is up: now the watch may start pairing
+        emit bleStateChanged();
         // The daemon is up; now poll /api/ble/status for the states that unfold after this
         // (subscribed, a passkey request, the handshake completing) - see connectBle()'s
         // own header comment for why this request itself doesn't wait for any of that.

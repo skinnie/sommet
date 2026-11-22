@@ -1333,10 +1333,19 @@ PageFlickable {
                     // Shared status line for both flows (only one runs at a time).
                     Text {
                         visible: DeviceService.bleAttempting && !DeviceService.bleSubscribed
+                        // Linux, two steps, one at a time: the password first (it switches
+                        // Bluetooth privacy on for this pairing; the request to the backend
+                        // is out for as long as the prompt is up), and only then the watch,
+                        // whose offer to pair lasts less than typing a password.
                         text: Qt.platform.os === "linux"
-                              ? qsTr("Type your password first if Sommet asks for it, then choose " +
-                                     "“Pair with app” (first time) or “Sync now” on the watch — " +
-                                     "its window is short")
+                              ? (!DeviceService.bleListening
+                                 ? qsTr("Step 1 of 2: if your system asks for your password, type it " +
+                                        "now. Sommet needs it once to switch on Bluetooth privacy " +
+                                        "for this pairing; without it the watch refuses this " +
+                                        "computer after its first sleep. Don't start on the watch yet.")
+                                 : qsTr("Step 2 of 2: now, on the watch, choose “Pair with app” " +
+                                        "(first time) or “Sync now”. Its offer is short: if nothing " +
+                                        "happens, choose it again."))
                               : Qt.platform.os === "windows"
                                 ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
                                        "watch now — its window is short. The first time, " +

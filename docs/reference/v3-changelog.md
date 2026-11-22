@@ -24,7 +24,17 @@ André on the P5Q (Mint): "it asks me sudo password ... and then it fails".
   password is asked once.
 - Checked: the start rule by tests; on this computer the daemon came up in 0.4 s started the
   way the download will; on the P5Q its system Python builds the daemon's classes and reaches
-  BlueZ. Not yet seen: the download itself pairing a watch on the P5Q.
+  BlueZ.
+- **Seen on the P5Q (Mint 22.1, Orico stick, André's Peak), 2026-11-22 16:05:** the download
+  pairs (code typed in Sommet), the watch subscribes 10 s after it is found, and the first
+  sync of the whole log ends 5 minutes later (about 550 KB, some 100 KB a minute), with no
+  damaged reply.
+- From that test: the pairing text on Linux is now two steps, one at a time. Step 1, the
+  password (with the reason), shown for as long as the system prompt is up; step 2, the watch,
+  only once the service is ready. The watch's offer to pair is shorter than typing a password,
+  so it had to be started twice.
+- The battery is read once before a Bluetooth sync starts: during the first, long one Home
+  could only say "not available yet".
 
 ## 2026-11-22: Bluetooth fixes read from Suunto's own material
 
