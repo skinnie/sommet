@@ -1,6 +1,8 @@
 import RNFS from 'react-native-fs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { connect, disconnect, pickGpxFile, writeRoutes, readRegion, saveToDownloads, getDeviceInfo, readLegacyNav, readLegacyRegion } from '../native/AmbitUsbModule';
+import { connect, disconnect, pickGpxFile, writeRoutes, readRegion, saveToDownloads, getDeviceInfo, readLegacyNav, readLegacyRegion, readPoiListRaw, setPoiListRaw } from '../native/AmbitUsbModule';
+import { writeKeepingPois } from './PoiKeeper';
+import { saveWatchBackup } from './WatchBackup';
 import { ROUTE_REGION_ADDR, POINTS_OFFSET, parseHead, parseRoutes } from './LegacyRoute';
 import { isAmbit12 } from './AmbitSettingsService';
 import { parseRouteGpx, nearestPointIndex, RoutePoint } from './RouteGpxParser';
@@ -173,7 +175,8 @@ export function routeFromGpx(xml: string, fallbackName: string): PendingRoute {
  * IMPORTANT, surfaced to the caller via SendRouteState so the UI can show it: a route
  * written this way is NOT durable. Any subsequent SuuntoLink cable sync, or the Suunto phone
  * app merely coming into BLE range, will silently wholesale-replace whatever is in the
- * watch's Routes region - confirmed on hardware. POIs are kept on the native side, and the
+ * watch's Routes region - confirmed on hardware. POIs are kept on the native side, with a copy
+ * on the phone and a second put-back if needed (writeRoutesKeepingPois), and the
  * routes already on the watch are read first and sent back with the new one (routes/05).
  * This is a "load right before you go"
  * feature, not a save.
@@ -212,7 +215,7 @@ export async function uploadRoute(route: PendingRoute, onState: Listener,
         throw new Error("Couldn't read the routes already on the watch, nothing was written " +
           `(they would have been lost): ${e?.message ?? e}`);
       }
-      await writeRoutes(mergeRoutes(nav, route));
+      await writeRoutesKeepingPois(mergeRoutes(nav, route));
     }
     await clearNavigationCache(); // real watch state just changed - see below
     emit({ phase: 'done', ...meta });
@@ -220,6 +223,22 @@ export async function uploadRoute(route: PendingRoute, onState: Listener,
     emit({ phase: 'error', error: e?.message ?? 'Failed to write the route' });
   } finally {
     await disconnect().catch(() => {});
+  }
+}
+
+/** The watch's whole route list in one write (Ambit3 / Traverse), with the POIs made safe around
+ * it: a copy saved on the phone first (backups/POIs/<serial>/), and written back once more if
+ * the watch does not hold them after the write (PoiKeeper.ts; the desktop does the same). */
+async function writeRoutesKeepingPois(routes: Parameters<typeof writeRoutes>[0]): Promise<void> {
+  const serial = (await getDeviceInfo()).serial ?? '';
+  const kept = await writeKeepingPois(async () => { await writeRoutes(routes); }, {
+    readPoiListRaw: async () => (await readPoiListRaw()) ?? '',
+    setPoiListRaw,
+    saveCopy: b64 => saveWatchBackup('POIs', b64, serial),
+  });
+  if (kept.copyPath) {
+    console.log(`[routes] ${kept.count} POIs kept across the route write (copy: ${kept.copyPath})`
+      + (kept.putBackAgain ? '; they had to be written back a second time' : ''));
   }
 }
 
@@ -240,7 +259,7 @@ export async function removeRouteFromWatch(name: string): Promise<void> {
     if (!nav.routes.some(r => storedName(r.name) === storedName(name))) {
       throw new Error(t.routeRemoveNotFound(name));
     }
-    await writeRoutes(existingRoutesToKeep(nav, name, Math.floor(Date.now() / 1000)));
+    await writeRoutesKeepingPois(existingRoutesToKeep(nav, name, Math.floor(Date.now() / 1000)));
   } finally {
     await clearNavigationCache();
     await disconnect().catch(() => {});

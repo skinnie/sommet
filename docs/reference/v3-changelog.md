@@ -7,6 +7,29 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: Bluetooth: one sync at launch instead of six, and a failed GPS data update can be tried again
+
+Read from the P5Q's log after André's test ("failed to get gps... there is no way to try again,
+but after some seconds it tried").
+
+- Home, Activities, Calendar and Totals each ask the watch for its activities when they open.
+  Over Bluetooth every ask was a whole sync: clock set, the watch's sync lock, the log header.
+  At launch six of them ran in 55 s (the clock was set six times) and every other job waited
+  behind them. The backend now gives the last good answer again for 2 minutes when the same
+  question comes back on the same link, unless the watch itself asked to sync ("Sync now" on
+  the watch always gets a real read). Requests that arrive together make one read
+  (`_handle_activities_ble`, `tools/test_ble_activities_reuse.py`). The cable is unchanged.
+- Home, GPS orbit: a failed update now ends with "tap to try again", and any status that says
+  "tap to" is drawn as a link. It could be tapped before, but nothing showed it.
+- Android, move sync: one piece of a move whose reply is lost or damaged is asked again (up to
+  4 tries) and the reply is checked to be about that piece (`pmem20.c` `read_log_chunk`). One
+  bad 1 KB piece used to end the whole sync; the desktop already asked again.
+- Android, sending or removing a route: a copy of the POIs is saved on the phone first, and
+  if the watch does not hold them after the write they are written back once more; an error
+  names the copy (`PoiKeeper.ts`, as the desktop's `put_pois_back_safely`). A put-back the watch
+  did not keep used to be reported as a success.
+- Checked by tests only. Not yet seen on the P5Q or with a watch on the tablet.
+
 ## 2026-11-22: a POI library, like the route library (desktop)
 
 André: "we have a library for the routes but not for the POIs... for me these two should be

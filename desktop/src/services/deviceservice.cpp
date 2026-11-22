@@ -472,16 +472,19 @@ void DeviceService::updateGpsOrbit()
 
         const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
         if (reply->error() != QNetworkReply::NoError && obj.isEmpty()) {
+            // "tap to try again": Home draws a status that says "tap to" as a link. A failure
+            // used to read as plain text with nothing to press (André, 2026-11-22: "error, there
+            // is no way to try again").
             m_gpsOrbitStatusText =
-                QStringLiteral("Couldn't reach the backend: %1").arg(backendErrorText(reply));
+                QStringLiteral("Couldn't reach the backend: %1 - tap to try again").arg(backendErrorText(reply));
             emit gpsOrbitChanged();
             return;
         }
 
         if (!obj.value(QStringLiteral("ok")).toBool()) {
-            m_gpsOrbitStatusText = QStringLiteral("Failed: %1")
+            m_gpsOrbitStatusText = QStringLiteral("Failed: %1 - tap to try again")
                 .arg(obj.value(QStringLiteral("error")).toString(
-                    obj.value(QStringLiteral("stderr")).toString()));
+                    obj.value(QStringLiteral("stderr")).toString()).trimmed());
         } else if (obj.value(QStringLiteral("skipped")).toBool()) {
             // André, 2026-08-11: "If already synced and updated just say synced." The date
             // it is synced TO is already on this card, so repeating it here said nothing.

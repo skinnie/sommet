@@ -1453,8 +1453,11 @@ PageFlickable {
                                 : (DeviceService.gpsOrbitStatusText || qsTr("Tap to check"))
                             // Status-calming: settled state is quiet; green + underline only for
                             // the actionable "Tap to check" prompt (see the Clock field above).
+                            // Also a status that says "tap to ..." (an update is due, or the last
+                            // try failed): it was tappable all along but looked like plain text.
                             readonly property bool actionable: !DeviceService.gpsOrbitBusy
-                                                               && !DeviceService.gpsOrbitStatusText
+                                && (!DeviceService.gpsOrbitStatusText
+                                    || DeviceService.gpsOrbitStatusText.indexOf("tap to") !== -1)
                             color: actionable ? Theme.primary : Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
                             font.underline: actionable

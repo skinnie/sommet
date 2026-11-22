@@ -1192,13 +1192,26 @@ static int read_log_chunk(libambit_pmem20_t *object, uint32_t address, uint32_t 
     *_address = htole32(address);
     *_length = htole32(length);
 
-    if (libambit_protocol_command(object->ambit_object, ambit_command_log_read, send_data, sizeof(send_data), &reply, &replylen, 0) == 0 &&
-        replylen == length + 8) {
-        memcpy(buffer, reply + 8, length);
-        ret = 0;
+    /* One piece is asked again when its reply is lost, damaged or about another piece
+     * (2026-11-22). A move is many 1 KB pieces over Bluetooth, and one bad piece used to end
+     * the whole sync here, while the region reader (ambit3_read_flash_region) and the desktop
+     * (tools/ble_server.py, READ_RETRIES) both ask again: a damaged block ended a sync on the
+     * P5Q on 2026-11-21 before the desktop got its retry. A flash read changes nothing on the
+     * watch, so asking again is safe. The reply starts with the address and length it answers,
+     * so a late reply to an earlier request is told apart and not taken for this one. */
+    for (int attempt = 0; attempt < 4 && ret != 0; attempt++) {
+        reply = NULL;
+        replylen = 0;
+        int cmd = libambit_protocol_command(object->ambit_object, ambit_command_log_read, send_data, sizeof(send_data), &reply, &replylen, 0);
+        if (cmd == 0 && replylen == length + 8 && memcmp(reply, send_data, sizeof(send_data)) == 0) {
+            memcpy(buffer, reply + 8, length);
+            ret = 0;
+        } else {
+            LOG_WARNING("read_log_chunk: 0x0b17 at 0x%06x wanted %u, got %zu bytes (ret=%d), attempt %d",
+                        address, length, replylen, cmd, attempt + 1);
+        }
+        libambit_protocol_free(reply);
     }
-
-    libambit_protocol_free(reply);
 
     return ret;
 }

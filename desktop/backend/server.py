@@ -260,6 +260,11 @@ _REQUEST_CTX = threading.local()   # per request thread: .foreground
 WATCH_LOCK = _WatchLock()
 _BLE_LAST_BATTERY = [None]
 _BLE_ROUTE_PROGRESS = [None]  # {stage, done, total (bytes)} while a route goes to the watch over Bluetooth
+# The last good answer of a Bluetooth activities read, for the page visits right after it
+# (_handle_activities_ble). One at a time: a second request waits for the first.
+_BLE_ACTIVITIES_LOCK = threading.Lock()
+_BLE_ACTIVITIES_LAST = {"key": None, "at": 0.0, "payload": None}
+BLE_ACTIVITIES_REUSE_S = 120
 _BLE_MOVES_PROGRESS = [None]  # {done, total (bytes), moves} while new moves come in over Bluetooth   # the last battery the watch gave over Bluetooth (_handle_device_ble)
 _STATIC_ANSWERS = {}   # catalogues that never change while the backend runs
 
@@ -4036,6 +4041,45 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_activities_ble(self, known_count, mark_synced=False):
+        """GET /api/activities over Bluetooth: one read of the watch serves the page visits that
+        follow it closely.
+
+        Home, Activities, Calendar and Totals each ask for the activities when they open. On the
+        cable that costs little. Over Bluetooth each one was a whole sync - clock set, the
+        watch's sync lock, the log header - and at launch six of them ran within a minute, with
+        every other job waiting behind them (P5Q, 2026-11-22: clock set six times in 55 s, and the
+        GPS data check failed meanwhile). So the last good answer is given again when the same
+        question comes back within BLE_ACTIVITIES_REUSE_S, on the same link, and the watch has
+        not asked to sync since ("Sync now" on the watch always gets a real read). Requests that
+        arrive together wait for the first one and then get its answer."""
+        key = (int(known_count), bool(mark_synced))
+        with _BLE_ACTIVITIES_LOCK:
+            last = _BLE_ACTIVITIES_LAST
+            status = ble_bridge.bridge.status()
+            asked_at = status.get("last_sync_notice_at") or 0
+            if (last["payload"] is not None and last["key"] == key
+                    and status.get("handshake_done")
+                    and time.time() - last["at"] < BLE_ACTIVITIES_REUSE_S
+                    and asked_at <= last["at"]):
+                self._send_json(200, {**last["payload"], "reused": True})
+                return
+            sent = []
+            send = self._send_json
+
+            def remember(code, payload):
+                sent.append((code, payload))
+                return send(code, payload)
+            self._send_json = remember
+            try:
+                self._read_activities_ble(known_count, mark_synced)
+            finally:
+                self._send_json = send
+            if sent and sent[-1][0] == 200 and isinstance(sent[-1][1], dict) and sent[-1][1].get("ok"):
+                last.update(key=key, at=time.time(), payload=sent[-1][1])
+            else:
+                last.update(key=None, at=0.0, payload=None)
+
+    def _read_activities_ble(self, known_count, mark_synced=False):
         """The BLE path for GET /api/activities - tools/ble_activities.py. Same real
         decode as USB (to_gpx()/to_fit(), unchanged), the ExerciseLog region read directly
         via the driver-path command() proven reliable for routes tonight - no temp
