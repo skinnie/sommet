@@ -2624,7 +2624,9 @@ PageFlickable {
         anchors.centerIn: Overlay.overlay
         title: qsTr("Enter the watch's passkey")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        onOpened: passkeyField.text = ""
+        // The field takes the keyboard as the dialog opens, and Enter confirms like OK
+        // (André, 2026-11-21: the code had to be clicked through with the mouse).
+        onOpened: { passkeyField.text = ""; passkeyField.forceActiveFocus() }
         onAccepted: DeviceService.submitBlePasskey(parseInt(passkeyField.text, 10))
 
         Connections {
@@ -2660,3 +2662,4 @@ PageFlickable {
         }
     }
 }
+                onAccepted: if (text.length > 0) blePasskeyDialog.accept()

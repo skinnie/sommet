@@ -26,6 +26,8 @@ Found on the first write tests over Bluetooth on Windows (André's Peak).
   the used part is read, checked by the database's own CRC (10 KB for one long route; anything
   that does not add up reads it all, as before). Same result as the whole read on the four
   databases SuuntoLink wrote in the captures. The cable reads everything, as before.
+- Linux: in the Bluetooth code dialog the field has the keyboard as it opens, and Enter
+  confirms like OK. Built, not yet tried with a watch pairing.
 
 ## 2026-11-21: Ambit3 Bluetooth on Windows (Windows' own Bluetooth)
 
