@@ -848,7 +848,12 @@ PageFlickable {
         // the connected device, or the Library (always there). ---
         Card {
             id: onDevicePoiCard
-            width: parent.width
+            // In Map view the card grows past the page's 480 column (as far as 980, window
+            // allowing), so the map fits beside the list; it stays centred like the others.
+            width: Theme.poisView === "map" && items.length > 0 && !loading
+                   ? Math.max(parent.width, Math.min(root.width - Theme.spacingLarge * 2, 980))
+                   : parent.width
+            x: (parent.width - width) / 2
             readonly property bool fromDevice: root.source === "device"
             readonly property bool loading: fromDevice
                 && (HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading)
@@ -982,35 +987,99 @@ PageFlickable {
                     autoHideMs: 10000
                 }
 
-                Repeater {
-                    model: onDevicePoiCard.loading ? [] : onDevicePoiCard.items
-                    delegate: Column {
-                        id: poiRow
-                        width: parent.width
-                        spacing: Theme.spacingSmall
-                        // The icon and its name: a library POI keeps the list its number is in;
-                        // one read off the device is numbered in that device's own list.
-                        readonly property var typeInfo: onDevicePoiCard.fromDevice
-                            ? DeviceCapabilities.poiTypeOf(modelData.type)
-                            : DeviceCapabilities.poiTypeIn(modelData.typeList, modelData.type)
+                // Map view: ONE map with every POI of the list as a pin, next to the list
+                // (above it in a narrow window). André, 2026-11-22, chose it over a small map
+                // per POI (what this was: a 120 px map strip above every row), which shows a
+                // dot in some streets and nothing about where the POIs are. A click on a pin
+                // picks its row; a click on a row centres the map on its pin.
+                // List view: the rows alone.
+                Item {
+                    id: poiArea
+                    width: parent.width
+                    readonly property var shown: onDevicePoiCard.loading ? [] : onDevicePoiCard.items
+                    readonly property bool withMap: Theme.poisView === "map" && shown.length > 0
+                    readonly property bool sideBySide: withMap && width >= 720
+                    readonly property real gap: Theme.spacingMedium
+                    property int picked: -1
+                    onShownChanged: picked = -1
+                    height: sideBySide ? Math.max(poiList.height, poiMapBox.height)
+                                       : poiList.y + poiList.height
+                    function typeInfoOf(p) {
+                        // A library POI keeps the list its number is in; one read off the device
+                        // is numbered in that device's own list.
+                        return onDevicePoiCard.fromDevice ? DeviceCapabilities.poiTypeOf(p.type)
+                                                          : DeviceCapabilities.poiTypeIn(p.typeList, p.type)
+                    }
+                    // From the list: the map goes to the pin (a second click shows all again).
+                    // From the map: the page scrolls until the row is on screen.
+                    function pick(i, fromList) {
+                        if (fromList && picked === i) { picked = -1; poiMap.resetView(); return }
+                        picked = i
+                        const p = shown[i]
+                        if (!p) return
+                        if (fromList) { poiMap.centerOn(p.lat, p.lon, Math.max(poiMap.currentZoom, 12)); return }
+                        const row = poiRows.itemAt(i)
+                        if (!row) return
+                        const top = row.mapToItem(root.contentItem, 0, 0).y
+                        if (top < root.contentY || top + row.height > root.contentY + root.height)
+                            root.contentY = Math.max(0, Math.min(top - root.height / 3,
+                                                                 root.contentHeight - root.height))
+                    }
 
-                        Item {
-                            // Map hidden in "list" view (Settings -> POIs view) - André, 2026-08-16.
-                            visible: Theme.poisView === "map"
-                            width: parent.width
-                            height: visible ? 120 : 0
-                            MapView {
-                                anchors.fill: parent
-                                inScrollingPage: true
-                                latitude: modelData.lat
-                                longitude: modelData.lon
-                                zoomLevel: 14
-                                showMarker: true
-                            }
+                    Item {
+                        id: poiMapBox
+                        visible: poiArea.withMap
+                        width: poiArea.sideBySide ? poiArea.width - poiList.width - poiArea.gap : poiArea.width
+                        height: !poiArea.withMap ? 0
+                              : poiArea.sideBySide ? Math.max(280, Math.min(460, root.height - 140)) : 260
+                        x: poiArea.sideBySide ? poiList.width + poiArea.gap : 0
+                        // Side by side, the map stays on screen while a long list scrolls.
+                        y: {
+                            if (!poiArea.sideBySide) return 0
+                            root.contentHeight; poiArea.y          // re-check when the page moves
+                            const top = poiArea.mapToItem(root.contentItem, 0, 0).y
+                            return Math.max(0, Math.min(root.contentY + Theme.spacingMedium - top,
+                                                        poiArea.height - height))
                         }
+                        MapView {
+                            id: poiMap
+                            anchors.fill: parent
+                            inScrollingPage: true
+                            showZoomControls: true
+                            zoomLevel: 13                 // one POI alone: a neighbourhood
+                            markers: poiArea.withMap ? poiArea.shown.map(p => {
+                                const t = poiArea.typeInfoOf(p)
+                                return { lat: p.lat, lon: p.lon, label: p.name, type: t.name, glyph: t.glyph }
+                            }) : []
+                            selectedMarker: poiArea.picked
+                            onMarkerTapped: (i) => poiArea.pick(i, false)
+                        }
+                    }
+
+                    Column {
+                        id: poiList
+                        y: poiArea.withMap && !poiArea.sideBySide ? poiMapBox.height + poiArea.gap : 0
+                        width: poiArea.sideBySide ? Math.round(poiArea.width * 0.52) : poiArea.width
+                        spacing: Theme.spacingSmall
+                Repeater {
+                    id: poiRows
+                    model: poiArea.shown
+                    delegate: Rectangle {
+                        id: poiRow
+                        required property var modelData
+                        required property int index
+                        width: parent.width
+                        height: poiRowLine.implicitHeight + 8
+                        radius: Theme.radiusSmall
+                        color: poiArea.withMap && poiArea.picked === index ? Theme.cardNested : "transparent"
+                        readonly property var typeInfo: poiArea.typeInfoOf(modelData)
+                        TapHandler { enabled: poiArea.withMap; onTapped: poiArea.pick(poiRow.index, true) }
 
                         Row {
-                            width: parent.width
+                            id: poiRowLine
+                            x: 6
+                            width: parent.width - 12
+                            anchors.verticalCenter: parent.verticalCenter
                             spacing: Theme.spacingSmall
 
                             // The POI's own watch icon, per type (André: "we miss the icons of
@@ -1028,9 +1097,10 @@ PageFlickable {
                                 ToolTip.text: poiRow.typeInfo.name
                             }
                             Text {
-                                width: parent.width - onWatchPoiGlyph.width - onWatchPoiType.width
+                                width: parent.width - onWatchPoiGlyph.width
+                                       - (onWatchPoiType.visible ? onWatchPoiType.width + Theme.spacingSmall : 0)
                                        - poiMainButton.width - poiMoreButton.width
-                                       - Theme.spacingSmall * 4
+                                       - Theme.spacingSmall * 3
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
                                 text: modelData.name
@@ -1042,6 +1112,9 @@ PageFlickable {
                             Text {
                                 id: onWatchPoiType
                                 anchors.verticalCenter: parent.verticalCenter
+                                // Next to the map the row is half as wide: the type's name is
+                                // on the icon's hover and on the pin.
+                                visible: !poiArea.sideBySide
                                 text: poiRow.typeInfo.name
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.fontSizeCaption
@@ -1075,6 +1148,8 @@ PageFlickable {
                                 }
                             }
                         }
+                    }
+                }
                     }
                 }
             }

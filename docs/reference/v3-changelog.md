@@ -7,6 +7,28 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-22: Routes as square cards, POIs on one map (desktop)
+
+André: "for POIs and Routes, if too many, we could go for more square maps, and do like the
+activities do...little squares". From eight sketches he chose a switch between list and
+squares for routes, and one map with every POI next to the list.
+
+- **Routes, Map view:** square cards side by side (as many as fit at 180 px, then widened to
+  fill the row), each with the route on a map, its name, distance, climb, Export and ⋯. It
+  was one full-width map strip per route. Only the squares on screen, and a screen around it,
+  hold a live map, so a long library no longer builds a map per route
+  (`RouteLibraryView.qml`). List view and the Map/List switch are as before.
+- **POIs, Map view:** one map with every POI of the shown list as a pin carrying its type's
+  icon, beside the list (above it under 720 px). It was a 120 px map strip above every line. A
+  click on a pin marks its line and scrolls to it; a click on a line centres the map on its
+  pin, a second click shows all pins again. In Map view the list card grows past the page's
+  480 px column, as far as 980 px (`PoisPage.qml`).
+- `MapView.qml`: `selectedMarker` (that pin is drawn filled, on top) and the signal
+  `markerTapped(index)`. Nothing changes for the pages that do not set them.
+- Seen in the test window with nine made-up routes and nine made-up POIs
+  (`sommet-builds/layout-test/shots/`), without map tiles: that test has no network. Android
+  follows.
+
 ## 2026-11-22: Android: the "Pair?" question comes in front when a watch pairs
 
 André, on the tablet: "I can't even connect the watch". The watch had been paired with the

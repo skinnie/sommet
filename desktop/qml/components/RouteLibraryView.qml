@@ -557,9 +557,16 @@ PageFlickable {
                 onAction: importDialog.open()
             }
 
-            Column {
+            // Map view: square cards side by side (André, 2026-11-22: "if too many, we could
+            // go for more square maps, and do like the activities do...little squares"); it was
+            // one full-width map strip per route. List view: the compact rows, one per line.
+            Flow {
+                id: cardFlow
                 width: parent.width
-                spacing: Theme.routesView === "list" ? 2 : Theme.spacingSmall
+                spacing: Theme.routesView === "list" ? 2 : Theme.spacingMedium
+                // As many squares as fit at 180 wide, then widened to fill the row.
+                readonly property int perRow: Math.max(1, Math.floor((width + spacing) / (180 + spacing)))
+                readonly property real cellW: Math.floor((width - spacing * (perRow - 1)) / perRow)
                 Repeater {
                     model: section.loading ? [] : root.sorted(section.items)
                     delegate: Item {
@@ -573,55 +580,74 @@ PageFlickable {
                             route.ascentMeters !== undefined ? qsTr("ascent %1 m").arg(Math.round(route.ascentMeters)) : "",
                             route.descentMeters !== undefined ? qsTr("descent %1 m").arg(Math.round(route.descentMeters)) : ""
                         ].filter(x => x.length > 0).join(" · ")
-                        width: parent.width
+                        width: listMode ? cardFlow.width : cardFlow.cellW
                         height: listMode ? 44 : mapCol.implicitHeight
+                        // Only the squares on screen (and a screen around it) hold a live map:
+                        // a long library does not build a map per route. The page is one
+                        // Flickable, so "on screen" is worked out from its scroll position.
+                        readonly property bool nearView: {
+                            root.contentHeight; routeDelegate.y; cardFlow.width    // re-check when the page moves
+                            const top = routeDelegate.mapToItem(root.contentItem, 0, 0).y
+                            return top + routeDelegate.height > root.contentY - root.height
+                                   && top < root.contentY + root.height * 2
+                        }
 
-                        // ---- map view: preview + name/stats + Open ⋯ ----
+                        // ---- map view: a square map, then name, stats, Export ⋯ ----
                         Column {
                             id: mapCol
                             visible: !routeDelegate.listMode
                             width: parent.width
                             spacing: Theme.spacingSmall
-                            Item {
-                                visible: routeDelegate.route.track && routeDelegate.route.track.length > 1
+                            Rectangle {
+                                id: square
+                                readonly property bool hasTrack: !!routeDelegate.route.track
+                                                                 && routeDelegate.route.track.length > 1
                                 width: parent.width
-                                height: visible ? 140 : 0
-                                MapView {
+                                height: width
+                                color: Theme.cardNested
+                                clip: true
+                                // No track to draw (a route whose points could not be read): the
+                                // square stays, so the rows of cards keep their line.
+                                Icon { anchors.centerIn: parent; visible: !square.hasTrack
+                                       glyph: Icons.routes; size: 40; color: Theme.mutedText }
+                                Loader {
                                     anchors.fill: parent
-                                    inScrollingPage: true
-                                    readonly property var center: RouteViewModel.trackCenter(routeDelegate.route.track)
-                                    latitude: center ? center.lat : 0
-                                    longitude: center ? center.lon : 0
-                                    trackPoints: routeDelegate.route.track || []
-                                    TapHandler { onTapped: root.showBig(routeDelegate.route) }
+                                    active: square.hasTrack && !routeDelegate.listMode && routeDelegate.nearView
+                                    sourceComponent: MapView {
+                                        inScrollingPage: true
+                                        readonly property var center: RouteViewModel.trackCenter(routeDelegate.route.track)
+                                        latitude: center ? center.lat : 0
+                                        longitude: center ? center.lon : 0
+                                        trackPoints: routeDelegate.route.track || []
+                                    }
                                 }
+                                TapHandler { enabled: square.hasTrack; onTapped: root.showBig(routeDelegate.route) }
                             }
+                            Text { width: parent.width; elide: Text.ElideRight; text: routeDelegate.route.name
+                                   color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true
+                                   HoverHandler { id: nameHover }
+                                   ToolTip.visible: nameHover.hovered && truncated
+                                   ToolTip.text: routeDelegate.route.name }
+                            // Two lines at most: four numbers do not fit one line of a square.
+                            Text { width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 2
+                                   elide: Text.ElideRight; text: routeDelegate.stats
+                                   height: Math.max(implicitHeight, font.pixelSize * 2.6)
+                                   color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
                             Row {
                                 width: parent.width
                                 spacing: Theme.spacingSmall
-                                Column {
-                                    width: parent.width - actions.width - Theme.spacingSmall
-                                    spacing: 2
-                                    Text { width: parent.width; elide: Text.ElideRight; text: routeDelegate.route.name
-                                           color: Theme.text; font.pixelSize: Theme.fontSizeBody; font.bold: true }
-                                    Text { width: parent.width; elide: Text.ElideRight; text: routeDelegate.stats
-                                           color: Theme.mutedText; font.pixelSize: Theme.fontSizeCaption }
+                                RoundedButton {
+                                    width: parent.width - moreButton.width - Theme.spacingSmall
+                                    text: root.removingKey === routeDelegate.route.key ? qsTr("Removing…") : qsTr("Export")
+                                    busy: root.removingKey === routeDelegate.route.key || root.busyKey === routeDelegate.route.key
+                                    enabled: root.busyKey === "" && (routeDelegate.route.src !== "magene" || !!routeDelegate.route.libraryId)
+                                    onClicked: root.exportItem(routeDelegate.route)
                                 }
-                                Row {
-                                    id: actions
-                                    spacing: Theme.spacingSmall
-                                    RoundedButton {
-                                        text: root.removingKey === routeDelegate.route.key ? qsTr("Removing…") : qsTr("Export")
-                                        busy: root.removingKey === routeDelegate.route.key || root.busyKey === routeDelegate.route.key
-                                        enabled: root.busyKey === "" && (routeDelegate.route.src !== "magene" || !!routeDelegate.route.libraryId)
-                                        onClicked: root.exportItem(routeDelegate.route)
-                                    }
-                                    RoundedButton {
-                                        id: moreButton
-                                        text: "⋯"
-                                        enabled: root.busyKey === ""
-                                        onClicked: { itemMenu.item = routeDelegate.route; itemMenu.popup(moreButton, 0, moreButton.height) }
-                                    }
+                                RoundedButton {
+                                    id: moreButton
+                                    text: "⋯"
+                                    enabled: root.busyKey === ""
+                                    onClicked: { itemMenu.item = routeDelegate.route; itemMenu.popup(moreButton, 0, moreButton.height) }
                                 }
                             }
                         }

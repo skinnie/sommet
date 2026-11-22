@@ -58,6 +58,11 @@ Item {
     // one place being edited," wrong for "here's everywhere a watch has been"). Each entry
     // may carry an optional `label` (shown nowhere yet - reserved for a future tap/tooltip).
     property var markers: []       // [{lat, lon, label?}, ...] - each drawn as its own pin
+    // The pin at `selectedMarker` (an index in `markers`) is drawn filled and on top (the POIs
+    // page's picked POI); a property and not a field of each marker, so picking one does not
+    // rebuild every pin. A click on a labelled pin says which one.
+    property int selectedMarker: -1
+    signal markerTapped(int index)
 
     // Climb-coloured route overlay (the offline planner, PlanRoutePage) - each entry is
     // { color: "#rrggbb", coords: [[lat, lon], ...] }, one contiguous stretch of the route
@@ -970,6 +975,8 @@ Item {
         delegate: Item {
             id: pin
             required property var modelData
+            required property int index
+            readonly property bool picked: index === root.selectedMarker
             width: 30
             height: 38
             x: root.lonToWorldX(modelData.lon) - root.originX - width / 2
@@ -984,9 +991,9 @@ Item {
             readonly property bool hasInfo: !!(modelData.label && modelData.label.length > 0)
             property bool pinned: false
             readonly property bool showInfo: hasInfo && (hoverInfo.hovered || pinned)
-            z: showInfo ? 100 : 0
+            z: showInfo ? 100 : picked ? 50 : 0
             HoverHandler { id: hoverInfo; enabled: pin.hasInfo; cursorShape: Qt.PointingHandCursor }
-            TapHandler { enabled: pin.hasInfo; onTapped: pin.pinned = !pin.pinned }
+            TapHandler { enabled: pin.hasInfo; onTapped: { pin.pinned = !pin.pinned; root.markerTapped(pin.index) } }
 
             Loader {
                 active: pin.showInfo      // built only while shown: a route can carry 500+ pins
@@ -1047,22 +1054,23 @@ Item {
             }
 
             Rectangle {
-                width: 26
-                height: 26
-                radius: 13
+                width: pin.picked ? 32 : 26
+                height: width
+                radius: width / 2
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: 4
-                color: "white"
+                anchors.bottomMargin: pin.picked ? 1 : 4
+                // The picked pin is filled, the others are white with a coloured ring.
+                color: pin.picked ? (modelData.color || Theme.mapAccent) : "white"
                 // A pin may carry its own `color` and `glyph` (e.g. the Route page's POIs: water,
                 // food, cemetery...); plain pins keep the app accent + generic place icon.
-                border.color: modelData.color || Theme.mapAccent
+                border.color: pin.picked ? "white" : (modelData.color || Theme.mapAccent)
                 border.width: 2
             }
             Icon {
                 glyph: modelData.glyph || Icons.pois
                 size: 16
-                color: modelData.color || Theme.mapAccent
+                color: pin.picked ? "white" : (modelData.color || Theme.mapAccent)
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 9

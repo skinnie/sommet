@@ -30,6 +30,11 @@ the eTrex, the Bryton, the Magene) or **Library (saved routes)**.
 - **Send to device** copies a library route to a connected device.
 - A route on a watch can be exported as a GPX, or removed from the watch.
 
+**Map or List.** The small switch next to the drop-down picks how the routes are shown. **Map**
+shows square cards side by side, each with the route drawn on a map, its name, distance and
+climb; a click on a square opens the large map. **List** shows one compact line per route. The
+choice is remembered.
+
 ## POIs
 
 On **POIs**, the same drop-down picks **On the watch** or **Library (saved POIs)**. The page is
@@ -42,6 +47,10 @@ there without a watch too.
   all of them. A POI already in the library (same name, same place) is not kept twice.
 - In the library, **Send to watch** sends one POI to the connected watch. **⋯** has Export,
   Rename and Delete.
+
+**Map or List.** In **Map**, one map shows every POI of the list as a pin, next to the list
+(above it in a narrow window). Click a pin and its line is marked in the list; click a line and
+the map goes to its pin, click it again to see all the pins. **List** shows the lines alone.
 
 **POI types.** An Ambit3 has 18 POI types and a Traverse has 48, numbered differently. The
 library remembers which watch family a POI's type came from, and sends it to the other family
