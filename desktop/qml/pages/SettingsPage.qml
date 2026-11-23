@@ -999,16 +999,27 @@ PageFlickable {
                     Text { text: qsTr("Location source"); color: Theme.text; font.pixelSize: Theme.fontSizeBody }
                     Row {
                         spacing: Theme.spacingSmall
-                        // IP-based is the real default now (Main.qml calls
-                        // WeatherService.detectLocationFromIp() on startup, not refresh()) - this
-                        // radio just reflects/re-triggers that, matching HomeViewModel's own
-                        // startup call rather than owning the decision itself.
+                        // A computer has no GPS: its address can be another city. A place set
+                        // here is saved and wins over it (André, 2026-11-23: Faro for Leiria).
                         RoundedRadioButton {
-                            checked: true
+                            checked: !WeatherService.manualLocation
                             text: qsTr("This computer (IP-based)")
-                            onCheckedChanged: if (checked) WeatherService.detectLocationFromIp()
+                            onClicked: WeatherService.useAutomaticLocation()
                         }
-                        RoundedRadioButton { text: qsTr("Manual") }
+                        RoundedRadioButton {
+                            id: weatherManualRadio
+                            checked: WeatherService.manualLocation
+                            text: qsTr("Manual")
+                            onClicked: WeatherService.setManualLocation(WeatherService.latitude,
+                                                                        WeatherService.longitude)
+                        }
+                    }
+                    PlaceSearchBar {
+                        width: parent.width
+                        onPlaceChosen: (lat, lon) => {
+                            weatherManualRadio.checked = true
+                            WeatherService.setManualLocation(lat, lon)
+                        }
                     }
 
                     Row {
@@ -1032,9 +1043,9 @@ PageFlickable {
                         onClicked: {
                             const lat = WatchUnits.parseDecimal(latField.text);
                             const lon = WatchUnits.parseDecimal(lonField.text);
-                            if (!isNaN(lat)) WeatherService.latitude = lat;
-                            if (!isNaN(lon)) WeatherService.longitude = lon;
-                            WeatherService.refresh();
+                            if (isNaN(lat) || isNaN(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+                            weatherManualRadio.checked = true;
+                            WeatherService.setManualLocation(lat, lon);
                         }
                     }
                 }

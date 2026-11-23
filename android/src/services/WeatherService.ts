@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LIVE_SECONDS, DevicePlace, onDevicePlace, placeIfAllowed, rememberedPlace } from './DeviceLocation';
 
 // v3.0 UI port (2026-08-09, "replicate the desktop version feature wise") - ports
 // desktop/src/services/weatherservice.cpp + qml/viewmodels/WeatherViewModel.qml byte-for-byte
@@ -156,8 +158,11 @@ interface WeatherState {
 }
 
 // Where the weather is for. Shared by Home's weather card and Settings -> Weather (desktop
-// parity: one WeatherService for the whole app). Detected from the IP at start, or set by hand
-// in Settings. Not saved, same as the desktop: the next start detects it from the IP again.
+// parity: one WeatherService for the whole app). A place set by hand in Settings is saved and
+// wins. Otherwise: the device's position, else the last one it had, else the IP address, which
+// can be a far-off city (Faro for a Vodafone line in Leiria, André 2026-11-23).
+// The position is rounded to 0.01 degree (about 1 km) here: the weather and place-name services
+// are outside ones, and a forecast needs no more than that.
 export interface WeatherLocation {
   latitude: number;
   longitude: number;
@@ -189,17 +194,57 @@ export function useWeatherLocation(): WeatherLocation {
   return loc;
 }
 
-/** Settings -> Weather -> "This phone (IP-based)": detect the location from the IP again. */
-export async function locateByIp(): Promise<void> {
-  detectedOnce = true;
-  const loc = await detectLocationFromIp();
-  const next = loc ?? { latitude: currentLocation.latitude, longitude: currentLocation.longitude };
-  publishLocation({ ...next, placeName: currentLocation.placeName, manual: false });
+const MANUAL_KEY = 'weather.manualPlace';
+const roughly = (v: number) => Math.round(v * 100) / 100;
+
+function publishDevicePlace(p: DevicePlace) {
+  if (currentLocation.manual) return;
+  publishLocation({ latitude: roughly(p.lat), longitude: roughly(p.lon),
+                    placeName: currentLocation.placeName, manual: false });
+}
+// A position read by any screen (the POIs map) moves the weather too.
+onDevicePlace(p => { if (p.ageSeconds < LIVE_SECONDS) publishDevicePlace(p); });
+
+async function locateFromDevice(): Promise<void> {
+  const last = await rememberedPlace();
+  if (last) {
+    publishDevicePlace(last);
+  } else {
+    const loc = await detectLocationFromIp();
+    if (loc && !currentLocation.manual) {
+      publishLocation({ ...loc, placeName: currentLocation.placeName, manual: false });
+    }
+  }
+  placeIfAllowed().catch(() => {});              // a live fix, if there is one, moves it again
 }
 
-/** Settings -> Weather -> Manual: use these coordinates. */
+/** At start: the saved place if one was set by hand, else where the device is. */
+async function startLocating(): Promise<void> {
+  detectedOnce = true;
+  try {
+    const raw = await AsyncStorage.getItem(MANUAL_KEY);
+    const saved = raw ? JSON.parse(raw) : null;
+    if (saved && Number.isFinite(saved.latitude) && Number.isFinite(saved.longitude)) {
+      publishLocation({ latitude: saved.latitude, longitude: saved.longitude, placeName: '', manual: true });
+      return;
+    }
+  } catch { /* no saved place */ }
+  await locateFromDevice();
+}
+
+/** Settings -> Weather -> "This device": forget the place set by hand and locate again. */
+export async function locateAutomatically(): Promise<void> {
+  detectedOnce = true;
+  currentLocation = { ...currentLocation, manual: false };
+  await AsyncStorage.removeItem(MANUAL_KEY).catch(() => {});
+  publishLocation(currentLocation);
+  await locateFromDevice();
+}
+
+/** Settings -> Weather -> Manual: use these coordinates, now and after a restart. */
 export function setManualLocation(latitude: number, longitude: number): void {
   detectedOnce = true;
+  AsyncStorage.setItem(MANUAL_KEY, JSON.stringify({ latitude, longitude })).catch(() => {});
   publishLocation({ latitude, longitude, placeName: '', manual: true });
 }
 
@@ -242,7 +287,7 @@ export function useWeather() {
       refresh();
     };
     locationListeners.add(onLocation);
-    if (!detectedOnce) locateByIp().then(() => { if (!fetched) refresh(); });
+    if (!detectedOnce) startLocating().then(() => { if (!fetched) refresh(); });
     else refresh();
     const iv = setInterval(refresh, REFRESH_INTERVAL_MS);
     return () => { clearInterval(iv); locationListeners.delete(onLocation); };

@@ -43,7 +43,7 @@ import { getLoadSource, setLoadSource, LoadSource } from '../services/CoachServi
 import {
   isCatalogAvailable, hasCatalog, importCatalog, getEntries, invalidateEntries,
 } from '../services/CatalogService';
-import { useWeatherLocation, locateByIp, setManualLocation } from '../services/WeatherService';
+import { useWeatherLocation, locateAutomatically, setManualLocation } from '../services/WeatherService';
 import { isMageneAvailable } from '../services/MageneBle';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
@@ -1104,7 +1104,7 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionDesc, { fontSize: 12 }]}>Provider: Open-Meteo</Text>
           <Text style={[styles.connRowText, { marginTop: 4 }]}>Location source</Text>
           <View style={[styles.chipRow, { justifyContent: 'flex-start', marginTop: 6 }]}>
-            {[{ manual: false, label: 'This phone (IP-based)' }, { manual: true, label: 'Manual' }].map(o => {
+            {[{ manual: false, label: 'This device (GPS, else internet)' }, { manual: true, label: 'Manual' }].map(o => {
               const on = weatherManual === o.manual;
               return (
                 <TouchableOpacity
@@ -1112,7 +1112,7 @@ export default function SettingsScreen() {
                   style={[styles.chip, on && styles.chipActive]}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: on }}
-                  onPress={() => { setWeatherManual(o.manual); if (!o.manual) locateByIp(); }}
+                  onPress={() => { setWeatherManual(o.manual); if (!o.manual) locateAutomatically(); }}
                 >
                   <Text style={[styles.chipText, on && styles.chipTextActive]}>{o.label}</Text>
                 </TouchableOpacity>

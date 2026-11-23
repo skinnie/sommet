@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
+#include <QSettings>
 #include <QUrlQuery>
 
 WeatherService::WeatherService(QObject *parent) : QObject(parent)
@@ -13,6 +14,39 @@ WeatherService::WeatherService(QObject *parent) : QObject(parent)
     m_refreshTimer.setInterval(10 * 60 * 1000);
     connect(&m_refreshTimer, &QTimer::timeout, this, &WeatherService::refresh);
     m_refreshTimer.start();
+
+    // A place set by hand survives a restart: the IP address can be another city (Faro for a
+    // Vodafone line in Leiria, André 2026-11-23), and a desktop has no GPS to correct it.
+    const QSettings settings;
+    if (settings.value(QStringLiteral("weather/manual"), false).toBool()) {
+        m_latitude = settings.value(QStringLiteral("weather/latitude"), m_latitude).toDouble();
+        m_longitude = settings.value(QStringLiteral("weather/longitude"), m_longitude).toDouble();
+        m_manualLocation = true;
+    }
+}
+
+void WeatherService::setManualLocation(double latitude, double longitude)
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("weather/manual"), true);
+    settings.setValue(QStringLiteral("weather/latitude"), latitude);
+    settings.setValue(QStringLiteral("weather/longitude"), longitude);
+    m_manualLocation = true;
+    m_latitude = latitude;
+    m_longitude = longitude;
+    emit locationChanged();
+    refresh();
+}
+
+void WeatherService::useAutomaticLocation()
+{
+    QSettings settings;
+    settings.remove(QStringLiteral("weather/manual"));
+    settings.remove(QStringLiteral("weather/latitude"));
+    settings.remove(QStringLiteral("weather/longitude"));
+    m_manualLocation = false;
+    emit locationChanged();
+    detectLocationFromIp();
 }
 
 void WeatherService::setLoading(bool value)
@@ -167,6 +201,10 @@ void WeatherService::fetchPlaceName()
 
 void WeatherService::detectLocationFromIp()
 {
+    if (m_manualLocation) {               // a place set by hand wins
+        refresh();
+        return;
+    }
     tryIpLocation(0);
 }
 
@@ -208,6 +246,10 @@ void WeatherService::tryIpLocation(int provider)
             bool latOk = false, lonOk = false;
             const double lat = number(obj.value(QStringLiteral("latitude")), &latOk);
             const double lon = number(obj.value(QStringLiteral("longitude")), &lonOk);
+            if (m_manualLocation) {           // set by hand while the lookup was on its way
+                refresh();
+                return;
+            }
             if (latOk && lonOk && !obj.value(QStringLiteral("error")).toBool()) {
                 setLatitude(lat);
                 setLongitude(lon);

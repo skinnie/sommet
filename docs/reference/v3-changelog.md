@@ -7,6 +7,36 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: The weather's place: the device's position, and a place set by hand is kept
+
+André: "why it says faro? i am i leiria". The place came from the IP address, and the lookup
+answers Faro for his Vodafone line, so Home's forecast was for Faro too.
+
+- **Android:** the weather uses the device's position (the live one, else the last it had), and
+  the IP address only without either. It never asks for the permission from Home; the POIs
+  page does. The position is **rounded to 0.01 degree (about 1 km)** before it goes to Open-Meteo
+  and OpenStreetMap's place names.
+- **Both apps:** a place set by hand in Settings → Weather is saved and wins after a restart (it
+  was lost at every start). Choosing "This device" / "This computer" forgets it.
+- **Desktop:** Settings → Weather gets the place search, so Leiria can be picked by name.
+- Seen in the desktop test window (scratch settings): a saved place loads after a restart, Apply
+  saves it, "This computer" removes it. Android type-checks and runs; a saved place and a live GPS
+  fix were not seen there yet.
+
+## 2026-11-23: The menu button on Activities no longer rebuilds every card's map
+
+André's speed test on the P5Q: no stall on Home, and on Activities about 0.7 s per click (29
+stalls of 256 to 543 ms in 10 clicks).
+
+- `MapView`: the tile list is built from which tiles are on screen, not from the map's position. It
+  was destroying and recreating every tile each time the map moved or changed width by one
+  pixel, on every map of the app.
+- `Main.qml`: the page follows the menu's width once the menu has finished sliding (220 ms),
+  so a page is laid out once per click and not on every step.
+- `SOMMET_STALL_LOG=<ms>`: a value of 20 or more is the limit (a faster PC needs a finer one).
+- Measured on the X230 with 88 made-up activities, no map tiles, 12 clicks, stalls over 30 ms:
+  240 ms per click before, 114 ms after. Not yet measured on the P5Q.
+
 ## 2026-11-23: POIs: one map to look at them and to add one
 
 André: "integrate the idea of the map + list but we take the map where we already have to add

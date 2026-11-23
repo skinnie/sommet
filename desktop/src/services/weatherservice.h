@@ -35,6 +35,8 @@ class WeatherService : public QObject
     Q_PROPERTY(bool hasFetchedOnce READ hasFetchedOnce NOTIFY hasFetchedOnceChanged)
     Q_PROPERTY(double latitude READ latitude WRITE setLatitude NOTIFY locationChanged)
     Q_PROPERTY(double longitude READ longitude WRITE setLongitude NOTIFY locationChanged)
+    // A place set by hand in Settings: saved, and the IP lookup leaves it alone.
+    Q_PROPERTY(bool manualLocation READ manualLocation NOTIFY locationChanged)
     // Reverse-geocoded from latitude/longitude via OSM's own Nominatim (no API key, same
     // provider this app's map tiles already come from and are already attributed to) -
     // Open-Meteo itself has no place-name lookup, only coordinates. Empty string if the
@@ -58,6 +60,7 @@ public:
     bool hasFetchedOnce() const { return m_hasFetchedOnce; }
     double latitude() const { return m_latitude; }
     double longitude() const { return m_longitude; }
+    bool manualLocation() const { return m_manualLocation; }
     void setLatitude(double value);
     void setLongitude(double value);
     double currentTemperature() const { return m_currentTemperature; }
@@ -75,6 +78,10 @@ public:
     // latitude/longitude from the result and calls refresh(); leaves them untouched on
     // failure rather than snapping to some default.
     Q_INVOKABLE void detectLocationFromIp();
+    // Settings > Weather: keep this place, now and after a restart.
+    Q_INVOKABLE void setManualLocation(double latitude, double longitude);
+    // Settings > Weather: forget the place set by hand and go back to the IP lookup.
+    Q_INVOKABLE void useAutomaticLocation();
 
 signals:
     void loadingChanged();
@@ -99,6 +106,7 @@ private:
     // least returns real weather rather than 0,0 (the Gulf of Guinea).
     double m_latitude = 48.85;
     double m_longitude = 2.35;
+    bool m_manualLocation = false;
 
     double m_currentTemperature = 0;
     int m_currentWeatherCode = -1;

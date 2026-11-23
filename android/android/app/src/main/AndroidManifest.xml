@@ -32,7 +32,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
     <!-- Bluetooth scanning needed it up to Android 11. On every version the POIs map opens on
-         where the device is (services/DeviceLocation.ts); the position stays on the device. -->
+         where the device is, and the weather is for there, rounded to about 1 km
+         (services/DeviceLocation.ts, WeatherService.ts). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.bluetooth_le"

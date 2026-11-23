@@ -18,7 +18,8 @@ import com.facebook.react.bridge.ReactMethod
 
 // Where this tablet or phone is, for the POIs map to open there (André, 2026-11-23: "can we make
 // the map appear on the tablet location?"). A position read recently is used at once; otherwise
-// it listens for one fix until the timeout. It stays on the device: nothing here sends it anywhere.
+// it listens for one fix until the timeout. Nothing here sends it anywhere; the weather uses it
+// rounded to about 1 km (WeatherService.ts).
 class DeviceLocationModule(private val ctx: ReactApplicationContext) : ReactContextBaseJavaModule(ctx) {
     override fun getName() = "DeviceLocation"
 
