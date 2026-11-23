@@ -19,7 +19,7 @@ import { Button, Dropdown, FieldRow, StatusNote } from '../components/ui/primiti
 import { TrackPreview } from '../components/TrackPreview';
 import { LockableScrollView } from '../components/ScrollLock';
 import { useWeatherLocation } from '../services/WeatherService';
-import { currentPlace, DevicePlace } from '../services/DeviceLocation';
+import { currentPlace, rememberedPlace, DevicePlace, LIVE_SECONDS } from '../services/DeviceLocation';
 
 // v3.0 UI port (2026-08-09, "re do... pois to match entirely desktop") - real structural
 // rebuild matching desktop's own PoisPage.qml: "Add a POI" gets a live pin preview, "Import
@@ -135,14 +135,20 @@ export default function PoiScreen() {
   const [focus, setFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
   const paneRef = useRef<ScrollView>(null);
   const mapCentre = useRef<(() => { lat: number; lon: number }) | null>(null);
-  // The map opens where the tablet is (André, 2026-11-23), or on the weather place until it knows
-  // or when it is not allowed to. All shows every POI; the location button comes back here.
+  // The map opens where the tablet is (André, 2026-11-23): its live position with a blue dot,
+  // else the last one it had, else the weather place. All shows every POI; the location button
+  // comes back here.
   const [here, setHere] = useState<DevicePlace | null>(null);
+  const [lastPlace, setLastPlace] = useState<DevicePlace | null>(null);
   const [atHere, setAtHere] = useState(true);
   const [hereKey, setHereKey] = useState(0);
   useFocusEffect(useCallback(() => {
     let live = true;
-    currentPlace().then(p => { if (live && p) setHere(p); }).catch(() => {});
+    rememberedPlace().then(p => { if (live && p) setLastPlace(p); });
+    currentPlace().then(p => {
+      if (!live || !p) return;
+      if (p.ageSeconds < LIVE_SECONDS) setHere(p); else setLastPlace(p);
+    }).catch(() => {});
     return () => { live = false; };
   }, []));
   const rowY = useRef<Record<number, number>>({});
@@ -369,7 +375,8 @@ export default function PoiScreen() {
     <View style={sideBySide ? { flex: 1.35 } : undefined}>
       <TrackPreview points={mapPoints} multiMarker controls onlyPointZoom={13} height={sideBySide ? paneH : 280}
         fallbackCenter={{ lat: weather.latitude, lon: weather.longitude }}
-        openAt={atHere ? { lat: here?.lat ?? weather.latitude, lon: here?.lon ?? weather.longitude, zoom: 13, key: hereKey } : null}
+        openAt={atHere ? { lat: here?.lat ?? lastPlace?.lat ?? weather.latitude,
+                           lon: here?.lon ?? lastPlace?.lon ?? weather.longitude, zoom: 13, key: hereKey } : null}
         here={here}
         onShowAll={() => { setPicked(-1); setFocus(null); setAtHere(false); }}
         onShowHere={() => { setPicked(-1); setFocus(null); setAtHere(true); setHereKey(k => k + 1); }}

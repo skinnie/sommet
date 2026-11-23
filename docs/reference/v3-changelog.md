@@ -30,6 +30,8 @@ poi...also make it dragable and zoomable like all others". He chose it from a wo
   and below, and `ACCESS_COARSE_LOCATION` is new. Until there is a fix, or without permission,
   and on the desktop (no GPS): the weather place. A target button comes back there; **All** fits
   every POI. On the desktop the view now stays put when the list changes.
+  Android remembers the last real position and listens up to 60 s: the weather place comes from
+  the IP address, and for André's Vodafone line in Leiria that says Faro.
 - Seen in the desktop test window (made-up POIs, scratch home, no map tiles): pick, double-click,
   pin drag, map drag, name and save, Find, narrow window. Seen on the tablet with André's own
   library (nothing saved): + Add POI, pin drag, hold and drag, zoom, line tap, double-tap, Cancel.
