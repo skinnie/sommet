@@ -308,6 +308,66 @@ def test_an_unanswered_start_resets_at_once():
     assert scan.resets == 1 and not scan.scanning and log[-3:] == ["close", "open", "filter"]
 
 
+def test_a_silent_bluez_gets_fewer_and_fewer_connections():
+    """X230, 2026-11-23: BlueZ answered nothing for hours. The first miss reconnects at once
+    (the cure for a stuck scan); after that each new connection waits twice as long."""
+    silent = "org.freedesktop.DBus.Error.NoReply: Did not receive a reply"
+    now = [1000.0]
+    log = []
+
+    def connect():
+        log.append("open")
+        return FakeAdapter(log, [silent]), lambda: log.append("close")
+    scan = S.ScanSession(connect, None, clock=lambda: now[0])
+    scan.start()                              # miss 1: close, and a new connection at once
+    assert log == ["open", "start", "close", "open"], log
+    scan.start()                              # miss 2: close, and wait
+    assert log[-2:] == ["start", "close"] and log.count("open") == 2
+    for _tick in range(3):                    # the 10 s ticks inside the wait open nothing
+        now[0] += 5
+        scan.start()
+    assert log.count("open") == 2 and not scan.scanning
+    now[0] += 6                               # 21 s after miss 2: one more try
+    scan.start()
+    assert log.count("open") == 3 and log.count("close") == 3
+    now[0] += 21                              # miss 3 doubled the wait to 40 s
+    scan.start()
+    assert log.count("open") == 3
+    assert scan._wait_s() == 40 and S.RESET_WAIT_MAX_S == 300
+    scan._misses = 40
+    assert scan._wait_s() == 300              # and never longer than that
+
+
+def test_an_answer_ends_the_waiting():
+    silent = "org.freedesktop.DBus.Error.NoReply: Did not receive a reply"
+    scan, log = scan_session([silent], [None, None, silent], [])
+    scan.start()                              # miss 1, reconnected
+    scan.start()
+    scan.stop()                               # answered twice on the new connection
+    assert scan._misses == 0 and not scan.scanning
+    scan.start()                              # a miss later on is a first miss again
+    assert log[-3:] == ["close", "open", "filter"] and scan.resets == 2
+
+
+def test_a_connection_that_fails_to_open_is_closed():
+    log = []
+
+    class NoFilter(FakeAdapter):
+        def SetDiscoveryFilter(self, _filter, timeout=None):  # noqa: N802
+            raise RuntimeError("org.freedesktop.DBus.Error.NoReply: Did not receive a reply")
+
+    def connect():
+        log.append("open")
+        return NoFilter(log, []), lambda: log.append("close")
+    now = [0.0]
+    scan = S.ScanSession(connect, {"Transport": "le"}, clock=lambda: now[0])
+    assert log == ["open", "close"]           # it used to stay open, one more every try
+    scan.start()
+    assert log == ["open", "close", "open", "close"] and not scan.scanning
+    scan.start()                              # now inside the wait
+    assert log.count("open") == 2
+
+
 def test_nothing_to_stop_is_stopped():
     scan, _log = scan_session(["org.bluez.Error.Failed: No discovery started"])
     scan.scanning = True

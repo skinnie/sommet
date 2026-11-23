@@ -1002,6 +1002,7 @@ SCAN_ON_S = 3
 SCAN_PERIOD_S = 10
 BLUEZ_REPLY_S = 5      # a scan call BlueZ has not answered by then is not coming back
 STUCK_STOPS = 2        # refused stops in a row before the scan's connection is reset
+RESET_WAIT_MAX_S = 300 # longest wait before a new scan connection while BlueZ stays silent
 
 
 def _no_reply(exc):
@@ -1020,15 +1021,36 @@ class ScanSession:
     closed and opened again when it happens. The watch service on the main connection is
     left alone. `connect()` returns (adapter interface, close function)."""
 
-    def __init__(self, connect, scan_filter=None):
+    def __init__(self, connect, scan_filter=None, clock=time.monotonic):
         self._connect = connect
         self._filter = scan_filter
+        self._clock = clock
         self._adapter = None
         self._close = None
         self.scanning = False
         self.refused = 0
         self.resets = 0
+        # Connections in a row that BlueZ gave no answer on, and when the next may be opened.
+        # The first miss reconnects at once (that is the cure for a stuck scan). After that
+        # the wait doubles up to RESET_WAIT_MAX_S: on the X230, 2026-11-23, BlueZ answered
+        # nothing for hours, and a new connection to the system's message bus every 10 s is
+        # the last thing a bus in that state needs.
+        self._misses = 0
+        self._wait_until = 0.0
         self._open()
+
+    def _wait_s(self):
+        if self._misses <= 1:
+            return 0
+        return min(SCAN_PERIOD_S * 2 ** min(self._misses - 1, 16), RESET_WAIT_MAX_S)
+
+    def _drop(self):
+        try:
+            if self._close is not None:
+                self._close()
+        except Exception:
+            pass
+        self._adapter = self._close = None
 
     def _open(self):
         try:
@@ -1036,24 +1058,31 @@ class ScanSession:
             if self._filter is not None:
                 self._adapter.SetDiscoveryFilter(self._filter, timeout=BLUEZ_REPLY_S)
         except Exception as exc:
-            print(f"  could not open the scan connection yet: {exc}")
-            self._adapter = None
+            # Close what was opened: left open, every later try added one more connection.
+            self._drop()
+            self._misses += 1
+            self._wait_until = self._clock() + self._wait_s()
+            print(f"  could not open the scan connection yet: {exc} - "
+                  f"next try in {max(self._wait_s(), SCAN_PERIOD_S):.0f} s")
 
     def reset(self, why):
-        print(f"  BlueZ stopped answering our scan ({why}) - reconnecting to clear it")
-        try:
-            if self._close is not None:
-                self._close()
-        except Exception:
-            pass
-        self._adapter = self._close = None
+        self._drop()
         self.scanning = False
         self.refused = 0
         self.resets += 1
-        self._open()
+        self._misses += 1
+        if self._misses == 1:
+            print(f"  BlueZ stopped answering our scan ({why}) - reconnecting to clear it")
+            self._open()
+        else:
+            self._wait_until = self._clock() + self._wait_s()
+            print(f"  BlueZ still does not answer our scan ({why}) - "
+                  f"next try in {self._wait_s():.0f} s")
 
     def start(self):
         if self._adapter is None:
+            if self._clock() < self._wait_until:
+                return
             self._open()
             if self._adapter is None:
                 return
@@ -1064,6 +1093,7 @@ class ScanSession:
                 self.reset("no answer to a scan start")
                 return
             # already running is fine; a refused start is caught by the stop after it
+        self._misses = 0               # BlueZ answered
         self.scanning = True
 
     def stop(self):

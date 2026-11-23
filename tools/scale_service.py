@@ -124,6 +124,7 @@ class ScaleListener:
     SCAN_OFF_S = 7.0
     HOLD_S = 20.0        # keep scanning this long after the last packet from the scale
     BLUEZ_REPLY_S = 5.0  # longest wait for BlueZ to answer a scan start or stop
+    BACKOFF_MAX_S = 300.0  # longest wait between bursts while they keep going wrong
 
     def __init__(self, data_dir=None):
         self.data_dir = data_dir
@@ -181,18 +182,55 @@ class ScaleListener:
         self._thread = None
 
     def _run(self):
-        """Bursts, each in its own event loop with its own connection to BlueZ, closed after the
-        burst. BlueZ ties a scan to the connection that asked for it: a scan stopped while the
-        watch link was connecting stayed on (17:24 and 17:30, 2026-10-28) until the backend
-        quit and its connection closed. Closing it after every burst ends such a scan at once."""
-        settle = etekcity_scale.Settle()
-        while not self._stop.is_set():
-            try:
-                asyncio.run(self._burst(settle))
-                self.error = None
-            except Exception as e:       # noqa: BLE001 - shown in the UI; the next burst retries
-                self.error = str(e) or e.__class__.__name__
-            self._stop.wait(self.SCAN_OFF_S)
+        """One event loop, and so one connection to BlueZ, for as long as it listens.
+
+        Until 2026-11-23 every burst had its own loop and its own connection, closed after the
+        burst: about 360 new connections to the system's message bus an hour. On the X230 that
+        was measured from the bus's own log (382 and 462 an hour while Sommet ran, 4 to 15
+        with it closed), about 19,500 of that boot's 20,260 connections, with the bus's
+        memory growing some 25 MB an hour meanwhile, and its Bluetooth service ended up
+        answering nothing. The bursts stay (they are what lets a Bluetooth mouse reconnect);
+        the connection is now kept, and replaced only when a burst goes wrong."""
+        try:
+            asyncio.run(self._listen(etekcity_scale.Settle()))
+        except Exception as e:           # noqa: BLE001 - shown in the UI
+            self.error = str(e) or e.__class__.__name__
+
+    def new_scanner(self, settle):
+        from bleak import BleakScanner
+        return BleakScanner(lambda device, adv: self._on_adv(settle, adv))
+
+    async def _listen(self, settle):
+        scanner = None
+        failures = 0
+        try:
+            while not self._stop.is_set():
+                if scanner is None:
+                    scanner = self.new_scanner(settle)
+                if await self._burst(scanner):
+                    failures = 0
+                else:
+                    # BlueZ ties a scan to the connection that asked for it: one whose start
+                    # or stop got no answer stays on (17:24 and 17:30, 2026-10-28, until the
+                    # backend quit). Closing the connection ends it at once. Then wait longer
+                    # each time: a Bluetooth that answers nothing gets a new connection every
+                    # few minutes, not every ten seconds.
+                    scanner = None
+                    await close_bluez_connection()
+                    failures += 1
+                await self._pause(self.off_seconds(failures))
+        finally:
+            await close_bluez_connection()
+
+    def off_seconds(self, failures):
+        """The wait between bursts: SCAN_OFF_S, doubled for every burst in a row that went
+        wrong, up to BACKOFF_MAX_S."""
+        return min(self.SCAN_OFF_S * 2 ** min(failures, 16), self.BACKOFF_MAX_S)
+
+    async def _pause(self, seconds):
+        until = time.monotonic() + seconds
+        while not self._stop.is_set() and time.monotonic() < until:
+            await asyncio.sleep(0.25)
 
     def _on_adv(self, settle, adv):
         raw = (adv.manufacturer_data or {}).get(etekcity_scale.COMPANY_ID)
@@ -209,23 +247,29 @@ class ScaleListener:
         if res:
             self.record(res, self.last_seen)
 
-    async def _burst(self, settle):
-        from bleak import BleakScanner
-        scanner = BleakScanner(lambda device, adv: self._on_adv(settle, adv))
+    async def _burst(self, scanner):
+        """One burst on the kept connection. True when BlueZ answered both the start and the
+        stop; False means the scan may still be on and the connection has to go."""
+        started = False
         try:
             # BlueZ can leave a start or stop unanswered while the watch link is connecting
             # (2026-10-28: a burst hung for over an hour, its scan on all along). Never wait
-            # long, and close the connection anyway: that ends the scan.
+            # long.
             await asyncio.wait_for(scanner.start(), self.BLUEZ_REPLY_S)
+            started = True
+            self.error = None
             began = time.time()
             while not self._stop.is_set() and self.keep_scanning(began, time.time()):
                 await asyncio.sleep(0.25)
-        finally:
-            try:
-                await asyncio.wait_for(scanner.stop(), self.BLUEZ_REPLY_S)
-            except Exception:            # noqa: BLE001 - not started, or no reply: close anyway
-                pass
-            await close_bluez_connection()
+        except asyncio.TimeoutError:
+            self.error = "Bluetooth on this computer is not answering"
+        except Exception as e:           # noqa: BLE001 - shown in the UI; a later burst retries
+            self.error = str(e) or e.__class__.__name__
+        try:
+            await asyncio.wait_for(scanner.stop(), self.BLUEZ_REPLY_S)
+        except Exception:                # noqa: BLE001 - not started, or no reply
+            return False
+        return started
 
     def keep_scanning(self, began, now):
         """Inside a burst: stay on for SCAN_ON_S, and for HOLD_S after the scale's last packet."""
@@ -276,12 +320,70 @@ def find_scales(seconds=15):
     return sorted(found.values(), key=lambda f: -(f["rssi"] or -999))
 
 
+def _selftest_one_connection():
+    """The listener keeps one connection to BlueZ across bursts (2026-11-23), drops it only
+    after a burst BlueZ did not answer, and then waits longer each time."""
+    L = ScaleListener()
+    assert [L.off_seconds(n) for n in (0, 1, 2, 3)] == [7.0, 14.0, 28.0, 56.0]
+    assert L.off_seconds(6) == L.off_seconds(60) == 300.0
+
+    class Scanner:
+        def __init__(self, log, bursts, fail_stop=False):
+            self.log, self.bursts, self.fail_stop = log, bursts, fail_stop
+
+        async def start(self):
+            self.log.append("start")
+
+        async def stop(self):
+            self.bursts.append(1)
+            if self.fail_stop:
+                raise RuntimeError("org.bluez.Error.InProgress")
+            self.log.append("stop")
+
+    def run(fail_first, stop_after):
+        global close_bluez_connection
+        log, bursts, waits = [], [], []
+        made = []
+        L = ScaleListener()
+        L.SCAN_ON_S = 0.0
+
+        def new_scanner(_settle):
+            made.append(Scanner(log, bursts, fail_stop=len(made) < fail_first))
+            log.append("scanner")
+            return made[-1]
+
+        async def pause(seconds):
+            waits.append(seconds)
+            if len(bursts) >= stop_after:
+                L._stop.set()
+
+        async def closed():
+            log.append("close")
+        L.new_scanner, L._pause = new_scanner, pause
+        saved = close_bluez_connection
+        close_bluez_connection = closed
+        try:
+            asyncio.run(L._listen(None))
+        finally:
+            close_bluez_connection = saved
+        return log, waits
+
+    log, waits = run(fail_first=0, stop_after=4)
+    assert log == ["scanner"] + ["start", "stop"] * 4 + ["close"], log   # one connection, 4 bursts
+    assert waits == [7.0] * 4, waits
+    log, waits = run(fail_first=2, stop_after=4)
+    assert log == ["scanner", "start", "close", "scanner", "start", "close",
+                   "scanner", "start", "stop", "start", "stop", "close"], log
+    assert waits == [14.0, 28.0, 7.0, 7.0], waits            # longer after each miss, then back
+
+
 def selftest():
     L0 = ScaleListener()
     assert L0.keep_scanning(100.0, 102.0) and not L0.keep_scanning(100.0, 103.5)   # a burst ends
     L0.last_seen = 110.0
     assert L0.keep_scanning(100.0, 125.0)                  # the scale is talking: stay on
     assert not L0.keep_scanning(100.0, 131.0)              # 20 s quiet: back to bursts
+    _selftest_one_connection()
     with tempfile.TemporaryDirectory() as tmp:
         assert load_weighins(tmp) == [] and series(data_dir=tmp) == []
         day = time.mktime((2026, 10, 16, 8, 0, 0, 0, 0, -1))

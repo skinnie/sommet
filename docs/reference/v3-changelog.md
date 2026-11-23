@@ -7,6 +7,33 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Linux: the scale listener keeps one connection to the Bluetooth service
+
+Found by another session on the X230, from the system bus's own log: while Sommet ran with
+the scale listener on, the bus got a new connection every 8 to 10 s (382 and 462 an hour,
+against 4 to 15 with Sommet closed); about 19,500 of that boot's 20,260 connections fall in
+three such stretches; the bus's memory grew about 25 MB an hour meanwhile, to 482 MB; and the
+Bluetooth service ended up answering nothing. That the churn caused the silence is likely,
+not proven (the root capture is still to come). The churn was Sommet's own design since
+0.2.54: every scale burst had its own event loop and connection, closed after the burst.
+
+- `scale_service.ScaleListener`: one event loop and one connection for as long as it listens;
+  each burst is a start and a stop on it. The connection is closed and replaced only after a
+  burst whose start or stop BlueZ did not answer (the case the old design was for), and then
+  the wait before the next burst doubles each time, 7 s up to 5 min. Burst timing unchanged.
+- `ble_server.ScanSession` (the watch scan): the first unanswered call reconnects at once, as
+  before; further ones in a row wait 20 s, 40 s ... up to 5 min before a new connection. A
+  connection that failed to open is now closed (it used to be left open, one more per try).
+- Tests: `scale_service.selftest()` (one connection across four bursts; two failed bursts then
+  recovery) and three in `test_ble_server_link.py`, all with BlueZ faked.
+- Seen for real on the X230 while its BlueZ was stuck, with the real bleak, 25 s: first burst
+  timed out at 5 s, its connection was closed, the next came 14 s later (the old design: every
+  12 s for ever), the listener stopped cleanly and the bus had as many connections after as
+  before. The listener's status then reads "Bluetooth on this computer is not answering".
+- Not yet seen: the working case on a real BlueZ (the X230's was stuck, the P5Q on Windows).
+  To see: the scale still weighs in, the watch still pairs, and the bus gets no new
+  connection per burst (`busctl --system list` twice, a minute apart).
+
 ## 2026-11-23: Linux: Sommet asks whether Bluetooth answers before it uses it
 
 André, on the X230's built-in Bluetooth: "says can't find". The watch was never the problem:
