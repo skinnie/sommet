@@ -26,6 +26,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(AmbitUsbPackage())
           add(AmbitBlePackage())
+          add(com.ambitsyncmodern.location.DeviceLocationPackage())
           add(GarminPackage())
           add(AmbitSmartSensorPackage())
           add(HrStrapPackage())

@@ -18,7 +18,8 @@ import { Card } from '../components/ui/Card';
 import { Button, Dropdown, FieldRow, StatusNote } from '../components/ui/primitives';
 import { TrackPreview } from '../components/TrackPreview';
 import { LockableScrollView } from '../components/ScrollLock';
-import { getWeatherLocation } from '../services/WeatherService';
+import { useWeatherLocation } from '../services/WeatherService';
+import { currentPlace, DevicePlace } from '../services/DeviceLocation';
 
 // v3.0 UI port (2026-08-09, "re do... pois to match entirely desktop") - real structural
 // rebuild matching desktop's own PoisPage.qml: "Add a POI" gets a live pin preview, "Import
@@ -134,9 +135,19 @@ export default function PoiScreen() {
   const [focus, setFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
   const paneRef = useRef<ScrollView>(null);
   const mapCentre = useRef<(() => { lat: number; lon: number }) | null>(null);
+  // The map opens where the tablet is (André, 2026-11-23), or on the weather place until it knows
+  // or when it is not allowed to. All shows every POI; the location button comes back here.
+  const [here, setHere] = useState<DevicePlace | null>(null);
+  const [atHere, setAtHere] = useState(true);
+  const [hereKey, setHereKey] = useState(0);
+  useFocusEffect(useCallback(() => {
+    let live = true;
+    currentPlace().then(p => { if (live && p) setHere(p); }).catch(() => {});
+    return () => { live = false; };
+  }, []));
   const rowY = useRef<Record<number, number>>({});
   function pickFromList(i: number, lat: number, lon: number) {
-    if (picked === i) { setPicked(-1); setFocus(null); return; }
+    if (picked === i) { setPicked(-1); setFocus(null); setAtHere(false); return; }
     setPicked(i); setFocus({ lat, lon, key: Date.now() });
   }
   // Puts the new POI's pin at a place and opens the form (moves the pin if it is already open).
@@ -352,12 +363,16 @@ export default function PoiScreen() {
   }, [mapPointsKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const sideBySide = listW >= 600;
   const paneH = Math.max(320, Math.min(600, winH - 270));
-  const weather = getWeatherLocation();
+  const weather = useWeatherLocation();
   const addType = poiTypesFor(watchModel).find(pt => pt.id === poiType);
   const mapEl = (
     <View style={sideBySide ? { flex: 1.35 } : undefined}>
       <TrackPreview points={mapPoints} multiMarker controls onlyPointZoom={13} height={sideBySide ? paneH : 280}
         fallbackCenter={{ lat: weather.latitude, lon: weather.longitude }}
+        openAt={atHere ? { lat: here?.lat ?? weather.latitude, lon: here?.lon ?? weather.longitude, zoom: 13, key: hereKey } : null}
+        here={here}
+        onShowAll={() => { setPicked(-1); setFocus(null); setAtHere(false); }}
+        onShowHere={() => { setPicked(-1); setFocus(null); setAtHere(true); setHereKey(k => k + 1); }}
         selectedIndex={picked} onMarkerTap={pickFromMap} focusOn={focus} centreRef={mapCentre}
         onDoubleTap={placePin}
         draft={adding && hasValidCoords ? { lat: parsedLat, lon: parsedLon } : null}
@@ -457,7 +472,7 @@ export default function PoiScreen() {
           )}
           {!adding && <Text style={styles.itemStats}>Double-tap the map to add a POI. Hold the map still to drag it, pinch to zoom.</Text>}
           {!adding && sourceCount > 0 && (
-            <TextInput style={styles.findInput} value={query} onChangeText={setQuery} placeholder="Find in this list"
+            <TextInput style={styles.findInput} value={query} onChangeText={v => { setQuery(v); if (v.trim()) setAtHere(false); }} placeholder="Find in this list"
               placeholderTextColor={theme.mutedText} autoCorrect={false} />
           )}
 

@@ -35,6 +35,7 @@ export function TrackPreview({
   points, height = 100, markerOnly = false, variableHeight = false, multiMarker = false,
   interactive = true, onDoubleTap, fallbackCenter, selectedIndex, onMarkerTap, focusOn,
   draft, onDraftMove, draftGlyph, onlyPointZoom = 6, controls = false, centreRef,
+  openAt, here, onShowAll, onShowHere,
 }: {
   // The POIs screen (André, 2026-11-23: one map to look at the POIs and to add one):
   // `draft` is the new POI's orange pin, on top of the others; a finger on it drags it at once
@@ -46,6 +47,14 @@ export function TrackPreview({
   onlyPointZoom?: number;
   // The + / - / All buttons of the desktop's map.
   controls?: boolean;
+  // Where the map opens instead of fitting its points (the POIs map opens where the device is).
+  // A new `key` goes back there; null fits the points.
+  openAt?: { lat: number; lon: number; zoom: number; key: number } | null;
+  // The device's own place, drawn as a blue dot.
+  here?: { lat: number; lon: number } | null;
+  // With `controls`: the All button, and the button that goes back to `openAt`.
+  onShowAll?: () => void;
+  onShowHere?: () => void;
   // Filled with a function giving the place at the middle of the map as it is now.
   centreRef?: React.MutableRefObject<(() => { lat: number; lon: number }) | null>;
   // multiMarker only (the POIs screen's one map, André 2026-11-22): the marker at
@@ -116,6 +125,8 @@ export function TrackPreview({
       hadFocus.current = false; viewRef.current = null; setView(null);   // every marker again
     }
   }, [focusKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const openKey = openAt ? openAt.key : -1;
+  useEffect(() => { viewRef.current = null; setView(null); }, [openKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const zoomStep = (dz: number) => {
     const v = viewRef.current ?? fittedRef.current;
     if (v) setV(zoomView(v, v.zf, 2 ** dz));
@@ -264,7 +275,9 @@ export function TrackPreview({
     return <View style={[styles.box, { height, backgroundColor: theme.background }]} onLayout={onLayout} />;
   }
 
-  const mosaic: TileMosaic = centerOnly
+  const mosaic: TileMosaic = openAt
+    ? centeredPointMosaic(openAt.lat, openAt.lon, boxWidth, height, openAt.zoom)
+    : centerOnly
     ? centeredPointMosaic(fallbackCenter!.lat, fallbackCenter!.lon, boxWidth, height, 13)
     : hasSinglePoint
     ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, 15)
@@ -282,6 +295,7 @@ export function TrackPreview({
   markersRef.current = multiMarker ? projected.map((p, i) => ({ x: p.x, y: p.y, index: validIndex[i] })) : [];
   const selectedAt = selectedIndex == null ? -1 : validIndex.indexOf(selectedIndex);
   const draftAt = draft && isValid(draft) ? drawn.project(draft.lat, draft.lon) : null;
+  const hereAt = here && isValid(here) ? drawn.project(here.lat, here.lon) : null;
 
   return (
     <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}
@@ -295,6 +309,12 @@ export function TrackPreview({
         />
       ))}
       <Svg width={mosaic.contentWidth} height={mosaic.contentHeight} style={StyleSheet.absoluteFill}>
+        {hereAt && (
+          <>
+            <Circle cx={hereAt.x} cy={hereAt.y} r={16} fill={HERE_COLOR} opacity={0.2} />
+            <Circle cx={hereAt.x} cy={hereAt.y} r={7} fill={HERE_COLOR} stroke="#ffffff" strokeWidth={2.5} />
+          </>
+        )}
         {centerOnly ? null : hasMultiMarker ? (
           <>
             {projected.map((p, i) => (i === selectedAt ? null : (
@@ -362,9 +382,22 @@ export function TrackPreview({
           <TouchableOpacity style={styles.ctrl} onPress={() => zoomStep(-1)} accessibilityLabel="Zoom out">
             <Text style={styles.ctrlText}>−</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.ctrl} onPress={fitAgain} accessibilityLabel="Show all POIs">
+          <TouchableOpacity style={styles.ctrl} onPress={() => { fitAgain(); onShowAll?.(); }} accessibilityLabel="Show all POIs">
             <Text style={styles.ctrlAll}>All</Text>
           </TouchableOpacity>
+          {onShowHere && (
+            <TouchableOpacity style={styles.ctrl} onPress={() => { fitAgain(); onShowHere(); }} accessibilityLabel="Go to where I am">
+              {/* A target, drawn: the app's icon font holds only the glyphs it uses. */}
+              <Svg width={20} height={20} viewBox="0 0 20 20">
+                <Circle cx={10} cy={10} r={5.5} fill="none" stroke="#333333" strokeWidth={2} />
+                <Circle cx={10} cy={10} r={2} fill="#333333" />
+                <Polyline points="10,1 10,5" stroke="#333333" strokeWidth={2} />
+                <Polyline points="10,15 10,19" stroke="#333333" strokeWidth={2} />
+                <Polyline points="1,10 5,10" stroke="#333333" strokeWidth={2} />
+                <Polyline points="15,10 19,10" stroke="#333333" strokeWidth={2} />
+              </Svg>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </View>
@@ -372,6 +405,7 @@ export function TrackPreview({
 }
 
 const DRAFT_COLOR = '#C4622D';    // the new POI's pin, as on the desktop
+const HERE_COLOR = '#2F7FE0';     // the device's own place
 
 const styles = StyleSheet.create({
   box: { width: '100%', borderRadius: 12, overflow: 'hidden' },

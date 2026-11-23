@@ -24,6 +24,12 @@ poi...also make it dragable and zoomable like all others". He chose it from a wo
   **Find in this list** narrows the list and the pins. The list scrolls in its own pane.
 - Desktop notes appear over the bottom of the map: in the page's flow, a note hiding by itself
   moved every line under the pointer.
+- **Where it opens** (André: "can we make the map appear on the tablet location?"). Android: the
+  device's position (`DeviceLocationModule`, `services/DeviceLocation.ts`), asked once, with a
+  blue dot; it stays on the device. `ACCESS_FINE_LOCATION` is no longer limited to Android 11
+  and below, and `ACCESS_COARSE_LOCATION` is new. Until there is a fix, or without permission,
+  and on the desktop (no GPS): the weather place. A target button comes back there; **All** fits
+  every POI. On the desktop the view now stays put when the list changes.
 - Seen in the desktop test window (made-up POIs, scratch home, no map tiles): pick, double-click,
   pin drag, map drag, name and save, Find, narrow window. Seen on the tablet with André's own
   library (nothing saved): + Add POI, pin drag, hold and drag, zoom, line tap, double-tap, Cancel.

@@ -41,6 +41,10 @@ On **POIs**, the same drop-down picks **On the watch** or **Library (saved POIs)
 there without a watch too. It is one map and one list, side by side (the map above the list on a
 narrow screen). The map shows every POI of the list, and it is also where you add one.
 
+**Where it opens.** On a tablet or phone the map opens where the device is, with a blue dot, once
+you allow Sommet to use the location (it stays on the device). Until there is a position, and on
+a computer, it opens on the place the weather uses. The target button comes back there.
+
 **Moving the map.** Drag it, pinch it, or use **+** and **−**. On a computer the mouse wheel
 zooms after one click on the map. On a tablet or phone, hold the map still for a moment and then
 drag, so a quick swipe still scrolls the page. **All** brings every POI back into view.

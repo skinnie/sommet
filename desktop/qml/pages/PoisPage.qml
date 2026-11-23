@@ -483,6 +483,19 @@ PageFlickable {
                     readonly property real gap: Theme.spacingMedium
                     readonly property real paneH: Math.max(430, Math.min(680, root.height - 170))
                     property int picked: -1
+                    // The map opens where you are: on a computer, the place the weather uses.
+                    // Any press on the map, All, or Find leaves it there (André, 2026-11-23).
+                    property bool atHere: true
+                    function goHere() {
+                        atHere = true
+                        picked = -1
+                        poiMap.centerOn(WeatherService.latitude, WeatherService.longitude, 13)
+                    }
+                    Timer { interval: 0; running: true; onTriggered: poiArea.goHere() }
+                    Connections {
+                        target: WeatherService
+                        function onLocationChanged() { if (poiArea.atHere) poiArea.goHere() }
+                    }
                     height: sideBySide ? Math.max(paneH, poiSide.height)
                                        : poiMapBox.height + gap + poiSide.height
                     onShownChanged: {
@@ -505,6 +518,7 @@ PageFlickable {
                     // From the list: the map goes to the pin (a second click shows all again).
                     // From the map: the list scrolls to the line.
                     function pick(i, fromList) {
+                        atHere = false
                         if (fromList && picked === i) { picked = -1; poiMap.resetView(); return }
                         picked = i
                         const p = shown[i]
@@ -535,6 +549,25 @@ PageFlickable {
                             })
                             selectedMarker: poiArea.picked
                             onMarkerTapped: (i) => poiArea.pick(i, false)
+                            PointHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onActiveChanged: if (active) poiArea.atHere = false
+                            }
+                            // The map's own centre follows its pins. When the list changes, keep
+                            // what is on screen where it is.
+                            property real keptLat: NaN
+                            property real keptLon: NaN
+                            on_CenterLatChanged: {
+                                if (userControlled && !isNaN(keptLat))
+                                    panY += latToWorldY(keptLat) - latToWorldY(_centerLat)
+                                keptLat = _centerLat
+                            }
+                            on_CenterLonChanged: {
+                                if (userControlled && !isNaN(keptLon))
+                                    panX += lonToWorldX(keptLon) - lonToWorldX(_centerLon)
+                                keptLon = _centerLon
+                            }
+                            Component.onCompleted: { keptLat = _centerLat; keptLon = _centerLon }
 
                             function onAPin(x, y) {
                                 return poiArea.shown.some(p => Math.hypot(lonToWorldX(p.lon) - originX - x,
@@ -631,7 +664,30 @@ PageFlickable {
                                 font.bold: true
                                 color: "#333333"
                             }
-                            TapHandler { onTapped: { poiArea.picked = -1; poiMap.resetView() } }
+                            TapHandler { onTapped: { poiArea.atHere = false; poiArea.picked = -1; poiMap.resetView() } }
+                        }
+                        // Back to where you are.
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.topMargin: 104
+                            anchors.rightMargin: 8
+                            width: 28; height: 28; radius: 4
+                            color: "#CCFFFFFF"
+                            // A target, drawn: the app's icon font holds only the glyphs it uses.
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 12; height: 12; radius: 6
+                                color: "transparent"
+                                border.width: 2
+                                border.color: "#333333"
+                            }
+                            Rectangle { anchors.centerIn: parent; width: 4; height: 4; radius: 2; color: "#333333" }
+                            Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 5; width: 2; height: 4; color: "#333333" }
+                            Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 19; width: 2; height: 4; color: "#333333" }
+                            Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 5; width: 4; height: 2; color: "#333333" }
+                            Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 19; width: 4; height: 2; color: "#333333" }
+                            TapHandler { onTapped: poiArea.goHere() }
                         }
                         // What just happened, over the bottom of the map: in the page's flow a
                         // note that hides by itself moved every line under the pointer.
@@ -916,7 +972,7 @@ PageFlickable {
                             visible: !root.adding && onDevicePoiCard.items.length > 0
                             width: parent.width
                             placeholderText: qsTr("Find in this list")
-                            onTextChanged: poiMap.resetView()
+                            onTextChanged: { if (text.length > 0) poiArea.atHere = false; if (!poiArea.atHere) poiMap.resetView() }
                         }
                         Text {
                             visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
