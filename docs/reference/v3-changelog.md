@@ -7,6 +7,38 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Linux: the scale listener asks BlueZ for the scale only (watch-protocol/08, B)
+
+Measured on the X230 once its Bluetooth answered again (the other session ended the Wine
+processes; the same bluetoothd came back in 13 s, no restart), counting BlueZ's signals on the
+system bus with `gdbus monitor`:
+
+| | signals |
+|---|---|
+| Sommet closed, 30 s | 0 |
+| scale listener, no filter, 4 bursts (38 s) | 140 |
+| scale listener, filter on one address, 3 bursts (30 s) | 6 |
+
+At about 35 signals a burst, six bursts a minute, the unfiltered listener alone sends some
+13,000 signals an hour: the 610,000 that filled the bus are about two days of it.
+
+- `ScaleListener.scan_filter()`: on Linux, `{"Pattern": <the scale's address>}` in BlueZ's
+  discovery filter (through bleak's `bluez={"filters": ...}`), DuplicateData left on. Used
+  only when a real packet has come from the very address the scale names in its payload:
+  `_on_adv` stores that as `bleAddress` in the scale's config, and the filter needs
+  `bleAddress == address`. A scale that advertises from another address is never filtered.
+  The scanner is rebuilt, on the same connection, when the filter changes.
+- Seen for real: the listener with the kept connection on a working BlueZ (one scanner, four
+  answered bursts, one close at the end), the filter accepted by BlueZ, the signal counts
+  above, and `bluetooth_silent()` answering False in 8 ms on a working BlueZ (the case I
+  could not see before).
+- NOT seen: a real weigh-in through the filter. The address in that run was made up. To see:
+  André steps on the scale twice with this build (the first is heard unfiltered and teaches
+  the address, the second comes through the filter).
+- The "not answering" message now says closing Wine alone can bring Bluetooth back.
+- Still open in the ticket: the watch scan's filter (C, needs the captures), and when the
+  listener scans at all (D, André's choice).
+
 ## 2026-11-23: The X230's silent Bluetooth: the cause, and the message names Wine
 
 Correction to the two entries below, which called Sommet's connection churn the likely cause.

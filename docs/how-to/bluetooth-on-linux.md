@@ -116,8 +116,13 @@ running. It listens to the Bluetooth service's signals and, in that case, never 
 Once the unread signals reached the system's limit (127 MiB), the system stopped listening to
 the Bluetooth service, which then hung. Every Bluetooth scan by any app adds signals, so the
 more Sommet scanned, the sooner the limit came. When Sommet sees `winedevice.exe` connected to
-the system, its message says so: close Wine first (`wineserver -k`), then restart Bluetooth.
-You can look yourself with `busctl --system list | grep -i wine`.
+the system, its message says so: close Wine (`wineserver -k`). On the X230 that alone brought
+Bluetooth, and the mouse, back within seconds; restarting Bluetooth is only for when it does
+not. You can look yourself with `busctl --system list | grep -i wine`.
+
+**Fewer signals from Sommet (0.2.67).** Once your scale has been heard, Sommet asks the
+Bluetooth service to report that one scale only. A 3-second scan then makes the service send
+2 signals instead of about 35 (measured on the X230).
 
 Sommet checks again by itself: at most once every 15 seconds while a page needs Bluetooth, and
 fresh each time you start a pairing.

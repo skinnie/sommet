@@ -133,6 +133,7 @@ class ScaleListener:
         self._lock = threading.Lock()
         self.error = None
         self.last_seen = None        # time of the last packet from our scale
+        self._scanner_filter = None  # what the current scanner asked BlueZ to report
         self.last_weighin = None     # the last stored reading
 
     # -- state -------------------------------------------------------------------------
@@ -196,15 +197,37 @@ class ScaleListener:
         except Exception as e:           # noqa: BLE001 - shown in the UI
             self.error = str(e) or e.__class__.__name__
 
+    def scan_filter(self):
+        """Linux: what BlueZ is asked to report, or None for everything.
+
+        An unfiltered scan makes BlueZ announce every advertiser in range to every program on
+        the system's message bus: 67 signals for two 3 s scans on the X230, against 4 with a
+        filter on one address (measured 2026-11-23). Those signals are what filled the bus
+        that night (watch-protocol/08). So once the scale has been heard, BlueZ is asked for
+        that one address only. "Heard" is the condition: the filter is used only when a real
+        packet came from the very address the scale names in its payload (`bleAddress`), so a
+        scale that advertises from another address is never filtered out."""
+        if not sys.platform.startswith("linux"):
+            return None
+        cfg = load_config(self.data_dir)
+        address = (cfg.get("address") or "").upper()
+        if address and cfg.get("bleAddress") == address:
+            return {"Pattern": address}
+        return None
+
     def new_scanner(self, settle):
         from bleak import BleakScanner
-        return BleakScanner(lambda device, adv: self._on_adv(settle, adv))
+        self._scanner_filter = self.scan_filter()
+        extra = {"bluez": {"filters": dict(self._scanner_filter)}} if self._scanner_filter else {}
+        return BleakScanner(lambda device, adv: self._on_adv(settle, adv, device), **extra)
 
     async def _listen(self, settle):
         scanner = None
         failures = 0
         try:
             while not self._stop.is_set():
+                if scanner is not None and self.scan_filter() != self._scanner_filter:
+                    scanner = None           # the scale was just heard, or changed: new filter
                 if scanner is None:
                     scanner = self.new_scanner(settle)
                 if await self._burst(scanner):
@@ -232,16 +255,22 @@ class ScaleListener:
         while not self._stop.is_set() and time.monotonic() < until:
             await asyncio.sleep(0.25)
 
-    def _on_adv(self, settle, adv):
+    def _on_adv(self, settle, adv, device=None):
         raw = (adv.manufacturer_data or {}).get(etekcity_scale.COMPANY_ID)
         d = etekcity_scale.decode(raw) if raw is not None else None
         if d is None:
             return
-        want = (load_config(self.data_dir).get("address") or "").upper()
+        cfg = load_config(self.data_dir)
+        want = (cfg.get("address") or "").upper()
         if want and d["address"] != want:
             return
-        if not want:                                       # first scale heard becomes THE scale
-            save_config({"address": d["address"]}, self.data_dir)
+        # The address the packet came from, as BlueZ names it: kept for scan_filter().
+        came_from = (getattr(device, "address", "") or "").upper()
+        if not want or (came_from and cfg.get("bleAddress") != came_from):
+            cfg["address"] = d["address"]                  # first scale heard becomes THE scale
+            if came_from:
+                cfg["bleAddress"] = came_from
+            save_config(cfg, self.data_dir)
         self.last_seen = time.time()
         res = settle.feed(d, self.last_seen)
         if res:
@@ -340,6 +369,18 @@ def _selftest_one_connection():
                 raise RuntimeError("org.bluez.Error.InProgress")
             self.log.append("stop")
 
+    def run_listen(listener):
+        global close_bluez_connection
+        saved = close_bluez_connection
+
+        async def closed():
+            return None
+        close_bluez_connection = closed
+        try:
+            asyncio.run(listener._listen(None))
+        finally:
+            close_bluez_connection = saved
+
     def run(fail_first, stop_after):
         global close_bluez_connection
         log, bursts, waits = [], [], []
@@ -371,10 +412,62 @@ def _selftest_one_connection():
     log, waits = run(fail_first=0, stop_after=4)
     assert log == ["scanner"] + ["start", "stop"] * 4 + ["close"], log   # one connection, 4 bursts
     assert waits == [7.0] * 4, waits
+    L = ScaleListener()
+    L.SCAN_ON_S = 0.0
+    wanted = [None]                             # what scan_filter() answers: nothing yet
+    made, pauses = [], []
+    L.scan_filter = lambda: wanted[0]
+
+    def new_scanner(_settle):
+        L._scanner_filter = L.scan_filter()     # as the real new_scanner does
+        made.append(L._scanner_filter)
+        return Scanner([], [])
+
+    async def pause(_seconds):
+        pauses.append(1)
+        if len(pauses) == 2:
+            wanted[0] = {"Pattern": "C0:FF:EE:00:00:01"}    # the scale was just heard
+        if len(pauses) >= 4:
+            L._stop.set()
+    L.new_scanner, L._pause = new_scanner, pause
+    run_listen(L)
+    # four bursts: the filter changed after the second, so one new scanner, and only one
+    assert made == [None, {"Pattern": "C0:FF:EE:00:00:01"}], made
     log, waits = run(fail_first=2, stop_after=4)
     assert log == ["scanner", "start", "close", "scanner", "start", "close",
                    "scanner", "start", "stop", "start", "stop", "close"], log
     assert waits == [14.0, 28.0, 7.0, 7.0], waits            # longer after each miss, then back
+
+
+def _selftest_filter(tmp):
+    """BlueZ is asked for the scale's address only once a packet really came from it."""
+    import types
+    packet = types.SimpleNamespace(manufacturer_data={
+        etekcity_scale.COMPANY_ID: bytes.fromhex("01010000eeffc0c0a90172230100000000020300")})
+    scale, other = "C0:FF:EE:00:00:01", "5A:11:22:33:44:55"
+    saved = sys.platform
+    try:
+        sys.platform = "linux"
+        L = ScaleListener(tmp)
+        assert L.scan_filter() is None                       # no scale yet: everything
+        save_config({"address": scale}, tmp)
+        assert L.scan_filter() is None                       # chosen, never heard: everything
+        L._on_adv(etekcity_scale.Settle(), packet, types.SimpleNamespace(address=other))
+        assert load_config(tmp)["bleAddress"] == other
+        assert L.scan_filter() is None                       # it advertises from another address
+        L._on_adv(etekcity_scale.Settle(), packet, types.SimpleNamespace(address=scale.lower()))
+        assert load_config(tmp) == {"address": scale, "bleAddress": scale}
+        assert L.scan_filter() == {"Pattern": scale}
+        save_config({"address": "AA:BB:CC:00:00:02", "bleAddress": scale}, tmp)
+        assert L.scan_filter() is None                       # another scale chosen: start over
+        forget(tmp)
+        L._on_adv(etekcity_scale.Settle(), packet, types.SimpleNamespace(address=scale))
+        assert L.scan_filter() == {"Pattern": scale}         # the first scale heard, at once
+        sys.platform = "win32"
+        assert L.scan_filter() is None                       # BlueZ's filter: Linux only
+    finally:
+        sys.platform = saved
+        forget(tmp)
 
 
 def selftest():
@@ -412,6 +505,7 @@ def selftest():
         assert L.status()["address"] == "AA" and L.status()["lastWeighIn"]["weightKg"] == 73.5
         forget(tmp)
         assert load_config(tmp) == {} and len(load_weighins(tmp)) == 4, "forget keeps the history"
+        _selftest_filter(tmp)
     print("selftest ok")
 
 

@@ -120,11 +120,14 @@ _SYSTEM_PYTHON = []          # [path or None], filled on first use
 # could not be found. One short Ping answers the question first.
 BLUETOOTH_SILENT_HINT = (
     "Bluetooth on this computer is not answering: its system service is running but stuck, so "
-    "no app can use Bluetooth right now. {wine}Restart Bluetooth (in a terminal: sudo systemctl "
+    "no app can use Bluetooth right now. {wine}restart Bluetooth (in a terminal: sudo systemctl "
     "restart bluetooth) or restart the computer, then try again. The cable works meanwhile.")
+# On the X230, ending the Wine processes brought the same bluetoothd back within 13 s, mouse
+# included, with no restart of the service.
 WINE_HINT = (
     "A Windows program under Wine is running in the background (winedevice.exe) and can cause "
-    "exactly this: close it first (in a terminal: wineserver -k). ")
+    "exactly this: close it (in a terminal: wineserver -k), which alone can bring Bluetooth "
+    "back within seconds. If it does not: ")
 _BLUEZ_PING = {"at": None, "silent": False, "wine": False}
 _BLUEZ_PING_LOCK = threading.Lock()
 _NO_REPLY_WORDS = ("timed out", "did not receive a reply", "timeout was reached", "noreply")
@@ -172,7 +175,9 @@ def _wine_on_the_bus():
 
 def silent_hint():
     """The words for a silent Bluetooth, naming Wine when the last check saw it on the bus."""
-    return BLUETOOTH_SILENT_HINT.format(wine=WINE_HINT if _BLUEZ_PING["wine"] else "")
+    if _BLUEZ_PING["wine"]:
+        return BLUETOOTH_SILENT_HINT.format(wine=WINE_HINT)
+    return BLUETOOTH_SILENT_HINT.format(wine="").replace("right now. restart", "right now. Restart")
 
 
 def bluetooth_silent(max_age=15.0, timeout=3.0):
