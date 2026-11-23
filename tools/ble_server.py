@@ -1565,7 +1565,13 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
 
-    adapter = find_adapter(bus, dbus)
+    try:
+        adapter = find_adapter(bus, dbus)
+    except dbus.exceptions.DBusException as exc:
+        # BlueZ up but answering nothing (X230, 2026-11-23): one line, not a traceback.
+        print(f"  Bluetooth on this computer is not answering ({exc.get_dbus_name()}) - "
+              "restart Bluetooth (sudo systemctl restart bluetooth) or the computer.")
+        return 3
     if not adapter:
         print("  no Bluetooth adapter with GattManager1 found.")
         return 1

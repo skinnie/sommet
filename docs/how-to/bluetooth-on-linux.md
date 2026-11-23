@@ -102,3 +102,20 @@ running, the same X230 mouse kept working.
    restart Bluetooth (`sudo systemctl restart bluetooth`).
 4. A newer USB Bluetooth adapter (Bluetooth 5) handles scanning and connections side by side
    far better than a 4.0 chip.
+
+## Linux: "Bluetooth on this computer is not answering"
+
+Sommet asks the system's Bluetooth service one short question before it pairs a watch, before
+it asks for your password, and before it reads a Magene, a Bryton, a Wahoo or a sensor over
+Bluetooth. If no answer comes within three seconds, Sommet stops there and says so. It does
+not ask for the password and does not switch the adapter off and on.
+
+The message means the service (`bluetoothd`) is running but stuck: no app on the computer can
+use Bluetooth, and a Bluetooth mouse or keyboard may have stopped too. It is not about the
+watch.
+
+**What to do:** restart Bluetooth (`sudo systemctl restart bluetooth`), or restart the
+computer, then try again. The cable works meanwhile.
+
+Sommet checks again by itself: at most once every 15 seconds while a page needs Bluetooth, and
+fresh each time you start a pairing.

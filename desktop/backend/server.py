@@ -1180,6 +1180,12 @@ BLE_LINK_TOOLS = {
 }
 
 
+# The tools that reach a device through the system's Bluetooth (BlueZ) themselves, besides
+# every magene_*.py. The watch tools are not here: they go through the Bluetooth daemon.
+BLUEZ_TOOLS = frozenset({"bryton_ble.py", "hrv_strap.py", "smart_sensor.py", "wahoo_ble_files.py",
+                         "wahoo_pages.py", "wahoo_profile.py", "wahoo_settings.py"})
+
+
 def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None):
     """Runs one of tools/*.py exactly as a person at a terminal would. Returns
     (returncode, stdout, stderr); never raises for a nonzero exit, the caller decides what
@@ -1195,6 +1201,12 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     two watches of the SAME model (two Ambit3 Peaks) can be driven individually - product_id
     alone can't tell them apart. Passed to the tool as AMBIT_SERIAL; None means don't filter by
     serial."""
+    # A tool that talks to the system's Bluetooth: not started while that service answers
+    # nothing. Each would wait out its own timeout (the Magene read: 90 s, asked again every
+    # 90 s by Home) and add one more unanswered request to a stuck service.
+    if (script.startswith("magene_") or script in BLUEZ_TOOLS) and ble_bridge.bluetooth_silent():
+        hint = ble_bridge.BLUETOOTH_SILENT_HINT
+        return 1, json.dumps({"ok": False, "error": hint, "bluetooth_silent": True}), hint
     if script != "list_watches.py" and product_id is None and serial is None:
         autopin_if_needed()
     effective_pid = product_id if product_id is not None else SELECTED_PRODUCT_ID
@@ -5463,6 +5475,14 @@ class Handler(BaseHTTPRequestHandler):
                 ble_bridge.daemon_command("")
             except ble_bridge.BleBridgeError as exc:
                 self._send_json(502, {"ok": False, "error": str(exc)})
+                return
+            # Does Bluetooth on this computer answer at all? Asked fresh, and BEFORE the privacy
+            # step: that one asks for the password and switches the adapter off and on, which
+            # is no use, and no small thing, against a service that answers nothing (X230,
+            # 2026-11-23).
+            if ble_bridge.bluetooth_silent(max_age=0):
+                self._send_json(502, {"ok": False, "error": ble_bridge.BLUETOOTH_SILENT_HINT,
+                                      "bluetooth_silent": True})
                 return
             _open_bt_privacy_window()
         try:

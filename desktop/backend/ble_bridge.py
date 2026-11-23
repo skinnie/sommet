@@ -109,6 +109,60 @@ DBUS_MODULES_HINT = (
     "works without them.")
 _SYSTEM_PYTHON = []          # [path or None], filled on first use
 
+# Linux: the system's Bluetooth service (BlueZ) can be up and still answer nothing. Seen on the
+# X230, 2026-11-23: bluetoothd held its bus name and took every request, and no reply ever
+# came back (the system message bus had stopped reading from it, an hour before anyone
+# paired). Sommet then asked for the password twice, switched the adapter off and on four
+# times, started a daemon that died in find_adapter, ran a 90 s Magene read every 90 s for an
+# hour, and told the user the watch could not be found. One short Ping answers the question
+# first.
+BLUETOOTH_SILENT_HINT = (
+    "Bluetooth on this computer is not answering: its system service is running but stuck, so "
+    "no app can use Bluetooth right now. Restart Bluetooth (in a terminal: sudo systemctl "
+    "restart bluetooth) or restart the computer, then try again. The cable works meanwhile.")
+_BLUEZ_PING = {"at": None, "silent": False}
+_BLUEZ_PING_LOCK = threading.Lock()
+_NO_REPLY_WORDS = ("timed out", "did not receive a reply", "timeout was reached", "noreply")
+
+
+def _bluez_ping(timeout):
+    """True = BlueZ took a Ping and did not answer within `timeout` s. False = it answered, is
+    not there at all (another error, with other words for the user), or nothing here can ask."""
+    env = _system_env()
+    asks = (
+        ["busctl", "--system", "--auto-start=no", f"--timeout={timeout:g}", "call", "org.bluez",
+         "/org/bluez", "org.freedesktop.DBus.Peer", "Ping"],
+        ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+         f"--reply-timeout={int(timeout * 1000)}", "/org/bluez", "org.freedesktop.DBus.Peer.Ping"],
+    )
+    for argv in asks:
+        if shutil.which(argv[0], path=env["PATH"]) is None:
+            continue
+        try:
+            done = subprocess.run(argv, env=env, timeout=timeout + 4, stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True)
+        except (OSError, subprocess.SubprocessError):
+            return False                # the asking itself went wrong: not a finding
+        if done.returncode == 0:
+            return False
+        words = (done.stderr + done.stdout).lower()
+        return any(w in words for w in _NO_REPLY_WORDS)
+    return False
+
+
+def bluetooth_silent(max_age=15.0, timeout=3.0):
+    """Linux only: True when the system's Bluetooth service takes a request and never answers.
+    The last answer is reused for `max_age` seconds, so a page that polls costs one Ping per
+    `max_age`, and while Bluetooth is stuck nothing else is sent to it."""
+    if not sys.platform.startswith("linux"):
+        return False
+    with _BLUEZ_PING_LOCK:
+        now = time.monotonic()
+        if _BLUEZ_PING["at"] is None or now - _BLUEZ_PING["at"] > max_age:
+            _BLUEZ_PING["silent"] = _bluez_ping(timeout)
+            _BLUEZ_PING["at"] = time.monotonic()
+        return _BLUEZ_PING["silent"]
+
 
 def _system_env():
     """The environment for the system's Python: none of the packaged app's library paths
@@ -222,6 +276,8 @@ class BleBridge:
             return                      # a daemon is already answering - adopt it, don't race it
         except BleBridgeError:
             pass                        # nothing there yet - fall through to actually starting one
+        if bluetooth_silent():
+            raise BleBridgeError(BLUETOOTH_SILENT_HINT)
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return

@@ -7,6 +7,32 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Linux: Sommet asks whether Bluetooth answers before it uses it
+
+André, on the X230's built-in Bluetooth: "says can't find". The watch was never the problem:
+the system's Bluetooth service had been up and answering nothing for about an hour (found by
+another session: the system message bus had stopped reading from it; the cause is on the
+computer's side and still open, `sommet-tracker` watch-protocol/06). Against that service
+Sommet asked for the password twice, switched the adapter off and on four times, started a
+daemon that died with a traceback in `find_adapter`, ran a 90 s Magene read every 90 s for an
+hour, and said the watch could not be found.
+
+- `ble_bridge.bluetooth_silent()`: one `org.freedesktop.DBus.Peer.Ping` to `org.bluez`, 3 s,
+  through `busctl` (or `dbus-send`), without starting a stopped service. True only when the
+  request is taken and no reply comes. The answer is reused for 15 s.
+- **Pairing** (`/api/ble/connect`): asked fresh, before the privacy step. Silent: the reply is
+  an error with plain words ("Bluetooth on this computer is not answering..."), no password
+  prompt, no adapter switch. `BleBridge.start()` refuses too, so no path starts a daemon on it.
+- **Bluetooth tools** (`run_tool`: every `magene_*.py`, `bryton_ble.py`, `hrv_strap.py`,
+  `smart_sensor.py`, the four Wahoo Bluetooth tools): not started while it is silent; the
+  caller gets the same words at once instead of the tool's own timeout.
+- `ble_server.py listen`: a D-Bus error in `find_adapter` is one log line and exit 3.
+- How-to: `docs/how-to/bluetooth-on-linux.md`, new last section.
+- `tools/test_bluetooth_silent.py` (11 tests, the asking faked). Seen for real on the X230
+  while its Bluetooth was stuck: the check said silent in 3.0 s and `start()` refused. The
+  answering case was seen only against another system service (UPower), not against a
+  working BlueZ: this laptop's was stuck and the P5Q was on Windows.
+
 ## 2026-11-22: Routes as square cards, POIs on one map
 
 André: "for POIs and Routes, if too many, we could go for more square maps, and do like the
