@@ -320,6 +320,12 @@ export default function HomeScreen() {
   // One "Pair via Bluetooth" for every Bluetooth device (desktop parity: the Pair button opens a
   // menu - Suunto watch / Magene C406 - the two flows share nothing at the BLE layer).
   const [pairMenuOpen, setPairMenuOpen] = useState(false);
+  // With only the watch to pair there is nothing to choose: start it directly (desktop parity,
+  // André 2026-11-23). The menu shows when the Magene is switched on too.
+  const openPairing = () => {
+    if (isMageneAvailable() && expFeatures.magene) setPairMenuOpen(true);
+    else handleBleConnectRef.current();
+  };
 
   // Bryton rides over USB (desktop parity: its card has Sync rides like every bike computer).
   const [brytonSync, setBrytonSync] = useState<BrytonRideSync | null>(null);
@@ -1386,7 +1392,7 @@ export default function HomeScreen() {
                     grow={false}
                   />
                 ))}
-                <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={() => setPairMenuOpen(true)}
+                <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={openPairing}
                   disabled={mageneBusy === 'scan'} variant="text" grow={false} />
               </View>
             )}
@@ -1474,7 +1480,7 @@ export default function HomeScreen() {
               still pair an Ambit watch over BLE while the head unit is plugged in. */}
           {(!bleConnected || !mageneOn) && (
             <View style={styles.heroButtons}>
-              <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={() => setPairMenuOpen(true)}
+              <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={openPairing}
                 disabled={mageneBusy === 'scan'} variant="text" grow={false} />
             </View>
           )}
@@ -1555,7 +1561,7 @@ export default function HomeScreen() {
             })}
             <TouchableOpacity
               key="__pair"
-              onPress={() => setPairMenuOpen(true)}
+              onPress={openPairing}
               activeOpacity={0.75}
               style={[styles.watchChip, styles.watchChipAction, { borderColor: theme.mutedText }]}
             >

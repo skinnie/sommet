@@ -1237,12 +1237,22 @@ PageFlickable {
                         title: qsTr("Pair another device by Bluetooth")
                         standardButtons: Dialog.Cancel
                         width: 420
-                        contentItem: Column {
-                            spacing: Theme.spacingSmall
-                            Repeater {
-                                // Only what is switched on: the watch with Experimental features >
-                                // Bluetooth, each bike computer with its own switch (2026-10-22).
-                                model: [
+                        // With one kind switched on there is nothing to choose: the Pair button
+                        // starts that pairing directly and this list is not shown (André,
+                        // 2026-11-23: "aren't we overcomplicating?"). An entry that cannot start
+                        // now (a watch already connected) still opens the list, which says why.
+                        function start(kind) {
+                            if (kind === "watch") DeviceService.connectBle(false);
+                            else if (kind === "brytonble") root.scanBrytonBle();
+                            else root.scanMagene();
+                        }
+                        function startOrChoose() {
+                            if (choices.length === 1 && choices[0].enabled) start(choices[0].kind);
+                            else open();
+                        }
+                        // Only what is switched on: the watch with Experimental features >
+                        // Bluetooth, each bike computer with its own switch (2026-10-22).
+                        readonly property var choices: [
                                     { kind: "watch", label: qsTr("Suunto watch"),
                                       hint: DeviceService.bleHandshakeDone
                                             ? qsTr("A watch is already connected by Bluetooth")
@@ -1269,6 +1279,10 @@ PageFlickable {
                                 ].filter(c => c.kind === "watch" ? DeviceService.bleExperimentEnabled
                                             : c.kind === "c406" ? BikeDevices.mageneShown
                                             : BikeDevices.brytonBleShown)
+                        contentItem: Column {
+                            spacing: Theme.spacingSmall
+                            Repeater {
+                                model: pairDialog.choices
                                 delegate: Rectangle {
                                     required property var modelData
                                     width: 388; height: Math.max(64, choiceRow.implicitHeight + Theme.spacingMedium)
@@ -1310,9 +1324,7 @@ PageFlickable {
                                         gesturePolicy: TapHandler.ReleaseWithinBounds
                                         onTapped: {
                                             pairDialog.close();
-                                            if (modelData.kind === "watch") DeviceService.connectBle(false);
-                                            else if (modelData.kind === "brytonble") root.scanBrytonBle();
-                                            else root.scanMagene();
+                                            pairDialog.start(modelData.kind);
                                         }
                                     }
                                 }
@@ -1772,7 +1784,7 @@ PageFlickable {
                                                   // a day as "Pair / sync": not needed).
                                                   : qsTr("Pair another device by Bluetooth")
                         enabled: !DeviceService.bleAttempting && !root.mageneScanning && !root.brytonScanning
-                        onClicked: pairDialog.open()
+                        onClicked: pairDialog.startOrChoose()
                     }
                     RoundedButton {
                         text: qsTr("Forget Bluetooth device")

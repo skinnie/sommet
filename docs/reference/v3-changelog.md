@@ -7,6 +7,21 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Pairing: no list when there is only one kind of device to pair
+
+André: "aren't we overcomplicating? tell me why we need ... a menu to select device". The
+list is needed when more than one kind is switched on (a watch pairs the other way round
+from a bike computer). With one kind there is nothing to choose.
+
+- Desktop (`HomePage.qml`): the Pair button calls `pairDialog.startOrChoose()`: one entry
+  that can start now starts directly; more than one, or one that cannot start (a watch
+  already connected), opens the list as before. The entries moved from the Repeater's model
+  to `pairDialog.choices`. Home's own step-by-step lines guide the watch pairing either way.
+- Android (`HomeScreen.tsx`): `openPairing()`: the watch pairing starts directly unless the
+  Magene is switched on, then the menu shows as before.
+- Checked: the staged QML has no syntax error, the Android screen type-checks. NOT seen in
+  a running app yet.
+
 ## 2026-11-23: POIs and the Kailash clock: desktop and Android send the same (watch-protocol/05)
 
 The last differences between what the two apps send, each checked first against Suunto's own
