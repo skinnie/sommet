@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Windows: pairing is left to Windows' pop-up; Forget reaches Windows
+
+André, P5Q Windows: "it stops after putting the pin", and "there is a button to remove paired
+devices but afaik it doesn't remove them from windows".
+
+- **Pairing.** Typing the code in Sommet has never worked on Windows: every time Sommet started
+  the pairing itself (custom pairing), Windows answered FAILED (19) as it got the code
+  (2026-11-21 15:17, 15:29, 15:39; 2026-11-23 18:40, 18:42). The one pairing that worked
+  (2026-11-21 15:45) is the one where Windows' own pop-up started first and Sommet's attempt got
+  OPERATION_ALREADY_IN_PROGRESS. Which came first was a race. `ble_server_win.py` no longer
+  starts a pairing: with the link up it waits up to 90 s for Windows' pop-up to finish
+  (`wait_for_windows_pairing`), and says what to do if it does not. Why Windows refuses the
+  custom pairing is not known.
+- **Forget.** `bt_bonds.py` knows Windows now (WinRT): it lists the Suunto watches Windows is
+  paired with and removes the one chosen, from Windows itself. Before, the list held no
+  watch on Windows and nothing was removed. Anything that is not a Suunto watch is neither
+  listed nor removable. A Magene Sommet remembers is still offered, as before.
+- `tools/test_bt_bonds_windows.py` (WinRT faked). Seen on the P5Q: the real list answers (empty,
+  as Windows holds no watch now). NOT seen: a pairing through the pop-up with this code, and a
+  real removal.
+
 ## 2026-11-23: Ambit1 and Ambit2: no "mark as synced" before POI and GPS data writes (watch-protocol/01)
 
 André: "q3 yes", after the firmware said what the captures and Suunto's own code already

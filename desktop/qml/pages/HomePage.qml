@@ -1815,10 +1815,11 @@ PageFlickable {
                     try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
                     forgetDialog.unsupported = !!(r && r.unsupported)
                     var list = (r && r.ok) ? (r.devices || []) : []
-                    // No bluetoothctl (macOS/Windows): the OS owns the bonds - still offer to drop
-                    // the Magene Sommet remembers.
-                    if (forgetDialog.unsupported && mageneMemory.address.length > 0)
-                        list = [{ address: mageneMemory.address, name: mageneMemory.name, kind: "magene", memoryOnly: true }]
+                    // macOS: the OS owns the bonds. Windows lists its paired Suunto watches
+                    // (bt_bonds.py) but not a Magene. Either way, still offer to drop the Magene
+                    // Sommet remembers.
+                    if ((forgetDialog.unsupported || Qt.platform.os === "windows") && mageneMemory.address.length > 0)
+                        list = list.concat([{ address: mageneMemory.address, name: mageneMemory.name, kind: "magene", memoryOnly: true }])
                     // The Aero 60 isn't bonded (its settings need no pairing), so it's only
                     // remembered by Sommet - forgetting it just drops that.
                     if (brytonBleMemory.address.length > 0)

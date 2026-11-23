@@ -328,6 +328,11 @@ class Agent:
         self._ready.set()
 
 
+PAIR_WAIT_S = 90.0        # time to read the code off the watch and type it in Windows' pop-up
+PAIR_LINK_GRACE_S = 3.0   # a link that stays down this long has ended the pairing
+HINT_PAIR_WINDOWS = ("Windows did not finish pairing. On the watch choose “Pair with app” again, "
+                     "then type the code it shows in the Windows pop-up. No pop-up? Look in "
+                     "the Windows notifications.")
 HINT_ADAPTER_STUCK = ("Windows sees the watch but its Bluetooth adapter refuses to connect. "
                       "Unplug the Bluetooth adapter and plug it back in (or turn Bluetooth off "
                       "and on in Windows), then choose “Sync now” on the watch.")
@@ -617,7 +622,7 @@ class WinHost:
                         break
                     await asyncio.sleep(0.1)
                 print(f"  link before pairing: {dev.connection_status.name}")
-                await self.pair(dev)
+                await self.wait_for_windows_pairing(dev)
             began = time.monotonic()
             res = await dev.get_gatt_services_async(self.CacheMode.UNCACHED)
             took = time.monotonic() - began
@@ -642,58 +647,39 @@ class WinHost:
         finally:
             self.dialing = False
 
-    async def pair(self, dev):
-        """Passkey Entry: the watch shows six digits, the user types them in Sommet (the
-        passkey dialog the Linux daemon already drives through `pending_passkey_device`)."""
-        e = self.enum
-        K = e.DevicePairingKinds
-        custom = dev.device_information.pairing.custom
+    async def wait_for_windows_pairing(self, dev):
+        """Leaves the pairing to Windows' own pop-up and waits for it to finish. The watch asks
+        for pairing by itself once it is linked (a Security Request), and Windows then shows
+        the pop-up where the code is typed.
 
-        def on_request(_c, args):
-            kind = args.pairing_kind
-            print(f"  pairing: Windows asks for {kind.name}")
-            if kind == K.PROVIDE_PIN:
-                deferral = args.get_deferral()
-
-                def wait():
-                    print("  pairing: the watch shows a 6-digit code - type it in Sommet (60 s)")
-                    value = self.agent.wait(self.state.path)
-                    if value is not None:
-                        print("  pairing: code typed, handing it to Windows")
-                        try:
-                            args.accept_with_pin(f"{value:06d}")
-                        except Exception as exc:           # noqa: BLE001
-                            print(f"  pairing: Windows refused the code: {exc!r}")
-                    else:
-                        print("  pairing: no code typed")
-                    deferral.complete()
-
-                threading.Thread(target=wait, daemon=True).start()
-            elif kind == K.DISPLAY_PIN:
-                print(f"  pairing: type {args.pin} on the watch")
-                args.accept()
-            else:
-                print(f"  pairing: {kind.name} - accepted")
-                args.accept()
-
-        token = custom.add_pairing_requested(on_request)
-        try:
-            kinds = K.PROVIDE_PIN | K.CONFIRM_ONLY | K.DISPLAY_PIN | K.CONFIRM_PIN_MATCH
-            r = await custom.pair_with_protection_level_async(
-                kinds, e.DevicePairingProtectionLevel.ENCRYPTION_AND_AUTHENTICATION)
-            print(f"  pairing result: {r.status.name} ({int(r.status)}), level "
-                  f"{r.protection_level_used.name}; link now {dev.connection_status.name}")
-            # OPERATION_ALREADY_IN_PROGRESS: the watch asked to pair as soon as it was linked
-            # and Windows' own pop-up took it (that pop-up is where the code is typed on
-            # Windows, André 2026-11-21); the pairing goes on there.
-            if r.status == e.DevicePairingResultStatus.OPERATION_ALREADY_IN_PROGRESS:
-                print("  pairing: Windows' own pop-up asks for the code the watch shows")
-            elif r.status not in (e.DevicePairingResultStatus.PAIRED,
-                                  e.DevicePairingResultStatus.ALREADY_PAIRED):
-                self.state.pairing_hint = (f"Pairing did not finish ({r.status.name}). Choose "
-                                           "“Pair with app” on the watch again.")
-        finally:
-            custom.remove_pairing_requested(token)
+        Sommet used to start the pairing itself (custom pairing, the code typed in Sommet).
+        That never worked on the P5Q: Windows answered FAILED (19) the moment it got the code,
+        on 2026-11-21 (15:17, 15:29, 15:39) and three times on 2026-11-23 (18:40 to 18:42). The
+        one pairing that did work (2026-11-21 15:45) is the one where Windows' pop-up got there
+        first and Sommet's own attempt was told OPERATION_ALREADY_IN_PROGRESS. Which of the two
+        started first was a race, so Sommet no longer takes part in it."""
+        print("  pairing: type the code the watch shows in the Windows pop-up "
+              f"(waiting up to {PAIR_WAIT_S:.0f} s)")
+        began = time.monotonic()
+        lost_at = None
+        while time.monotonic() - began < PAIR_WAIT_S:
+            info = await self.enum.DeviceInformation.create_from_id_async(dev.device_id)
+            if info.pairing.is_paired:
+                print(f"  pairing: done after {time.monotonic() - began:.0f} s; "
+                      f"link {dev.connection_status.name}")
+                return True
+            if dev.connection_status == self.ConnStatus.CONNECTED:
+                lost_at = None
+            elif lost_at is None:
+                lost_at = time.monotonic()
+            elif time.monotonic() - lost_at > PAIR_LINK_GRACE_S:
+                print("  pairing: the link dropped before Windows finished")
+                self.state.pairing_hint = HINT_PAIR_WINDOWS
+                return False
+            await asyncio.sleep(0.5)
+        print("  pairing: Windows did not finish in time")
+        self.state.pairing_hint = HINT_PAIR_WINDOWS
+        return False
 
     def _on_connection(self, dev, _args):
         if dev.connection_status == self.ConnStatus.DISCONNECTED:
