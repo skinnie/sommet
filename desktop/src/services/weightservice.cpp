@@ -720,6 +720,13 @@ void WeightService::scaleStart(const QString &address)
     emit changed();
 }
 
+void WeightService::scaleWant(int seconds)
+{
+    if (!QSettings().value(QStringLiteral("weight/scale/enabled"), false).toBool())
+        return;                                // no scale, or the user stopped it
+    scalePost(QStringLiteral("want"), {{QStringLiteral("seconds"), seconds}});
+}
+
 void WeightService::scaleStop()
 {
     QSettings().setValue(QStringLiteral("weight/scale/enabled"), false);

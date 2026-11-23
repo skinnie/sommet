@@ -124,5 +124,11 @@ not. You can look yourself with `busctl --system list | grep -i wine`.
 Bluetooth service to report that one scale only. A 3-second scan then makes the service send
 2 signals instead of about 35 (measured on the X230).
 
+**When Sommet listens for the scale (0.2.67, on every desktop system).** While the **Weight**
+page is open, and for 5 minutes after Sommet starts. At other times it does not scan at all.
+So step on the scale with the Weight page showing, or just after starting Sommet. In
+Settings → Connections the scale then reads "On: listens while the Weight page is open", and
+"Listening" while it is scanning. Before 0.2.67 it scanned for as long as Sommet was open.
+
 Sommet checks again by itself: at most once every 15 seconds while a page needs Bluetooth, and
 fresh each time you start a pairing.

@@ -7,6 +7,27 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: The scale is listened for while the Weight page is open (watch-protocol/08, D)
+
+André's choice of three ("1 a"): not for as long as Sommet is open, but when a weigh-in is
+likely. Desktop, every system.
+
+- `ScaleListener.want(seconds)` / `wanted()`: the listener scans only until the time last
+  asked for (10 s to 15 min a request). `start()` asks for 5 minutes, so a scale set up
+  earlier is heard for 5 minutes after Sommet starts. Outside that it makes no scan and
+  holds no connection to BlueZ; its thread waits. `status()` has `scanning` next to
+  `listening`.
+- `POST /api/scale/want {seconds}`; it starts nothing, so a listener the user stopped stays
+  stopped. `WeightService.scaleWant()`; the Weight page sends it every minute while it is
+  shown (150 s each time).
+- Words: Settings → Connections and the scale dialog say "On: listens while the Weight page is
+  open" when it is on and not scanning, "Listening" while it scans.
+- A weigh-in with Sommet open on another page, more than 5 minutes after start, is no longer
+  recorded. That is the price of the choice, and is in the how-to.
+- Android is unchanged: it hears the scale while the app is open, and has no BlueZ.
+- Tests in `scale_service.selftest()` (nothing before `want`, bursts during, connection closed
+  after; the limits). NOT seen yet: a real weigh-in.
+
 ## 2026-11-23: Linux: the scale listener asks BlueZ for the scale only (watch-protocol/08, B)
 
 Measured on the X230 once its Bluetooth answered again (the other session ended the Wine

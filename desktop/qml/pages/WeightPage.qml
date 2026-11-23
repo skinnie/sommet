@@ -26,6 +26,14 @@ Item {
     ScaleSetupDialog { id: scaleDialog }
 
     Component.onCompleted: if (WeightService.connected) WeightService.refresh()
+    // The scale is listened for while this page is open (and for 5 minutes after Sommet
+    // starts), not all the time: each scan makes the computer's Bluetooth announce what it
+    // hears to every program. Asked again every minute, for 2.5 minutes each time.
+    Timer {
+        interval: 60000; repeat: true; triggeredOnStart: true
+        running: root.visible && !!WeightService.scale.address && !!WeightService.scale.listening
+        onTriggered: WeightService.scaleWant(150)
+    }
     Connections {
         target: WeightService
         function onChanged() { chart.requestPaint() }
@@ -64,7 +72,8 @@ Item {
                 StatusChip {
                     anchors.verticalCenter: parent.verticalCenter
                     text: !WeightService.scale.address ? qsTr("Not set up")
-                        : WeightService.scale.listening ? qsTr("Listening") : qsTr("Not listening")
+                        : !WeightService.scale.listening ? qsTr("Not listening")
+                        : WeightService.scale.scanning ? qsTr("Listening") : qsTr("On")
                     tone: WeightService.scale.listening ? "success" : "neutral"
                 }
                 Text {

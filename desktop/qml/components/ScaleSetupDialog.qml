@@ -67,7 +67,9 @@ ThemedDialog {
                 }
                 Text {
                     color: Theme.text; font.pixelSize: Theme.fontSizeBody
-                    text: root.sc.listening ? qsTr("Listening") : qsTr("Not listening")
+                    text: !root.sc.listening ? qsTr("Not listening")
+                        : root.sc.scanning ? qsTr("Listening")
+                        : qsTr("On: listens while the Weight page is open")
                 }
             }
             Text {

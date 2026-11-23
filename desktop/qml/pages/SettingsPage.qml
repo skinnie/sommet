@@ -374,7 +374,9 @@ PageFlickable {
                     name: qsTr("Bluetooth scale")
                     connected: !!WeightService.scale.listening
                     status: !WeightService.scale.address ? qsTr("Not set up")
-                        : connected ? qsTr("Listening") : qsTr("Not listening")
+                        : !connected ? qsTr("Not listening")
+                        : WeightService.scale.scanning ? qsTr("Listening")
+                        : qsTr("On: listens while the Weight page is open")
                     actionText: WeightService.scale.address ? qsTr("Manage") : qsTr("Set up")
                     onActivated: scaleSetupDialog.open()
                 }

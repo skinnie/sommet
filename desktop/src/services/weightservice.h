@@ -93,6 +93,9 @@ public:
     // Start listening (remember `address` as THE scale when given). Stop / forget it again.
     Q_INVOKABLE void scaleStart(const QString &address = QString());
     Q_INVOKABLE void scaleStop();
+    // Ask the backend to scan for the scale for the next `seconds`. The Weight page calls it
+    // while it is open; otherwise the listener scans only for 5 minutes after Sommet starts.
+    Q_INVOKABLE void scaleWant(int seconds = 150);
     Q_INVOKABLE void scaleForget();
     // Height / sex typed by hand (used when intervals.icu is not connected or has none).
     Q_INVOKABLE void setBodyProfile(double heightCm, const QString &sex);

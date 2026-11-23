@@ -125,6 +125,8 @@ class ScaleListener:
     HOLD_S = 20.0        # keep scanning this long after the last packet from the scale
     BLUEZ_REPLY_S = 5.0  # longest wait for BlueZ to answer a scan start or stop
     BACKOFF_MAX_S = 300.0  # longest wait between bursts while they keep going wrong
+    START_WINDOW_S = 300.0  # it scans this long after it starts, then only when asked (want)
+    WANT_MAX_S = 900.0
 
     def __init__(self, data_dir=None):
         self.data_dir = data_dir
@@ -134,6 +136,7 @@ class ScaleListener:
         self.error = None
         self.last_seen = None        # time of the last packet from our scale
         self._scanner_filter = None  # what the current scanner asked BlueZ to report
+        self._wanted_until = 0.0     # monotonic time until which it scans (want())
         self.last_weighin = None     # the last stored reading
 
     # -- state -------------------------------------------------------------------------
@@ -148,10 +151,27 @@ class ScaleListener:
     def listening(self):
         return self._thread is not None and self._thread.is_alive()
 
+    def want(self, seconds=None):
+        """Scan for the next `seconds`. André's choice, 2026-11-23: the scale is listened for
+        while the Weight page is open (the page asks again every minute) and for
+        START_WINDOW_S after Sommet starts, not for as long as Sommet is open. Every scan
+        makes the computer's Bluetooth announce what it hears to every program on the system
+        (watch-protocol/08), so it scans when a weigh-in is likely and is silent otherwise."""
+        try:
+            seconds = float(seconds) if seconds else self.START_WINDOW_S
+        except (TypeError, ValueError):
+            seconds = self.START_WINDOW_S
+        seconds = max(10.0, min(seconds, self.WANT_MAX_S))
+        self._wanted_until = max(self._wanted_until, time.monotonic() + seconds)
+
+    def wanted(self):
+        return time.monotonic() < self._wanted_until
+
     def status(self):
         cfg = load_config(self.data_dir)
         w = self.last_weighin or (load_weighins(self.data_dir) or [None])[-1]
         return {"ok": True, "available": self.available(), "listening": self.listening(),
+                "scanning": self.listening() and self.wanted(),
                 "address": cfg.get("address"), "lastSeen": self.last_seen,
                 "lastWeighIn": w, "error": self.error}
 
@@ -164,6 +184,7 @@ class ScaleListener:
                 cfg = load_config(self.data_dir)
                 cfg["address"] = address.upper()
                 save_config(cfg, self.data_dir)
+            self.want(self.START_WINDOW_S)
             if self.listening():
                 return
             if not self.available():
@@ -226,6 +247,15 @@ class ScaleListener:
         failures = 0
         try:
             while not self._stop.is_set():
+                if not self.wanted():
+                    # Nobody is about to weigh in: no scan, and no connection either (an
+                    # open one still receives every signal BlueZ sends).
+                    if scanner is not None:
+                        scanner = None
+                        await close_bluez_connection()
+                    failures = 0
+                    await self._pause(1.0)
+                    continue
                 if scanner is not None and self.scan_filter() != self._scanner_filter:
                     scanner = None           # the scale was just heard, or changed: new filter
                 if scanner is None:
@@ -352,6 +382,7 @@ def find_scales(seconds=15):
 def _selftest_one_connection():
     """The listener keeps one connection to BlueZ across bursts (2026-11-23), drops it only
     after a burst BlueZ did not answer, and then waits longer each time."""
+    global close_bluez_connection
     L = ScaleListener()
     assert [L.off_seconds(n) for n in (0, 1, 2, 3)] == [7.0, 14.0, 28.0, 56.0]
     assert L.off_seconds(6) == L.off_seconds(60) == 300.0
@@ -387,6 +418,7 @@ def _selftest_one_connection():
         made = []
         L = ScaleListener()
         L.SCAN_ON_S = 0.0
+        L.want(60)
 
         def new_scanner(_settle):
             made.append(Scanner(log, bursts, fail_stop=len(made) < fail_first))
@@ -414,6 +446,7 @@ def _selftest_one_connection():
     assert waits == [7.0] * 4, waits
     L = ScaleListener()
     L.SCAN_ON_S = 0.0
+    L.want(60)
     wanted = [None]                             # what scan_filter() answers: nothing yet
     made, pauses = [], []
     L.scan_filter = lambda: wanted[0]
@@ -433,6 +466,38 @@ def _selftest_one_connection():
     run_listen(L)
     # four bursts: the filter changed after the second, so one new scanner, and only one
     assert made == [None, {"Pattern": "C0:FF:EE:00:00:01"}], made
+    # It scans only while wanted: nothing before want(), bursts during, and when the time is
+    # up the connection is closed and no scanner is made until it is wanted again.
+    L = ScaleListener()
+    L.SCAN_ON_S = 0.0
+    log, ticks = [], []
+    assert not L.wanted() and L.status()["scanning"] is False
+    L.new_scanner = lambda _s: log.append("scanner") or Scanner(log, [])
+
+    async def pause(_seconds):
+        ticks.append(1)
+        if len(ticks) == 2:
+            L.want(60)                          # the Weight page opens
+        elif len(ticks) == 4:
+            L._wanted_until = 0.0               # ... and its time runs out
+        elif len(ticks) >= 6:
+            L._stop.set()
+    L._pause = pause
+
+    async def closed():
+        log.append("close")
+    saved = close_bluez_connection
+    close_bluez_connection = closed
+    try:
+        asyncio.run(L._listen(None))
+    finally:
+        close_bluez_connection = saved
+    assert log == ["scanner", "start", "stop", "start", "stop", "close", "close"], log
+    L2 = ScaleListener()
+    L2.want(5)
+    assert L2.wanted() and L2._wanted_until - time.monotonic() > 9      # never under 10 s
+    L2.want(10 ** 6)
+    assert L2._wanted_until - time.monotonic() <= L2.WANT_MAX_S + 1     # nor over 15 min
     log, waits = run(fail_first=2, stop_after=4)
     assert log == ["scanner", "start", "close", "scanner", "start", "close",
                    "scanner", "start", "stop", "start", "stop", "close"], log

@@ -1930,6 +1930,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_scale_control("start", body)
         elif self.path == "/api/scale/stop":
             self._handle_scale_control("stop", body)
+        elif self.path == "/api/scale/want":
+            self._handle_scale_control("want", body)
         elif self.path == "/api/scale/forget":
             self._handle_scale_control("forget", body)
         elif self.path == "/api/scale/find":
@@ -6669,10 +6671,14 @@ class Handler(BaseHTTPRequestHandler):
                               "series": scale_service.series(num("height"), sex, num("offset") or 0.0)})
 
     def _handle_scale_control(self, what, body):
-        """POST /api/scale/{start,stop,forget}. start takes an optional {address} to pin the scale."""
+        """POST /api/scale/{start,stop,want,forget}. start takes an optional {address} to pin the
+        scale. want {seconds?}: scan for that long from now; the Weight page sends it while it
+        is open. It starts nothing: a listener the user stopped stays stopped."""
         listener = scale_listener()
         if what == "start":
             listener.start((body or {}).get("address"))
+        elif what == "want":
+            listener.want((body or {}).get("seconds"))
         elif what == "stop":
             listener.stop()
         else:
