@@ -150,15 +150,18 @@ int main(int argc, char *argv[])
 
     // Speed test (SommetPerf.bat sets SOMMET_STALL_LOG=1): logs every time the window's thread
     // was busy for more than 200 ms, i.e. the window could not react. Frame timings alone can't
-    // tell this: an idle window draws no frames, so idle and frozen look the same there.
+    // tell this: an idle window draws no frames, so idle and frozen look the same there. A value
+    // of 20 or more is the limit in ms instead (a faster PC needs a finer one to compare two builds).
     QTimer stallProbe;
     QElapsedTimer stallClock;
     if (qEnvironmentVariableIsSet("SOMMET_STALL_LOG")) {
+        const int asked = qEnvironmentVariableIntValue("SOMMET_STALL_LOG");
+        const qint64 limit = asked >= 20 ? asked : 200;
         stallClock.start();
         stallProbe.setInterval(50);
-        QObject::connect(&stallProbe, &QTimer::timeout, [&stallClock] {
+        QObject::connect(&stallProbe, &QTimer::timeout, [&stallClock, limit] {
             const qint64 late = stallClock.restart() - 50;
-            if (late > 200)
+            if (late > limit)
                 qWarning().noquote() << QStringLiteral("[STALL] %1 ms").arg(late);
         });
         stallProbe.start();

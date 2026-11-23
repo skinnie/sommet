@@ -514,26 +514,36 @@ Item {
         panY = latToWorldY(lat) - latToWorldY(_centerLat)
     }
 
-    Repeater {
-        model: {
-            // Nothing is fetched while the map is hidden. Activity maps stay hidden until their
-            // track has loaded, and before that sit at 0,0 - every card and the detail view
-            // first downloaded open-ocean tiles at 0,0 (desktop audit 2026-10-29).
-            if (!root.visible || root.width <= 0 || root.height <= 0) return []
-            const minTx = Math.floor(root.originX / root.tileSize)
-            const maxTx = Math.floor((root.originX + root.width) / root.tileSize)
-            const minTy = Math.floor(root.originY / root.tileSize)
-            const maxTy = Math.floor((root.originY + root.height) / root.tileSize)
-            const tiles = []
-            for (let tx = minTx; tx <= maxTx; tx++) {
-                for (let ty = minTy; ty <= maxTy; ty++) {
-                    if (tx >= 0 && ty >= 0 && tx < root.tilesPerSide && ty < root.tilesPerSide) {
-                        tiles.push({ x: tx, y: ty })
-                    }
-                }
+    // Which tiles are on screen, as text. The tile list below is built from this and not from
+    // originX: it used to be rebuilt, destroying and recreating every tile, each time the map
+    // moved or changed width by one pixel, even with the same tiles on screen. That was most of
+    // the 0.7 s freeze per menu click on Activities on the P5Q (a map on each card, 2026-11-23).
+    readonly property string _tileRange: {
+        // Nothing is fetched while the map is hidden. Activity maps stay hidden until their
+        // track has loaded, and before that sit at 0,0 - every card and the detail view
+        // first downloaded open-ocean tiles at 0,0 (desktop audit 2026-10-29).
+        if (!root.visible || root.width <= 0 || root.height <= 0) return ""
+        return [root.tilesPerSide,
+                Math.floor(root.originX / root.tileSize),
+                Math.floor((root.originX + root.width) / root.tileSize),
+                Math.floor(root.originY / root.tileSize),
+                Math.floor((root.originY + root.height) / root.tileSize)].join(",")
+    }
+    readonly property var _tiles: {
+        if (root._tileRange === "") return []
+        const r = root._tileRange.split(",").map(Number)
+        const tiles = []
+        for (let tx = r[1]; tx <= r[2]; tx++) {
+            for (let ty = r[3]; ty <= r[4]; ty++) {
+                if (tx >= 0 && ty >= 0 && tx < r[0] && ty < r[0])
+                    tiles.push({ x: tx, y: ty })
             }
-            return tiles
         }
+        return tiles
+    }
+
+    Repeater {
+        model: root._tiles
         delegate: Image {
             x: modelData.x * root.tileSize - root.originX
             y: modelData.y * root.tileSize - root.originY

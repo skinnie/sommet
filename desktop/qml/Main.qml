@@ -78,6 +78,17 @@ ApplicationWindow {
     // same "one hamburger, hide the sidebar" idea the Android app uses (as an overlay drawer on
     // phones, a docked collapse on tablets). Expanded by default - there's room on the desktop.
     property bool navExpanded: true
+    // The width the page is laid out for. It follows the menu only once the menu has finished
+    // moving: laid out on every step of the slide, a page of map cards froze the window for
+    // about 0.7 s per click on the P5Q, 0 on Home (SommetMenuPerf, André 2026-11-23: "on
+    // activities is slow"). Clicking again before the slide ends costs no layout at all.
+    property int pageMenuWidth: 220
+    onNavExpandedChanged: pageWidthLater.restart()
+    Timer {
+        id: pageWidthLater
+        interval: 220
+        onTriggered: window.pageMenuWidth = window.navExpanded ? 220 : 0
+    }
 
     // UI zoom (André, 2026-11-07, X230 720p screen: wanted a Chrome-style "Ctrl+scroll to zoom
     // out" so more fits without scrolling). Theme.uiScale re-lays-out the whole UI crisply; these
@@ -407,7 +418,7 @@ ApplicationWindow {
                            : (suuntoLinkBanner.visible ? suuntoLinkBanner.bottom : parent.top)
                 anchors.topMargin: (syncBanner.visible || suuntoLinkBanner.visible) ? Theme.spacingSmall : 0
                 anchors.left: parent.left
-                anchors.right: parent.right
+                width: window.width - window.pageMenuWidth
                 anchors.bottom: parent.bottom
 
                 Loader {
