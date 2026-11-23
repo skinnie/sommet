@@ -830,12 +830,51 @@ class AmbitBleModule(private val reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun disconnectBle(promise: Promise) {
+        endLink()
+        promise.resolve(true)
+    }
+
+    private fun endLink() {
         autoReconnectAddress = null
         unregisterBondReceiver()
         clearSubscribeTimeout()
         closeServer()
         nativeInitStarted = false
-        promise.resolve(true)
+    }
+
+    // Home's "Forget Bluetooth device" (André, 2026-11-23; the desktop has had one since
+    // 2026-09-26). Only a paired Suunto watch can be removed here: the same name rule as
+    // listBondedWatches, so a headset or a mouse is never touched. removeBond is not public
+    // API, so it goes through reflection; if this Android refuses it the promise rejects with
+    // NOT_AVAILABLE and Home offers Android's own Bluetooth settings.
+    @ReactMethod
+    fun forgetBondedWatch(address: String, promise: Promise) {
+        val adapter = (reactContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        if (adapter == null) { promise.reject("NOT_AVAILABLE", "Bluetooth is off or unavailable"); return }
+        try {
+            val device = adapter.bondedDevices?.firstOrNull {
+                it.address.equals(address, ignoreCase = true) && isWatchName(it.name ?: "")
+            }
+            if (device == null) { promise.reject("NOT_PAIRED", "That watch is not paired here"); return }
+            if (connectedDevice?.address.equals(address, ignoreCase = true)
+                || autoReconnectAddress.equals(address, ignoreCase = true)) endLink()
+            val asked = device.javaClass.getMethod("removeBond").invoke(device) as? Boolean ?: false
+            if (!asked) { promise.reject("NOT_AVAILABLE", "Android did not remove the pairing"); return }
+            waitForBondGone(device, promise, 25)
+        } catch (e: ReflectiveOperationException) {
+            promise.reject("NOT_AVAILABLE", "Android does not let an app remove a pairing")
+        } catch (e: SecurityException) {
+            promise.reject("NOT_AVAILABLE", "Android does not let this app remove a pairing")
+        }
+    }
+
+    private fun waitForBondGone(device: BluetoothDevice, promise: Promise, triesLeft: Int) {
+        val gone = try { device.bondState == BluetoothDevice.BOND_NONE } catch (_: SecurityException) { false }
+        when {
+            gone -> promise.resolve(true)
+            triesLeft <= 0 -> promise.reject("NOT_AVAILABLE", "Android did not remove the pairing")
+            else -> mainHandler.postDelayed({ waitForBondGone(device, promise, triesLeft - 1) }, 200)
+        }
     }
 
     private fun closeServer() {

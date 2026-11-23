@@ -27,7 +27,7 @@ import { runIntervalsAutoSync } from '../services/IntervalsImport';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   scanAndConnect as bleScanAndConnect, scanAndConnectTo as bleScanAndConnectTo,
-  listBondedWatches, BondedWatch, onBleDisconnected, onBleSyncRequested,
+  listBondedWatches, forgetBondedWatch, BondedWatch, onBleDisconnected, onBleSyncRequested,
   armAutoReconnect, onBleReconnected,
 } from '../native/AmbitBleModule';
 import * as Garmin from '../native/GarminModule';
@@ -325,6 +325,43 @@ export default function HomeScreen() {
   const openPairing = () => {
     if (isMageneAvailable() && expFeatures.magene) setPairMenuOpen(true);
     else handleBleConnectRef.current();
+  };
+
+  // "Forget Bluetooth device" (desktop parity, André 2026-11-23). One paired watch: straight to
+  // the question; several: a list first.
+  const [forgetMenuOpen, setForgetMenuOpen] = useState(false);
+  const forgetWatch = async (w: BondedWatch) => {
+    const name = watchPillName(w.name);
+    try {
+      await forgetBondedWatch(w.address);
+      if (connectedBleAddress === w.address) {
+        setBleConnected(false);
+        bleConnectedRef.current = false;
+        autoReconnectRef.current = false;
+        setBleTransportActive(false);
+        setConnectedBleAddress(null);
+        setConnectError(t.homeForgetWatchDone(name));
+        setPhase('connect-error');
+      } else {
+        Alert.alert(t.homeForgetWatchBtn, t.homeForgetWatchDone(name));
+      }
+    } catch (e: any) {
+      if (e?.code === 'NOT_PAIRED') Alert.alert(t.homeForgetWatchBtn, e.message);
+      else Alert.alert(t.homeForgetWatchBtn, t.homeForgetWatchFailed, [
+        { text: t.cancel, style: 'cancel' },
+        { text: t.homeForgetWatchSettings, onPress: () => { Linking.sendIntent('android.settings.BLUETOOTH_SETTINGS').catch(() => {}); } },
+      ]);
+    }
+    listBondedWatches().then(setBondedWatches).catch(() => {});
+  };
+  const askForgetWatch = (w: BondedWatch) => Alert.alert(
+    t.homeForgetWatchBtn, t.homeForgetWatchConfirm(watchPillName(w.name)),
+    [{ text: t.cancel, style: 'cancel' },
+     { text: t.homeForgetWatchPill, style: 'destructive', onPress: () => { forgetWatch(w); } }],
+  );
+  const openForget = () => {
+    if (bondedWatches.length === 1) askForgetWatch(bondedWatches[0]);
+    else setForgetMenuOpen(true);
   };
 
   // Bryton rides over USB (desktop parity: its card has Sync rides like every bike computer).
@@ -1394,6 +1431,9 @@ export default function HomeScreen() {
                 ))}
                 <Button label={t.homeBleConnectBtn} busy={mageneBusy === 'scan'} onPress={openPairing}
                   disabled={mageneBusy === 'scan'} variant="text" grow={false} />
+                {bondedWatches.length > 0 && (
+                  <Button label={t.homeForgetWatchBtn} onPress={openForget} variant="text" grow={false} />
+                )}
               </View>
             )}
           </Card>
@@ -1496,6 +1536,12 @@ export default function HomeScreen() {
             visible: isMageneAvailable() && expFeatures.magene, disabled: !!mageneBusy },
         ]}
       />
+      <ActionMenu
+        visible={forgetMenuOpen}
+        title={t.homeForgetWatchBtn}
+        onClose={() => setForgetMenuOpen(false)}
+        items={bondedWatches.map(w => ({ label: watchPillName(w.name), onPress: () => askForgetWatch(w) }))}
+      />
       {mageneOn && (
         <Card style={[roomy ? styles.deviceCardRoomy : styles.deviceCardCol, styles.deviceCardInner]}>
           <Icon name="magene" size={36} color={theme.text} />
@@ -1570,6 +1616,18 @@ export default function HomeScreen() {
                 {t.homePairWatchPill}
               </Text>
             </TouchableOpacity>
+            {bondedWatches.length > 0 && (
+              <TouchableOpacity
+                key="__forget"
+                onPress={openForget}
+                activeOpacity={0.75}
+                style={[styles.watchChip, styles.watchChipAction, { borderColor: theme.mutedText }]}
+              >
+                <Text style={[styles.watchChipText, { color: theme.mutedText }]}>
+                  {t.homeForgetWatchPill}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
           {!!(ambitInfo.fwVersion || ambitInfo.hwVersion) && (
             <Text style={[styles.deviceSub, v3MutedStyle]}>

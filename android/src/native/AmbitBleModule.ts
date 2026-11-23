@@ -56,6 +56,15 @@ export function listBondedWatches(): Promise<BondedWatch[]> {
   return NativeAmbitBle.listBondedWatches();
 }
 
+/** Removes one paired Suunto watch from this phone or tablet (Home's "Forget Bluetooth device").
+ * Rejects with code NOT_AVAILABLE when Android refuses: its own Bluetooth settings can do it. */
+export function forgetBondedWatch(address: string): Promise<boolean> {
+  if (typeof NativeAmbitBle.forgetBondedWatch !== 'function') {
+    return Promise.reject(Object.assign(new Error('not in this build'), { code: 'NOT_AVAILABLE' }));
+  }
+  return NativeAmbitBle.forgetBondedWatch(address);
+}
+
 /** Like scanAndConnect(), but pins the connection to the one bonded watch at `address`
  * (from listBondedWatches()) — for when more than one paired watch might be in range. Same
  * "trigger Sync now on the watch first" requirement as scanAndConnect(). Falls back to the

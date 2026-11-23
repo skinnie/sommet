@@ -7,6 +7,21 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Android: "Forget Bluetooth device"
+
+The desktop has had it since 2026-09-26; on Android a paired watch could only be removed in
+Android's own settings (André: "q2 yes").
+
+- Home: a **Forget Bluetooth device** button next to Pair while no watch is linked, a **Forget**
+  chip next to Pair while one is. One paired watch goes straight to the question, several show
+  a list first. The activities stay.
+- `AmbitBleModule.forgetBondedWatch(address)`: only a paired watch by `listBondedWatches`' name
+  rule, so a headset or mouse is never touched. It ends the link or standing reconnect to that
+  watch first, then calls `removeBond` (not public API, through reflection) and waits for
+  Android to confirm. If Android refuses, Home says so and offers its Bluetooth settings.
+- Type-checked, and the package builds. NOT tried on the tablet: removing a pairing is what
+  the button does, so the first real press is André's.
+
 ## 2026-11-23: Windows: pairing is left to Windows' pop-up; Forget reaches Windows
 
 André, P5Q Windows: "it stops after putting the pin", and "there is a button to remove paired

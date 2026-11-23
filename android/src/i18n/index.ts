@@ -116,6 +116,12 @@ const fr = {
   watchBleClosedError: 'La montre a fermé la liaison Bluetooth. Sur la montre, choisissez « Sync now », puis touchez « Connecter … en Bluetooth » dans Accueil, et réessayez.',
   sportModesBackupFailed: 'Impossible d’enregistrer une copie des modes sport de la montre, rien n’a été écrit',
   homePairWatchPill: 'Associer',
+  homeForgetWatchBtn: 'Oublier un appareil Bluetooth',
+  homeForgetWatchPill: 'Oublier',
+  homeForgetWatchConfirm: (name: string) => `Oublier ${name} ? Vos activités restent. Pour le réutiliser en Bluetooth, associez-le depuis le menu de la montre (« Pair with app »). Sur la montre, faites aussi Bluetooth > Unpair > Forget.`,
+  homeForgetWatchDone: (name: string) => `${name} est oubliée sur cet appareil.`,
+  homeForgetWatchFailed: 'Android n’a pas laissé Sommet retirer cette association. Vous pouvez le faire dans ses réglages Bluetooth.',
+  homeForgetWatchSettings: 'Ouvrir les réglages Bluetooth',
   homeBleReadyTitle: 'Prêt à associer',
   homeBleReadyMsg:
     "Sur la montre : menu « Pair Mobile App » (première association) ou « Sync now » " +
@@ -1072,6 +1078,12 @@ const en: typeof fr = {
   watchBleClosedError: 'The watch closed the Bluetooth link. Choose "Sync now" on the watch, tap "Connect … via Bluetooth" on Home, then try again.',
   sportModesBackupFailed: 'Could not save a copy of the watch’s sport modes, so nothing was written',
   homePairWatchPill: 'Pair',
+  homeForgetWatchBtn: 'Forget Bluetooth device',
+  homeForgetWatchPill: 'Forget',
+  homeForgetWatchConfirm: (name: string) => `Forget ${name}? Your activities stay. To use it over Bluetooth again, pair it from the watch's own menu (“Pair with app”). On the watch, also do Bluetooth > Unpair > Forget.`,
+  homeForgetWatchDone: (name: string) => `${name} is forgotten on this device.`,
+  homeForgetWatchFailed: 'Android did not let Sommet remove this pairing. You can do it in its Bluetooth settings.',
+  homeForgetWatchSettings: 'Open Bluetooth settings',
   homeBleReadyTitle: 'Ready to pair',
   homeBleReadyMsg:
     "On the watch: menu \"Pair Mobile App\" (first pairing) or \"Sync now\" (already " +
