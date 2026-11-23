@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Image, Text, StyleSheet, LayoutChangeEvent, PanResponder, GestureResponderEvent } from 'react-native';
+import { View, Image, Text, StyleSheet, LayoutChangeEvent, PanResponder, GestureResponderEvent, TouchableOpacity } from 'react-native';
 import Svg, { Circle, Polyline } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { useV3Theme } from '../theme/v3';
@@ -34,7 +34,20 @@ const DOUBLE_TAP_MS = 300;
 export function TrackPreview({
   points, height = 100, markerOnly = false, variableHeight = false, multiMarker = false,
   interactive = true, onDoubleTap, fallbackCenter, selectedIndex, onMarkerTap, focusOn,
+  draft, onDraftMove, draftGlyph, onlyPointZoom = 6, controls = false, centreRef,
 }: {
+  // The POIs screen (André, 2026-11-23: one map to look at the POIs and to add one):
+  // `draft` is the new POI's orange pin, on top of the others; a finger on it drags it at once
+  // and `onDraftMove` gets the place. `draftGlyph` is its type's icon.
+  draft?: { lat: number; lon: number } | null;
+  onDraftMove?: (lat: number, lon: number) => void;
+  draftGlyph?: string;
+  // multiMarker with one point: how close to show it (6 = the country, for places visited).
+  onlyPointZoom?: number;
+  // The + / - / All buttons of the desktop's map.
+  controls?: boolean;
+  // Filled with a function giving the place at the middle of the map as it is now.
+  centreRef?: React.MutableRefObject<(() => { lat: number; lon: number }) | null>;
   // multiMarker only (the POIs screen's one map, André 2026-11-22): the marker at
   // `selectedIndex` (an index in `points`) is drawn filled and on top; a tap on a marker says
   // which one; `focusOn` moves the view to a point (a POI picked in the list) and, set back to
@@ -83,7 +96,11 @@ export function TrackPreview({
   const layoutRef = useRef<ReturnType<typeof layoutView> | null>(null);
   const g = useRef({ armed: false, locked: false, timer: null as ReturnType<typeof setTimeout> | null,
                      x0: 0, y0: 0, t0: 0, moved: false, lastX: 0, lastY: 0,
-                     pinchD0: 0, pinchZ0: 0, lastTapT: 0, lastTapX: 0, lastTapY: 0 }).current;
+                     pinchD0: 0, pinchZ0: 0, lastTapT: 0, lastTapX: 0, lastTapY: 0, onDraft: false, onCtrl: false }).current;
+  const draftMoveRef = useRef(onDraftMove);
+  draftMoveRef.current = onDraftMove;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const pointsKey = points.map(p => `${p.lat},${p.lon}`).join(';');
   useEffect(() => { viewRef.current = null; setView(null); }, [pointsKey]);   // new data: fit again
   const setV = (v: PanZoomView) => { viewRef.current = v; setView(v); };
@@ -99,9 +116,14 @@ export function TrackPreview({
       hadFocus.current = false; viewRef.current = null; setView(null);   // every marker again
     }
   }, [focusKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const zoomStep = (dz: number) => {
+    const v = viewRef.current ?? fittedRef.current;
+    if (v) setV(zoomView(v, v.zf, 2 ** dz));
+  };
+  const fitAgain = () => { viewRef.current = null; setView(null); hadFocus.current = false; };
   const release = () => {
     if (g.timer) { clearTimeout(g.timer); g.timer = null; }
-    g.armed = false; g.pinchD0 = 0;
+    g.armed = false; g.pinchD0 = 0; g.onDraft = false;
     if (g.locked) { g.locked = false; scrollLock.unlock(); }
     setGrabbed(false);
   };
@@ -123,6 +145,12 @@ export function TrackPreview({
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (_e, gs) => { g.lastX = gs.moveX; g.lastY = gs.moveY; },
     onPanResponderMove: (e, gs) => {
+      if (g.onDraft) {
+        // The pin's foot is under the finger's point; the map stays where it is.
+        const at = layoutRef.current?.latLonAt(e.nativeEvent.locationX, e.nativeEvent.locationY);
+        if (at) draftMoveRef.current?.(at.lat, at.lon);
+        return;
+      }
       const v = viewRef.current; if (!v) return;
       const d = spread(e);
       if (d > 0) {
@@ -139,13 +167,22 @@ export function TrackPreview({
   }), []);   // eslint-disable-line react-hooks/exhaustive-deps
   const touchHandlers = interactive ? {
     onTouchStart: (e: GestureResponderEvent) => {
+      if (g.onCtrl) return;                          // a finger on + / - / All is not on the map
       const ts = e.nativeEvent.touches;
-      if (ts.length >= 2) { grab(); return; }
+      if (ts.length >= 2) { g.onDraft = false; grab(); return; }
       g.x0 = e.nativeEvent.pageX; g.y0 = e.nativeEvent.pageY; g.t0 = Date.now(); g.moved = false;
+      const dr = draftRef.current, lay = layoutRef.current;
+      if (dr && lay) {
+        const at = lay.project(dr.lat, dr.lon);
+        if (Math.hypot(at.x - e.nativeEvent.locationX, at.y - e.nativeEvent.locationY) < 34) {
+          g.onDraft = true; grab(); return;          // no hold needed: the pin is what is dragged
+        }
+      }
       if (g.timer) clearTimeout(g.timer);
       g.timer = setTimeout(() => { g.timer = null; if (!g.moved) grab(); }, HOLD_MS);
     },
     onTouchMove: (e: GestureResponderEvent) => {
+      if (g.onCtrl) return;
       if (Math.hypot(e.nativeEvent.pageX - g.x0, e.nativeEvent.pageY - g.y0) > SLOP) {
         g.moved = true;
         if (!g.armed && g.timer) { clearTimeout(g.timer); g.timer = null; }   // a swipe: the page scrolls
@@ -153,6 +190,7 @@ export function TrackPreview({
     },
     onTouchEnd: (e: GestureResponderEvent) => {
       if (e.nativeEvent.touches.length > 0) return;
+      if (g.onCtrl) { g.onCtrl = false; return; }
       const wasArmed = g.armed;
       const quickTap = !g.moved && Date.now() - g.t0 < HOLD_MS;
       release();
@@ -174,7 +212,7 @@ export function TrackPreview({
         if (at) onDoubleTap(at.lat, at.lon);
       } else { g.lastTapT = now; g.lastTapX = x; g.lastTapY = y; }
     },
-    onTouchCancel: () => release(),
+    onTouchCancel: () => { g.onCtrl = false; release(); },
   } : {};
 
   // Real bug, found live (2026-08-10) - some real synced activities carry a garbage GPS fix
@@ -231,17 +269,19 @@ export function TrackPreview({
     : hasSinglePoint
     ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, 15)
     : hasMultiMarker && validPoints.length === 1
-    ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, 6)
+    ? centeredPointMosaic(validPoints[0].lat, validPoints[0].lon, boxWidth, height, onlyPointZoom)
     : fitBoundsMosaic(validPoints, boxWidth, variableHeight ? {} : { targetHeight: height });
 
   fittedRef.current = viewFromMosaic(mosaic);
   // Once grabbed, the owner's view; before that, the fitted picture (the same view, to the pixel).
   const lay = layoutView(view ?? fittedRef.current, mosaic.contentWidth, mosaic.contentHeight);
   layoutRef.current = lay;
+  if (centreRef) centreRef.current = () => lay.latLonAt(mosaic.contentWidth / 2, mosaic.contentHeight / 2);
   const drawn = view ? { z: lay.z, tiles: lay.tiles, project: lay.project } : mosaic;
   const projected = validPoints.map(p => drawn.project(p.lat, p.lon));
   markersRef.current = multiMarker ? projected.map((p, i) => ({ x: p.x, y: p.y, index: validIndex[i] })) : [];
   const selectedAt = selectedIndex == null ? -1 : validIndex.indexOf(selectedIndex);
+  const draftAt = draft && isValid(draft) ? drawn.project(draft.lat, draft.lon) : null;
 
   return (
     <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}
@@ -302,15 +342,45 @@ export function TrackPreview({
             />
           </>
         )}
+        {draftAt && (
+          <>
+            <Circle cx={draftAt.x} cy={draftAt.y} r={22} fill={DRAFT_COLOR} opacity={0.2} />
+            <Circle cx={draftAt.x} cy={draftAt.y} r={15} fill={DRAFT_COLOR} stroke="#ffffff" strokeWidth={2.5} />
+          </>
+        )}
       </Svg>
+      {draftAt && !!draftGlyph && (
+        <Text style={[styles.draftGlyph, { left: draftAt.x - 15, top: draftAt.y - 11 }]}>{draftGlyph}</Text>
+      )}
       {grabbed && <View style={[StyleSheet.absoluteFill, styles.grabbed]} />}
       </View>
+      {controls && (
+        <View style={styles.controls} onTouchStart={() => { g.onCtrl = true; }}>
+          <TouchableOpacity style={styles.ctrl} onPress={() => zoomStep(1)} accessibilityLabel="Zoom in">
+            <Text style={styles.ctrlText}>+</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.ctrl} onPress={() => zoomStep(-1)} accessibilityLabel="Zoom out">
+            <Text style={styles.ctrlText}>−</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.ctrl} onPress={fitAgain} accessibilityLabel="Show all POIs">
+            <Text style={styles.ctrlAll}>All</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
+const DRAFT_COLOR = '#C4622D';    // the new POI's pin, as on the desktop
+
 const styles = StyleSheet.create({
   box: { width: '100%', borderRadius: 12, overflow: 'hidden' },
+  controls: { position: 'absolute', right: 8, top: 8, gap: 4 },
+  ctrl: { width: 34, height: 34, borderRadius: 4, backgroundColor: '#FFFFFFCC', alignItems: 'center', justifyContent: 'center' },
+  ctrlText: { fontSize: 20, fontWeight: '700', color: '#333333', lineHeight: 24 },
+  ctrlAll: { fontSize: 11, fontWeight: '700', color: '#333333' },
+  draftGlyph: { position: 'absolute', width: 30, height: 22, textAlign: 'center', fontFamily: 'MaterialSymbolsRounded',
+                fontSize: 18, lineHeight: 22, color: '#ffffff' },
   noDataBox: { alignItems: 'center', justifyContent: 'center', gap: 6 },
   noDataText: { fontSize: 11, fontWeight: '600' },
   grabbed: { borderWidth: 2, borderColor: TRACK_COLOR, borderRadius: 12 },

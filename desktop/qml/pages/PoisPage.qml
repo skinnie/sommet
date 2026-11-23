@@ -3,10 +3,13 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import SommetUi
 
-// Step 9. On-watch POIs shown as a real per-POI list with a thumbnail map and Export, since
-// 2026-08-08 (see the "On the watch" Card below for the fuller story). Add is a REAL watch
-// write since 2026-08-11 - write_nav.py's `addpoi`, the Android app's hardware-confirmed
-// algorithm ported back into this repo (see backend/server.py's _handle_poi_add).
+// One map and one list (André, 2026-11-23: "integrate the idea of the map + list but we take the
+// map where we already have to add poi ... make it dragable and zoomable like all others"). The
+// map shows every POI of the list and is also where a new one is placed: a double-click, a
+// right-click > Point here, or + Add POI puts an orange pin that can be dragged, and the form
+// opens beside the map. A click on a pin marks its line; a click on a line goes to its pin and
+// opens its actions. Add is a real watch write (write_nav.py's `addpoi`, see
+// backend/server.py's _handle_poi_add).
 PageFlickable {
     id: root
     contentWidth: width
@@ -48,9 +51,11 @@ PageFlickable {
     property var library: []
     property string libraryNote: ""
     property string libraryTone: "success"
-    property string formNote: ""            // under the Add card's buttons
-    property string formTone: "success"
-    property string importNote: ""          // in the Import card
+    // The POI being added: its pin on the map and the form beside it. A send closes the form
+    // once the watch has it; `pendingPick` is the POI to mark when the list comes back.
+    property bool adding: false
+    property bool closeAfterSend: false
+    property var pendingPick: null
     // Something to send a POI to: a watch with POIs, or a Garmin (its SD card).
     readonly property bool deviceHere: HomeViewModel.isGarmin
                                        || (HomeViewModel.connected && DeviceCapabilities.supportsPOIs)
@@ -99,12 +104,8 @@ PageFlickable {
             return count === 1 ? qsTr("Already in the library.") : qsTr("All of them are already in the library.")
         return r.saved === 1 ? qsTr("Saved to the library.") : qsTr("%1 POIs saved to the library.").arg(r.saved)
     }
-    // Where the last send was started, so its "sending / sent / failed" note shows next to the
-    // button that was pressed and not in both cards: "form" (Add and Import cards) or "list".
-    property string sentFrom: "form"
     // One POI to the connected device: a watch write, or a GPX on a Garmin's SD card.
-    function sendToDevice(name, lat, lon, type, ele, from) {
-        root.sentFrom = from || "form"
+    function sendToDevice(name, lat, lon, type, ele) {
         if (HomeViewModel.isGarmin) {
             const safeName = (name || "poi").replace(/[\\/:*?"<>|]/g, "_")
             GarminService.writeGpxToDevice("Waypoints_" + safeName + ".gpx",
@@ -113,10 +114,63 @@ PageFlickable {
             PoiService.addPoi(name, lat, lon, type, ele !== undefined && ele !== null ? ele : NaN)
         }
     }
-    // The Add card's POI, as the library keeps it (its type is a number in the picker's list).
+    // The form's POI, as the library keeps it (its type is a number in the picker's list).
     function formItem() {
-        return { name: root.poiName, lat: root.poiLat, lon: root.poiLon,
+        return { name: root.poiName.trim(), lat: root.poiLat, lon: root.poiLon,
                  type: root.poiType, typeList: DeviceCapabilities.poiTypeListKey }
+    }
+    // Puts the new POI's pin at a place and opens the form (moves the pin if it is already open).
+    function startAdd(lat, lon) {
+        const fresh = !root.adding
+        root.poiLat = lat
+        root.poiLon = lon
+        root.coordError = ""
+        root.adding = true
+        poiArea.picked = -1
+        if (fresh) {
+            poiNameField.text = ""
+            root.poiType = DeviceCapabilities.poiTypeDefault
+            Qt.callLater(() => poiNameField.forceActiveFocus())
+        }
+    }
+    function closeForm() {
+        root.adding = false
+        root.closeAfterSend = false
+        root.coordError = ""
+    }
+    function showFormPin() {
+        poiMap.centerOn(root.poiLat, root.poiLon, Math.max(poiMap.currentZoom, 12))
+    }
+    // Keeps the new POI in the library, then shows it there, marked.
+    function saveForm() {
+        const item = root.formItem()
+        root.pendingPick = item
+        root.keep([item], r => {
+            root.libraryTone = r.ok ? "success" : "error"
+            root.libraryNote = root.keptText(r, 1)
+            if (!r.ok) { root.pendingPick = null; return }
+            root.closeForm()
+            if (root.source !== "library") root.sourceKey = "library"
+        })
+    }
+    // To the device, with a copy in the library. The form closes when the watch has it.
+    function sendForm() {
+        const item = root.formItem()
+        root.libraryNote = ""
+        root.closeAfterSend = !HomeViewModel.isGarmin
+        root.sendToDevice(item.name, item.lat, item.lon, item.type)
+        root.keep([item], r => {
+            if (!r.ok) { root.libraryTone = "error"; root.libraryNote = root.keptText(r, 1) }
+        })
+        if (HomeViewModel.isGarmin) root.closeForm()
+    }
+    Connections {
+        target: PoiService
+        function onAddResultChanged() {
+            if (!root.closeAfterSend || PoiService.adding) return
+            root.closeAfterSend = false
+            if (PoiService.addOk) root.closeForm()
+        }
     }
     function exportPoi(poi) {
         const safeName = (poi.name || "poi").replace(/[\\/:*?"<>|]/g, "_")
@@ -134,10 +188,13 @@ PageFlickable {
         target: PoiService
         function onImportedPoisChanged() {
             const pois = PoiService.importedPois
-            root.importNote = ""
             if (pois.length === 0) return
-            root.keep(pois.map(x => ({ name: x.name, lat: x.lat, lon: x.lon, ele: x.ele })),
-                      r => root.importNote = root.keptText(r, pois.length))
+            // The file's POIs go to the library, and the page shows them there.
+            root.keep(pois.map(x => ({ name: x.name, lat: x.lat, lon: x.lon, ele: x.ele })), r => {
+                root.libraryTone = r.ok ? "success" : "error"
+                root.libraryNote = root.keptText(r, pois.length)
+                if (r.ok) root.sourceKey = "library"
+            })
         }
     }
 
@@ -229,30 +286,6 @@ PageFlickable {
             })
         }
     }
-    // The ⋯ menu of one row, as on the Routes page.
-    ThemedMenu {
-        id: poiMenu
-        property var poi: ({})
-        property string src: ""
-        // Export is the row's own button when there is no device to send to.
-        property bool withExport: false
-        ThemedMenuItem { text: qsTr("Export…"); visible: poiMenu.src === "library" && poiMenu.withExport
-                         onTriggered: root.exportPoi(poiMenu.poi) }
-        ThemedMenuItem { text: qsTr("Rename…"); visible: poiMenu.src === "library"
-                         onTriggered: { renameLibraryDialog.poi = poiMenu.poi; renameLibraryDialog.open() } }
-        ThemedMenuItem { text: qsTr("Delete…"); visible: poiMenu.src === "library"
-                         onTriggered: { deleteLibraryDialog.poi = poiMenu.poi; deleteLibraryDialog.open() } }
-        ThemedMenuItem { text: qsTr("Save to library"); visible: poiMenu.src === "device"
-                         onTriggered: root.keep([root.deviceItem(poiMenu.poi)], r => {
-                             root.libraryTone = r.ok ? "success" : "error"
-                             root.libraryNote = root.keptText(r, 1)
-                         }) }
-        ThemedMenuItem { text: qsTr("Remove from the watch…")
-                         visible: poiMenu.src === "device" && !HomeViewModel.isGarmin
-                                  && DeviceCapabilities.supportsPoiRemove
-                         enabled: !PoiService.removing
-                         onTriggered: { removePoiDialog.poi = poiMenu.poi; removePoiDialog.open() } }
-    }
 
     // POI note dialog - what happens to POIs sent to the watch (André, 2026-08-17), the same
     // little "i" affordance as the Routes page. Opens next to its badge.
@@ -319,402 +352,709 @@ PageFlickable {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Theme.spacingLarge
-        width: 480
+        width: Math.max(280, Math.min(root.width - Theme.spacingLarge * 2, 1120))
         spacing: Theme.spacingMedium
 
-        // --- Add ---
+        // --- The POIs: ONE source at a time, picked in the drop-down as on the Routes page (the
+        // connected device, or the Library, always there), on one map and one list. ---
         Card {
+            id: onDevicePoiCard
             width: parent.width
+            readonly property bool fromDevice: root.source === "device"
+            readonly property bool loading: fromDevice
+                && (HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading)
+            readonly property var onDevicePois:
+                HomeViewModel.isGarmin ? GarminService.onDevicePois : PoiService.onWatchPois
+            readonly property var items: fromDevice ? onDevicePois : root.library
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                Row {
-                    spacing: Theme.spacingSmall
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Add a POI"); font.bold: true; color: Theme.text
-                    }
-                    Rectangle {
-                        id: poiInfoBadge
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 15; height: 15; radius: 7.5
-                        color: "transparent"
-                        border.width: 1
-                        border.color: Theme.mutedText
-                        Text {
-                            anchors.centerIn: parent
-                            text: "i"
-                            font.pixelSize: Theme.fontSizeLabel
-                            font.bold: true
-                            color: Theme.mutedText
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: poiInfoDialog.open()
-                        }
-                    }
-                }
-
-                // The whole picker lives right here, no dialog - André, 2026-08-11, after
-                // trying the button-plus-window version: "delete pick on a map ... and just
-                // put everything you had on the window that open, directly on POI screen".
-                // The content is the late PoiPickerDialog's, verbatim: instruction, name,
-                // search, coordinates, and the crosshair map with drag-to-pick - the same
-                // interaction as Settings' Kailash home picker, just not behind a click.
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: qsTr("Drag the map to move it, right-click a spot and choose " +
-                                "Point here. Click the map, then scroll to zoom.")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeBody
-                }
-
-                // One line: the type dropdown (carrying the selected type's icon as its own
-                // leading logo), the name, and the place search - all three inline (André,
-                // 2026-08-13: "type + name + search all inline").
-                Row {
+                // The list on the left; Import and + Add POI on the right, or under it when
+                // the window is narrow.
+                Flow {
                     width: parent.width
                     spacing: Theme.spacingSmall
-
-                    // Type dropdown, same rounded-square shape as the name field. ClickFocus stops
-                    // it grabbing initial focus on load, and the neutral-grey background override
-                    // keeps it from lighting up green on focus/open (André, 2026-08-13). Width 168
-                    // fits the leading icon + the longest name ("Crossroads") + the arrow.
-                    RoundedComboBox {
-                        id: poiTypeBox
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 158
-                        focusPolicy: Qt.ClickFocus
-                        leftPadding: Theme.spacingSmall
-                        rightPadding: indicator.width + Theme.spacingSmall
-                        model: DeviceCapabilities.poiTypes
-                        textRole: "name"
-                        currentIndex: DeviceCapabilities.poiTypeIndex(root.poiType)
-                        onActivated: (i) => root.poiType = DeviceCapabilities.poiTypes[i].id
-                        // Open the list just below the box instead of on top of it. Overlapping,
-                        // the popup's rounded rectangle sat over the box's own rounded rectangle
-                        // and the two borders doubled up at the top corners (André, 2026-08-13:
-                        // the open dropdown's "corner issue").
-                        popup.y: poiTypeBox.height
-                        // Real, 2026-08-25 (app-wide button coherence pass): this override
-                        // duplicated RoundedComboBox's OLD white+border default, which shadowed
-                        // the shared component's own fix (now flat Theme.cardNested) - dropped
-                        // so this box inherits the current shared look instead of a frozen copy
-                        // of the old one. Only popup.y above (unrelated) needed to be per-instance.
-                        // The selected type's own watch icon sits inside, left of the name, and
-                        // updates live - the "logo" now lives in the dropdown itself.
-                        contentItem: Item {
-                            Row {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: Theme.spacingSmall
-                                Icon {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    glyph: DeviceCapabilities.poiTypeGlyph(root.poiType)
-                                    size: 22
-                                    color: Theme.text
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: poiTypeBox.displayText
-                                    color: Theme.text
-                                    font.pixelSize: Theme.fontSizeBody
-                                    elide: Text.ElideRight
-                                }
+                    Row {
+                        id: poiBarLeft
+                        spacing: Theme.spacingMedium
+                        RoundedComboBox {
+                            id: poiSourceBox
+                            width: 220
+                            model: root.sources.map(x => x.label)
+                            currentIndex: root.sources.findIndex(x => x.key === root.source)
+                            // A new model (a watch connecting) resets the index to 0 and drops
+                            // the binding (seen on the Routes page's own drop-down).
+                            onModelChanged: Qt.callLater(() => poiSourceBox.currentIndex = Qt.binding(
+                                                () => root.sources.findIndex(x => x.key === root.source)))
+                            onActivated: (i) => {
+                                root.sourceKey = root.sources[i].key
+                                root.libraryNote = ""
+                                if (root.sourceKey === "library") root.refreshLibrary()
                             }
                         }
-                        // Per-row icon in the dropdown popup too, not just the selected box: the
-                        // shared RoundedComboBox delegate is text-only, so override it here so every
-                        // type in the list carries its own watch glyph (André: "we miss the icons of
-                        // type of poi"). Each row is one entry of DeviceCapabilities.poiTypes.
-                        delegate: ItemDelegate {
-                            width: poiTypeBox.width
-                            height: 34
-                            highlighted: poiTypeBox.highlightedIndex === index
-                            contentItem: Row {
-                                spacing: Theme.spacingSmall
-                                Icon {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    glyph: modelData.glyph
-                                    size: 20
-                                    color: Theme.text
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.name
-                                    color: Theme.text
-                                    font.pixelSize: Theme.fontSizeBody
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
-                    }
-                    // Name - between the type and the search on the same line.
-                    RoundedTextField {
-                        id: poiNameField
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 124
-                        // The watch stores at most 15 bytes for the name (ambit_format.py
-                        // MAX_NAME_BYTES, which truncates on write) - cap the field so what you
-                        // type is what the watch keeps, instead of a silent trim (André, 2026-08-13).
-                        maximumLength: 15
-                        placeholderText: qsTr("Name this POI")
-                        onTextChanged: root.poiName = text
-                    }
-                    // Place search - fills the rest of the same line.
-                    PlaceSearchBar {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - poiTypeBox.width - poiNameField.width
-                               - (Theme.spacingSmall * 2)
-                        onPlaceChosen: (lat, lon) => {
-                            root.poiLat = lat
-                            root.poiLon = lon
-                            addMap.resetView()
-                        }
-                    }
-                }
-
-                // #10: the watch keeps at most 15 characters - say so when the user hits it,
-                // rather than the field just refusing more keystrokes silently.
-                Text {
-                    visible: poiNameField.length >= 15
-                    text: qsTr("Names can be up to 15 characters.")
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                }
-
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    RoundedTextField {
-                        width: (parent.width - Theme.spacingSmall) / 2
-                        placeholderText: qsTr("Latitude")
-                        text: root.poiLat.toFixed(6)
-                        onEditingFinished: {
-                            const v = WatchUnits.parseDecimal(text)
-                            if (!isNaN(v) && v >= -90 && v <= 90) {
-                                root.poiLat = v
-                                root.coordError = ""
-                                addMap.resetView()
-                            } else {
-                                // #10: don't silently revert - say why.
-                                root.coordError = qsTr("Latitude must be a number between -90 and 90.")
-                                text = root.poiLat.toFixed(6)
-                            }
-                        }
-                    }
-                    RoundedTextField {
-                        width: (parent.width - Theme.spacingSmall) / 2
-                        placeholderText: qsTr("Longitude")
-                        text: root.poiLon.toFixed(6)
-                        onEditingFinished: {
-                            const v = WatchUnits.parseDecimal(text)
-                            if (!isNaN(v) && v >= -180 && v <= 180) {
-                                root.poiLon = v
-                                root.coordError = ""
-                                addMap.resetView()
-                            } else {
-                                // #10: don't silently revert - say why.
-                                root.coordError = qsTr("Longitude must be a number between -180 and 180.")
-                                text = root.poiLon.toFixed(6)
-                            }
-                        }
-                    }
-                }
-
-                // #10 (André, 2026-09-02): validation feedback instead of a silent revert.
-                Text {
-                    width: parent.width
-                    visible: root.coordError.length > 0
-                    wrapMode: Text.WordWrap
-                    text: root.coordError
-                    color: Theme.error
-                    font.pixelSize: Theme.fontSizeCaption
-                }
-
-                Item {
-                    width: parent.width
-                    height: 300
-
-                    MapView {
-                        id: addMap
-                        // scrollZoom deliberately OFF here: this map is embedded mid-way down a
-                        // scrolling page (PageFlickable), and MapView's scroll-to-zoom
-                        // WheelHandler swallows the wheel, so with it on the page couldn't be
-                        // scrolled past this 300px map in a short/windowed window (André,
-                        // 2026-09-05 - "on poi screen it doesn't scroll fully unless full
-                        // screen"). Zoom is still available via the map's own +/- buttons.
-                        // Full-screen/dedicated maps (MapWindow, OfflineMaps, Plan) keep
-                        // scrollZoom because there is no page to scroll past them.
-                        // 2026-11-20: wheel zoom on, after a click (inScrollingPage).
-                        inScrollingPage: true
-                        // Left drag moves the map (MapView's own drag); right-click opens
-                        // "Point here" (André, 2026-11-21: "click to drag, right click, menu
-                        // point here for pointing the poi"). The pin sits on the POI itself,
-                        // not the map's centre, so it stays put while the map moves.
-                        anchors.fill: parent
-                        clip: true
-                        latitude: root.poiLat
-                        longitude: root.poiLon
-                        zoomLevel: 15
-                        markers: [{ lat: root.poiLat, lon: root.poiLon }]
-
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: (event) => {
-                                pointMenu.lat = addMap.latAtY(event.position.y)
-                                pointMenu.lon = addMap.lonAtX(event.position.x)
-                                pointMenu.popup()
-                            }
-                        }
-                        ThemedMenu {
-                            id: pointMenu
-                            property real lat: 0
-                            property real lon: 0
-                            ThemedMenuItem {
-                                text: qsTr("Point here")
-                                onTriggered: {
-                                    root.poiLat = pointMenu.lat
-                                    root.poiLon = pointMenu.lon
-                                    addMap.resetView()   // centre on the new POI
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Real, 2026-08-08 ("routes/POI we maintain the same feature... but on the
-                // modes that send to the watch, they only should send for sdcard, check
-                // android app") - same rule and same warning as Routes' own Send button,
-                // see RoutesPage.qml's own comment on this for the full reasoning.
-                // Real request 2026-08-08 (real hardware confirmed working): no frame at
-                // all - plain text matching this page's own muted description text, not a
-                // boxed warning.
-                Text {
-                    visible: HomeViewModel.isGarmin
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: GarminService.hasSdCard
-                        ? qsTr("This will be sent to the SD card only - writing to " +
-                                "internal memory can break your device.")
-                        : qsTr("No SD card detected in this Garmin device - sending a " +
-                                "POI is disabled. Writing to internal memory can " +
-                                "break your device.")
-                }
-
-                // "Save to library" keeps it in Sommet only. A send to a watch or SD card
-                // keeps a copy in the library too: every POI made here is kept (André,
-                // 2026-11-22), and the library and the watch then live their own lives.
-                Row {
-                    spacing: Theme.spacingSmall
-                    RoundedButton {
-                        text: qsTr("Save to library")
-                        onClicked: root.keep([root.formItem()], r => {
-                            root.formTone = r.ok ? "success" : "error"
-                            root.formNote = root.keptText(r, 1)
-                        })
-                    }
-                    RoundedButton {
-                        visible: root.deviceHere
-                        text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
-                        enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
-                        onClicked: {
-                            root.formNote = ""
-                            root.sendToDevice(root.poiName, root.poiLat, root.poiLon, root.poiType)
-                            if (root.poiName.trim().length > 0)
-                                root.keep([root.formItem()], r => {
-                                    if (!r.ok) { root.formTone = "error"; root.formNote = root.keptText(r, 1) }
-                                })
-                        }
-                    }
-                }
-
-                StatusNote {
-                    width: parent.width
-                    text: root.formNote
-                    tone: root.formTone
-                    autoHideMs: 10000
-                }
-                StatusNote {
-                    width: parent.width
-                    text: HomeViewModel.isGarmin || root.sentFrom !== "form" ? ""
-                        : PoiService.adding ? qsTr("Sending the POI to the watch...")
-                        : PoiService.addResultText
-                    tone: PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
-                    autoHideMs: 10000
-                }
-                StatusNote {
-                    width: parent.width
-                    text: HomeViewModel.isGarmin && root.sentFrom === "form" ? GarminService.writeError : ""
-                    tone: "error"
-                }
-                StatusNote {
-                    width: parent.width
-                    text: HomeViewModel.isGarmin && root.sentFrom === "form" && GarminService.writeOk
-                          && GarminService.writeError.length === 0 ? qsTr("Sent to the SD card.") : ""
-                    tone: "success"
-                }
-            }
-        }
-
-        // --- Import from GPX - real, confirmed-working on the Android app
-        // (opensportsync-main's "POI import (GPX file and manual coordinates)"), missing
-        // here until 2026-08-07. Parses real <wpt> waypoints; since 2026-08-11 each Add is
-        // a real watch write (write_nav.py addpoi), same as manual entry above. ---
-        Card {
-            width: parent.width
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-
-                Text { text: qsTr("Import from GPX"); font.bold: true; color: Theme.text }
-
-                RoundedButton {
-                    text: qsTr("Import GPX…")
-                    onClicked: poiFileDialog.open()
-                }
-
-                StatusNote {
-                    width: parent.width
-                    text: PoiService.importError
-                    tone: "error"
-                }
-                StatusNote {
-                    width: parent.width
-                    text: root.importNote
-                    tone: root.importNote.indexOf(qsTr("Couldn't")) === 0 ? "error" : "success"
-                }
-
-                Repeater {
-                    model: PoiService.importedPois
-                    delegate: Row {
-                        width: parent.width
-                        spacing: Theme.spacingSmall
-                        Text {
-                            width: parent.width - (addImportedButton.visible ? addImportedButton.width + Theme.spacingSmall : 0)
+                        Rectangle {
+                            id: poiInfoBadge
                             anchors.verticalCenter: parent.verticalCenter
-                            elide: Text.ElideRight
-                            color: Theme.text
-                            font.pixelSize: Theme.fontSizeLabel
-                            text: qsTr("%1  (%2, %3)")
-                                .arg(modelData.name)
-                                .arg(modelData.lat.toFixed(5))
-                                .arg(modelData.lon.toFixed(5))
+                            width: 15; height: 15; radius: 7.5
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.mutedText
+                            Text {
+                                anchors.centerIn: parent
+                                text: "i"
+                                font.pixelSize: Theme.fontSizeLabel
+                                font.bold: true
+                                color: Theme.mutedText
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: poiInfoDialog.open()
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
+                                     && onDevicePoiCard.items.length > 0
+                            text: qsTr("Save all to library")
+                            color: saveAllHover.hovered ? Theme.primary : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.bold: true
+                            HoverHandler { id: saveAllHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler {
+                                onTapped: {
+                                    const pois = onDevicePoiCard.onDevicePois.map(x => root.deviceItem(x))
+                                    root.keep(pois, r => {
+                                        root.libraryTone = r.ok ? "success" : "error"
+                                        root.libraryNote = root.keptText(r, pois.length)
+                                    })
+                                }
+                            }
+                        }
+                    }
+                    Item {
+                        width: Math.max(0, parent.width - poiBarLeft.width - poiBarRight.width
+                                           - Theme.spacingSmall * 2)
+                        height: 1
+                    }
+                    Row {
+                        id: poiBarRight
+                        spacing: Theme.spacingSmall
+                        RoundedButton {
+                            text: qsTr("Import GPX…")
+                            onClicked: poiFileDialog.open()
                         }
                         RoundedButton {
-                            id: addImportedButton
-                            visible: root.deviceHere
-                            text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
-                            enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
-                            // The watch's plain type (a number from the other family's list
-                            // would draw another icon), and the file's elevation.
-                            onClicked: root.sendToDevice(modelData.name, modelData.lat, modelData.lon,
-                                                         DeviceCapabilities.poiTypeDefault, modelData.ele)
+                            accent: true
+                            text: qsTr("+ Add POI")
+                            onClicked: root.startAdd(poiMap.latAtY(poiMap.height / 2),
+                                                     poiMap.lonAtX(poiMap.width / 2))
+                        }
+                    }
+                }
+
+                Text {
+                    visible: onDevicePoiCard.loading
+                    color: Theme.mutedText
+                    text: qsTr("Reading POIs off the %1...")
+                        .arg(HomeViewModel.isGarmin ? qsTr("device") : qsTr("watch"))
+                }
+                ErrorBanner {
+                    width: parent.width
+                    detail: (onDevicePoiCard.fromDevice && !HomeViewModel.isGarmin
+                             && !PoiService.loading && !PoiService.ok) ? PoiService.lastError : ""
+                    context: qsTr("reading POIs from the watch")
+                    // Unplugging the watch mid-session is the usual cause here (real case,
+                    // 2026-08-11) - plug it back in and this re-runs the same read.
+                    canRetry: true
+                    onRetry: PoiService.refresh()
+                }
+                // The map and the list, side by side (the map above it in a narrow window).
+                Item {
+                    id: poiArea
+                    width: parent.width
+                    readonly property var shown: {
+                        const all = onDevicePoiCard.loading ? [] : onDevicePoiCard.items
+                        const q = poiFind.text.trim().toLowerCase()
+                        return q.length > 0 ? all.filter(p => (p.name || "").toLowerCase().indexOf(q) >= 0) : all
+                    }
+                    readonly property bool sideBySide: width >= 720
+                    readonly property real gap: Theme.spacingMedium
+                    readonly property real paneH: Math.max(430, Math.min(680, root.height - 170))
+                    property int picked: -1
+                    height: sideBySide ? Math.max(paneH, poiSide.height)
+                                       : poiMapBox.height + gap + poiSide.height
+                    onShownChanged: {
+                        picked = -1
+                        const want = root.pendingPick
+                        if (!want) return
+                        const i = shown.findIndex(p => p.name === want.name
+                                                  && Math.abs(p.lat - want.lat) < 0.0002
+                                                  && Math.abs(p.lon - want.lon) < 0.0002)
+                        if (i < 0) return
+                        root.pendingPick = null
+                        Qt.callLater(() => pick(i, true))
+                    }
+                    function typeInfoOf(p) {
+                        // A library POI keeps the list its number is in; one read off the device
+                        // is numbered in that device's own list.
+                        return onDevicePoiCard.fromDevice ? DeviceCapabilities.poiTypeOf(p.type)
+                                                          : DeviceCapabilities.poiTypeIn(p.typeList, p.type)
+                    }
+                    // From the list: the map goes to the pin (a second click shows all again).
+                    // From the map: the list scrolls to the line.
+                    function pick(i, fromList) {
+                        if (fromList && picked === i) { picked = -1; poiMap.resetView(); return }
+                        picked = i
+                        const p = shown[i]
+                        if (!p) return
+                        if (fromList) poiMap.centerOn(p.lat, p.lon, Math.max(poiMap.currentZoom, 12))
+                        Qt.callLater(() => poiRows.positionViewAtIndex(i, ListView.Contain))
+                    }
+
+                    Item {
+                        id: poiMapBox
+                        width: poiArea.sideBySide ? poiArea.width - poiSide.width - poiArea.gap : poiArea.width
+                        height: poiArea.sideBySide ? poiArea.height : 300
+                        MapView {
+                            id: poiMap
+                            anchors.fill: parent
+                            clip: true
+                            // The wheel zooms after a click on the map (it scrolls the page until
+                            // then); drag moves it, as on every map.
+                            inScrollingPage: true
+                            showZoomControls: true
+                            // No POI yet: the place the weather uses.
+                            latitude: WeatherService.latitude
+                            longitude: WeatherService.longitude
+                            zoomLevel: 13                 // one POI alone: a neighbourhood
+                            markers: poiArea.shown.map(p => {
+                                const t = poiArea.typeInfoOf(p)
+                                return { lat: p.lat, lon: p.lon, label: p.name, type: t.name, glyph: t.glyph }
+                            })
+                            selectedMarker: poiArea.picked
+                            onMarkerTapped: (i) => poiArea.pick(i, false)
+
+                            function onAPin(x, y) {
+                                return poiArea.shown.some(p => Math.hypot(lonToWorldX(p.lon) - originX - x,
+                                                                         latToWorldY(p.lat) - originY - 19 - y) < 22)
+                            }
+                            // Double-click: a new POI here (a double-click on a pin is two picks).
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onDoubleTapped: (ev) => {
+                                    if (poiMap.onAPin(ev.position.x, ev.position.y)) return
+                                    root.startAdd(poiMap.latAtY(ev.position.y), poiMap.lonAtX(ev.position.x))
+                                }
+                            }
+                            // Right-click: "Point here" (André, 2026-11-21).
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: (event) => {
+                                    pointMenu.lat = poiMap.latAtY(event.position.y)
+                                    pointMenu.lon = poiMap.lonAtX(event.position.x)
+                                    pointMenu.popup()
+                                }
+                            }
+                            ThemedMenu {
+                                id: pointMenu
+                                property real lat: 0
+                                property real lon: 0
+                                ThemedMenuItem {
+                                    text: qsTr("Point here")
+                                    onTriggered: root.startAdd(pointMenu.lat, pointMenu.lon)
+                                }
+                            }
+
+                            // The new POI's pin: orange, and it can be dragged to the exact spot.
+                            Item {
+                                id: draftPin
+                                visible: root.adding
+                                z: 200
+                                width: 36; height: 44
+                                x: poiMap.lonToWorldX(root.poiLon) - poiMap.originX - width / 2
+                                y: poiMap.latToWorldY(root.poiLat) - poiMap.originY - height
+                                property point grabOffset: Qt.point(0, 0)
+                                Rectangle {
+                                    width: 32; height: 32; radius: 16
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    color: "#C4622D"
+                                    border.width: 2.5
+                                    border.color: "#FFFFFF"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        font.family: Icons.fontFamily
+                                        font.pixelSize: 20
+                                        color: "#FFFFFF"
+                                        text: DeviceCapabilities.poiTypeGlyph(root.poiType)
+                                    }
+                                }
+                                Rectangle {
+                                    width: 3; height: 13
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    color: "#C4622D"
+                                }
+                                HoverHandler { cursorShape: draftDrag.active ? Qt.ClosedHandCursor : Qt.SizeAllCursor }
+                                DragHandler {
+                                    id: draftDrag
+                                    target: null
+                                    // Not given up to the map's own drag.
+                                    grabPermissions: PointerHandler.TakeOverForbidden
+                                    onActiveChanged: if (active) draftPin.grabOffset = Qt.point(
+                                        draftPin.width / 2 - centroid.pressPosition.x,
+                                        draftPin.height - centroid.pressPosition.y)
+                                    onCentroidChanged: {
+                                        if (!active) return
+                                        const at = poiMap.mapFromItem(null, centroid.scenePosition.x,
+                                                                      centroid.scenePosition.y)
+                                        root.poiLat = poiMap.latAtY(at.y + draftPin.grabOffset.y)
+                                        root.poiLon = poiMap.lonAtX(at.x + draftPin.grabOffset.x)
+                                    }
+                                }
+                            }
+                        }
+                        // Every POI back in view, under the map's own + and - buttons.
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.topMargin: 72
+                            anchors.rightMargin: 8
+                            width: 28; height: 28; radius: 4
+                            color: "#CCFFFFFF"
+                            visible: poiArea.shown.length > 0
+                            Text {
+                                anchors.centerIn: parent
+                                text: qsTr("All")
+                                font.pixelSize: Theme.fontSizeCaption
+                                font.bold: true
+                                color: "#333333"
+                            }
+                            TapHandler { onTapped: { poiArea.picked = -1; poiMap.resetView() } }
+                        }
+                        // What just happened, over the bottom of the map: in the page's flow a
+                        // note that hides by itself moved every line under the pointer.
+                        Column {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 8
+                            z: 250
+                            spacing: 4
+                            StatusNote {
+                                width: parent.width
+                                text: PoiService.importError
+                                tone: "error"
+                            }
+                            StatusNote {
+                                width: parent.width
+                                text: root.saveError.length > 0 ? qsTr("Couldn't save: %1").arg(root.saveError) : ""
+                                tone: "error"
+                            }
+                            StatusNote {
+                                width: parent.width
+                                text: root.libraryNote
+                                tone: root.libraryTone
+                                autoHideMs: 10000
+                            }
+                            StatusNote {
+                                width: parent.width
+                                text: HomeViewModel.isGarmin || !onDevicePoiCard.fromDevice ? ""
+                                    : PoiService.removing ? qsTr("Removing the POI from the watch...")
+                                    : PoiService.removeResultText
+                                tone: PoiService.removing ? "working" : PoiService.removeOk ? "success" : "error"
+                                autoHideMs: 10000
+                            }
+                            // A POI sent to the device, from the form or from a line of the list.
+                            StatusNote {
+                                width: parent.width
+                                text: HomeViewModel.isGarmin
+                                      ? (GarminService.writeError.length > 0 ? GarminService.writeError
+                                         : GarminService.writeOk ? qsTr("Sent to the SD card.") : "")
+                                    : PoiService.adding ? qsTr("Sending the POI to the watch...")
+                                    : PoiService.addResultText
+                                tone: HomeViewModel.isGarmin
+                                      ? (GarminService.writeError.length > 0 ? "error" : "success")
+                                      : PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
+                                autoHideMs: 10000
+                            }
+                        }
+                        // Search for a place: goes there, and moves the new POI's pin if one is open.
+                        PlaceSearchBar {
+                            x: 8; y: 8
+                            z: 300
+                            width: Math.min(260, parent.width - 60)
+                            onPlaceChosen: (lat, lon) => {
+                                if (root.adding) { root.poiLat = lat; root.poiLon = lon }
+                                poiMap.centerOn(lat, lon, 13)
+                            }
+                        }
+                    }
+
+                    Column {
+                        id: poiSide
+                        x: poiArea.sideBySide ? poiMapBox.width + poiArea.gap : 0
+                        y: poiArea.sideBySide ? 0 : poiMapBox.height + poiArea.gap
+                        width: poiArea.sideBySide ? Math.round(poiArea.width * 0.40) : poiArea.width
+                        spacing: Theme.spacingSmall
+
+                        // The new POI.
+                        Rectangle {
+                            width: parent.width
+                            visible: root.adding
+                            height: poiForm.height + Theme.spacingMedium * 2
+                            radius: Theme.radiusSmall
+                            color: Theme.cardNested
+                            Column {
+                                id: poiForm
+                                x: Theme.spacingMedium
+                                y: Theme.spacingMedium
+                                width: parent.width - Theme.spacingMedium * 2
+                                spacing: Theme.spacingSmall
+                                Item {
+                                    width: parent.width
+                                    height: poiFormTitle.height
+                                    Text { id: poiFormTitle; text: qsTr("New POI"); font.bold: true; color: Theme.text }
+                                    // The watch keeps at most 15 characters: count them as they
+                                    // are typed instead of the field just refusing more.
+                                    Text {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: qsTr("%1 / 15").arg(poiNameField.length)
+                                        color: Theme.mutedText
+                                        font.pixelSize: Theme.fontSizeCaption
+                                    }
+                                }
+                                Row {
+                                    width: parent.width
+                                    spacing: Theme.spacingSmall
+                                // Type dropdown, same rounded-square shape as the name field. ClickFocus stops
+                                // it grabbing initial focus on load, and the neutral-grey background override
+                                // keeps it from lighting up green on focus/open (André, 2026-08-13). Width 168
+                                // fits the leading icon + the longest name ("Crossroads") + the arrow.
+                                RoundedComboBox {
+                                    id: poiTypeBox
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 158
+                                    focusPolicy: Qt.ClickFocus
+                                    leftPadding: Theme.spacingSmall
+                                    rightPadding: indicator.width + Theme.spacingSmall
+                                    model: DeviceCapabilities.poiTypes
+                                    textRole: "name"
+                                    currentIndex: DeviceCapabilities.poiTypeIndex(root.poiType)
+                                    onActivated: (i) => root.poiType = DeviceCapabilities.poiTypes[i].id
+                                    // Open the list just below the box instead of on top of it. Overlapping,
+                                    // the popup's rounded rectangle sat over the box's own rounded rectangle
+                                    // and the two borders doubled up at the top corners (André, 2026-08-13:
+                                    // the open dropdown's "corner issue").
+                                    popup.y: poiTypeBox.height
+                                    // Real, 2026-08-25 (app-wide button coherence pass): this override
+                                    // duplicated RoundedComboBox's OLD white+border default, which shadowed
+                                    // the shared component's own fix (now flat Theme.cardNested) - dropped
+                                    // so this box inherits the current shared look instead of a frozen copy
+                                    // of the old one. Only popup.y above (unrelated) needed to be per-instance.
+                                    // The selected type's own watch icon sits inside, left of the name, and
+                                    // updates live - the "logo" now lives in the dropdown itself.
+                                    contentItem: Item {
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: Theme.spacingSmall
+                                            Icon {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                glyph: DeviceCapabilities.poiTypeGlyph(root.poiType)
+                                                size: 22
+                                                color: Theme.text
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: poiTypeBox.displayText
+                                                color: Theme.text
+                                                font.pixelSize: Theme.fontSizeBody
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                    }
+                                    // Per-row icon in the dropdown popup too, not just the selected box: the
+                                    // shared RoundedComboBox delegate is text-only, so override it here so every
+                                    // type in the list carries its own watch glyph (André: "we miss the icons of
+                                    // type of poi"). Each row is one entry of DeviceCapabilities.poiTypes.
+                                    delegate: ItemDelegate {
+                                        width: poiTypeBox.width
+                                        height: 34
+                                        highlighted: poiTypeBox.highlightedIndex === index
+                                        contentItem: Row {
+                                            spacing: Theme.spacingSmall
+                                            Icon {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                glyph: modelData.glyph
+                                                size: 20
+                                                color: Theme.text
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: modelData.name
+                                                color: Theme.text
+                                                font.pixelSize: Theme.fontSizeBody
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                    }
+                                }
+                                    // The watch stores at most 15 bytes for the name
+                                    // (ambit_format.py MAX_NAME_BYTES).
+                                    RoundedTextField {
+                                        id: poiNameField
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - poiTypeBox.width - Theme.spacingSmall
+                                        maximumLength: 15
+                                        placeholderText: qsTr("Name this POI")
+                                        onTextChanged: root.poiName = text
+                                    }
+                                }
+                                Row {
+                                    width: parent.width
+                                    spacing: Theme.spacingSmall
+                                    RoundedTextField {
+                                        width: (parent.width - Theme.spacingSmall) / 2
+                                        placeholderText: qsTr("Latitude")
+                                        text: root.poiLat.toFixed(6)
+                                        onEditingFinished: {
+                                            const v = WatchUnits.parseDecimal(text)
+                                            if (!isNaN(v) && v >= -90 && v <= 90) {
+                                                if (Math.abs(v - root.poiLat) < 0.0000005) return
+                                                root.poiLat = v
+                                                root.coordError = ""
+                                                root.showFormPin()
+                                            } else {
+                                                // #10: don't silently revert - say why.
+                                                root.coordError = qsTr("Latitude must be a number between -90 and 90.")
+                                                text = Qt.binding(() => root.poiLat.toFixed(6))
+                                            }
+                                        }
+                                    }
+                                    RoundedTextField {
+                                        width: (parent.width - Theme.spacingSmall) / 2
+                                        placeholderText: qsTr("Longitude")
+                                        text: root.poiLon.toFixed(6)
+                                        onEditingFinished: {
+                                            const v = WatchUnits.parseDecimal(text)
+                                            if (!isNaN(v) && v >= -180 && v <= 180) {
+                                                if (Math.abs(v - root.poiLon) < 0.0000005) return
+                                                root.poiLon = v
+                                                root.coordError = ""
+                                                root.showFormPin()
+                                            } else {
+                                                // #10: don't silently revert - say why.
+                                                root.coordError = qsTr("Longitude must be a number between -180 and 180.")
+                                                text = Qt.binding(() => root.poiLon.toFixed(6))
+                                            }
+                                        }
+                                    }
+                                }
+                                // #10 (André, 2026-09-02): validation feedback instead of a silent revert.
+                                Text {
+                                    width: parent.width
+                                    visible: root.coordError.length > 0
+                                    wrapMode: Text.WordWrap
+                                    text: root.coordError
+                                    color: Theme.error
+                                    font.pixelSize: Theme.fontSizeCaption
+                                }
+                                // Same rule and same warning as Routes' own Send button (2026-08-08).
+                                Text {
+                                    visible: HomeViewModel.isGarmin
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                    color: Theme.mutedText
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    text: GarminService.hasSdCard
+                                        ? qsTr("This will be sent to the SD card only - writing to " +
+                                                "internal memory can break your device.")
+                                        : qsTr("No SD card detected in this Garmin device - sending a " +
+                                                "POI is disabled. Writing to internal memory can " +
+                                                "break your device.")
+                                }
+                                // "Save to library" keeps it in Sommet only. A send keeps a copy in
+                                // the library too (André, 2026-11-22).
+                                Flow {
+                                    width: parent.width
+                                    spacing: Theme.spacingSmall
+                                    RoundedButton {
+                                        accent: !root.deviceHere
+                                        text: qsTr("Save to library")
+                                        enabled: root.poiName.trim().length > 0
+                                        onClicked: root.saveForm()
+                                    }
+                                    RoundedButton {
+                                        visible: root.deviceHere
+                                        accent: true
+                                        text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
+                                        enabled: root.poiName.trim().length > 0
+                                                 && (HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding)
+                                        onClicked: root.sendForm()
+                                    }
+                                    RoundedButton {
+                                        text: qsTr("Cancel")
+                                        onClicked: root.closeForm()
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            visible: !root.adding
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            text: qsTr("Double-click the map to add a POI, or right-click and choose Point here.")
+                        }
+                        RoundedTextField {
+                            id: poiFind
+                            visible: !root.adding && onDevicePoiCard.items.length > 0
+                            width: parent.width
+                            placeholderText: qsTr("Find in this list")
+                            onTextChanged: poiMap.resetView()
+                        }
+                        Text {
+                            visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
+                                     && onDevicePoiCard.items.length === 0
+                                     && (HomeViewModel.isGarmin || PoiService.ok)
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.mutedText
+                            text: qsTr("Nothing to sync.")
+                        }
+                        Text {
+                            visible: !onDevicePoiCard.fromDevice && onDevicePoiCard.items.length === 0
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            color: Theme.mutedText
+                            text: qsTr("Nothing saved yet. A POI you add or import here is kept in the " +
+                                       "library, and so is one you save from a watch.")
+                        }
+                        Text {
+                            visible: onDevicePoiCard.items.length > 0 && poiArea.shown.length === 0
+                            width: parent.width
+                            color: Theme.mutedText
+                            text: qsTr("No POI with that name.")
+                        }
+
+                        ListView {
+                            id: poiRows
+                            width: parent.width
+                            visible: count > 0
+                            clip: true
+                            spacing: 2
+                            boundsBehavior: Flickable.StopAtBounds
+                            height: poiArea.sideBySide ? Math.max(130, poiArea.paneH - y)
+                                                       : Math.min(contentHeight, 420)
+                            ScrollBar.vertical: ScrollBar {}
+                            model: poiArea.shown
+                            delegate: Rectangle {
+                                id: poiRow
+                                required property var modelData
+                                required property int index
+                                readonly property bool isPicked: poiArea.picked === index
+                                readonly property var typeInfo: poiArea.typeInfoOf(modelData)
+                                readonly property bool sends: !onDevicePoiCard.fromDevice && root.deviceHere
+                                width: ListView.view.width - 10
+                                height: poiRowColumn.height + 8
+                                radius: Theme.radiusSmall
+                                color: isPicked ? Theme.cardNested : poiRowHover.hovered ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.04) : "transparent"
+                                HoverHandler { id: poiRowHover }
+
+                                Column {
+                                    id: poiRowColumn
+                                    x: 6; y: 4
+                                    width: parent.width - 12
+                                    spacing: 6
+                                    Item {
+                                        width: parent.width
+                                        height: Math.max(poiRowText.height, 26)
+                                        TapHandler { onTapped: poiArea.pick(poiRow.index, true) }
+                                        Text {
+                                            id: onWatchPoiGlyph
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            font.family: Icons.fontFamily
+                                            font.pixelSize: Theme.fontSizeBody + 5
+                                            color: Theme.primary
+                                            text: poiRow.typeInfo.glyph
+                                        }
+                                        Column {
+                                            id: poiRowText
+                                            x: onWatchPoiGlyph.width + Theme.spacingSmall
+                                            width: parent.width - x
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: poiRow.modelData.name
+                                                color: Theme.text
+                                                font.pixelSize: Theme.fontSizeBody
+                                                font.bold: true
+                                            }
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: qsTr("%1 · %2, %3").arg(poiRow.typeInfo.name)
+                                                    .arg(poiRow.modelData.lat.toFixed(4)).arg(poiRow.modelData.lon.toFixed(4))
+                                                color: Theme.mutedText
+                                                font.pixelSize: Theme.fontSizeCaption
+                                            }
+                                        }
+                                    }
+                                    // The marked line's actions.
+                                    Flow {
+                                        visible: poiRow.isPicked
+                                        width: parent.width
+                                        spacing: Theme.spacingSmall
+                                        RoundedButton {
+                                            visible: poiRow.sends
+                                            text: HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
+                                            enabled: HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
+                                            onClicked: {
+                                                root.libraryNote = ""
+                                                root.sendToDevice(poiRow.modelData.name, poiRow.modelData.lat, poiRow.modelData.lon,
+                                                                  poiRow.modelData.typeHere, poiRow.modelData.ele)
+                                            }
+                                        }
+                                        RoundedButton {
+                                            text: qsTr("Export…")
+                                            onClicked: root.exportPoi(poiRow.modelData)
+                                        }
+                                        RoundedButton {
+                                            visible: !onDevicePoiCard.fromDevice
+                                            text: qsTr("Rename…")
+                                            onClicked: { renameLibraryDialog.poi = poiRow.modelData; renameLibraryDialog.open() }
+                                        }
+                                        RoundedButton {
+                                            visible: !onDevicePoiCard.fromDevice
+                                            danger: true
+                                            text: qsTr("Delete…")
+                                            onClicked: { deleteLibraryDialog.poi = poiRow.modelData; deleteLibraryDialog.open() }
+                                        }
+                                        RoundedButton {
+                                            visible: onDevicePoiCard.fromDevice
+                                            text: qsTr("Save to library")
+                                            onClicked: root.keep([root.deviceItem(poiRow.modelData)], r => {
+                                                root.libraryTone = r.ok ? "success" : "error"
+                                                root.libraryNote = root.keptText(r, 1)
+                                            })
+                                        }
+                                        RoundedButton {
+                                            visible: onDevicePoiCard.fromDevice && !HomeViewModel.isGarmin
+                                                     && DeviceCapabilities.supportsPoiRemove
+                                            danger: true
+                                            enabled: !PoiService.removing
+                                            text: qsTr("Remove from the watch…")
+                                            onClicked: { removePoiDialog.poi = poiRow.modelData; removePoiDialog.open() }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -839,317 +1179,6 @@ PageFlickable {
                             text: qsTr("%1, %2  (%3 m)")
                                 .arg(modelData.lat.toFixed(5)).arg(modelData.lon.toFixed(5)).arg(modelData.altitude_m)
                         }
-                    }
-                }
-            }
-        }
-
-        // --- The POI list: ONE source at a time, picked in the drop-down, as on the Routes page:
-        // the connected device, or the Library (always there). ---
-        Card {
-            id: onDevicePoiCard
-            // In Map view the card grows past the page's 480 column (as far as 980, window
-            // allowing), so the map fits beside the list; it stays centred like the others.
-            width: Theme.poisView === "map" && items.length > 0 && !loading
-                   ? Math.max(parent.width, Math.min(root.width - Theme.spacingLarge * 2, 980))
-                   : parent.width
-            x: (parent.width - width) / 2
-            readonly property bool fromDevice: root.source === "device"
-            readonly property bool loading: fromDevice
-                && (HomeViewModel.isGarmin ? GarminService.deviceGpxLoading : PoiService.loading)
-            readonly property var onDevicePois:
-                HomeViewModel.isGarmin ? GarminService.onDevicePois : PoiService.onWatchPois
-            readonly property var items: fromDevice ? onDevicePois : root.library
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-                // The source drop-down, then the map/list view control (moved here from
-                // Settings, André 2026-08-16; still persisted via Theme.poisView).
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingMedium
-                    RoundedComboBox {
-                        id: poiSourceBox
-                        width: 220
-                        model: root.sources.map(x => x.label)
-                        currentIndex: root.sources.findIndex(x => x.key === root.source)
-                        // A new model (a watch connecting) resets the index to 0 and drops
-                        // the binding (seen on the Routes page's own drop-down).
-                        onModelChanged: Qt.callLater(() => poiSourceBox.currentIndex = Qt.binding(
-                                            () => root.sources.findIndex(x => x.key === root.source)))
-                        onActivated: (i) => {
-                            root.sourceKey = root.sources[i].key
-                            root.libraryNote = ""
-                            if (root.sourceKey === "library") root.refreshLibrary()
-                        }
-                    }
-                    ViewModeToggle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: !onDevicePoiCard.loading && onDevicePoiCard.items.length > 0
-                        mode: Theme.poisView
-                        onChosen: (m) => Theme.poisView = m
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
-                                 && onDevicePoiCard.items.length > 0
-                        text: qsTr("Save all to library")
-                        color: saveAllHover.hovered ? Theme.primary : Theme.mutedText
-                        font.pixelSize: Theme.fontSizeCaption
-                        font.bold: true
-                        HoverHandler { id: saveAllHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler {
-                            onTapped: {
-                                const pois = onDevicePoiCard.onDevicePois.map(x => root.deviceItem(x))
-                                root.keep(pois, r => {
-                                    root.libraryTone = r.ok ? "success" : "error"
-                                    root.libraryNote = root.keptText(r, pois.length)
-                                })
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    visible: onDevicePoiCard.loading
-                    color: Theme.mutedText
-                    text: qsTr("Reading POIs off the %1...")
-                        .arg(HomeViewModel.isGarmin ? qsTr("device") : qsTr("watch"))
-                }
-                ErrorBanner {
-                    width: parent.width
-                    detail: (onDevicePoiCard.fromDevice && !HomeViewModel.isGarmin
-                             && !PoiService.loading && !PoiService.ok) ? PoiService.lastError : ""
-                    context: qsTr("reading POIs from the watch")
-                    // Unplugging the watch mid-session is the usual cause here (real case,
-                    // 2026-08-11) - plug it back in and this re-runs the same read.
-                    canRetry: true
-                    onRetry: PoiService.refresh()
-                }
-                Text {
-                    visible: onDevicePoiCard.fromDevice && !onDevicePoiCard.loading
-                             && onDevicePoiCard.items.length === 0
-                             && (HomeViewModel.isGarmin || PoiService.ok)
-                    color: Theme.mutedText
-                    text: qsTr("Nothing to sync.")
-                }
-                Text {
-                    visible: !onDevicePoiCard.fromDevice && onDevicePoiCard.items.length === 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    text: qsTr("Nothing saved yet. A POI you add or import here is kept in the " +
-                               "library, and so is one you save from a watch.")
-                }
-                // What the library is, in one line (André, 2026-11-22: "library is one thing,
-                // device library is another.. independent").
-                Text {
-                    visible: !onDevicePoiCard.fromDevice && onDevicePoiCard.items.length > 0
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    color: Theme.mutedText
-                    font.pixelSize: Theme.fontSizeCaption
-                    text: qsTr("Your POIs, kept in Sommet. A watch has its own list: send it the " +
-                               "ones you want there. Deleting here leaves the watch as it is.")
-                }
-                StatusNote {
-                    width: parent.width
-                    text: root.saveError.length > 0 ? qsTr("Couldn't save: %1").arg(root.saveError) : ""
-                    tone: "error"
-                }
-                StatusNote {
-                    width: parent.width
-                    text: root.libraryNote
-                    tone: root.libraryTone
-                    autoHideMs: 10000
-                }
-                StatusNote {
-                    width: parent.width
-                    text: HomeViewModel.isGarmin || !onDevicePoiCard.fromDevice ? ""
-                        : PoiService.removing ? qsTr("Removing the POI from the watch...")
-                        : PoiService.removeResultText
-                    tone: PoiService.removing ? "working" : PoiService.removeOk ? "success" : "error"
-                    autoHideMs: 10000
-                }
-                // A POI sent from the library: the same notes as under the Add card, here
-                // where the button is.
-                StatusNote {
-                    width: parent.width
-                    text: onDevicePoiCard.fromDevice || root.sentFrom !== "list" ? ""
-                        : HomeViewModel.isGarmin
-                          ? (GarminService.writeError.length > 0 ? GarminService.writeError
-                             : GarminService.writeOk ? qsTr("Sent to the SD card.") : "")
-                        : PoiService.adding ? qsTr("Sending the POI to the watch...")
-                        : PoiService.addResultText
-                    tone: HomeViewModel.isGarmin
-                          ? (GarminService.writeError.length > 0 ? "error" : "success")
-                          : PoiService.adding ? "working" : PoiService.addOk ? "success" : "error"
-                    autoHideMs: 10000
-                }
-
-                // Map view: ONE map with every POI of the list as a pin, next to the list
-                // (above it in a narrow window). André, 2026-11-22, chose it over a small map
-                // per POI (what this was: a 120 px map strip above every row), which shows a
-                // dot in some streets and nothing about where the POIs are. A click on a pin
-                // picks its row; a click on a row centres the map on its pin.
-                // List view: the rows alone.
-                Item {
-                    id: poiArea
-                    width: parent.width
-                    readonly property var shown: onDevicePoiCard.loading ? [] : onDevicePoiCard.items
-                    readonly property bool withMap: Theme.poisView === "map" && shown.length > 0
-                    readonly property bool sideBySide: withMap && width >= 720
-                    readonly property real gap: Theme.spacingMedium
-                    property int picked: -1
-                    onShownChanged: picked = -1
-                    height: sideBySide ? Math.max(poiList.height, poiMapBox.height)
-                                       : poiList.y + poiList.height
-                    function typeInfoOf(p) {
-                        // A library POI keeps the list its number is in; one read off the device
-                        // is numbered in that device's own list.
-                        return onDevicePoiCard.fromDevice ? DeviceCapabilities.poiTypeOf(p.type)
-                                                          : DeviceCapabilities.poiTypeIn(p.typeList, p.type)
-                    }
-                    // From the list: the map goes to the pin (a second click shows all again).
-                    // From the map: the page scrolls until the row is on screen.
-                    function pick(i, fromList) {
-                        if (fromList && picked === i) { picked = -1; poiMap.resetView(); return }
-                        picked = i
-                        const p = shown[i]
-                        if (!p) return
-                        if (fromList) { poiMap.centerOn(p.lat, p.lon, Math.max(poiMap.currentZoom, 12)); return }
-                        const row = poiRows.itemAt(i)
-                        if (!row) return
-                        const top = row.mapToItem(root.contentItem, 0, 0).y
-                        if (top < root.contentY || top + row.height > root.contentY + root.height)
-                            root.contentY = Math.max(0, Math.min(top - root.height / 3,
-                                                                 root.contentHeight - root.height))
-                    }
-
-                    Item {
-                        id: poiMapBox
-                        visible: poiArea.withMap
-                        width: poiArea.sideBySide ? poiArea.width - poiList.width - poiArea.gap : poiArea.width
-                        height: !poiArea.withMap ? 0
-                              : poiArea.sideBySide ? Math.max(280, Math.min(460, root.height - 140)) : 260
-                        x: poiArea.sideBySide ? poiList.width + poiArea.gap : 0
-                        // Side by side, the map stays on screen while a long list scrolls.
-                        y: {
-                            if (!poiArea.sideBySide) return 0
-                            root.contentHeight; poiArea.y          // re-check when the page moves
-                            const top = poiArea.mapToItem(root.contentItem, 0, 0).y
-                            return Math.max(0, Math.min(root.contentY + Theme.spacingMedium - top,
-                                                        poiArea.height - height))
-                        }
-                        MapView {
-                            id: poiMap
-                            anchors.fill: parent
-                            inScrollingPage: true
-                            showZoomControls: true
-                            zoomLevel: 13                 // one POI alone: a neighbourhood
-                            markers: poiArea.withMap ? poiArea.shown.map(p => {
-                                const t = poiArea.typeInfoOf(p)
-                                return { lat: p.lat, lon: p.lon, label: p.name, type: t.name, glyph: t.glyph }
-                            }) : []
-                            selectedMarker: poiArea.picked
-                            onMarkerTapped: (i) => poiArea.pick(i, false)
-                        }
-                    }
-
-                    Column {
-                        id: poiList
-                        y: poiArea.withMap && !poiArea.sideBySide ? poiMapBox.height + poiArea.gap : 0
-                        width: poiArea.sideBySide ? Math.round(poiArea.width * 0.52) : poiArea.width
-                        spacing: Theme.spacingSmall
-                Repeater {
-                    id: poiRows
-                    model: poiArea.shown
-                    delegate: Rectangle {
-                        id: poiRow
-                        required property var modelData
-                        required property int index
-                        width: parent.width
-                        height: poiRowLine.implicitHeight + 8
-                        radius: Theme.radiusSmall
-                        color: poiArea.withMap && poiArea.picked === index ? Theme.cardNested : "transparent"
-                        readonly property var typeInfo: poiArea.typeInfoOf(modelData)
-                        TapHandler { enabled: poiArea.withMap; onTapped: poiArea.pick(poiRow.index, true) }
-
-                        Row {
-                            id: poiRowLine
-                            x: 6
-                            width: parent.width - 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: Theme.spacingSmall
-
-                            // The POI's own watch icon, per type (André: "we miss the icons of
-                            // type of poi").
-                            Text {
-                                id: onWatchPoiGlyph
-                                anchors.verticalCenter: parent.verticalCenter
-                                font.family: Icons.fontFamily
-                                font.pixelSize: Theme.fontSizeBody + 3
-                                color: Theme.primary
-                                text: poiRow.typeInfo.glyph
-                                // Hover: the type's name in the watch's own list.
-                                HoverHandler { id: poiRowTypeHover }
-                                ToolTip.visible: poiRowTypeHover.hovered
-                                ToolTip.text: poiRow.typeInfo.name
-                            }
-                            Text {
-                                width: parent.width - onWatchPoiGlyph.width
-                                       - (onWatchPoiType.visible ? onWatchPoiType.width + Theme.spacingSmall : 0)
-                                       - poiMainButton.width - poiMoreButton.width
-                                       - Theme.spacingSmall * 3
-                                anchors.verticalCenter: parent.verticalCenter
-                                elide: Text.ElideRight
-                                text: modelData.name
-                                color: Theme.text
-                                font.pixelSize: Theme.fontSizeBody
-                                font.bold: true
-                            }
-                            // The type's name in the watch's own list ("Big game", "Camp" ...).
-                            Text {
-                                id: onWatchPoiType
-                                anchors.verticalCenter: parent.verticalCenter
-                                // Next to the map the row is half as wide: the type's name is
-                                // on the icon's hover and on the pin.
-                                visible: !poiArea.sideBySide
-                                text: poiRow.typeInfo.name
-                                color: Theme.mutedText
-                                font.pixelSize: Theme.fontSizeCaption
-                            }
-
-                            // On the device: Export. In the library: send it to the connected
-                            // device (Export is in the ⋯ menu), or Export when nothing is
-                            // connected.
-                            RoundedButton {
-                                id: poiMainButton
-                                readonly property bool sends: !onDevicePoiCard.fromDevice && root.deviceHere
-                                text: !sends ? qsTr("Export")
-                                    : HomeViewModel.isGarmin ? qsTr("Send to SD card") : qsTr("Send to watch")
-                                enabled: !sends ? true
-                                    : HomeViewModel.isGarmin ? GarminService.hasSdCard : !PoiService.adding
-                                onClicked: {
-                                    if (!sends) { root.exportPoi(modelData); return }
-                                    root.libraryNote = ""
-                                    root.sendToDevice(modelData.name, modelData.lat, modelData.lon,
-                                                      modelData.typeHere, modelData.ele, "list")
-                                }
-                            }
-                            RoundedButton {
-                                id: poiMoreButton
-                                text: "⋯"
-                                onClicked: {
-                                    poiMenu.poi = modelData
-                                    poiMenu.src = root.source
-                                    poiMenu.withExport = poiMainButton.sends
-                                    poiMenu.popup(poiMoreButton, 0, poiMoreButton.height)
-                                }
-                            }
-                        }
-                    }
-                }
                     }
                 }
             }

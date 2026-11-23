@@ -7,6 +7,28 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: POIs: one map to look at them and to add one
+
+André: "integrate the idea of the map + list but we take the map where we already have to add
+poi...also make it dragable and zoomable like all others". He chose it from a working mock.
+
+- **One card, one map, one list**, on desktop (`PoisPage.qml`) and Android (`PoiScreen.tsx`). The
+  separate Add POI and Import cards, their second map and the Map/List switch are gone.
+- **Adding:** a double-click or double-tap, right-click > Point here (desktop), or + Add POI (the
+  middle of the map) puts an orange pin, and the form opens beside the map. The pin can be
+  dragged. Save and Send close the form, and a saved POI is shown marked in the library.
+- **Moving the map:** as the other maps (drag, wheel after a click, pinch, hold then drag on
+  touch, + and −), plus **All**. `TrackPreview` gets `draft`, `onDraftMove`, `controls`,
+  `centreRef` and `onlyPointZoom`; one POI alone now opens at street level instead of a country.
+- **The list:** a line shows icon, name, type and position. Its actions open when it is clicked.
+  **Find in this list** narrows the list and the pins. The list scrolls in its own pane.
+- Desktop notes appear over the bottom of the map: in the page's flow, a note hiding by itself
+  moved every line under the pointer.
+- Seen in the desktop test window (made-up POIs, scratch home, no map tiles): pick, double-click,
+  pin drag, map drag, name and save, Find, narrow window. Seen on the tablet with André's own
+  library (nothing saved): + Add POI, pin drag, hold and drag, zoom, line tap, double-tap, Cancel.
+  NOT seen: a Send to watch from the new form on a real watch (it calls the same send as before).
+
 ## 2026-11-23: Android: "Forget Bluetooth device"
 
 The desktop has had it since 2026-09-26; on Android a paired watch could only be removed in

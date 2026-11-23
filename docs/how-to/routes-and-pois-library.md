@@ -38,19 +38,30 @@ choice is remembered.
 ## POIs
 
 On **POIs**, the same drop-down picks **On the watch** or **Library (saved POIs)**. The page is
-there without a watch too.
+there without a watch too. It is one map and one list, side by side (the map above the list on a
+narrow screen). The map shows every POI of the list, and it is also where you add one.
 
-- **Save to library** keeps the POI you made on the map in the library.
+**Moving the map.** Drag it, pinch it, or use **+** and **−**. On a computer the mouse wheel
+zooms after one click on the map. On a tablet or phone, hold the map still for a moment and then
+drag, so a quick swipe still scrolls the page. **All** brings every POI back into view.
+
+**Adding a POI.** Double-click the map (double-tap on a tablet or phone), right-click and choose
+**Point here**, or press **+ Add POI**. An orange pin appears and the form opens beside the map.
+Drag the pin to the exact spot, give the POI a name and a type, and choose:
+
+- **Save to library** keeps the POI in the library.
 - **Send to watch** sends it to the connected watch, and keeps a copy in the library as well.
-- A GPX you import is kept in the library; each of its POIs can then be sent to the watch.
-- In the watch's list, **⋯ → Save to library** keeps one POI, and **Save all to library** keeps
-  all of them. A POI already in the library (same name, same place) is not kept twice.
-- In the library, **Send to watch** sends one POI to the connected watch. **⋯** has Export,
-  Rename and Delete.
 
-**Map or List.** In **Map**, one map shows every POI of the list as a pin, next to the list
-(above it in a narrow window). Click a pin and its line is marked in the list; click a line and
-the map goes to its pin, click it again to see all the pins. **List** shows the lines alone.
+**Import GPX…** keeps every POI of the file in the library, and each can then be sent to the watch.
+
+**Finding a POI.** Click a pin and its line is marked in the list. Click a line and the map goes
+to its pin, and its actions open under it; click it again to see all the pins. **Find in this
+list** narrows both the list and the map.
+
+- In the library, a line's actions are **Send to watch**, **Export**, **Rename** and **Delete**.
+- In the watch's list they are **Export**, **Save to library** and **Remove from the watch**.
+  **Save all to library** keeps all of them. A POI already in the library (same name, same place)
+  is not kept twice.
 
 **How many.** An Ambit3 or a Traverse keeps at most 250
 POIs, and Sommet says so before sending one more. (Suunto's own software allows an Ambit1 or

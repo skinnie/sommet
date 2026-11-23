@@ -19,8 +19,6 @@ import { Button, Dropdown, FieldRow, StatusNote } from '../components/ui/primiti
 import { TrackPreview } from '../components/TrackPreview';
 import { LockableScrollView } from '../components/ScrollLock';
 import { getWeatherLocation } from '../services/WeatherService';
-import { getViewMode, setViewMode as persistViewMode, ViewMode } from '../services/ListViewPrefs';
-import { ViewModeToggle } from '../components/ui/ViewModeToggle';
 
 // v3.0 UI port (2026-08-09, "re do... pois to match entirely desktop") - real structural
 // rebuild matching desktop's own PoisPage.qml: "Add a POI" gets a live pin preview, "Import
@@ -45,6 +43,12 @@ import { ViewModeToggle } from '../components/ui/ViewModeToggle';
 // the watch from that card, every POI of an imported GPX, and "Save to library" on a watch's POI.
 // The screen is in the menu without a watch too (Home passes `watch`), as Routes is.
 // Its new words are in English only for now, like the route library's.
+//
+// One map and one list, as on the desktop (André, 2026-11-23: "integrate the idea of the map +
+// list but we take the map where we already have to add poi"). The map shows every POI of the
+// list and is where a new one is placed: a double-tap or + Add POI puts an orange pin that can
+// be dragged, and the form opens beside the map (above the list on a phone). A tap on a pin
+// marks its line; a tap on a line goes to its pin and opens its actions.
 export default function PoiScreen() {
   const theme = useV3Theme();
   const styles = createStyles(theme);
@@ -79,8 +83,10 @@ export default function PoiScreen() {
   const [source, setSource] = useState<number>(watchHere ? 0 : 1);   // 0 = on the watch, 1 = Library
   useEffect(() => { if (!watchHere) setSource(1); }, [watchHere]);
   const [note, setNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
-  const [formNote, setFormNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
-  const [importNote, setImportNote] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  // The new POI: its pin on the map and the form. `query` is "Find in this list".
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
+  const pendingPick = useRef<{ name: string; lat: number; lon: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
 
@@ -112,35 +118,35 @@ export default function PoiScreen() {
   const [infoOpen, setInfoOpen] = useState(false);  // the little "i" POI-note dialog
   const poiBusy = poiState.phase === 'connecting' || poiState.phase === 'writing';
 
-  const [imported, setImported] = useState<WatchPoi[] | null>(null);
   const [importPicking, setImportPicking] = useState(false);
-  const [addingIndex, setAddingIndex] = useState<number | null>(null);
 
   const [onWatch, setOnWatch] = useState<WatchPoi[] | null>(null);
   const [onWatchLoading, setOnWatchLoading] = useState(false);
   const [onWatchError, setOnWatchError] = useState<string | undefined>();
   const [exportingIndex, setExportingIndex] = useState<number | null>(null);
   const [removingIndex, setRemovingIndex] = useState<number | null>(null);
-  // Map/list view (persisted Settings pref). POIs are single points, so no sort control
-  // (name is the only meaningful key) - just the view toggle.
-  const [viewMode, setViewMode] = useState<ViewMode>('map');
-  useFocusEffect(useCallback(() => { getViewMode('pois').then(setViewMode); }, []));
-  function changeViewMode(m: ViewMode) { setViewMode(m); persistViewMode('pois', m); }
-
-  // Map view (André, 2026-11-22, as on the desktop): ONE map with every POI of the shown list
-  // as a marker, next to the list on a wide screen and above it on a narrow one. It was a small
-  // map above every line. A tap on a marker marks its line and brings it into view; a tap on a
-  // line moves the map to its marker, and a second tap shows every marker again.
+  // ONE map with every POI of the shown list as a marker, next to the list on a wide screen and
+  // above it on a narrow one. A tap on a marker marks its line and brings it into view; a tap on
+  // a line moves the map to its marker, and a second tap shows every marker again.
   const { height: winH } = useWindowDimensions();
   const [listW, setListW] = useState(0);
   const [picked, setPicked] = useState(-1);
   const [focus, setFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
   const paneRef = useRef<ScrollView>(null);
+  const mapCentre = useRef<(() => { lat: number; lon: number }) | null>(null);
   const rowY = useRef<Record<number, number>>({});
   function pickFromList(i: number, lat: number, lon: number) {
     if (picked === i) { setPicked(-1); setFocus(null); return; }
     setPicked(i); setFocus({ lat, lon, key: Date.now() });
   }
+  // Puts the new POI's pin at a place and opens the form (moves the pin if it is already open).
+  function placePin(lat: number, lon: number) {
+    if (!adding) { setPoiName(''); setPoiType(poiTypeDefaultFor(watchModel)); }
+    setPoiLat(lat.toFixed(6)); setPoiLon(lon.toFixed(6));
+    setPicked(-1);
+    setAdding(true);
+  }
+  function closeForm() { setAdding(false); setPoiName(''); setPoiLat(''); setPoiLon(''); }
   function pickFromMap(i: number) {
     setPicked(i);
     paneRef.current?.scrollTo({ y: Math.max(0, (rowY.current[i] ?? 0) - 8), animated: true });
@@ -199,30 +205,34 @@ export default function PoiScreen() {
   }
   const formItem = (): PoiToKeep => ({ name: poiName.trim(), lat: parsedLat, lon: parsedLon, type: poiType, typeList });
 
-  // Keeps the POI in Sommet only; the fields stay, so it can still be sent to the watch.
+  // Keeps the POI in Sommet only, then shows it in the library, marked.
   async function handleSaveToLibrary() {
     if (poiBusy || !formIsValid()) return;
-    setFormNote(await keep([formItem()]));
+    const item = formItem();
+    pendingPick.current = { name: item.name, lat: parsedLat, lon: parsedLon };
+    const r = await keep([item]);
+    setNote(r);
+    if (r.tone === 'error') { pendingPick.current = null; return; }
+    closeForm();
+    setSource(1);
   }
 
   async function handleAddPoi() {
     if (poiBusy || !formIsValid()) return;
-    setFormNote(null);
+    setNote(null);
     // Every POI made here is kept (the library and the watch then live their own lives).
     const item = formItem();
-    keep([item]).then(r => { if (r.tone === 'error') setFormNote(r); });
+    keep([item]).then(r => { if (r.tone === 'error') setNote(r); });
     if (demo.enabled) {
       setOnWatch(demoAddPoi(demo.variant, { name: poiName.trim(), latitude: parsedLat, longitude: parsedLon, type: poiType }));
-      setPoiName(''); setPoiLat(''); setPoiLon('');
+      closeForm();
       return;
     }
     try {
       await addPoiToWatch(poiName.trim(), parsedLat, parsedLon, setPoiState, poiType);
       setPoiState(s => {
         if (s.phase === 'done') {
-          setPoiName('');
-          setPoiLat('');
-          setPoiLon('');
+          closeForm();
           loadOnWatch();
         } else if (s.phase === 'error') {
           Alert.alert(t.error, s.error ?? t.unknownError);
@@ -240,48 +250,17 @@ export default function PoiScreen() {
     setImportPicking(true);
     try {
       const wps = await pickAndParseWaypoints();
-      if (wps) {
-        setImported(wps);
-        setImportNote(null);
-        // An imported GPX is kept in the library straight away; each POI can then go to the watch.
-        if (wps.length > 0) {
-          setImportNote(await keep(wps.map(w => ({ name: w.name, lat: w.latitude, lon: w.longitude, ele: w.elevation ?? null }))));
-        }
+      // An imported GPX is kept in the library straight away; the screen shows it there, and
+      // each POI can then be sent to the watch from its line.
+      if (wps && wps.length > 0) {
+        const r = await keep(wps.map(w => ({ name: w.name, lat: w.latitude, lon: w.longitude, ele: w.elevation ?? null })));
+        setNote(r);
+        if (r.tone === 'success') setSource(1);
       }
     } catch (e: any) {
       Alert.alert(t.error, e?.message ?? t.unknownError);
     } finally {
       setImportPicking(false);
-    }
-  }
-
-  async function handleAddImported(wp: WatchPoi, index: number) {
-    if (addingIndex !== null) return;
-    if (demo.enabled) {
-      setOnWatch(demoAddPoi(demo.variant, { ...wp, type: poiTypeDefaultFor(watchModel) }));
-      setImported(list => (list ? list.filter((_, k) => k !== index) : list));
-      return;
-    }
-    setAddingIndex(index);
-    try {
-      // addPoiToWatch reports a failure through its state callback, it does not throw. This
-      // used to pass a no-op, so a POI the watch never got still left the list as if added
-      // (8 of them on 2026-10-24, after the watch had closed Bluetooth).
-      let failure: string | undefined;
-      // The watch's plain type (-1) and, for a Traverse, the file's elevation.
-      await addPoiToWatch(wp.name, wp.latitude, wp.longitude, st => {
-        if (st.phase === 'error') failure = st.error ?? t.unknownError;
-      }, -1, wp.elevation);
-      if (failure) {
-        Alert.alert(t.error, failure);
-        return;
-      }
-      setImported(prev => prev?.filter((_, i) => i !== index) ?? null);
-      loadOnWatch();
-    } catch (e: any) {
-      Alert.alert(t.error, e?.message ?? t.unknownError);
-    } finally {
-      setAddingIndex(null);
     }
   }
 
@@ -353,28 +332,45 @@ export default function PoiScreen() {
     }
   }
 
-  const mapPoints = source === 1 ? library.map(p => ({ lat: p.lat, lon: p.lon }))
-    : (watchHere && !onWatchLoading && onWatch ? onWatch.map(p => ({ lat: p.latitude, lon: p.longitude })) : []);
+  // The list as shown: the source, narrowed by "Find in this list". Indexes count in these.
+  const q = query.trim().toLowerCase();
+  const libShown = library.filter(p => !q || p.name.toLowerCase().includes(q));
+  const watchShown = (watchHere && !onWatchLoading && onWatch ? onWatch : []).filter(p => !q || p.name.toLowerCase().includes(q));
+  const sourceCount = source === 1 ? library.length : (watchHere && !onWatchLoading && onWatch ? onWatch.length : 0);
+  const mapPoints = source === 1 ? libShown.map(p => ({ lat: p.lat, lon: p.lon }))
+    : watchShown.map(p => ({ lat: p.latitude, lon: p.longitude }));
   const mapPointsKey = `${source}:${mapPoints.map(p => `${p.lat},${p.lon}`).join(';')}`;
-  useEffect(() => { setPicked(-1); setFocus(null); rowY.current = {}; }, [mapPointsKey]);   // another list: nothing picked
-  const withMap = viewMode === 'map' && mapPoints.length > 0;
-  const sideBySide = withMap && listW >= 600;
-  const paneH = Math.max(280, Math.min(520, winH - 280));
-  const mapEl = withMap ? (
-    <View style={sideBySide ? { width: '46%' } : { marginTop: v3Spacing.medium }}>
-      <TrackPreview points={mapPoints} multiMarker height={sideBySide ? paneH : 220}
-        selectedIndex={picked} onMarkerTap={pickFromMap} focusOn={focus} />
+  useEffect(() => {
+    setFocus(null); rowY.current = {};
+    const want = pendingPick.current;
+    const i = want && source === 1 ? libShown.findIndex(p => p.name === want.name
+      && Math.abs(p.lat - want.lat) < 0.0002 && Math.abs(p.lon - want.lon) < 0.0002) : -1;
+    if (i >= 0) {
+      pendingPick.current = null;
+      setPicked(i); setFocus({ lat: libShown[i].lat, lon: libShown[i].lon, key: Date.now() });
+    } else setPicked(-1);                                       // another list: nothing picked
+  }, [mapPointsKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const sideBySide = listW >= 600;
+  const paneH = Math.max(320, Math.min(600, winH - 270));
+  const weather = getWeatherLocation();
+  const addType = poiTypesFor(watchModel).find(pt => pt.id === poiType);
+  const mapEl = (
+    <View style={sideBySide ? { flex: 1.35 } : undefined}>
+      <TrackPreview points={mapPoints} multiMarker controls onlyPointZoom={13} height={sideBySide ? paneH : 280}
+        fallbackCenter={{ lat: weather.latitude, lon: weather.longitude }}
+        selectedIndex={picked} onMarkerTap={pickFromMap} focusOn={focus} centreRef={mapCentre}
+        onDoubleTap={placePin}
+        draft={adding && hasValidCoords ? { lat: parsedLat, lon: parsedLon } : null}
+        draftGlyph={addType?.glyph}
+        onDraftMove={(lat, lon) => { setPoiLat(lat.toFixed(6)); setPoiLon(lon.toFixed(6)); }} />
     </View>
-  ) : null;
-  // A line of the list: in Map view it can be tapped, and the picked one is marked.
-  const lineStyle = (i: number) => [styles.row,
-    withMap && { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
-    withMap && picked === i && { backgroundColor: theme.primary + '1F' }];
+  );
+  // A line of the list: the picked one is marked, and its actions open under it.
+  const lineStyle = (i: number) => [styles.line, picked === i && { backgroundColor: theme.primary + '1F' }];
 
   return (
     <LockableScrollView style={styles.root} contentContainerStyle={styles.content}>
 
-      {/* ── Add a POI ── */}
       {/* POI note dialog: what happens to POIs sent to the watch (André, 2026-08-17), same
           little "i" affordance as the Routes screen. */}
       <Modal visible={infoOpen} transparent animationType="fade" onRequestClose={() => setInfoOpen(false)}>
@@ -390,178 +386,148 @@ export default function PoiScreen() {
       </Modal>
 
       <Card style={{ width: '100%' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={styles.cardTitle}>{t.poiSection}</Text>
-          <TouchableOpacity style={styles.infoBadge} onPress={() => setInfoOpen(true)} hitSlop={8}>
-            <Text style={styles.infoBadgeText}>i</Text>
-          </TouchableOpacity>
-        </View>
-        <FieldRow icon="poi" value={poiName} onChangeText={setPoiName} placeholder={t.poiNamePlaceholder} editable={!poiBusy} style={{ marginTop: v3Spacing.small }} />
-        <View style={styles.row}>
-          {/* Real bug, found live on device (2026-08-09): FieldRow's own `style` prop only
-              reaches its inner TextInput, not the outer row container - passing flex:1
-              directly to FieldRow sized the text *inside* each field, not the field's own
-              box, so Longitude was pushed off the right edge of the screen instead of
-              sitting beside Latitude. Wrapping each in its own flex:1 View is the real fix. */}
-          <View style={{ flex: 1 }}>
-            <FieldRow icon="map" value={poiLat} onChangeText={setPoiLat} placeholder={t.poiLat} keyboardType="numbers-and-punctuation" editable={!poiBusy} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <FieldRow icon="map" value={poiLon} onChangeText={setPoiLon} placeholder={t.poiLon} keyboardType="numbers-and-punctuation" editable={!poiBusy} />
-          </View>
-        </View>
-        {/* POI type (the icon the watch shows) - a horizontal chip picker, default Waypoint. */}
-        <Text style={styles.typeLabel}>{t.poiType}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: v3Spacing.small, paddingVertical: 2 }}>
-          {poiTypesFor(watchModel).map(pt => (
-            <TouchableOpacity key={pt.id} disabled={poiBusy} onPress={() => setPoiType(pt.id)}
-              style={[styles.typeChipRow, poiType === pt.id && styles.typeChipSel]}>
-              <Text style={[styles.typeGlyph, poiType === pt.id && styles.typeGlyphSel]}>{pt.glyph}</Text>
-              <Text style={[styles.typeChipText, poiType === pt.id && styles.typeChipTextSel]}>{pt.name}</Text>
+        {/* One source at a time (desktop's drop-down); Import and + Add POI on the right. */}
+        <View style={styles.bar}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap', flexShrink: 1 }}>
+            {watchHere
+              ? <Dropdown value={source} onSelect={v => { setSource(v); setNote(null); if (v === 1) refreshLibrary(); }}
+                  choices={[{ value: 0, label: t.poiOnWatchSection }, { value: 1, label: 'Library' }]} />
+              : <Text style={styles.cardTitle}>Library</Text>}
+            <TouchableOpacity style={styles.infoBadge} onPress={() => setInfoOpen(true)} hitSlop={8}>
+              <Text style={styles.infoBadgeText}>i</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-        <View style={{ marginTop: v3Spacing.small }}>
-          {/* Hold still to grab and drag the map, pinch to zoom, double-tap to put the POI
-              there (André, 2026-11-21). Before a place is chosen it opens on the weather place. */}
-          <TrackPreview
-            points={hasValidCoords ? [{ lat: parsedLat, lon: parsedLon }] : []}
-            markerOnly
-            height={220}
-            fallbackCenter={{ lat: getWeatherLocation().latitude, lon: getWeatherLocation().longitude }}
-            onDoubleTap={(lat, lon) => { setPoiLat(lat.toFixed(6)); setPoiLon(lon.toFixed(6)); }}
-          />
-          <Text style={styles.itemStats}>{t.poiMapHint}</Text>
-        </View>
-        {/* "Save to library" keeps it in Sommet only; a send to the watch keeps a copy too. */}
-        <View style={[styles.row, { flexWrap: 'wrap' }]}>
-          <Button label="Save to library" variant={watchHere ? 'outline' : 'filled'} grow={false} disabled={poiBusy} onPress={handleSaveToLibrary} />
-          {watchHere && (
-            <Button label={t.poiAddBtn} variant="filled" grow={false} loading={poiBusy} disabled={poiBusy} onPress={handleAddPoi} />
-          )}
-        </View>
-        {formNote && <StatusNote text={formNote.text} tone={formNote.tone} closable />}
-      </Card>
-
-      {/* ── Import from GPX ── */}
-      <Card style={{ width: '100%' }}>
-        <Text style={styles.cardTitle}>{t.poiImportSection}</Text>
-        {/* Not t.poiImportDesc any more: it said every waypoint "is sent as a POI", and an import now
-            keeps them in the library first (seen on the tablet, 2026-11-22). */}
-        <Text style={styles.itemStats}>Choose a GPX file: every waypoint in it is kept in the library, and each can then be sent to the watch.</Text>
-        <Button label={t.poiImportBtn} variant="filled" loading={importPicking} disabled={importPicking} onPress={handleImportPick} style={{ marginTop: v3Spacing.small }} />
-        {importNote && <StatusNote text={importNote.text} tone={importNote.tone} closable />}
-
-        {imported && imported.map((wp, i) => (
-          <View key={`${wp.name}-${i}`} style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemName} numberOfLines={1}>{wp.name}</Text>
-              <Text style={styles.itemStats}>{t.poiCoords(wp.latitude, wp.longitude)}</Text>
-            </View>
-            {watchHere && (
-              <TouchableOpacity style={styles.exportBtn} disabled={addingIndex !== null} onPress={() => handleAddImported(wp, i)}>
-                <Text style={styles.exportBtnText}>{addingIndex === i ? '…' : t.poiItemAddBtn}</Text>
+            {source === 0 && !onWatchLoading && onWatch && onWatch.length > 0 && (
+              <TouchableOpacity hitSlop={8} accessibilityLabel="Save all POIs to the library"
+                onPress={async () => setNote(await keep(onWatch.map(fromWatch)))}>
+                <Text style={styles.linkText}>Save all to library</Text>
               </TouchableOpacity>
             )}
           </View>
-        ))}
-      </Card>
-
-      {/* ── One source at a time: the watch or the Library (desktop's drop-down) ── */}
-      <Card style={{ width: '100%' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          {watchHere
-            ? <Dropdown value={source} onSelect={v => { setSource(v); setNote(null); if (v === 1) refreshLibrary(); }}
-                choices={[{ value: 0, label: t.poiOnWatchSection }, { value: 1, label: 'Library' }]} />
-            : <Text style={styles.cardTitle}>Library</Text>}
-          {(source === 1 ? library.length > 0 : (!onWatchLoading && onWatch && onWatch.length > 0)) && (
-            <ViewModeToggle mode={viewMode} onChange={changeViewMode} />
-          )}
-          {source === 0 && !onWatchLoading && onWatch && onWatch.length > 0 && (
-            <TouchableOpacity hitSlop={8} accessibilityLabel="Save all POIs to the library"
-              onPress={async () => setNote(await keep(onWatch.map(fromWatch)))}>
-              <Text style={styles.linkText}>Save all to library</Text>
-            </TouchableOpacity>
-          )}
+          <View style={{ flexDirection: 'row', gap: v3Spacing.small }}>
+            <Button label="Import GPX…" variant="outline" grow={false} loading={importPicking} disabled={importPicking} onPress={handleImportPick} />
+            <Button label="+ Add POI" accent grow={false} onPress={() => {
+              const c = mapCentre.current?.() ?? { lat: weather.latitude, lon: weather.longitude };
+              placePin(c.lat, c.lon);
+            }} />
+          </View>
         </View>
         {note && <StatusNote text={note.text} tone={note.tone} closable />}
 
-        {/* ── Library ── */}
-        {source === 1 && library.length === 0 && (
-          <Text style={styles.itemStats}>Nothing saved yet. A POI you add or import here is kept in the library, and so is one you save from a watch.</Text>
-        )}
-        {source === 1 && library.length > 0 && (
-          <Text style={styles.itemStats}>Your POIs, kept in Sommet. A watch has its own list: send it the ones you want there. Deleting here leaves the watch as it is.</Text>
-        )}
         <View onLayout={e => { const w = Math.round(e.nativeEvent.layout.width); if (w !== listW) setListW(w); }}
-              style={sideBySide ? { flexDirection: 'row', gap: v3Spacing.medium, alignItems: 'flex-start' } : undefined}>
-        {!sideBySide && mapEl}
-        {/* With the map, the list scrolls in its own pane, so map and list stay together. */}
-        <ScrollView ref={paneRef} nestedScrollEnabled scrollEnabled={withMap}
-          style={withMap ? { flex: sideBySide ? 1 : undefined, maxHeight: sideBySide ? paneH : 360 } : undefined}>
-        {source === 1 && library.map((p, i) => (
-          <View key={p.id} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }}
-                style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-            <Pressable style={lineStyle(i)} disabled={!withMap} onPress={() => pickFromList(i, p.lat, p.lon)}>
-              {/* The icon and its name, from the list the POI's type number is in. */}
-              <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeIn(p.typeList, p.type).glyph}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.itemName} numberOfLines={1}>{p.name}</Text>
-                <Text style={styles.itemStats}>{poiTypeIn(p.typeList, p.type).name} · {t.poiCoords(p.lat, p.lon)}</Text>
+              style={[{ marginTop: v3Spacing.small, gap: v3Spacing.medium },
+                      sideBySide && { flexDirection: 'row', alignItems: 'flex-start' }]}>
+        {mapEl}
+        <View style={sideBySide ? { flex: 1, height: paneH } : undefined}>
+          {/* ── The new POI ── */}
+          {adding && (
+            <View style={styles.form}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <Text style={styles.itemName}>New POI</Text>
+                <Text style={styles.itemStats}>{poiName.length} / 15</Text>
               </View>
-            </Pressable>
-            <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
-              {watchHere && (
-                <Button label={t.poiAddBtn} variant="text" grow={false} busy={sendingId === p.id}
-                  disabled={sendingId !== null || poiBusy} onPress={() => handleSendFromLibrary(p)} />
-              )}
-              <Button label={t.poiItemExportBtn} variant="text" grow={false} disabled={exportingIndex !== null}
-                onPress={() => handleExportItem({ name: p.name, latitude: p.lat, longitude: p.lon, elevation: p.ele ?? undefined }, i)} />
-              <Button label="Rename" variant="text" grow={false} onPress={() => setRenaming({ id: p.id, value: p.name })} />
-              <Button label="Delete" variant="text" danger grow={false} onPress={() => handleDeleteFromLibrary(p)} />
+              <FieldRow icon="poi" value={poiName} onChangeText={v => setPoiName(v.slice(0, 15))} placeholder={t.poiNamePlaceholder} editable={!poiBusy} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled
+                style={{ flexGrow: 0 }} contentContainerStyle={{ gap: v3Spacing.small, paddingVertical: 2 }}>
+                {poiTypesFor(watchModel).map(pt => (
+                  <TouchableOpacity key={pt.id} disabled={poiBusy} onPress={() => setPoiType(pt.id)}
+                    style={[styles.typeChipRow, poiType === pt.id && styles.typeChipSel]}>
+                    <Text style={[styles.typeGlyph, poiType === pt.id && styles.typeGlyphSel]}>{pt.glyph}</Text>
+                    <Text style={[styles.typeChipText, poiType === pt.id && styles.typeChipTextSel]}>{pt.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {/* Each in its own flex:1 View: FieldRow's `style` only reaches its inner TextInput. */}
+              <View style={[styles.row, { marginTop: 0 }]}>
+                <View style={{ flex: 1 }}>
+                  <FieldRow icon="map" value={poiLat} onChangeText={setPoiLat} placeholder={t.poiLat} keyboardType="numbers-and-punctuation" editable={!poiBusy} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <FieldRow icon="map" value={poiLon} onChangeText={setPoiLon} placeholder={t.poiLon} keyboardType="numbers-and-punctuation" editable={!poiBusy} />
+                </View>
+              </View>
+              {/* "Save to library" keeps it in Sommet only; a send to the watch keeps a copy too. */}
+              <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
+                <Button label="Save to library" variant="outline" accent={!watchHere} grow={false} disabled={poiBusy || !poiName.trim()} onPress={handleSaveToLibrary} />
+                {watchHere && (
+                  <Button label={t.poiAddBtn} accent grow={false} loading={poiBusy} disabled={poiBusy || !poiName.trim()} onPress={handleAddPoi} />
+                )}
+                <Button label={t.cancel} variant="text" grow={false} disabled={poiBusy} onPress={closeForm} />
+              </View>
             </View>
-          </View>
-        ))}
+          )}
+          {!adding && <Text style={styles.itemStats}>Double-tap the map to add a POI. Hold the map still to drag it, pinch to zoom.</Text>}
+          {!adding && sourceCount > 0 && (
+            <TextInput style={styles.findInput} value={query} onChangeText={setQuery} placeholder="Find in this list"
+              placeholderTextColor={theme.mutedText} autoCorrect={false} />
+          )}
 
-        {/* ── On the watch ── */}
-        {source === 0 && watchHere && (<>
-          {onWatchLoading && <Text style={styles.itemStats}>{t.poiOnWatchReading}</Text>}
-          {!onWatchLoading && onWatchError && (
+          {source === 1 && library.length === 0 && (
+            <Text style={styles.itemStats}>Nothing saved yet. A POI you add or import here is kept in the library, and so is one you save from a watch.</Text>
+          )}
+          {source === 0 && watchHere && onWatchLoading && <Text style={styles.itemStats}>{t.poiOnWatchReading}</Text>}
+          {source === 0 && watchHere && !onWatchLoading && onWatchError && (
             <Text style={[styles.itemStats, { color: theme.error }]}>{t.poiOnWatchError(onWatchError)}</Text>
           )}
-          {!onWatchLoading && onWatchError && onWatch && onWatch.length > 0 && (
+          {source === 0 && watchHere && !onWatchLoading && onWatchError && onWatch && onWatch.length > 0 && (
             <Text style={styles.itemStats}>{t.poiOnWatchStale}</Text>
           )}
-          {!onWatchLoading && !onWatchError && onWatch && onWatch.length === 0 && (
+          {source === 0 && watchHere && !onWatchLoading && !onWatchError && onWatch && onWatch.length === 0 && (
             <Text style={styles.itemStats}>{t.poiOnWatchEmpty}</Text>
           )}
+          {sourceCount > 0 && mapPoints.length === 0 && <Text style={styles.itemStats}>No POI with that name.</Text>}
 
-          {!onWatchLoading && onWatch && onWatch.map((poi, i) => (
-            <View key={`${poi.name}-${i}`} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }}
-                  style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-              <Pressable style={lineStyle(i)} disabled={!withMap} onPress={() => pickFromList(i, poi.latitude, poi.longitude)}>
+          {/* The list scrolls in its own pane, so map and list stay together. */}
+          <ScrollView ref={paneRef} nestedScrollEnabled keyboardShouldPersistTaps="handled"
+            style={sideBySide ? { flex: 1, marginTop: v3Spacing.small } : { maxHeight: 420, marginTop: v3Spacing.small }}>
+          {source === 1 && libShown.map((p, i) => (
+            <View key={p.id} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }} style={lineStyle(i)}>
+              <Pressable style={styles.lineMain} onPress={() => pickFromList(i, p.lat, p.lon)}>
+                {/* The icon and its name, from the list the POI's type number is in. */}
+                <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeIn(p.typeList, p.type).glyph}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={styles.itemStats} numberOfLines={1}>{poiTypeIn(p.typeList, p.type).name} · {t.poiCoords(p.lat, p.lon)}</Text>
+                </View>
+              </Pressable>
+              {picked === i && (
+                <View style={styles.lineActions}>
+                  {watchHere && (
+                    <Button label={t.poiAddBtn} variant="text" grow={false} busy={sendingId === p.id}
+                      disabled={sendingId !== null || poiBusy} onPress={() => handleSendFromLibrary(p)} />
+                  )}
+                  <Button label={t.poiItemExportBtn} variant="text" grow={false} disabled={exportingIndex !== null}
+                    onPress={() => handleExportItem({ name: p.name, latitude: p.lat, longitude: p.lon, elevation: p.ele ?? undefined }, i)} />
+                  <Button label="Rename" variant="text" grow={false} onPress={() => setRenaming({ id: p.id, value: p.name })} />
+                  <Button label="Delete" variant="text" danger grow={false} onPress={() => handleDeleteFromLibrary(p)} />
+                </View>
+              )}
+            </View>
+          ))}
+
+          {source === 0 && watchShown.map((poi, i) => (
+            <View key={`${poi.name}-${i}`} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }} style={lineStyle(i)}>
+              <Pressable style={styles.lineMain} onPress={() => pickFromList(i, poi.latitude, poi.longitude)}>
                 {/* The POI's own watch icon and the name of its type in that watch's list. */}
                 <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeOf(poi.type, watchModel).glyph}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName} numberOfLines={1}>{poi.name}</Text>
-                  <Text style={styles.itemStats}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
+                  <Text style={styles.itemStats} numberOfLines={1}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
                 </View>
               </Pressable>
-              {/* Under the name, so three buttons fit a phone (as the route library's rows). */}
-              <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
-                <Button label={t.poiItemExportBtn} variant="text" grow={false} busy={exportingIndex === i}
-                  disabled={exportingIndex !== null} onPress={() => handleExportItem(poi, i)} />
-                <Button label="Save to library" variant="text" grow={false}
-                  onPress={async () => setNote(await keep([fromWatch(poi)]))} />
-                <Button label={t.poiItemRemoveBtn} variant="text" danger grow={false} busy={removingIndex === i}
-                  disabled={removingIndex !== null || onWatchLoading} onPress={() => handleRemoveItem(poi, i)} />
-              </View>
+              {picked === i && (
+                <View style={styles.lineActions}>
+                  <Button label={t.poiItemExportBtn} variant="text" grow={false} busy={exportingIndex === i}
+                    disabled={exportingIndex !== null} onPress={() => handleExportItem(poi, i)} />
+                  <Button label="Save to library" variant="text" grow={false}
+                    onPress={async () => setNote(await keep([fromWatch(poi)]))} />
+                  <Button label={t.poiItemRemoveBtn} variant="text" danger grow={false} busy={removingIndex === i}
+                    disabled={removingIndex !== null || onWatchLoading} onPress={() => handleRemoveItem(poi, i)} />
+                </View>
+              )}
             </View>
           ))}
-        </>)}
-        </ScrollView>
-        {sideBySide && mapEl}
+          </ScrollView>
+        </View>
         </View>
       </Card>
 
@@ -601,16 +567,16 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small, marginTop: v3Spacing.small },
   itemName: { fontSize: v3Type.bodyLarge, fontWeight: '700', color: t.text },
   itemStats: { fontSize: v3Type.label, color: t.mutedText, marginTop: 2 },
-  onWatchItem: { marginTop: v3Spacing.large, paddingTop: v3Spacing.medium, borderTopWidth: 1, borderTopColor: t.mutedText + '22', gap: v3Spacing.small },
-  exportBtn: {
-    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8,
-    backgroundColor: t.primary + '1F', borderWidth: 1, borderColor: t.primary,
-  },
-  exportBtnText: { color: t.primary, fontWeight: '600', fontSize: v3Type.label },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: v3Spacing.small },
+  form: { backgroundColor: t.mutedText + '14', borderRadius: 10, padding: v3Spacing.small, gap: v3Spacing.small, marginBottom: v3Spacing.small },
+  findInput: { borderWidth: 1, borderColor: t.mutedText + '55', borderRadius: 10, color: t.text,
+               paddingHorizontal: 12, paddingVertical: 6, fontSize: v3Type.body, marginTop: v3Spacing.small },
+  line: { borderRadius: 8, marginBottom: 2 },
+  lineMain: { flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small, paddingHorizontal: 6, paddingVertical: 6 },
+  lineActions: { flexDirection: 'row', flexWrap: 'wrap', gap: v3Spacing.small, paddingHorizontal: 6, paddingBottom: 6 },
   linkText: { fontSize: v3Type.label, color: t.mutedText, fontWeight: '700' },
   renameInput: { borderWidth: 1, borderColor: t.mutedText + '55', borderRadius: 10, color: t.text,
                  paddingHorizontal: 12, paddingVertical: 8, fontSize: v3Type.body, marginVertical: v3Spacing.small },
-  typeLabel: { fontSize: v3Type.label, color: t.mutedText, marginTop: v3Spacing.small, marginBottom: 4 },
   typeChipRow: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999,
