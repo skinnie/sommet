@@ -26,7 +26,15 @@ likely. Desktop, every system.
   recorded. That is the price of the choice, and is in the how-to.
 - Android is unchanged: it hears the scale while the app is open, and has no BlueZ.
 - Tests in `scale_service.selftest()` (nothing before `want`, bursts during, connection closed
-  after; the limits). NOT seen yet: a real weigh-in.
+  after; the limits).
+- Seen in the test window (the built app, scratch home, a made-up scale, state read every
+  10 s): scanning from start to 293 s, off at 303 s; Weight page opened at about 320 s,
+  scanning again from 324 s and its chip reads "Listening"; back to Home at about 385 s,
+  scanning until 526 s, off from 536 s (the page's last request plus 150 s)
+  (`sommet-builds/layout-test/run/sw-status.log`, `shots/sw-02-weight.png`). BlueZ itself was
+  not reachable from that test's own network space, so no scan ran there; the real scans
+  were seen separately (the entry below).
+- NOT seen yet: a real weigh-in.
 
 ## 2026-11-23: Linux: the scale listener asks BlueZ for the scale only (watch-protocol/08, B)
 
