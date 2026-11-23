@@ -52,6 +52,11 @@ there without a watch too.
 (above it in a narrow window). Click a pin and its line is marked in the list; click a line and
 the map goes to its pin, click it again to see all the pins. **List** shows the lines alone.
 
+**How many.** An Ambit3 or a Traverse keeps at most 250
+POIs, and Sommet says so before sending one more. (Suunto's own software allows an Ambit1 or
+Ambit2 100, shared with the waypoints of its routes; Sommet does not check that one.) The
+library has no limit.
+
 **POI types.** An Ambit3 has 18 POI types and a Traverse has 48, numbered differently. The
 library remembers which watch family a POI's type came from, and sends it to the other family
 by its icon: a "Camp" stays a "Camp". A Traverse type with no Ambit3 icon becomes the plain

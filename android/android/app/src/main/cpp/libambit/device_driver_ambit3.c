@@ -1024,11 +1024,17 @@ static int log_synced(ambit_object_t *object, ambit_log_entry_t *log_entry)
  * a single-entry SBEM0102 push sent via command 0x1201 (the same
  * opcode/wire-shape log_synced() above already uses for its own single-entry
  * push) of entry 0x34 (utf8 ISO8601 string *with* timezone offset, e.g.
- * "2026-08-08T17:20:22+0200", NUL-terminated). The real BLE captures also
- * always sent a second push of entry 0x48 (sml.DeviceLog.NextTime, a single
- * 0x00 byte) right after - the real cable capture does NOT, confirming it's
- * unrelated to the clock write itself; still replicated here for BLE only,
- * non-fatal if rejected.
+ * "2026-08-08T17:20:22+0200", NUL-terminated).
+ *
+ * Until 2026-11-23 a second push of entry 0x48 followed over Bluetooth, copied from the 7R
+ * app's captures. It is not part of the clock: 0x48 is sml.DeviceLog.NextTime (0 = NewSamples,
+ * 1 = AllSamples; field 72 of the Kailash's own list), and the 7R app sends it right after
+ * each read of the travel log (entry 0x53), 13 times in 9 captures, three of them in rounds
+ * with no clock push at all (kailash7rsettingschange f783, f986; Untitled 3 f3993). Sent
+ * with the clock it told the watch the travel log's samples were taken, read or not
+ * (inferred from the reply sizes: 76 samples, then 1). Removed; the clock is one message, as
+ * SuuntoLink sends over the cable and the 7R app's own log says ("Setting device time", one
+ * setSmlData). Whether to send it after our own travel-log read is a separate question.
  *
  * Earlier in this same investigation a bootloader-mode-only hypothesis was
  * drawn from a single capture (resumefirmwarekailash) that happened to enter
@@ -1045,11 +1051,10 @@ static int log_synced(ambit_object_t *object, ambit_log_entry_t *log_entry)
  *     fw 2.0.22, the shipping firmware)
  * All confirmed byte-exact against real SuuntoLink/7R captures. The legacy 0x0300/0x0302 is
  * MovesLink-era and these firmwares ACK it but never apply it. */
-static int ambit3_sbem_time_sync(ambit_object_t *object, struct tm *tm, uint8_t entry_id, bool send_next_time)
+static int ambit3_sbem_time_sync(ambit_object_t *object, struct tm *tm, uint8_t entry_id)
 {
     libambit_sbem0102_data_t send_data_object, reply_data_object;
     char iso8601[32];
-    uint8_t next_time = 0x00;
     int ret = 0;
 
     // %z on both glibc (desktop test builds) and bionic (real Android target)
@@ -1070,33 +1075,19 @@ static int ambit3_sbem_time_sync(ambit_object_t *object, struct tm *tm, uint8_t 
     libambit_sbem0102_data_free(&send_data_object);
     libambit_sbem0102_data_free(&reply_data_object);
 
-    if (ret == 0 && send_next_time && object->transport == AMBIT_TRANSPORT_BLE) {
-        libambit_sbem0102_data_init(&send_data_object);
-        libambit_sbem0102_data_init(&reply_data_object);
-        libambit_sbem0102_data_add(&send_data_object, 0x48, &next_time, sizeof(next_time));
-        // Real capture behavior only, not required for the clock write itself -
-        // don't fail the whole sync if this second, still-unexplained push is
-        // rejected. Cable's own real capture never sends this at all.
-        if (libambit_sbem0102_command_request(&object->driver_data->sbem0102, ambit_command_ambit3_log_synced, &send_data_object, &reply_data_object) != 0) {
-            LOG_WARNING("Kailash time sync: NextTime push failed (non-fatal)");
-        }
-        libambit_sbem0102_data_free(&send_data_object);
-        libambit_sbem0102_data_free(&reply_data_object);
-    }
-
     return ret;
 }
 
-/* Kailash (Hoopoe): entry 0x34, plus the BLE-only NextTime (0x48) follow-up its own captures show. */
+/* Kailash (Hoopoe): entry 0x34, one message on both transports. */
 static int kailash_time_sync(ambit_object_t *object, struct tm *tm)
 {
-    return ambit3_sbem_time_sync(object, tm, 0x34, true);
+    return ambit3_sbem_time_sync(object, tm, 0x34);
 }
 
 /* Traverse (Jabiru): entry 0x3f on fw 2.x, no NextTime push (its cable capture never sends one). */
 static int traverse_time_sync(ambit_object_t *object, struct tm *tm)
 {
-    return ambit3_sbem_time_sync(object, tm, 0x3f, false);
+    return ambit3_sbem_time_sync(object, tm, 0x3f);
 }
 
 /**
@@ -1439,6 +1430,11 @@ static uint8_t *ambit3_build_poi_write_payload(
 
 /* The watch holds two lists of 250 POIs (MSP430X Emu 2.4.17, flash 0x27100/0x2B100). */
 #define AMBIT3_POI_MAX_EXISTING 500
+/* ... but a write only ever fills the first list (firmware 0x397e6 -> 0x5eb10 on list 1), so
+ * 250 is the most a watch keeps: SuuntoLink's own number (getMaxPoiCount, 0xfa) and the
+ * emulated Peak's (adds 251 to 254 answered, not kept). Same number in tools/ambit_format.py
+ * (POI_MAX). 2026-11-23, watch-protocol/05. */
+#define AMBIT3_POI_MAX_ADD 250
 
 /* Most bytes in one 0x55 entry: its length must stay a single byte (< 0xff). */
 #define AMBIT3_POI_ENTRY_MAX 0xfe
@@ -1531,8 +1527,9 @@ int ambit3_add_poi_to_watch(ambit_object_t *object, const char *name, double lat
         LOG_ERROR("ambit3_add_poi_to_watch: could not read the POI count, nothing written");
         return -1;
     }
-    if (count_before >= AMBIT3_POI_MAX_EXISTING) {
-        LOG_ERROR("ambit3_add_poi_to_watch: the watch already holds %d POIs", count_before);
+    if (count_before >= AMBIT3_POI_MAX_ADD) {
+        LOG_ERROR("ambit3_add_poi_to_watch: the watch already holds %d POIs (it keeps %d)",
+                  count_before, AMBIT3_POI_MAX_ADD);
         return -1;
     }
 

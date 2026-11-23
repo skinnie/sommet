@@ -133,8 +133,13 @@ class WritingToATraverse(unittest.TestCase):
         self.assertEqual(F.waypoint_type_id(None), 17)
         with self.assertRaises(ValueError):
             F.waypoint_type_id("Big game")                          # not an Ambit3 type
-        with self.assertRaises(ValueError):
-            F.waypoint_type_id(48, ALPHA)
+
+    def test_a_type_number_the_watch_lacks_becomes_its_plain_type(self):
+        """As SuuntoLink's own table and the Android app do (watch-protocol/05)."""
+        self.assertEqual(F.waypoint_type_id(48, ALPHA), 26)
+        self.assertEqual(F.waypoint_type_id(40), 17)                # a Traverse type, on an Ambit3
+        self.assertEqual(F.waypoint_type_id("99"), 17)
+        self.assertEqual(F.waypoint_type_id(10), 10)                # one it has stays
 
 
 class BluetoothLink:
@@ -159,10 +164,55 @@ class BluetoothLink:
         return b""
 
 
+class LinkWithAHello(BluetoothLink):
+    """The real Bluetooth link: it already holds the watch's hello. Counts what it is asked."""
+
+    def __init__(self, model, firmware, holds=0):
+        super().__init__(model, firmware)
+        self.device_info = {"model": model, "serial": "TESTSERIAL000000"}
+        self.asked = []
+        self.written = [b""] * holds
+
+    def command(self, command, payload=b"", **kw):
+        self.asked.append(command)
+        return super().command(command, payload, **kw)
+
+
 class AddingOverBluetooth(unittest.TestCase):
     def setUp(self):
         import ble_pois
         self.ble_pois = ble_pois
+
+    def test_the_model_comes_from_the_hello_not_from_a_new_question(self):
+        """Suunto asks device info once per connection. We asked twice per add (2026-11-23)."""
+        watch = LinkWithAHello("Emu", (2, 4, 17, 0))
+        self.assertTrue(self.ble_pois.add_poi(watch, "Hut", 46.5, 7.5, 10)["ok"])
+        self.assertEqual(watch.asked, [W.CMD_POI_COUNT, W.CMD_POI_WRITE, W.CMD_POI_COUNT])
+        (entry, _), = F.sbem_entries(watch.written[-1])
+        self.assertEqual(entry, 0x55)
+
+    def test_a_traverse_is_still_told_apart_by_its_hello(self):
+        watch = LinkWithAHello("Loon", (2, 0, 22, 0))
+        self.assertTrue(self.ble_pois.add_poi(watch, "Hide", 60.28, 24.98, "Big game")["ok"])
+        self.assertEqual(W.pois_of_reply(watch.written[-1])[0]["type"], 43)
+        (entry, _), = F.sbem_entries(watch.written[-1])
+        self.assertEqual(entry, 0x53)
+        # A Traverse is still asked for its firmware (its entry number changed with it); that
+        # question is the field-list reader's own, not the model lookup's.
+
+    def test_a_full_watch_is_refused_before_a_byte(self):
+        watch = LinkWithAHello("Emu", (2, 4, 17, 0), holds=F.POI_MAX)
+        result = self.ble_pois.add_poi(watch, "One more", 46.5, 7.5)
+        self.assertFalse(result["ok"])
+        self.assertIn("250", result["error"])
+        self.assertEqual(watch.asked, [W.CMD_POI_COUNT])            # nothing written
+        almost = LinkWithAHello("Emu", (2, 4, 17, 0), holds=F.POI_MAX - 1)
+        self.assertTrue(self.ble_pois.add_poi(almost, "The last", 46.5, 7.5)["ok"])
+
+    def test_an_unknown_type_number_is_written_as_the_plain_one(self):
+        watch = LinkWithAHello("Emu", (2, 4, 17, 0))
+        self.assertTrue(self.ble_pois.add_poi(watch, "Hut", 46.5, 7.5, 40)["ok"])
+        self.assertEqual(W.pois_of_reply(watch.written[-1])[0]["type"], 17)
 
     def test_a_traverse_alpha_gets_its_own_form_and_the_picked_type(self):
         watch = BluetoothLink("Loon", (2, 0, 22, 0))

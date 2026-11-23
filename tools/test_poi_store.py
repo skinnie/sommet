@@ -296,6 +296,32 @@ class RemovePoi(unittest.TestCase):
         W.remove_pois(self.watch, [("SommetA", 50.6, 3.06)], self.tmp.name)
         self.assertFalse({0x0B16, 0x0B18} & set(self.watch.sent))
 
+    def test_the_list_is_read_twice_and_must_not_have_changed(self):
+        """As Android's remove: a POI saved on the watch itself between the first read and the
+        emptying would be lost. Nothing is written when the two reads differ."""
+        real = self.watch.command
+        reads = {"n": 0}
+
+        def a_poi_saved_on_the_watch_meanwhile(command, payload=b"", **k):
+            if command == W.CMD_POI_READ and payload[:2] == b"\0\0":
+                reads["n"] += 1
+                if reads["n"] == 2:
+                    self.watch.records.append(W.build_poi_record("On the watch", 41.0, -8.0))
+            return real(command, payload, **k)
+        self.watch.command = a_poi_saved_on_the_watch_meanwhile
+        result = W.remove_pois(self.watch, [("SommetA", 50.6, 3.06)], self.tmp.name)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["changed"])
+        self.assertIn("changed", result["error"])
+        self.assertNotIn(W.CMD_POI_ERASE if hasattr(W, "CMD_POI_ERASE") else 0x0B04, self.watch.sent)
+        self.assertEqual(len(self.watch.records), 4)                 # all three, and the new one
+
+    def test_an_unchanged_list_costs_one_more_read(self):
+        self.watch.sent.clear()
+        self.assertTrue(W.remove_pois(self.watch, [("SommetA", 50.6, 3.06)], self.tmp.name)["ok"])
+        first_write = self.watch.sent.index(0x0B04)
+        self.assertEqual(self.watch.sent[:first_write].count(W.CMD_POI_READ), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

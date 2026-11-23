@@ -7,6 +7,40 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: POIs and the Kailash clock: desktop and Android send the same (watch-protocol/05)
+
+The last differences between what the two apps send, each checked first against Suunto's own
+traffic and the watch programs (evidence in the ticket; scripts in
+`sommet-builds/re-small-ones/`). André: "go for all".
+
+- **POI add, desktop over Bluetooth: no device-info question per add.** `write_nav._pid()`
+  takes the model from the hello the link already holds; it asked 0x0000 twice for one add.
+  Suunto asks it once per connection. An Ambit3 add is now count, write, count. (A Traverse
+  is still asked for its firmware by the field-list reader: its entry number changed with it.)
+- **POI limit: 250, on both.** SuuntoLink's number, the watch programs' (a write only fills
+  the first of two lists of 250) and the emulated Peak's (adds 251 to 254 answered, not
+  kept). Desktop: `ambit_format.POI_MAX`; `ble_pois.add_poi()` and `write_nav.run_addpoi()`
+  refuse before a byte with "The watch already holds N POIs and keeps at most 250". Android:
+  the add check compares with 250 (`AMBIT3_POI_MAX_ADD`), it was 500 and could never stop an
+  add. Until now the 251st add ended as "the watch did not keep the POI".
+- **Unknown POI type number, desktop: the watch's plain type** (17 "Waypoint", 26 on a
+  Traverse), as Android always did and as SuuntoLink's own table does for the types an Ambit3
+  lacks. It was an error. An unknown type NAME is still an error.
+- **POI remove, desktop: the list is read a second time** right before it is emptied and must
+  be byte for byte the first read, else nothing is written ("The POIs on the watch changed
+  while removing"). Android's remove always did this. Suunto reads once; the second read
+  guards a POI saved on the watch itself in between, and costs one list read.
+- **Kailash clock, Android: one message.** The second push (entry 0x48) is gone. 0x48 is
+  `sml.DeviceLog.NextTime`, the travel log's "samples taken" mark; the 7R app sends it after
+  each travel-log read, not with the clock. Sent with the clock it may have made the watch
+  stop offering a track the app holds only in memory (inferred, not proven).
+- A wrong comment corrected: SuuntoLink does write the long `55 ff` POI entry.
+- Tests: `test_traverse_poi_link.py` (the hello, the limit, the plain type),
+  `test_poi_store.py` (two reads, the refusal). NOT seen on a real watch yet. To see: on a
+  Peak over Bluetooth from the desktop, one POI add (count +1, its icon), one with type 40
+  (shows as Waypoint), one remove (the others unchanged); on a Kailash from the tablet, Sync
+  time sets the clock, and a recorded track is still offered on the next connection.
+
 ## 2026-11-23: The scale is listened for while the Weight page is open (watch-protocol/08, D)
 
 André's choice of three ("1 a"): not for as long as Sommet is open, but when a weigh-in is

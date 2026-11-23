@@ -1044,13 +1044,34 @@ def poi_entry_of(reply):
 TRAVERSE_MODEL_PRODUCT_IDS = {"Jabiru": 0x002B, "Loon": 0x002D}
 
 
+def _hello(link):
+    """The watch's hello as a Bluetooth link keeps it ({model, serial, fw_version, ...}), from
+    the link itself or from the bridge's status; {} for a cable link or when there is none."""
+    info = getattr(link, "device_info", None)
+    if info is None and hasattr(link, "status"):
+        try:
+            info = link.status().get("device_info")
+        except Exception:                                    # noqa: BLE001
+            info = None
+    return info if isinstance(info, dict) else {}
+
+
 def _pid(link):
     """The product id of the watch `link` is open on (or was asked for), None when unknown.
     A Bluetooth link has no USB product id: there a Traverse is recognised by the model name
-    in its device-info reply, so its POIs get the Traverse form over Bluetooth too."""
+    of its hello, so its POIs get the Traverse form over Bluetooth too.
+
+    The model comes from the hello the link already holds. Until 2026-11-23 this asked the
+    watch for its device info (0x0000) each time, twice for one POI add over Bluetooth
+    (poi_format and the type). Suunto's software asks it once, as the first message of a
+    connection, and never again before a POI write (every cable capture, and the four
+    Bluetooth captures of its app). Asked only when the link holds no model."""
     pid = getattr(link, "opened_product_id", None) or getattr(link, "product_id", None)
     if pid or getattr(link, "dry_run", True):
         return pid
+    known = str(_hello(link).get("model") or "")
+    if known:
+        return TRAVERSE_MODEL_PRODUCT_IDS.get(known)
     try:
         info = link.command(CMD_DEVICE_INFO, b"\x02\x48\x03\x00")
     except Exception:          # each transport raises its own type; unknown model = Ambit3 form
@@ -1084,10 +1105,13 @@ def poi_format(link):
 
 def poi_entry_payloads(records, entry=POI_ENTRY):
     """POI record bodies as the 0x0b25 payloads that append them: packed in order into `entry`
-    (0x55 on an Ambit3) entries of at most POI_ENTRY_MAX bytes, one 0x0b25 each. SuuntoLink's poiimport writes one
-    such entry (single-byte length, its 5 POIs in 249 bytes) and never the extended header
-    (0x55 0xFF + u32); that form is only what the watch sends on a read, and writing it
-    corrupted the POI store (2026-08-30). 0x0b25 appends (Ambit3 firmware FUN_0004da50), so
+    (0x55 on an Ambit3) entries of at most POI_ENTRY_MAX bytes, one 0x0b25 each. SuuntoLink's
+    poiimport writes one such entry (single-byte length, its 5 POIs in 249 bytes). For a
+    longer list SuuntoLink does write the extended header (0x55 0xFF + u32): 9 POIs in 426
+    bytes in ambit3declination #406, read back complete in the next capture (this comment
+    said until 2026-11-23 that it never does). Our own try at that form corrupted the POI
+    store on 2026-08-30, for a reason not found, so we keep to short entries, which were seen
+    working. 0x0b25 appends (Ambit3 firmware FUN_0004da50), so
     several in a row add up. The Android twin, ambit3_write_poi_bodies(), put 9 POIs back on
     André's Peak this way (2026-10-25). Empty records are skipped: a POI the watch lists as an
     empty entry (a name over 15 bytes) has no data to put back."""
@@ -1293,6 +1317,9 @@ def run_addpoi(args):
         raise SystemExit(f"addpoi: {e}")
     entry, with_altitude = poi_format(link)
     before = poi_count(link)
+    if before is not None and before >= F.POI_MAX:
+        print(f"!! {F.poi_full_words(before)}")
+        return 1
     # --ele (metres) reaches a Traverse only: an Ambit3 POI has no altitude.
     record = build_poi_record(args.name.strip(), args.lat, args.lon, type_=poi_type,
                               altitude=F.poi_altitude(args.ele) if with_altitude else None)
@@ -1446,8 +1473,8 @@ def put_pois_back_safely(link, pois, backup=None):
 
 def remove_pois(link, targets, backup_dir):
     """Removes `targets` ([(name, lat, lon)]) from an Ambit3-family watch, keeping every other
-    POI byte for byte: device info, read the list (0x0b24, every page), save a copy, then
-    set_poi_records() with the rest. If that fails after the list was emptied, the copy is
+    POI byte for byte: device info, read the list (0x0b24, every page), save a copy, read the
+    list again (it must be the same), then set_poi_records() with the rest. If that fails after the list was emptied, the copy is
     written back once. Never touches the routes. The Android twin is
     PoiService.removePoisFromWatch(), tested on André's Peak 2026-10-25.
 
@@ -1461,6 +1488,14 @@ def remove_pois(link, targets, backup_dir):
     backup = None if link.dry_run else str(save_poi_backup(
         reply, serial_from_device_info(info) or getattr(link, "opened_serial", None) or "", backup_dir))
     entry = poi_entry_of(reply)
+    # The list once more, right before it is emptied: a POI saved or deleted on the watch
+    # itself since the first read would otherwise be lost (the rest is written from the first
+    # read). Android has done this since its remove was written (ambit3_set_poi_list); Suunto's
+    # software reads once. One list read; nothing is written when the two differ.
+    if not link.dry_run and read_pois(link) != reply:
+        return {"ok": False, "changed": True, "backup": backup,
+                "error": "The POIs on the watch changed while removing. Nothing was removed: "
+                         "read the list again."}
     try:
         set_poi_records(link, keep, entry)
     except (RuntimeError, TimeoutError, OSError) as e:

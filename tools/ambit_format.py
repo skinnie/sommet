@@ -261,17 +261,18 @@ def waypoint_type_name(type_id, product_id=None):
 def waypoint_type_id(value, product_id=None):
     """Resolve a POI type given either its numeric id or its (case-insensitive) name, in the
     list of the watch it is for (the Traverse's 48 types with its product id, else the Ambit's
-    18). None or "" gives that watch's plain type. Raises ValueError on an unknown name or id
-    so a CLI/API surfaces it rather than writing the default."""
+    18). None or "" gives that watch's plain type, and so does a NUMBER that watch has no type
+    for: SuuntoLink's own table turns the types an Ambit3 lacks into 17 "Waypoint", and the
+    Android app has always done the same (watch-protocol/05, 2026-11-23; it used to be an
+    error here). An unknown NAME still raises ValueError: that is a typing mistake to show."""
     types = waypoint_types_for(product_id)
+    plain = (TRAVERSE_WAYPOINT_TYPE_DEFAULT if product_id in WAYPOINT_ALT_PRODUCT_IDS
+             else WAYPOINT_TYPE_DEFAULT)
     if value in (None, ""):
-        return (TRAVERSE_WAYPOINT_TYPE_DEFAULT if product_id in WAYPOINT_ALT_PRODUCT_IDS
-                else WAYPOINT_TYPE_DEFAULT)
+        return plain
     if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
         tid = int(value)
-        if tid not in types:
-            raise ValueError(f"POI type id {tid} out of range 0-{max(types)}")
-        return tid
+        return tid if tid in types else plain
     for tid, name in types.items():
         if name.lower() == str(value).strip().lower():
             return tid
@@ -289,6 +290,17 @@ def waypoint_type_id(value, product_id=None):
 # from or written to a real Traverse: that watch held none and is no longer on hand.
 POI_ENTRY = 0x55
 POI_ENTRY_TRAVERSE = 0x53
+
+# The most POIs an Ambit3-family watch or a Traverse keeps: 250. SuuntoLink's own number
+# (getMaxPoiCount, 0xfa), the watch programs' (two lists of 250 each, and a write only ever
+# fills the first: Peak 2.4.17 0x2cdf4, same in Sport, Run, Vertical and Traverse Alpha), and
+# the emulated Peak's: adds 251 to 254 were answered like any other and not kept.
+POI_MAX = 250
+
+
+def poi_full_words(count):
+    return (f"The watch already holds {count} POIs and keeps at most {POI_MAX}. "
+            "Remove one first.")
 POI_ENTRY_TRAVERSE_FW1 = 0x52
 POI_ENTRIES = (POI_ENTRY, POI_ENTRY_TRAVERSE, POI_ENTRY_TRAVERSE_FW1)
 POI_ENTRIES_WITH_ALTITUDE = (POI_ENTRY_TRAVERSE, POI_ENTRY_TRAVERSE_FW1)

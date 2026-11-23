@@ -73,6 +73,8 @@ def add_poi(link, name, lat, lon, type_=None, elevation=None):
     only the new record (0x0b25 appends) and check the count (0x0b02) went up by one.
     Never touches Waypoints/Routes flash and needs no commit."""
     before = poi_count(link)
+    if before is not None and before >= F.POI_MAX:
+        return {"ok": False, "dry_run": link.dry_run, "error": F.poi_full_words(before)}
     # The entry number, the plain type and the altitude field are the watch's own (a Traverse
     # differs from an Ambit3, see write_nav.poi_format).
     # `type_` is the picked POI type (number or name) in that watch's list; None = its plain one.
