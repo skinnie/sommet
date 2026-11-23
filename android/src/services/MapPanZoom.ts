@@ -52,6 +52,12 @@ export function layoutView(view: MapView, w: number, h: number): ViewLayout {
   };
 }
 
+/** The same view centred on one point, zoomed in to at least `minZoom` (a POI picked in a list). */
+export function centredOn(view: MapView, lat: number, lon: number, minZoom: number): MapView {
+  const p = worldPixel(lat, lon, 0);
+  return { u: wrap01(p.x / TILE_SIZE), v: clamp01(p.y / TILE_SIZE), zf: clampZoom(Math.max(view.zf, minZoom)) };
+}
+
 /** Moves the map with the finger: a drag of (dx, dy) display pixels. */
 export function panView(view: MapView, dx: number, dy: number): MapView {
   const world = TILE_SIZE * 2 ** view.zf;

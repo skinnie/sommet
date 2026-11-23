@@ -6,7 +6,7 @@ import { useV3Theme } from '../theme/v3';
 import { getMapProvider, MapProvider } from '../services/MapProviderService';
 import { fitBoundsMosaic, centeredPointMosaic, tileUrl, TileMosaic, TRACK_COLOR, TILE_HEADERS } from '../services/MapTile';
 import { t } from '../i18n';
-import { MapView as PanZoomView, layoutView, panView, viewFromMosaic, zoomView } from '../services/MapPanZoom';
+import { MapView as PanZoomView, centredOn, layoutView, panView, viewFromMosaic, zoomView } from '../services/MapPanZoom';
 import { useScrollLock } from './ScrollLock';
 
 // Touch (André, 2026-11-21: "press and drag and for poi, double tap"). A quick swipe on the map
@@ -33,8 +33,16 @@ const DOUBLE_TAP_MS = 300;
 // pick a zoom/scale) renders on the next pass.
 export function TrackPreview({
   points, height = 100, markerOnly = false, variableHeight = false, multiMarker = false,
-  interactive = true, onDoubleTap, fallbackCenter,
+  interactive = true, onDoubleTap, fallbackCenter, selectedIndex, onMarkerTap, focusOn,
 }: {
+  // multiMarker only (the POIs screen's one map, André 2026-11-22): the marker at
+  // `selectedIndex` (an index in `points`) is drawn filled and on top; a tap on a marker says
+  // which one; `focusOn` moves the view to a point (a POI picked in the list) and, set back to
+  // null, shows every marker again. `key` changes for each pick, so the same point picked
+  // twice still moves the view.
+  selectedIndex?: number;
+  onMarkerTap?: (index: number) => void;
+  focusOn?: { lat: number; lon: number; key: number } | null;
   // No point yet (the POI form before a place is chosen): show the map here, without a pin.
   fallbackCenter?: { lat: number; lon: number };
   // false: a fixed picture (activity cards, where a long-press already deletes the move).
@@ -79,6 +87,18 @@ export function TrackPreview({
   const pointsKey = points.map(p => `${p.lat},${p.lon}`).join(';');
   useEffect(() => { viewRef.current = null; setView(null); }, [pointsKey]);   // new data: fit again
   const setV = (v: PanZoomView) => { viewRef.current = v; setView(v); };
+  // Where each marker is drawn now, with its index in `points`, for onMarkerTap.
+  const markersRef = useRef<{ x: number; y: number; index: number }[]>([]);
+  const focusKey = focusOn ? focusOn.key : 0;
+  const hadFocus = useRef(false);
+  useEffect(() => {
+    if (focusOn) {
+      const base = viewRef.current ?? fittedRef.current;
+      if (base) { hadFocus.current = true; setV(centredOn(base, focusOn.lat, focusOn.lon, 12)); }
+    } else if (hadFocus.current) {
+      hadFocus.current = false; viewRef.current = null; setView(null);   // every marker again
+    }
+  }, [focusKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const release = () => {
     if (g.timer) { clearTimeout(g.timer); g.timer = null; }
     g.armed = false; g.pinchD0 = 0;
@@ -136,6 +156,16 @@ export function TrackPreview({
       const wasArmed = g.armed;
       const quickTap = !g.moved && Date.now() - g.t0 < HOLD_MS;
       release();
+      if (!wasArmed && quickTap && onMarkerTap) {
+        // The nearest marker under the finger (within a fingertip, 30 px).
+        const x = e.nativeEvent.locationX, y = e.nativeEvent.locationY;
+        let best = -1, bestD = 30;
+        for (const m of markersRef.current) {
+          const d = Math.hypot(m.x - x, m.y - y);
+          if (d < bestD) { bestD = d; best = m.index; }
+        }
+        if (best >= 0) { onMarkerTap(best); return; }
+      }
       if (wasArmed || !quickTap || !onDoubleTap) return;
       const now = Date.now(), x = e.nativeEvent.locationX, y = e.nativeEvent.locationY;
       if (now - g.lastTapT < DOUBLE_TAP_MS && Math.hypot(x - g.lastTapX, y - g.lastTapY) < 40) {
@@ -153,10 +183,12 @@ export function TrackPreview({
   // Infinity/NaN, which silently poisons every tile position downstream with no crash and
   // no visible error - RN just renders nothing. Same "skip the bad one, don't throw" spirit
   // PoiService.ts's own SBEM entry parsing already uses for malformed watch data.
-  const validPoints = points.filter(p =>
+  const isValid = (p: { lat: number; lon: number }) =>
     Number.isFinite(p.lat) && p.lat >= -90 && p.lat <= 90 &&
-    Number.isFinite(p.lon) && p.lon >= -180 && p.lon <= 180
-  );
+    Number.isFinite(p.lon) && p.lon >= -180 && p.lon <= 180;
+  const validPoints = points.filter(isValid);
+  // Each valid point's index in `points` (selectedIndex and onMarkerTap count in `points`).
+  const validIndex = points.map((p, i) => (isValid(p) ? i : -1)).filter(i => i >= 0);
 
   const hasMultiMarker = multiMarker && validPoints.length >= 1;
   const hasMultiPoint = !markerOnly && !multiMarker && validPoints.length >= 2;
@@ -208,6 +240,8 @@ export function TrackPreview({
   layoutRef.current = lay;
   const drawn = view ? { z: lay.z, tiles: lay.tiles, project: lay.project } : mosaic;
   const projected = validPoints.map(p => drawn.project(p.lat, p.lon));
+  markersRef.current = multiMarker ? projected.map((p, i) => ({ x: p.x, y: p.y, index: validIndex[i] })) : [];
+  const selectedAt = selectedIndex == null ? -1 : validIndex.indexOf(selectedIndex);
 
   return (
     <View style={[styles.box, { height: mosaic.contentHeight, backgroundColor: theme.background }]} onLayout={onLayout}
@@ -222,13 +256,23 @@ export function TrackPreview({
       ))}
       <Svg width={mosaic.contentWidth} height={mosaic.contentHeight} style={StyleSheet.absoluteFill}>
         {centerOnly ? null : hasMultiMarker ? (
-          projected.map((p, i) => (
-            <React.Fragment key={i}>
-              <Circle cx={p.x} cy={p.y} r={12} fill={TRACK_COLOR} opacity={0.18} />
-              <Circle cx={p.x} cy={p.y} r={7} fill="#ffffff" stroke={TRACK_COLOR} strokeWidth={2} />
-              <Circle cx={p.x} cy={p.y} r={3} fill={TRACK_COLOR} />
-            </React.Fragment>
-          ))
+          <>
+            {projected.map((p, i) => (i === selectedAt ? null : (
+              <React.Fragment key={i}>
+                <Circle cx={p.x} cy={p.y} r={12} fill={TRACK_COLOR} opacity={0.18} />
+                <Circle cx={p.x} cy={p.y} r={7} fill="#ffffff" stroke={TRACK_COLOR} strokeWidth={2} />
+                <Circle cx={p.x} cy={p.y} r={3} fill={TRACK_COLOR} />
+              </React.Fragment>
+            )))}
+            {/* The picked one: filled, larger, drawn last so no other marker covers it. */}
+            {selectedAt >= 0 && (
+              <>
+                <Circle cx={projected[selectedAt].x} cy={projected[selectedAt].y} r={17} fill={TRACK_COLOR} opacity={0.22} />
+                <Circle cx={projected[selectedAt].x} cy={projected[selectedAt].y} r={10} fill={TRACK_COLOR} stroke="#ffffff" strokeWidth={2.5} />
+                <Circle cx={projected[selectedAt].x} cy={projected[selectedAt].y} r={3.5} fill="#ffffff" />
+              </>
+            )}
+          </>
         ) : hasSinglePoint ? (
           // Real, 2026-08-10 ("POI: make the marker of a color better visible", then "it is
           // grey, not very visible" once theme.primary turned out to be Android's own muted

@@ -22,6 +22,7 @@ import { LockableScrollView } from '../components/ScrollLock';
 import { SortBar } from '../components/ui/SortBar';
 import { getViewMode, setViewMode as persistViewMode, sortItems, sortKeysFor, SortKey, ViewMode } from '../services/ListViewPrefs';
 import { ViewModeToggle } from '../components/ui/ViewModeToggle';
+import { ActionMenu, ActionMenuItem } from '../components/ui/ActionMenu';
 import { detectBryton } from '../services/BrytonUsb';
 import { sendRouteToBryton } from '../services/BrytonTrack';
 import { getKnownMagene, type KnownMagene } from '../services/MageneStore';
@@ -113,6 +114,21 @@ export default function RouteScreen() {
     try { return routeFromGpx(await getLibraryGpx(r.id), r.name); }
     catch (e: any) { Alert.alert(t.error, e?.message ?? t.unknownError); return null; }
   }
+  // What a library route can do, for its line in the list and for its square card's ⋯.
+  async function libOpen(r: LibraryRoute) {
+    const pr = await libraryRoute(r);
+    if (pr) openInPlanner(r.name, pr.points.map(p => ({ lat: p.lat, lon: p.lon, ele: p.alt })));
+  }
+  async function libSend(r: LibraryRoute) {
+    const pr = await libraryRoute(r);
+    if (pr) { setPending(pr); scrollRef.current?.scrollTo({ y: 0, animated: true }); }
+  }
+  function libDelete(r: LibraryRoute) {
+    Alert.alert('Delete route', `Remove “${r.name}” from the Library?`, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.delete, style: 'destructive', onPress: () => deleteLibraryRoute(r.id).then(() => { refreshLibrary(); syncLibrariesSoon(refreshLibrary); }) },
+    ]);
+  }
   // The planner's "Send to…" hands its route back as points: it becomes the route to send here.
   useEffect(() => {
     const snd = params.send as { name: string; points: { lat: number; lon: number; ele?: number | null }[] } | undefined;
@@ -197,6 +213,19 @@ export default function RouteScreen() {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   useFocusEffect(useCallback(() => { getViewMode('routes').then(setViewMode); }, []));
   function changeViewMode(m: ViewMode) { setViewMode(m); persistViewMode('routes', m); }
+  // Map view: square cards side by side (André, 2026-11-22, as on the desktop: "more square
+  // maps, and do like the activities do...little squares"); it was one full-width map strip
+  // per route. As many squares as fit at 140 wide (two on a phone), widened to fill the row.
+  // A card has room for one button; the rest of its actions are behind ⋯.
+  const GRID_GAP = v3Spacing.medium;
+  const [gridW, setGridW] = useState(0);
+  const perRow = Math.max(1, Math.floor((gridW + GRID_GAP) / (140 + GRID_GAP)));
+  const cellW = gridW > 0 ? Math.floor((gridW - GRID_GAP * (perRow - 1)) / perRow) : 0;
+  const onGridLayout = (e: { nativeEvent: { layout: { width: number } } }) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w !== gridW) setGridW(w);
+  };
+  const [menu, setMenu] = useState<{ title: string; items: ActionMenuItem[] } | null>(null);
   const sortedOnWatch = onWatch
     ? sortItems(onWatch.map(r => ({ r, name: r.name, distanceM: r.distanceM, ascentM: r.ascentM })), sortKey).map(x => x.r)
     : null;
@@ -449,26 +478,37 @@ export default function RouteScreen() {
           <EmptyState icon="route" title={t.routeLibraryEmptyTitle} text={t.routeLibraryEmptyText}
             actionLabel={t.routeLibraryEmptyAction} onAction={handlePick} />
         )}
-        {source === 1 && library.map((r, i) => (
+        {source === 1 && viewMode === 'map' && library.length > 0 && (
+          <View onLayout={onGridLayout} style={styles.grid}>
+            {cellW > 0 && library.map(r => (
+              <View key={r.id} style={{ width: cellW, gap: 4 }}>
+                <TrackPreview points={r.preview} height={cellW} />
+                <Text style={styles.itemName} numberOfLines={1}>{r.name}</Text>
+                <Text style={styles.itemStats} numberOfLines={2}>{formatDist(r.distanceMeters)} · +{r.ascentMeters} m</Text>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Button label="Send…" disabled={sendBusy} onPress={() => libSend(r)} style={styles.cardButton} />
+                  </View>
+                  <Button label="⋯" grow={false} style={styles.cardButton} onPress={() => setMenu({ title: r.name, items: [
+                    { label: 'Open in planner', onPress: () => libOpen(r) },
+                    { label: 'Send…', onPress: () => libSend(r), disabled: sendBusy },
+                    { label: 'Rename', onPress: () => setRenaming({ id: r.id, value: r.name }) },
+                    { label: 'Delete', tone: 'alert', onPress: () => libDelete(r) },
+                  ] })} />
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+        {source === 1 && viewMode !== 'map' && library.map((r, i) => (
           <View key={r.id} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-            {viewMode === 'map' && r.preview.length > 1 && <TrackPreview points={r.preview} height={120} variableHeight />}
             <Text style={styles.itemName}>{r.name}</Text>
             <Text style={styles.itemStats}>{formatDist(r.distanceMeters)} · +{r.ascentMeters} m</Text>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
-              <Button label="Open in planner" variant="text" grow={false} onPress={async () => {
-                const pr = await libraryRoute(r);
-                if (pr) openInPlanner(r.name, pr.points.map(p => ({ lat: p.lat, lon: p.lon, ele: p.alt })));
-              }} />
-              <Button label="Send…" variant="text" grow={false} disabled={sendBusy} onPress={async () => {
-                const pr = await libraryRoute(r);
-                if (pr) { setPending(pr); scrollRef.current?.scrollTo({ y: 0, animated: true }); }
-              }} />
+              <Button label="Open in planner" variant="text" grow={false} onPress={() => libOpen(r)} />
+              <Button label="Send…" variant="text" grow={false} disabled={sendBusy} onPress={() => libSend(r)} />
               <Button label="Rename" variant="text" grow={false} onPress={() => setRenaming({ id: r.id, value: r.name })} />
-              <Button label="Delete" variant="text" danger grow={false} onPress={() => Alert.alert(
-                'Delete route', `Remove “${r.name}” from the Library?`, [
-                  { text: t.cancel, style: 'cancel' },
-                  { text: t.delete, style: 'destructive', onPress: () => deleteLibraryRoute(r.id).then(() => { refreshLibrary(); syncLibrariesSoon(refreshLibrary); }) },
-                ])} />
+              <Button label="Delete" variant="text" danger grow={false} onPress={() => libDelete(r)} />
             </View>
           </View>
         ))}
@@ -490,9 +530,34 @@ export default function RouteScreen() {
           <SortBar keys={sortKeysFor('routes')} value={sortKey} onChange={setSortKey} />
         )}
 
-        {!onWatchLoading && sortedOnWatch && sortedOnWatch.map((route, i) => (
+        {!onWatchLoading && sortedOnWatch && viewMode === 'map' && sortedOnWatch.length > 0 && (
+          <View onLayout={onGridLayout} style={styles.grid}>
+            {cellW > 0 && sortedOnWatch.map((route, i) => (
+              <View key={`${route.name}-${i}`} style={{ width: cellW, gap: 4 }}>
+                <TrackPreview points={route.points.map(p => ({ lat: p.latitude, lon: p.longitude }))} height={cellW} />
+                <Text style={styles.itemName} numberOfLines={1}>{route.name}</Text>
+                <Text style={styles.itemStats} numberOfLines={2}>
+                  {t.routeStats(formatDist(route.distanceM), route.points.length, route.ascentM, route.descentM)}
+                </Text>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Button label={t.routeItemExportBtn} busy={exportingIndex === i} disabled={exportingIndex !== null}
+                      onPress={() => handleExportItem(route, i)} style={styles.cardButton} />
+                  </View>
+                  <Button label="⋯" grow={false} style={styles.cardButton} onPress={() => setMenu({ title: route.name, items: [
+                    { label: t.routeItemExportBtn, onPress: () => handleExportItem(route, i), disabled: exportingIndex !== null },
+                    { label: 'Open in planner', visible: route.points.length > 1,
+                      onPress: () => openInPlanner(route.name, route.points.map(p => ({ lat: p.latitude, lon: p.longitude, ele: null }))) },
+                    { label: t.routeItemRemoveBtn, tone: 'alert', disabled: removingName !== null || onWatchLoading,
+                      onPress: () => handleRemoveItem(route) },
+                  ] })} />
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+        {!onWatchLoading && sortedOnWatch && viewMode !== 'map' && sortedOnWatch.map((route, i) => (
           <View key={`${route.name}-${i}`} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-            {viewMode === 'map' && route.points.length > 1 && <TrackPreview points={route.points.map(p => ({ lat: p.latitude, lon: p.longitude }))} height={120} variableHeight />}
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>{route.name}</Text>
@@ -515,6 +580,9 @@ export default function RouteScreen() {
         ))}
         </>)}
       </Card>
+
+      {/* A square card's ⋯ */}
+      <ActionMenu visible={menu != null} title={menu?.title} items={menu?.items ?? []} onClose={() => setMenu(null)} />
 
       {/* Rename a Library route */}
       <Modal visible={renaming != null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
@@ -568,6 +636,8 @@ const createStyles = (t: ReturnType<typeof useV3Theme>) => StyleSheet.create({
   dialogCloseText: { fontSize: v3Type.body, color: t.primary, fontWeight: '700' },
   row: { flexDirection: 'row', alignItems: 'center', gap: v3Spacing.small },
   itemName: { fontSize: v3Type.bodyLarge, fontWeight: '700', color: t.text },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: v3Spacing.medium, marginTop: v3Spacing.medium },
+  cardButton: { paddingVertical: 6, paddingHorizontal: 10 },
   itemStats: { fontSize: v3Type.label, color: t.mutedText, marginTop: 2 },
   exportAllLink: { fontSize: v3Type.label, color: t.mutedText, fontWeight: '700' },
   onWatchItem: { marginTop: v3Spacing.large, paddingTop: v3Spacing.medium, borderTopWidth: 1, borderTopColor: t.mutedText + '22', gap: v3Spacing.small },

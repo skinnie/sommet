@@ -49,3 +49,18 @@ describe('MapPanZoom', () => {
     expect(new Set(lay.tiles.map(t => t.key)).size).toBe(lay.tiles.length);
   });
 });
+
+// A POI picked in the POIs screen's list (2026-11-22): the map goes to its marker.
+describe('centredOn', () => {
+  const { centredOn, layoutView } = require('../MapPanZoom');
+  test('the point lands in the middle of the box, zoomed in to at least minZoom', () => {
+    const v = centredOn({ u: 0.5, v: 0.5, zf: 6.4 }, 37.0194, -7.9304, 12);
+    expect(v.zf).toBe(12);
+    const at = layoutView(v, 400, 300).project(37.0194, -7.9304);
+    expect(at.x).toBeCloseTo(200, 3);
+    expect(at.y).toBeCloseTo(150, 3);
+  });
+  test('a view already closer than minZoom keeps its zoom', () => {
+    expect(centredOn({ u: 0.1, v: 0.2, zf: 15.5 }, 60.17, 24.94, 12).zf).toBe(15.5);
+  });
+});

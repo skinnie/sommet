@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable, TextInput } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, useWindowDimensions } from 'react-native';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
 import {
   addPoiToWatch, AddPoiState, readOnWatchPois, getCachedPois, exportSinglePoiToGpx, pickAndParseWaypoints,
@@ -126,6 +126,25 @@ export default function PoiScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   useFocusEffect(useCallback(() => { getViewMode('pois').then(setViewMode); }, []));
   function changeViewMode(m: ViewMode) { setViewMode(m); persistViewMode('pois', m); }
+
+  // Map view (André, 2026-11-22, as on the desktop): ONE map with every POI of the shown list
+  // as a marker, next to the list on a wide screen and above it on a narrow one. It was a small
+  // map above every line. A tap on a marker marks its line and brings it into view; a tap on a
+  // line moves the map to its marker, and a second tap shows every marker again.
+  const { height: winH } = useWindowDimensions();
+  const [listW, setListW] = useState(0);
+  const [picked, setPicked] = useState(-1);
+  const [focus, setFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
+  const paneRef = useRef<ScrollView>(null);
+  const rowY = useRef<Record<number, number>>({});
+  function pickFromList(i: number, lat: number, lon: number) {
+    if (picked === i) { setPicked(-1); setFocus(null); return; }
+    setPicked(i); setFocus({ lat, lon, key: Date.now() });
+  }
+  function pickFromMap(i: number) {
+    setPicked(i);
+    paneRef.current?.scrollTo({ y: Math.max(0, (rowY.current[i] ?? 0) - 8), animated: true });
+  }
 
   // Real, 2026-08-10 ("it is not upon the watch to give you that, is on the app to store
   // the activities, so they can load almost immediately and just refresh what is new") -
@@ -334,6 +353,24 @@ export default function PoiScreen() {
     }
   }
 
+  const mapPoints = source === 1 ? library.map(p => ({ lat: p.lat, lon: p.lon }))
+    : (watchHere && !onWatchLoading && onWatch ? onWatch.map(p => ({ lat: p.latitude, lon: p.longitude })) : []);
+  const mapPointsKey = `${source}:${mapPoints.map(p => `${p.lat},${p.lon}`).join(';')}`;
+  useEffect(() => { setPicked(-1); setFocus(null); rowY.current = {}; }, [mapPointsKey]);   // another list: nothing picked
+  const withMap = viewMode === 'map' && mapPoints.length > 0;
+  const sideBySide = withMap && listW >= 600;
+  const paneH = Math.max(280, Math.min(520, winH - 280));
+  const mapEl = withMap ? (
+    <View style={sideBySide ? { width: '46%' } : { marginTop: v3Spacing.medium }}>
+      <TrackPreview points={mapPoints} multiMarker height={sideBySide ? paneH : 220}
+        selectedIndex={picked} onMarkerTap={pickFromMap} focusOn={focus} />
+    </View>
+  ) : null;
+  // A line of the list: in Map view it can be tapped, and the picked one is marked.
+  const lineStyle = (i: number) => [styles.row,
+    withMap && { paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
+    withMap && picked === i && { backgroundColor: theme.primary + '1F' }];
+
   return (
     <LockableScrollView style={styles.root} contentContainerStyle={styles.content}>
 
@@ -457,17 +494,23 @@ export default function PoiScreen() {
         {source === 1 && library.length > 0 && (
           <Text style={styles.itemStats}>Your POIs, kept in Sommet. A watch has its own list: send it the ones you want there. Deleting here leaves the watch as it is.</Text>
         )}
+        <View onLayout={e => { const w = Math.round(e.nativeEvent.layout.width); if (w !== listW) setListW(w); }}
+              style={sideBySide ? { flexDirection: 'row', gap: v3Spacing.medium, alignItems: 'flex-start' } : undefined}>
+        {!sideBySide && mapEl}
+        {/* With the map, the list scrolls in its own pane, so map and list stay together. */}
+        <ScrollView ref={paneRef} nestedScrollEnabled scrollEnabled={withMap}
+          style={withMap ? { flex: sideBySide ? 1 : undefined, maxHeight: sideBySide ? paneH : 360 } : undefined}>
         {source === 1 && library.map((p, i) => (
-          <View key={p.id} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-            {viewMode === 'map' && <TrackPreview points={[{ lat: p.lat, lon: p.lon }]} markerOnly height={90} />}
-            <View style={styles.row}>
+          <View key={p.id} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }}
+                style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
+            <Pressable style={lineStyle(i)} disabled={!withMap} onPress={() => pickFromList(i, p.lat, p.lon)}>
               {/* The icon and its name, from the list the POI's type number is in. */}
               <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeIn(p.typeList, p.type).glyph}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName} numberOfLines={1}>{p.name}</Text>
                 <Text style={styles.itemStats}>{poiTypeIn(p.typeList, p.type).name} · {t.poiCoords(p.lat, p.lon)}</Text>
               </View>
-            </View>
+            </Pressable>
             <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
               {watchHere && (
                 <Button label={t.poiAddBtn} variant="text" grow={false} busy={sendingId === p.id}
@@ -495,16 +538,16 @@ export default function PoiScreen() {
           )}
 
           {!onWatchLoading && onWatch && onWatch.map((poi, i) => (
-            <View key={`${poi.name}-${i}`} style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
-              {viewMode === 'map' && <TrackPreview points={[{ lat: poi.latitude, lon: poi.longitude }]} markerOnly height={90} />}
-              <View style={styles.row}>
+            <View key={`${poi.name}-${i}`} onLayout={e => { rowY.current[i] = e.nativeEvent.layout.y; }}
+                  style={i > 0 ? styles.onWatchItem : { marginTop: v3Spacing.medium, gap: v3Spacing.small }}>
+              <Pressable style={lineStyle(i)} disabled={!withMap} onPress={() => pickFromList(i, poi.latitude, poi.longitude)}>
                 {/* The POI's own watch icon and the name of its type in that watch's list. */}
                 <Text style={[styles.typeGlyph, { fontSize: 22, color: theme.primary }]}>{poiTypeOf(poi.type, watchModel).glyph}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName} numberOfLines={1}>{poi.name}</Text>
                   <Text style={styles.itemStats}>{poiTypeOf(poi.type, watchModel).name} · {t.poiCoords(poi.latitude, poi.longitude)}</Text>
                 </View>
-              </View>
+              </Pressable>
               {/* Under the name, so three buttons fit a phone (as the route library's rows). */}
               <View style={[styles.row, { flexWrap: 'wrap', marginTop: 0 }]}>
                 <Button label={t.poiItemExportBtn} variant="text" grow={false} busy={exportingIndex === i}
@@ -517,6 +560,9 @@ export default function PoiScreen() {
             </View>
           ))}
         </>)}
+        </ScrollView>
+        {sideBySide && mapEl}
+        </View>
       </Card>
 
       <Modal visible={renaming != null} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
