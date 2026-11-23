@@ -7,14 +7,43 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: The X230's silent Bluetooth: the cause, and the message names Wine
+
+Correction to the two entries below, which called Sommet's connection churn the likely cause.
+It was not. The other session's root capture (bluetoothd's stack, the bus daemon's own
+statistics) shows:
+
+- A Wine service process, `winedevice.exe` with Wine's Bluetooth driver, left running since
+  2026-11-20 16:31 by another project's Windows program, subscribed to BlueZ's signals on the
+  system bus and never read them.
+- The bus daemon queued them for it: 610,802 messages, 133,169,187 bytes, the daemon's limit
+  for one sender (`max_incoming_bytes`) to the byte. At the limit, between 00:00 and 00:02 on
+  11-23, it stopped reading from bluetoothd.
+- bluetoothd then blocked for good inside one libdbus call (a send whose flush has no
+  timeout), main loop stopped: no D-Bus, no mouse relay.
+- Sommet's part: its scans made BlueZ emit most of those signals (a signal per advertisement
+  it surfaces). The connection churn fixed below is a separate matter (new bus names do not
+  count against bluetoothd); it stays fixed as hygiene. The privacy step triggered nothing.
+
+Changed now:
+
+- `ble_bridge.silent_hint()`: when BlueZ is silent and `busctl --system list` shows a
+  `winedevice.exe`, the message adds "A Windows program under Wine is running in the
+  background... close it first (wineserver -k)". Seen for real on the X230 in exactly that
+  state. Three more tests in `test_bluetooth_silent.py` (14).
+- How-to: the Wine cause, in the "not answering" section.
+
+Open, ticket watch-protocol/08: make Sommet's scans produce fewer BlueZ signals (a filter on
+what BlueZ reports; the scale listener not scanning for as long as Sommet is open).
+
 ## 2026-11-23: Linux: the scale listener keeps one connection to the Bluetooth service
 
 Found by another session on the X230, from the system bus's own log: while Sommet ran with
 the scale listener on, the bus got a new connection every 8 to 10 s (382 and 462 an hour,
 against 4 to 15 with Sommet closed); about 19,500 of that boot's 20,260 connections fall in
 three such stretches; the bus's memory grew about 25 MB an hour meanwhile, to 482 MB; and the
-Bluetooth service ended up answering nothing. That the churn caused the silence is likely,
-not proven (the root capture is still to come). The churn was Sommet's own design since
+Bluetooth service ended up answering nothing. The churn did not cause the silence (see the
+entry above); it was still Sommet's own wasteful design since
 0.2.54: every scale burst had its own event loop and connection, closed after the burst.
 
 - `scale_service.ScaleListener`: one event loop and one connection for as long as it listens;
@@ -38,8 +67,8 @@ not proven (the root capture is still to come). The churn was Sommet's own desig
 
 André, on the X230's built-in Bluetooth: "says can't find". The watch was never the problem:
 the system's Bluetooth service had been up and answering nothing for about an hour (found by
-another session: the system message bus had stopped reading from it; the cause is on the
-computer's side and still open, `sommet-tracker` watch-protocol/06). Against that service
+another session: the system message bus had stopped reading from it; the cause is in the
+entry above). Against that service
 Sommet asked for the password twice, switched the adapter off and on four times, started a
 daemon that died with a traceback in `find_adapter`, ran a 90 s Magene read every 90 s for an
 hour, and said the watch could not be found.

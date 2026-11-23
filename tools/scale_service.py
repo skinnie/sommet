@@ -185,12 +185,12 @@ class ScaleListener:
         """One event loop, and so one connection to BlueZ, for as long as it listens.
 
         Until 2026-11-23 every burst had its own loop and its own connection, closed after the
-        burst: about 360 new connections to the system's message bus an hour. On the X230 that
-        was measured from the bus's own log (382 and 462 an hour while Sommet ran, 4 to 15
-        with it closed), about 19,500 of that boot's 20,260 connections, with the bus's
-        memory growing some 25 MB an hour meanwhile, and its Bluetooth service ended up
-        answering nothing. The bursts stay (they are what lets a Bluetooth mouse reconnect);
-        the connection is now kept, and replaced only when a burst goes wrong."""
+        burst: about 360 new connections to the system's message bus an hour, measured on the
+        X230 from the bus's own log (382 and 462 an hour while Sommet ran, 4 to 15 with it
+        closed). That was not what silenced that laptop's Bluetooth that night (a Wine process
+        that never read BlueZ's signals was), but it was waste on a shared bus. The bursts stay
+        (they are what lets a Bluetooth mouse reconnect); the connection is now kept, and
+        replaced only when a burst goes wrong."""
         try:
             asyncio.run(self._listen(etekcity_scale.Settle()))
         except Exception as e:           # noqa: BLE001 - shown in the UI

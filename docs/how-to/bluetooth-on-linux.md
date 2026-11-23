@@ -91,25 +91,10 @@ Sommet closes and opens again when the service stops answering it. With both run
 same X230 mouse kept working.
 
 **Changed in 0.2.67.** From 0.2.54 the scale listener closed and reopened its connection after
-every burst, about 360 times an hour. On the X230 that added up: the system's message bus
-grew to several hundred MB over three days and the Bluetooth service ended up answering
-nothing (measured 2026-11-23; that the first caused the second is likely, not proven). The
-bursts are unchanged. The listener now keeps one connection for as long as it listens and
-replaces it only after a burst the service did not answer; when that keeps happening, it and
-the watch scan wait longer each time, up to five minutes, before connecting again.
-
-**If it still happens:**
-
-1. Turn the scale off while you don't need it: **Settings → Connections → Bluetooth scale →
-   Manage → Stop listening** (Start listening turns it back on; your weigh-ins are kept).
-2. Turn Bluetooth off in Sommet: **Settings → Experimental features → Bluetooth**. The cable
-   still works for the watch.
-3. If the mouse stays dead after closing Sommet, check nothing is still scanning:
-   `bluetoothctl show | grep Discovering` should say `no`. If it says `yes` with Sommet closed,
-   a Sommet backend may still be running: `pkill -x Sommet` and stop `python3 server.py`, or
-   restart Bluetooth (`sudo systemctl restart bluetooth`).
-4. A newer USB Bluetooth adapter (Bluetooth 5) handles scanning and connections side by side
-   far better than a 4.0 chip.
+every burst, about 360 times an hour. The bursts are unchanged. The listener now keeps one
+connection for as long as it listens and replaces it only after a burst the service did not
+answer; when that keeps happening, it and the watch scan wait longer each time, up to five
+minutes, before connecting again.
 
 ## Linux: "Bluetooth on this computer is not answering"
 
@@ -124,6 +109,15 @@ watch.
 
 **What to do:** restart Bluetooth (`sudo systemctl restart bluetooth`), or restart the
 computer, then try again. The cable works meanwhile.
+
+**The one cause seen so far: Wine.** On a ThinkPad X230 (2026-11-23) a Windows program had
+been run under Wine days before, and Wine's background service (`winedevice.exe`) was still
+running. It listens to the Bluetooth service's signals and, in that case, never read them.
+Once the unread signals reached the system's limit (127 MiB), the system stopped listening to
+the Bluetooth service, which then hung. Every Bluetooth scan by any app adds signals, so the
+more Sommet scanned, the sooner the limit came. When Sommet sees `winedevice.exe` connected to
+the system, its message says so: close Wine first (`wineserver -k`), then restart Bluetooth.
+You can look yourself with `busctl --system list | grep -i wine`.
 
 Sommet checks again by itself: at most once every 15 seconds while a page needs Bluetooth, and
 fresh each time you start a pairing.

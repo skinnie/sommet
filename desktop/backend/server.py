@@ -1205,7 +1205,7 @@ def run_tool(script, args, timeout=180, stdin=None, product_id=None, serial=None
     # nothing. Each would wait out its own timeout (the Magene read: 90 s, asked again every
     # 90 s by Home) and add one more unanswered request to a stuck service.
     if (script.startswith("magene_") or script in BLUEZ_TOOLS) and ble_bridge.bluetooth_silent():
-        hint = ble_bridge.BLUETOOTH_SILENT_HINT
+        hint = ble_bridge.silent_hint()
         return 1, json.dumps({"ok": False, "error": hint, "bluetooth_silent": True}), hint
     if script != "list_watches.py" and product_id is None and serial is None:
         autopin_if_needed()
@@ -5481,7 +5481,7 @@ class Handler(BaseHTTPRequestHandler):
             # is no use, and no small thing, against a service that answers nothing (X230,
             # 2026-11-23).
             if ble_bridge.bluetooth_silent(max_age=0):
-                self._send_json(502, {"ok": False, "error": ble_bridge.BLUETOOTH_SILENT_HINT,
+                self._send_json(502, {"ok": False, "error": ble_bridge.silent_hint(),
                                       "bluetooth_silent": True})
                 return
             _open_bt_privacy_window()

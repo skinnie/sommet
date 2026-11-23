@@ -110,17 +110,22 @@ DBUS_MODULES_HINT = (
 _SYSTEM_PYTHON = []          # [path or None], filled on first use
 
 # Linux: the system's Bluetooth service (BlueZ) can be up and still answer nothing. Seen on the
-# X230, 2026-11-23: bluetoothd held its bus name and took every request, and no reply ever
-# came back (the system message bus had stopped reading from it, an hour before anyone
-# paired). Sommet then asked for the password twice, switched the adapter off and on four
-# times, started a daemon that died in find_adapter, ran a 90 s Magene read every 90 s for an
-# hour, and told the user the watch could not be found. One short Ping answers the question
-# first.
+# X230, 2026-11-23. The cause, found with a root capture: a Wine background process
+# (winedevice.exe, Wine's Bluetooth driver) had subscribed to BlueZ's signals on the system
+# message bus and never read them. After 610,000 signals the bus held its limit of 127 MiB of
+# bluetoothd's messages for that one reader and stopped reading from bluetoothd, which then
+# sat for ever in a send. Sommet did not cause it, but met it badly: it asked for the password
+# twice, switched the adapter off and on four times, started a daemon that died in
+# find_adapter, ran a 90 s Magene read every 90 s for an hour, and told the user the watch
+# could not be found. One short Ping answers the question first.
 BLUETOOTH_SILENT_HINT = (
     "Bluetooth on this computer is not answering: its system service is running but stuck, so "
-    "no app can use Bluetooth right now. Restart Bluetooth (in a terminal: sudo systemctl "
+    "no app can use Bluetooth right now. {wine}Restart Bluetooth (in a terminal: sudo systemctl "
     "restart bluetooth) or restart the computer, then try again. The cable works meanwhile.")
-_BLUEZ_PING = {"at": None, "silent": False}
+WINE_HINT = (
+    "A Windows program under Wine is running in the background (winedevice.exe) and can cause "
+    "exactly this: close it first (in a terminal: wineserver -k). ")
+_BLUEZ_PING = {"at": None, "silent": False, "wine": False}
 _BLUEZ_PING_LOCK = threading.Lock()
 _NO_REPLY_WORDS = ("timed out", "did not receive a reply", "timeout was reached", "noreply")
 
@@ -150,6 +155,26 @@ def _bluez_ping(timeout):
     return False
 
 
+def _wine_on_the_bus():
+    """True when a Wine service process holds a connection to the system message bus: the one
+    cause of a silent BlueZ seen so far. No root needed; any doubt is False."""
+    env = _system_env()
+    if shutil.which("busctl", path=env["PATH"]) is None:
+        return False
+    try:
+        done = subprocess.run(["busctl", "--system", "list", "--no-legend"], env=env, timeout=5,
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(len(f) > 2 and f[2].lower().startswith("winedevice")
+               for f in (line.split() for line in done.stdout.splitlines()))
+
+
+def silent_hint():
+    """The words for a silent Bluetooth, naming Wine when the last check saw it on the bus."""
+    return BLUETOOTH_SILENT_HINT.format(wine=WINE_HINT if _BLUEZ_PING["wine"] else "")
+
+
 def bluetooth_silent(max_age=15.0, timeout=3.0):
     """Linux only: True when the system's Bluetooth service takes a request and never answers.
     The last answer is reused for `max_age` seconds, so a page that polls costs one Ping per
@@ -160,6 +185,7 @@ def bluetooth_silent(max_age=15.0, timeout=3.0):
         now = time.monotonic()
         if _BLUEZ_PING["at"] is None or now - _BLUEZ_PING["at"] > max_age:
             _BLUEZ_PING["silent"] = _bluez_ping(timeout)
+            _BLUEZ_PING["wine"] = _BLUEZ_PING["silent"] and _wine_on_the_bus()
             _BLUEZ_PING["at"] = time.monotonic()
         return _BLUEZ_PING["silent"]
 
@@ -277,7 +303,7 @@ class BleBridge:
         except BleBridgeError:
             pass                        # nothing there yet - fall through to actually starting one
         if bluetooth_silent():
-            raise BleBridgeError(BLUETOOTH_SILENT_HINT)
+            raise BleBridgeError(silent_hint())
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return

@@ -31,7 +31,7 @@ class Ping(unittest.TestCase):
         self.calls = []
         B.sys = types.SimpleNamespace(platform="linux")
         B.shutil.which = lambda name, path=None: "/usr/bin/" + name
-        B._BLUEZ_PING.update(at=None, silent=False)
+        B._BLUEZ_PING.update(at=None, silent=False, wine=False)
 
     def tearDown(self):
         B.subprocess.run, B.shutil.which, _platform, ping = self.saved
@@ -79,11 +79,45 @@ class Ping(unittest.TestCase):
 
     def test_the_answer_is_reused(self):
         self.fake(answer(1, "Call failed: Connection timed out"))
+        pings = lambda: sum("Ping" in c for c in self.calls)  # noqa: E731
         self.assertTrue(B.bluetooth_silent())
         self.assertTrue(B.bluetooth_silent())
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(pings(), 1)
         self.assertTrue(B.bluetooth_silent(max_age=0))       # a pairing asks fresh
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(pings(), 2)
+
+    def test_wine_on_the_bus_is_named(self):
+        """The X230's cause: a leftover winedevice.exe that never read BlueZ's signals."""
+        listing = (":1.16     1646 bluetoothd      root    :1.16   bluetooth.service - -\n"
+                   ":1.6529 251223 winedevice.exe  andre   :1.6529 user@1000.service - -\n")
+
+        def run(argv, **_kw):
+            self.calls.append(argv)
+            if "list" in argv:
+                return types.SimpleNamespace(returncode=0, stdout=listing, stderr="")
+            return answer(1, "Call failed: Connection timed out")
+        B.subprocess.run = run
+        self.assertTrue(B.bluetooth_silent())
+        self.assertIn("Wine", B.silent_hint())
+        self.assertIn("wineserver -k", B.silent_hint())
+        self.assertLess(B.silent_hint().index("wineserver"), B.silent_hint().index("systemctl"))
+
+    def test_without_wine_the_words_do_not_mention_it(self):
+        def run(argv, **_kw):
+            if "list" in argv:
+                return types.SimpleNamespace(
+                    returncode=0, stderr="",
+                    stdout=":1.16 1646 bluetoothd root :1.16 bluetooth.service - -\n")
+            return answer(1, "Call failed: Connection timed out")
+        B.subprocess.run = run
+        self.assertTrue(B.bluetooth_silent())
+        self.assertNotIn("Wine", B.silent_hint())
+        self.assertNotIn("{", B.silent_hint())
+
+    def test_an_answering_bluetooth_never_looks_for_wine(self):
+        self.fake(answer(0))
+        self.assertFalse(B.bluetooth_silent())
+        self.assertEqual(len(self.calls), 1)
 
     def test_other_systems_are_never_asked(self):
         B.sys = types.SimpleNamespace(platform="win32")
