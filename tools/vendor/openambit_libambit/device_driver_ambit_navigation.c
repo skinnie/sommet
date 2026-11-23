@@ -183,11 +183,15 @@ int ambit_navigation_waypoint_read(ambit_object_t *object, ambit_pack_waypoint_t
 
 int ambit_navigation_waypoint_write(ambit_object_t *object,ambit_pack_waypoint_t *waypoint_data, uint16_t waypoint_count) {
 
-    //Notify device, start write
-    if( libambit_protocol_command(object, ambit_command_write_start, NULL, 0, NULL, NULL, 0) != 0) {
-        LOG_WARNING("Device denied writing (navigation)");
-        return -1;
-    }
+    /* No 0x0b1b here (removed 2026-11-23, watch-protocol/01; André: "q3 yes"). openambit sent it
+     * first and called it "write_start" with the note "Really!? Just a guess..." (protocol.h).
+     * It is Suunto's MarkLogsSynced (Moveslink2 names the task so): on an Ambit2 it sets byte 7
+     * of every logbook record, so every move reads as already downloaded (Duck 2.0.16, handler
+     * 0x19946 branch 0x19F06 -> routine 0x43002); an Ambit1 has no such command and answers
+     * with an error that libambit ignores (Bluebird 2.5.7, handler 0x1547C). SuuntoLink sends
+     * it once, right after downloading moves, and writes waypoints and orbit data to an Ambit1
+     * with no 0x0b1b at all (zzambit1full.pcap). Not yet seen: an Ambit2 taking this write
+     * without it on a real watch. */
 
     //Remove all device navigation elements before write
     if( libambit_protocol_command(object, ambit_command_nav_memory_delete, NULL, 0, NULL, NULL, 0) != 0) {

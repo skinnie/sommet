@@ -7,6 +7,33 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-23: Ambit1 and Ambit2: no "mark as synced" before POI and GPS data writes (watch-protocol/01)
+
+André: "q3 yes", after the firmware said what the captures and Suunto's own code already
+did (the per-model table is in watch-protocol/05).
+
+- What it was: openambit sent 0x0b1b before a waypoint write and before a GPS orbit write and
+  called it "write_start" ("Really!? Just a guess..."). It is Suunto's MarkLogsSynced. On an
+  Ambit2 it sets byte 7 of every logbook record, so every move reads as already downloaded,
+  at each POI write and each GPS data update (Duck 2.0.16: handler 0x19946, branch 0x19F06,
+  routine 0x43002). An Ambit1 has no such command (Bluebird 2.5.7: handler 0x1547C has no
+  branch for it) and answers with an error libambit ignores.
+- Removed in seven places. Desktop: `ambit_legacy_cli.c` (waypoints-restore),
+  `openambit_libambit/device_driver_ambit_navigation.c`, `device_driver_ambit.c` (Ambit1/2
+  orbit write), `device_driver_ambit3.c` (orbit write, not reached by the app). Android:
+  `jni_bridge.cpp` (legacy waypoints), `libambit/device_driver_ambit.c` (orbit write),
+  `device_driver_ambit_navigation.c` (no caller). A waypoint write is now 0x0b04, then one
+  0x0b05 per point; an orbit write starts at its header read.
+- Evidence it is not needed: SuuntoLink writes waypoints and orbit data to an Ambit1 with no
+  0x0b1b in the whole capture (`zzambit1full.pcap`: 0x0b04 at frame 3899, 140 x 0x0b16 from
+  frame 155). On the Ambit2 SuuntoLink sends it once, right after downloading a move (frame
+  113021 of `ambit2_suuntolink_settings_sportmodes.pcap`), not per waypoint write.
+- The desktop helper and the Android package build; `test_legacy_poi_remove.py` and
+  `test_legacy_route_send.py` pass. **NOT seen on a real watch.** There is no capture of an
+  Ambit2 taking a waypoint or orbit write in a session without 0x0b1b, so this one needs
+  André's Ambit2: write a POI, update the GPS data, see both arrive; the Ambit1 the same if
+  at hand. Ambit2 S and Ambit2 R: no firmware here, same code path, not looked at.
+
 ## 2026-11-23: Pairing: no list when there is only one kind of device to pair
 
 André: "aren't we overcomplicating? tell me why we need ... a menu to select device". The

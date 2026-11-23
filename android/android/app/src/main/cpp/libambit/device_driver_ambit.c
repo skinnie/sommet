@@ -294,7 +294,15 @@ static int gps_orbit_write(ambit_object_t *object, uint8_t *data, size_t datalen
 
     LOG_INFO("Writing GPS orbit data");
 
-    libambit_protocol_command(object, ambit_command_write_start, NULL, 0, NULL, NULL, 0);
+    /* No 0x0b1b here (removed 2026-11-23, watch-protocol/01; André: "q3 yes"). openambit sent it
+     * first and called it "write_start" with the note "Really!? Just a guess..." (protocol.h).
+     * It is Suunto's MarkLogsSynced (Moveslink2 names the task so): on an Ambit2 it sets byte 7
+     * of every logbook record, so every move reads as already downloaded (Duck 2.0.16, handler
+     * 0x19946 branch 0x19F06 -> routine 0x43002); an Ambit1 has no such command and answers
+     * with an error that libambit ignores (Bluebird 2.5.7, handler 0x1547C). SuuntoLink sends
+     * it once, right after downloading moves, and writes waypoints and orbit data to an Ambit1
+     * with no 0x0b1b at all (zzambit1full.pcap). Not yet seen: an Ambit2 taking this write
+     * without it on a real watch. */
 
     if (object->driver->gps_orbit_header_read(object, header) == 0) {
         cmpheader[0] = data[7]; // Year, swap bytes

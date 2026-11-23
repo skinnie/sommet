@@ -618,7 +618,11 @@ static int gps_orbit_write(ambit_object_t *object, uint8_t *data, size_t datalen
 
     LOG_INFO("Writing GPS orbit data");
 
-    libambit_protocol_command(object, ambit_command_write_start, NULL, 0, NULL, NULL, 0);
+    /* No 0x0b1b here (removed 2026-11-23): on the Ambit3 family it marks every move in the
+     * logbook as synced (Peak 2.4.17 handler 0x1A45C branch 0x1b -> 0x1935C; same routine in
+     * the Vertical and the Traverse). The Android copy of this file lost it on 2026-11-22. The
+     * app does not reach this function (server.py sends the Ambit3 family's orbit data from
+     * Python); only a hand-run CLI would. */
 
     if (object->driver->gps_orbit_header_read(object, header) == 0) {
         cmpheader[0] = data[7]; // Year, swap bytes

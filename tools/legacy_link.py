@@ -264,8 +264,8 @@ def _encode_waypoints(waypoints):
 
 def waypoints_restore(waypoints):
     """Replace the whole on-device waypoint (POI) list with `waypoints` (a list of dicts, as the
-    `settings` reply lists them). Command path: write_start + nav_memory_delete + one
-    waypoint_write per point, type kept RAW so a backup round-trips byte-exact. 0x0b04 clears
+    `settings` reply lists them). Command path: nav_memory_delete + one
+    waypoint_write per point (no 0x0b1b first since 2026-11-23: it marks moves as synced), type kept RAW so a backup round-trips byte-exact. 0x0b04 clears
     only the waypoint list (not the route flash region), so this never endangers routes."""
     blob = _encode_waypoints(waypoints)
     with tempfile.NamedTemporaryFile(suffix=".wpts", delete=False) as tf:
@@ -308,7 +308,7 @@ def waypoints_without(waypoints, name, lat, lon, tol=1e-5):
 
 def poi_remove(name, lat, lon, backup_dir):
     """Remove one POI from an Ambit1/2, keeping every other waypoint (André, 2026-11-21).
-    SuuntoLink itself manages this family's POIs by rewriting the whole list - write_start,
+    SuuntoLink itself manages this family's POIs by rewriting the whole list -
     0x0b04 empties it, one 0x0b05 per waypoint (assets/pcap/ambit2_suuntolink_settings_
     sportmodes.pcap) - so removing one is that same write without it: a copy of the list goes
     to <backup_dir>/POIs/ambit1-2/ first, the rest is written back (waypoints_restore), the

@@ -3,7 +3,8 @@
 
 Ground truth: André's Ambit2 SuuntoLink capture (assets/pcap/ambit2_suuntolink_settings_
 sportmodes.pcap, git-ignored - skipped where it is absent). SuuntoLink writes this family's POIs
-as one whole list: write_start, 0x0b04 empties it, one 0x0b05 per waypoint. Checked here:
+as one whole list: 0x0b04 empties it, one 0x0b05 per waypoint (the 0x0b1b earlier in that
+capture belongs to the move download before it, not to the waypoint write). Checked here:
   - the list read back from those 0x0b05 packets, minus one POI, packs to exactly the remaining
     packets SuuntoLink sent (same bytes, same order) - so a removal writes what SuuntoLink would;
   - poi_remove() saves a copy first, keeps route turn-points, and writes the copy back when the

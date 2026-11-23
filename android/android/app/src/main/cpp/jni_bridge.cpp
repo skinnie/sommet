@@ -1794,7 +1794,7 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyRegion(
  * Ambit 1/2 (Bluebird) waypoint (POI) WRITE - the command-based path, not a flash-region write.
  * Legacy waypoints live in the command-accessible nav list (0x0b02/0x0b03 read), NOT the SBEM POI
  * list (0x0b24, which addPoi/ambit3_add_poi_to_watch use and which is empty on this family). The
- * write sequence mirrors openambit's ambit_navigation_waypoint_write: 0x0b1b write_start, then
+ * write sequence is openambit's ambit_navigation_waypoint_write without its first command:
  * 0x0b04 nav_memory_delete (clears the whole nav list), then one 0x0b05 waypoint_write per point.
  *
  * `records` is a flat byte array, 48 bytes per waypoint (little-endian), built by TS:
@@ -1825,12 +1825,17 @@ Java_com_ambitsyncmodern_usb_AmbitUsbModule_nativeAmbitWriteLegacyWaypoints(
     int count = (int)(len / 48);
     if (count > 250) { LOGE("nativeAmbitWriteLegacyWaypoints: too many waypoints (%d)", count); return -1; }
 
-    // 0x0b1b write_start, then 0x0b04 nav_memory_delete (clear the whole nav list first).
+    // 0x0b04 nav_memory_delete (clear the whole nav list first).
+    /* No 0x0b1b here (removed 2026-11-23, watch-protocol/01; André: "q3 yes"). openambit sent it
+     * first and called it "write_start" with the note "Really!? Just a guess..." (protocol.h).
+     * It is Suunto's MarkLogsSynced (Moveslink2 names the task so): on an Ambit2 it sets byte 7
+     * of every logbook record, so every move reads as already downloaded (Duck 2.0.16, handler
+     * 0x19946 branch 0x19F06 -> routine 0x43002); an Ambit1 has no such command and answers
+     * with an error that libambit ignores (Bluebird 2.5.7, handler 0x1547C). SuuntoLink sends
+     * it once, right after downloading moves, and writes waypoints and orbit data to an Ambit1
+     * with no 0x0b1b at all (zzambit1full.pcap). Not yet seen: an Ambit2 taking this write
+     * without it on a real watch. */
     uint8_t *reply = nullptr; size_t rlen = 0;
-    if (libambit_protocol_command(g_device, 0x0b1b, nullptr, 0, &reply, &rlen, 0) != 0) {
-        LOGE("nativeAmbitWriteLegacyWaypoints: write_start (0x0b1b) denied"); if (reply) free(reply); return -1;
-    }
-    if (reply) { free(reply); reply = nullptr; }
     if (libambit_protocol_command(g_device, 0x0b04, nullptr, 0, &reply, &rlen, 0) != 0) {
         LOGE("nativeAmbitWriteLegacyWaypoints: nav_memory_delete (0x0b04) failed"); if (reply) free(reply); return -1;
     }

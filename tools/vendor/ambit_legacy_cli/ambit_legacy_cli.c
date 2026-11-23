@@ -1344,7 +1344,8 @@ static int cmd_flash_write(uint32_t address, const char *file, uint32_t extra) {
  *   type)  [41] year u16  [43] month [44] day [45] hour [46] minute [47] second
  * We keep `type` RAW (no Movescount table conversion) so a backup round-trips byte-exact -
  * hence the command path here rather than libambit_navigation_write (which would convert it).
- *   0x0b1b write_start -> 0x0b04 nav_memory_delete -> one 0x0b05 waypoint_write per point.
+ *   0x0b04 nav_memory_delete -> one 0x0b05 waypoint_write per point. (Until 2026-11-23 a
+ *   0x0b1b went first; see the note in the function.)
  * 0x0b04 clears the waypoint list only (NOT the route flash region - HW-confirmed), so this
  * never endangers routes; the caller restores routes separately via flash-write. */
 static int cmd_waypoints_restore(const char *file) {
@@ -1371,14 +1372,17 @@ static int cmd_waypoints_restore(const char *file) {
     ambit_object_t *dev = open_selected_device(&devices, &info);
     if (!dev) { free(recs); fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"no Suunto device found on the USB bus\"}\n"); return 1; }
 
-    /* write_start then clear the whole nav list. */
+    /* Clear the whole nav list. */
+    /* No 0x0b1b here (removed 2026-11-23, watch-protocol/01; André: "q3 yes"). openambit sent it
+     * first and called it "write_start" with the note "Really!? Just a guess..." (protocol.h).
+     * It is Suunto's MarkLogsSynced (Moveslink2 names the task so): on an Ambit2 it sets byte 7
+     * of every logbook record, so every move reads as already downloaded (Duck 2.0.16, handler
+     * 0x19946 branch 0x19F06 -> routine 0x43002); an Ambit1 has no such command and answers
+     * with an error that libambit ignores (Bluebird 2.5.7, handler 0x1547C). SuuntoLink sends
+     * it once, right after downloading moves, and writes waypoints and orbit data to an Ambit1
+     * with no 0x0b1b at all (zzambit1full.pcap). Not yet seen: an Ambit2 taking this write
+     * without it on a real watch. */
     uint8_t *r = NULL; size_t rl = 0;
-    if (libambit_protocol_command(dev, ambit_command_write_start, NULL, 0, &r, &rl, 0) != 0) {
-        if (r) libambit_protocol_free(r);
-        fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"write_start (0x0b1b) denied\"}\n");
-        free(recs); libambit_close(dev); libambit_free_enumeration(devices); return 1;
-    }
-    if (r) { libambit_protocol_free(r); r = NULL; }
     if (libambit_protocol_command(dev, ambit_command_nav_memory_delete, NULL, 0, &r, &rl, 0) != 0) {
         if (r) libambit_protocol_free(r);
         fputs("@@JSON@@\n", stdout); printf("{\"ok\": false, \"error\": \"nav_memory_delete (0x0b04) failed\"}\n");
