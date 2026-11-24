@@ -37,6 +37,9 @@ class WeatherService : public QObject
     Q_PROPERTY(double longitude READ longitude WRITE setLongitude NOTIFY locationChanged)
     // A place set by hand in Settings: saved, and the IP lookup leaves it alone.
     Q_PROPERTY(bool manualLocation READ manualLocation NOTIFY locationChanged)
+    // Also by the Wi-Fi networks around (off until the owner switches it on): their addresses go
+    // to BeaconDB, an open database. André, 2026-11-23: "can't we also know aprox location by wifi?"
+    Q_PROPERTY(bool wifiLocation READ wifiLocation WRITE setWifiLocation NOTIFY wifiLocationChanged)
     // Reverse-geocoded from latitude/longitude via OSM's own Nominatim (no API key, same
     // provider this app's map tiles already come from and are already attributed to) -
     // Open-Meteo itself has no place-name lookup, only coordinates. Empty string if the
@@ -61,6 +64,8 @@ public:
     double latitude() const { return m_latitude; }
     double longitude() const { return m_longitude; }
     bool manualLocation() const { return m_manualLocation; }
+    bool wifiLocation() const { return m_wifiLocation; }
+    void setWifiLocation(bool on);
     void setLatitude(double value);
     void setLongitude(double value);
     double currentTemperature() const { return m_currentTemperature; }
@@ -88,12 +93,16 @@ signals:
     void availableChanged();
     void hasFetchedOnceChanged();
     void locationChanged();
+    void wifiLocationChanged();
     void dataChanged();
     void placeNameChanged();
 
 private:
     // One IP-location service after another until one answers (see detectLocationFromIp).
     void tryIpLocation(int provider);
+    // The networks heard now (nmcli on Linux, netsh on Windows), then BeaconDB; the IP lookup if
+    // that gives nothing.
+    void tryWifiLocation();
 
     QNetworkAccessManager m_network;
     QTimer m_refreshTimer;
@@ -107,6 +116,7 @@ private:
     double m_latitude = 48.85;
     double m_longitude = 2.35;
     bool m_manualLocation = false;
+    bool m_wifiLocation = false;
 
     double m_currentTemperature = 0;
     int m_currentWeatherCode = -1;

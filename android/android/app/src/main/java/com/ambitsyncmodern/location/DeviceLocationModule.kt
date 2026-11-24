@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -58,6 +59,26 @@ class DeviceLocationModule(private val ctx: ReactApplicationContext) : ReactCont
                 promise.resolve(null)
             }
         }
+    }
+
+    /** The Wi-Fi networks heard now, as [{bssid, level (dBm), ssid}], for a position by Wi-Fi
+     *  when the owner switched it on (DeviceLocation.ts decides what of it is sent). */
+    @ReactMethod
+    fun wifiNearby(promise: Promise) {
+        val out = Arguments.createArray()
+        val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wm == null || !allowed()) { promise.resolve(out); return }
+        try {
+            @Suppress("DEPRECATION") wm.startScan()       // results come later; the last scan is used now
+            for (r in wm.scanResults) {
+                out.pushMap(Arguments.createMap().apply {
+                    putString("bssid", r.BSSID ?: "")
+                    putInt("level", r.level)
+                    @Suppress("DEPRECATION") putString("ssid", r.SSID ?: "")
+                })
+            }
+        } catch (_: Exception) {}
+        promise.resolve(out)
     }
 
     private fun listenOnce(lm: LocationManager, providers: List<String>, last: Location?,

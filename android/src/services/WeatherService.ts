@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LIVE_SECONDS, DevicePlace, onDevicePlace, placeIfAllowed, rememberedPlace } from './DeviceLocation';
+import {
+  BEACONDB_URL, LIVE_SECONDS, LOOKUP_AGENT, DevicePlace, onDevicePlace, placeIfAllowed, rememberedPlace,
+} from './DeviceLocation';
 
 // v3.0 UI port (2026-08-09, "replicate the desktop version feature wise") - ports
 // desktop/src/services/weatherservice.cpp + qml/viewmodels/WeatherViewModel.qml byte-for-byte
@@ -112,6 +114,19 @@ const IP_LOCATION_SERVICES = [
 ];
 
 export async function detectLocationFromIp(): Promise<{ latitude: number; longitude: number } | null> {
+  // BeaconDB first, with nothing but the address it sees: it placed a Vodafone line in Leiria
+  // near Leiria, where ipapi.co says Faro (2026-11-23). Its IP data is DB-IP's (CC BY 4.0).
+  try {
+    const res = await fetch(BEACONDB_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': LOOKUP_AGENT },
+      body: JSON.stringify({ wifiAccessPoints: [] }),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      const latitude = Number(body?.location?.lat), longitude = Number(body?.location?.lng);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude };
+    }
+  } catch { /* the next service */ }
   for (const url of IP_LOCATION_SERVICES) {
     try {
       const res = await fetch(url, { headers: { 'User-Agent': 'Sommet/2.0' } });

@@ -36,6 +36,9 @@
          (services/DeviceLocation.ts, WeatherService.ts). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The Wi-Fi networks around, for a position by Wi-Fi when the owner switches it on. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-feature android:name="android.hardware.bluetooth_le"
         android:required="false" />
 

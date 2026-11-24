@@ -1003,7 +1003,7 @@ PageFlickable {
                         // here is saved and wins over it (André, 2026-11-23: Faro for Leiria).
                         RoundedRadioButton {
                             checked: !WeatherService.manualLocation
-                            text: qsTr("This computer (IP-based)")
+                            text: qsTr("This computer")
                             onClicked: WeatherService.useAutomaticLocation()
                         }
                         RoundedRadioButton {
@@ -1013,6 +1013,12 @@ PageFlickable {
                             onClicked: WeatherService.setManualLocation(WeatherService.latitude,
                                                                         WeatherService.longitude)
                         }
+                    }
+                    RoundedSwitch {
+                        width: parent.width
+                        text: qsTr("Find this computer by Wi-Fi too. It sends the addresses of the Wi-Fi networks around to BeaconDB, an open database.")
+                        checked: WeatherService.wifiLocation
+                        onToggled: WeatherService.wifiLocation = checked
                     }
                     PlaceSearchBar {
                         width: parent.width

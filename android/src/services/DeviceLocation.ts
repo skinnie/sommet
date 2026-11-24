@@ -6,9 +6,63 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // the weather place comes from the IP address, which can be a far-off city (Faro for a Vodafone
 // line in Leiria, 2026-11-23). The exact position stays on the device; the weather gets it rounded
 // to about 1 km (WeatherService.ts).
+//
+// By Wi-Fi, when the owner switched it on (Settings > Weather; André, 2026-11-23: "can't we also
+// know aprox location by wifi?"): the addresses of the Wi-Fi networks around go to BeaconDB, an
+// open database, which answers with a position. It runs next to the GPS, which wins when it has a
+// fix. Left out, as is the custom for these services: networks whose name ends in "_nomap", and
+// addresses a device made up (locally administered). Fewer than two networks: nothing is sent.
 export interface DevicePlace { lat: number; lon: number; accuracy: number; ageSeconds: number }
 
 const LAST_KEY = 'device.lastPlace';
+const WIFI_KEY = 'location.wifi';
+export const BEACONDB_URL = 'https://api.beacondb.net/v1/geolocate';
+export const LOOKUP_AGENT = 'Sommet/2.0 (open-source watch app)';
+const MAX_NETWORKS = 20;
+
+export async function wifiLookupOn(): Promise<boolean> {
+  try { return (await AsyncStorage.getItem(WIFI_KEY)) === '1'; } catch { return false; }
+}
+export async function setWifiLookup(on: boolean): Promise<void> {
+  try { await AsyncStorage.setItem(WIFI_KEY, on ? '1' : '0'); } catch { /* stays as it was */ }
+}
+
+/** What of the networks heard may be sent: the strongest real ones, at most MAX_NETWORKS. */
+export function usableNetworks(heard: { bssid: string; level: number; ssid?: string }[]):
+    { macAddress: string; signalStrength: number }[] {
+  return heard
+    .filter(n => /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(n.bssid))
+    .filter(n => !(n.ssid ?? '').toLowerCase().endsWith('_nomap'))
+    .filter(n => (parseInt(n.bssid.slice(0, 2), 16) & 0x02) === 0)      // made-up addresses
+    .sort((a, b) => b.level - a.level)
+    .slice(0, MAX_NETWORKS)
+    .map(n => ({ macAddress: n.bssid.toLowerCase(), signalStrength: Math.round(n.level) }));
+}
+
+/** BeaconDB's answer as a place; one that fell back to the IP address is not one. */
+export function placeFromLookup(body: any): DevicePlace | null {
+  const lat = Number(body?.location?.lat), lon = Number(body?.location?.lng);
+  if (body?.fallback || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon, accuracy: Number(body?.accuracy) || 1000, ageSeconds: 0 };
+}
+
+async function wifiPlace(): Promise<DevicePlace | null> {
+  if (!(await wifiLookupOn())) return null;
+  const networks = usableNetworks(await NativeModules.DeviceLocation.wifiNearby());
+  if (networks.length < 2) return null;
+  const res = await fetch(BEACONDB_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': LOOKUP_AGENT },
+    body: JSON.stringify({ considerIp: false, wifiAccessPoints: networks }),
+  });
+  if (!res.ok) return null;
+  const place = placeFromLookup(await res.json());
+  if (place) {
+    AsyncStorage.setItem(LAST_KEY, JSON.stringify(place)).catch(() => {});
+    listeners.forEach(f => f(place));
+  }
+  return place;
+}
 /** A position older than this is where the device was, not where it is. */
 export const LIVE_SECONDS = 600;
 
@@ -22,6 +76,7 @@ export function onDevicePlace(f: (p: DevicePlace) => void): () => void {
 }
 
 async function read(timeoutMs: number): Promise<DevicePlace | null> {
+  wifiPlace().catch(() => null);                 // quick and rough, next to the GPS
   const place: DevicePlace | null = await NativeModules.DeviceLocation.current(timeoutMs);
   if (place) {
     AsyncStorage.setItem(LAST_KEY, JSON.stringify(place)).catch(() => {});

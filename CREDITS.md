@@ -93,6 +93,8 @@ Services and libraries the app talks to at runtime:
 - Map data © **OpenStreetMap** contributors, under the **Open Database License (ODbL)**. Tiles:
   **CyclOSM** / OpenStreetMap France and standard OSM.
 - Weather by **[Open-Meteo](https://open-meteo.com/)** (CC BY 4.0).
+- Approximate position (from the internet address, and by Wi-Fi when switched on):
+  **[BeaconDB](https://beacondb.net/)**; its IP data is from **DB-IP** (IP to City Lite, CC BY 4.0).
 - Icons: **Google Material Symbols** (Apache License 2.0); 7 activity icons are Suunto's own (see credits).
 - Mobile maps: **[Leaflet](https://leafletjs.com/)** (BSD-2-Clause).
 - POIs along a route: exported from **[PitStopper](https://pitstopper.net)**.

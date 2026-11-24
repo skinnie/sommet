@@ -19,7 +19,7 @@ import { Button, Dropdown, FieldRow, StatusNote } from '../components/ui/primiti
 import { TrackPreview } from '../components/TrackPreview';
 import { LockableScrollView } from '../components/ScrollLock';
 import { useWeatherLocation } from '../services/WeatherService';
-import { currentPlace, rememberedPlace, DevicePlace, LIVE_SECONDS } from '../services/DeviceLocation';
+import { currentPlace, onDevicePlace, rememberedPlace, DevicePlace, LIVE_SECONDS } from '../services/DeviceLocation';
 
 // v3.0 UI port (2026-08-09, "re do... pois to match entirely desktop") - real structural
 // rebuild matching desktop's own PoisPage.qml: "Add a POI" gets a live pin preview, "Import
@@ -145,11 +145,15 @@ export default function PoiScreen() {
   useFocusEffect(useCallback(() => {
     let live = true;
     rememberedPlace().then(p => { if (live && p) setLastPlace(p); });
+    // Wi-Fi answers first and roughly, the GPS later and finely: keep the finer one.
+    const off = onDevicePlace(p => {
+      if (live && p.ageSeconds < LIVE_SECONDS) setHere(prev => (!prev || p.accuracy <= prev.accuracy ? p : prev));
+    });
     currentPlace().then(p => {
       if (!live || !p) return;
-      if (p.ageSeconds < LIVE_SECONDS) setHere(p); else setLastPlace(p);
+      if (p.ageSeconds >= LIVE_SECONDS) setLastPlace(p);
     }).catch(() => {});
-    return () => { live = false; };
+    return () => { live = false; off(); };
   }, []));
   const rowY = useRef<Record<number, number>>({});
   function pickFromList(i: number, lat: number, lon: number) {

@@ -43,6 +43,7 @@ import { getLoadSource, setLoadSource, LoadSource } from '../services/CoachServi
 import {
   isCatalogAvailable, hasCatalog, importCatalog, getEntries, invalidateEntries,
 } from '../services/CatalogService';
+import { setWifiLookup, wifiLookupOn } from '../services/DeviceLocation';
 import { useWeatherLocation, locateAutomatically, setManualLocation } from '../services/WeatherService';
 import { isMageneAvailable } from '../services/MageneBle';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
@@ -333,6 +334,8 @@ export default function SettingsScreen() {
   // Weather (desktop parity): where the forecast on Home is for.
   const weatherLoc = useWeatherLocation();
   const [weatherManual, setWeatherManual]           = useState(false);
+  const [wifiOn, setWifiOn]                         = useState(false);
+  useEffect(() => { wifiLookupOn().then(setWifiOn); }, []);
   const [latText, setLatText]                       = useState('');
   const [lonText, setLonText]                       = useState('');
   useEffect(() => { setWeatherManual(weatherLoc.manual); }, [weatherLoc.manual]);
@@ -1104,7 +1107,7 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionDesc, { fontSize: 12 }]}>Provider: Open-Meteo</Text>
           <Text style={[styles.connRowText, { marginTop: 4 }]}>Location source</Text>
           <View style={[styles.chipRow, { justifyContent: 'flex-start', marginTop: 6 }]}>
-            {[{ manual: false, label: 'This device (GPS, else internet)' }, { manual: true, label: 'Manual' }].map(o => {
+            {[{ manual: false, label: 'This device' }, { manual: true, label: 'Manual' }].map(o => {
               const on = weatherManual === o.manual;
               return (
                 <TouchableOpacity
@@ -1119,6 +1122,9 @@ export default function SettingsScreen() {
               );
             })}
           </View>
+          <SwitchLine value={wifiOn} a11yLabel="Find the position by Wi-Fi too"
+            label="Find the position by Wi-Fi too, when GPS has none. It sends the addresses of the Wi-Fi networks around to BeaconDB, an open database."
+            onValueChange={v => { setWifiOn(v); setWifiLookup(v).then(() => { if (v && !weatherManual) locateAutomatically(); }); }} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <FieldRow icon="poi" value={latText} onChangeText={setLatText} placeholder="Latitude"
