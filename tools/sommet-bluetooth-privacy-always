@@ -8,6 +8,9 @@
 # Prints ON | OFF | FAILED. The file is fixed: as root nothing else is ever edited. Not as
 # root (the tests), SOMMET_BT_CONF names a scratch file and nothing is restarted.
 set -u
+# Once, from Sommet's package: a fixed copy and polkit's description of it (sommet-polkit-install).
+I="$(dirname "$0")/sommet-polkit-install"
+[ "$(id -u)" = "0" ] && [ -x "$I" ] && { "$I" >/dev/null 2>&1 || true; }
 CONF=/etc/bluetooth/main.conf
 RESTART=1
 if [ "$(id -u)" != "0" ] && [ -n "${SOMMET_BT_CONF:-}" ]; then CONF="$SOMMET_BT_CONF"; RESTART=0; fi

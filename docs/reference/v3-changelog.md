@@ -7,6 +7,22 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-24: Position by Wi-Fi, place fields only with Manual, a clear Linux password window
+
+- **Wi-Fi** (André: "can't we also know aprox location by wifi?", then "1 a"): a switch in
+  Settings > Weather, off until turned on. The strongest Wi-Fi networks around (at most 20, not
+  those ending in `_nomap`, no made-up addresses) go to BeaconDB, an open database. The GPS wins
+  when it is finer. The internet-address lookup now asks BeaconDB first, with no Wi-Fi data:
+  about 10 km from Leiria for his line, where the previous service said Faro.
+- **Manual only when chosen** ("on the tablet when I click apply it switches to manual"): the place
+  search, latitude, longitude and Apply show only with Manual, on both apps.
+- **Linux password window** ("it just says some code"): the first password also installs a polkit
+  description of Sommet's two Bluetooth scripts, so the window then says why it asks. Sommet's own
+  step text is shorter too.
+- Only checked without a watch and in a test window; the polkit window is not seen yet.
+
+---
+
 ## 2026-11-23: The weather's place: the device's position, and a place set by hand is kept
 
 André: "why it says faro? i am i leiria". The place came from the IP address, and the lookup

@@ -5,6 +5,9 @@
 # Prints ALREADY (privacy was on: nothing done) | ON | FAILED, then waits on stdin:
 # a line, EOF (Sommet quit) or 30 minutes turns privacy off again, printing OFF.
 set -u
+# Once, from Sommet's package: a fixed copy and polkit's description of it (sommet-polkit-install).
+I="$(dirname "$0")/sommet-polkit-install"
+[ "$(id -u)" = "0" ] && [ -x "$I" ] && { "$I" >/dev/null 2>&1 || true; }
 B="$1"
 case "$(basename "$B")" in btmgmt) ;; *) echo "not btmgmt: $B" >&2; exit 2 ;; esac
 privacy() { timeout 10 "$B" info 2>/dev/null | grep -q 'current settings:.* privacy'; }

@@ -1,0 +1,50 @@
+#!/bin/bash
+# Sommet: copies its two Bluetooth root scripts to a fixed, root-owned folder and describes them
+# to polkit, so the system's password window says in a sentence why Sommet asks (André,
+# 2026-11-24: "it just says some code"; then "1 a"). Without the description the window can
+# only show the script's path, which inside the AppImage changes at every start.
+# Run as root by those two scripts, from Sommet's package, before their own work; a later
+# Sommet with other scripts installs its own the next time (bt_privacy.py compares the files).
+# $1 (the tests only): a scratch folder used instead of /. Prints nothing; exit 0 = installed.
+set -u
+ROOT="${1:-}"
+SRC="$(cd "$(dirname "$0")" && pwd)"
+DEST="$ROOT/usr/local/libexec/sommet"
+POLICY="$ROOT/usr/share/polkit-1/actions/io.github.skinnie.sommet.policy"
+[ "$SRC" = "$DEST" ] && exit 0
+mkdir -p "$DEST" "$(dirname "$POLICY")" || exit 1
+for f in sommet-bluetooth-privacy sommet-bluetooth-privacy-always; do
+  install -m 0755 "$SRC/$f" "$DEST/$f.new" && mv -f "$DEST/$f.new" "$DEST/$f" || exit 1
+done
+cat > "$POLICY.new" <<'XML' || exit 1
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Sommet</vendor>
+  <vendor_url>https://github.com/skinnie/sommet</vendor_url>
+  <action id="io.github.skinnie.sommet.pair-watch">
+    <description>Let a watch remember this computer</description>
+    <message>Sommet needs your password once, so the watch remembers this computer.</message>
+    <icon_name>bluetooth</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/sommet/sommet-bluetooth-privacy</annotate>
+  </action>
+  <action id="io.github.skinnie.sommet.pair-without-password">
+    <description>Pair watches without the password</description>
+    <message>Sommet needs your password to change one Bluetooth setting, so watches pair without asking for it again.</message>
+    <icon_name>bluetooth</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/sommet/sommet-bluetooth-privacy-always</annotate>
+  </action>
+</policyconfig>
+XML
+chmod 0644 "$POLICY.new" && mv -f "$POLICY.new" "$POLICY"

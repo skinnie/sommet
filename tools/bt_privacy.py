@@ -40,6 +40,24 @@ MAX_WINDOW_S = 1800         # the root script turns privacy off by itself after 
 ROOT_SCRIPT = pathlib.Path(__file__).resolve().parent / "sommet-bluetooth-privacy"
 ALWAYS_SCRIPT = pathlib.Path(__file__).resolve().parent / "sommet-bluetooth-privacy-always"
 MAIN_CONF = pathlib.Path("/etc/bluetooth/main.conf")
+# Where sommet-polkit-install puts root-owned copies, with polkit's description of them: run from
+# there, the password window says why Sommet asks instead of showing a path (André, 2026-11-24).
+INSTALLED_DIR = pathlib.Path("/usr/local/libexec/sommet")
+POLICY_FILE = pathlib.Path("/usr/share/polkit-1/actions/io.github.skinnie.sommet.policy")
+
+
+def script_path(bundled):
+    """The installed copy of a root script when it is the same file, owned by root and
+    described to polkit; otherwise the one in Sommet's package (which installs itself when run)."""
+    installed = INSTALLED_DIR / bundled.name
+    try:
+        st = installed.stat()
+        if (POLICY_FILE.exists() and st.st_uid == 0 and not st.st_mode & 0o022
+                and installed.read_bytes() == bundled.read_bytes()):
+            return installed
+    except OSError:
+        pass
+    return bundled
 
 
 def always_on(conf=None):
@@ -62,7 +80,7 @@ def set_always(on, prompt_timeout=180):
     if not shutil.which("pkexec"):
         return {"ok": False, "always": always_on(), "error": "pkexec is not installed"}
     try:
-        done = subprocess.run(["pkexec", str(ALWAYS_SCRIPT), "on" if on else "off"],
+        done = subprocess.run(["pkexec", str(script_path(ALWAYS_SCRIPT)), "on" if on else "off"],
                               capture_output=True, text=True, timeout=prompt_timeout)
     except subprocess.TimeoutExpired:
         return {"ok": False, "always": always_on(), "error": "the password was not typed in time"}
@@ -101,10 +119,8 @@ def check():
     return True, "fresh pairing on Linux"
 
 
-NOTICE = ("Type your password first, THEN choose Pair with app on the watch. Sommet needs it "
-          "once, to turn on Bluetooth privacy while your watch pairs - without it, the watch "
-          "won't reconnect to this computer after it sleeps. Privacy goes off again after the "
-          "pairing; Bluetooth may blink off for a second.")
+NOTICE = ("Type your password first, then choose Pair with app on the watch. Sommet needs it "
+          "once, so the watch remembers this computer. Bluetooth may blink off for a second.")
 
 
 def notify():
@@ -140,7 +156,7 @@ class PrivacyWindow:
         notify()
         try:
             self.proc = subprocess.Popen(
-                ["pkexec", str(ROOT_SCRIPT), btmgmt],
+                ["pkexec", str(script_path(ROOT_SCRIPT)), btmgmt],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True)
         except OSError as exc:

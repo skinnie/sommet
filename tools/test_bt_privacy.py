@@ -14,6 +14,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import bt_privacy as P  # noqa: E402
 
 P.notify = lambda: None          # no real desktop notifications from a test run
+# Never this computer's installed copies (a pairing here installs them; see test_installed_*).
+P.INSTALLED_DIR = pathlib.Path("/nonexistent/sommet-test")
 
 
 def fake_tools(tmp, pkexec_code=None, privacy_on=False):
@@ -193,6 +195,35 @@ def test_a_cancelled_prompt_changes_nothing():
             assert conf.read_text() == CONF
         finally:
             P.MAIN_CONF = saved
+
+def test_installed_copies_and_polkit_description():
+    import subprocess
+    import xml.etree.ElementTree as ET
+    with tempfile.TemporaryDirectory() as t:
+        root = pathlib.Path(t)
+        tools = pathlib.Path(P.__file__).resolve().parent
+        r = subprocess.run([str(tools / "sommet-polkit-install"), str(root)], capture_output=True, text=True)
+        assert r.returncode == 0 and r.stdout == "", r
+        dest = root / "usr/local/libexec/sommet"
+        for name in ("sommet-bluetooth-privacy", "sommet-bluetooth-privacy-always"):
+            assert (dest / name).read_bytes() == (tools / name).read_bytes()
+            assert os.access(dest / name, os.X_OK)
+        policy = ET.parse(root / "usr/share/polkit-1/actions/io.github.skinnie.sommet.policy")
+        paths = {a.get("id"): a.find("annotate").text for a in policy.getroot().iter("action")}
+        assert paths == {
+            "io.github.skinnie.sommet.pair-watch": "/usr/local/libexec/sommet/sommet-bluetooth-privacy",
+            "io.github.skinnie.sommet.pair-without-password":
+                "/usr/local/libexec/sommet/sommet-bluetooth-privacy-always"}, paths
+        assert all(a.find("message").text for a in policy.getroot().iter("action"))
+        # The package's copy is used: the test's copies are not root's, and before that, none.
+        saved = (P.INSTALLED_DIR, P.POLICY_FILE)
+        P.INSTALLED_DIR, P.POLICY_FILE = dest, root / "usr/share/polkit-1/actions/io.github.skinnie.sommet.policy"
+        try:
+            assert P.script_path(P.ROOT_SCRIPT) == P.ROOT_SCRIPT       # owned by this user, not root
+        finally:
+            P.INSTALLED_DIR, P.POLICY_FILE = saved
+        assert P.script_path(P.ROOT_SCRIPT) == P.ROOT_SCRIPT           # nothing installed
+
 
 def main():
     path = os.environ["PATH"]

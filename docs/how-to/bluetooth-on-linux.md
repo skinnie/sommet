@@ -50,6 +50,14 @@ privacy off: tested on an Ambit3 Peak, through a link drop and a computer restar
 in `/etc` is changed, and a restart of the computer or of Bluetooth also resets privacy to
 your setting.
 
+**The first time, the password window shows a file path.** The system only shows a sentence
+for programs it has been told about. So with that first password, Sommet also copies its two
+Bluetooth scripts to `/usr/local/libexec/sommet/` and adds a short description of them,
+`/usr/share/polkit-1/actions/io.github.skinnie.sommet.policy`. From then on the window says
+"Sommet needs your password once, so the watch remembers this computer." A newer Sommet with
+other scripts shows the path once more and puts its own in place. To remove them, delete that
+folder and that file (as administrator).
+
 **When Sommet doesn't ask.**
 - A watch is already paired with this computer: that's a reconnect, not a pairing.
 - `pkexec` or `btmgmt` isn't installed (`btmgmt` is in `bluez` on Ubuntu and Debian, and in
