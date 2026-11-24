@@ -1014,13 +1014,17 @@ PageFlickable {
                                                                         WeatherService.longitude)
                         }
                     }
+                    // André, 2026-11-24: "i don't want mannualy": the place fields and Apply
+                    // only with Manual; the Wi-Fi switch only with This computer.
                     RoundedSwitch {
+                        visible: !WeatherService.manualLocation
                         width: parent.width
                         text: qsTr("Find this computer by Wi-Fi too. It sends the addresses of the Wi-Fi networks around to BeaconDB, an open database.")
                         checked: WeatherService.wifiLocation
                         onToggled: WeatherService.wifiLocation = checked
                     }
                     PlaceSearchBar {
+                        visible: WeatherService.manualLocation
                         width: parent.width
                         onPlaceChosen: (lat, lon) => {
                             weatherManualRadio.checked = true
@@ -1029,6 +1033,7 @@ PageFlickable {
                     }
 
                     Row {
+                        visible: WeatherService.manualLocation
                         width: parent.width
                         spacing: Theme.spacingSmall
                         RoundedTextField {
@@ -1045,6 +1050,7 @@ PageFlickable {
                         }
                     }
                     RoundedButton {
+                        visible: WeatherService.manualLocation
                         text: qsTr("Apply")
                         onClicked: {
                             const lat = WatchUnits.parseDecimal(latField.text);

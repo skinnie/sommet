@@ -1260,7 +1260,7 @@ PageFlickable {
                                             // (Bluetooth privacy, tools/bt_privacy.py) BEFORE the
                                             // watch should start pairing - its window is short.
                                             : Qt.platform.os === "linux"
-                                              ? qsTr("Type your password if asked, then “Pair with app” (first time) or “Sync now” on the watch")
+                                              ? qsTr("Your computer may ask for your password first, so the watch remembers it. Then “Pair with app” (first time) or “Sync now” on the watch")
                                               // Windows' own pop-up asks for the code (André,
                                               // 2026-11-21: the way pairing works there).
                                               : Qt.platform.os === "windows"
@@ -1351,10 +1351,10 @@ PageFlickable {
                         // whose offer to pair lasts less than typing a password.
                         text: Qt.platform.os === "linux"
                               ? (!DeviceService.bleListening
-                                 ? qsTr("Step 1 of 2: if your system asks for your password, type it " +
-                                        "now. Sommet needs it once to switch on Bluetooth privacy " +
-                                        "for this pairing; without it the watch refuses this " +
-                                        "computer after its first sleep. Don't start on the watch yet.")
+                                 // André, 2026-11-24: "we should be more simple and clear".
+                                 ? qsTr("Step 1 of 2: your computer asks for your password. Sommet " +
+                                        "needs it once, so the watch remembers this computer. " +
+                                        "Don't start on the watch yet.")
                                  : qsTr("Step 2 of 2: now, on the watch, choose “Pair with app” " +
                                         "(first time) or “Sync now”. Its offer is short: if nothing " +
                                         "happens, choose it again."))

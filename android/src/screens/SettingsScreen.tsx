@@ -1122,10 +1122,12 @@ export default function SettingsScreen() {
               );
             })}
           </View>
-          <SwitchLine value={wifiOn} a11yLabel="Find the position by Wi-Fi too"
+          {/* André, 2026-11-24: "i don't want mannualy": the place fields and Apply only with
+              Manual, the Wi-Fi switch only with This device (as on the desktop). */}
+          {!weatherManual && <SwitchLine value={wifiOn} a11yLabel="Find the position by Wi-Fi too"
             label="Find the position by Wi-Fi too, when GPS has none. It sends the addresses of the Wi-Fi networks around to BeaconDB, an open database."
-            onValueChange={v => { setWifiOn(v); setWifiLookup(v).then(() => { if (v && !weatherManual) locateAutomatically(); }); }} />
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+            onValueChange={v => { setWifiOn(v); setWifiLookup(v).then(() => { if (v && !weatherManual) locateAutomatically(); }); }} />}
+          {weatherManual && <View style={{ flexDirection: 'row', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <FieldRow icon="poi" value={latText} onChangeText={setLatText} placeholder="Latitude"
                 keyboardType="numbers-and-punctuation" accessibilityLabel="Latitude" />
@@ -1134,10 +1136,10 @@ export default function SettingsScreen() {
               <FieldRow icon="poi" value={lonText} onChangeText={setLonText} placeholder="Longitude"
                 keyboardType="numbers-and-punctuation" accessibilityLabel="Longitude" />
             </View>
-          </View>
-          <View style={styles.row}>
+          </View>}
+          {weatherManual && <View style={styles.row}>
             <Button label="Apply" variant="outline" grow={false} onPress={handleApplyWeather} />
-          </View>
+          </View>}
         </SettingsSection>
 
         {/* Ember's own settings (sync, food search), once it's on in "Show in the sidebar". */}
