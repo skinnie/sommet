@@ -419,6 +419,8 @@ def _selftest_one_connection():
         L = ScaleListener()
         L.SCAN_ON_S = 0.0
         L.want(60)
+        L.scan_filter = lambda: None        # not this computer's saved scale (2026-11-24: a
+                                            # scale heard here made every burst a new scanner)
 
         def new_scanner(_settle):
             made.append(Scanner(log, bursts, fail_stop=len(made) < fail_first))
@@ -473,6 +475,7 @@ def _selftest_one_connection():
     log, ticks = [], []
     assert not L.wanted() and L.status()["scanning"] is False
     L.new_scanner = lambda _s: log.append("scanner") or Scanner(log, [])
+    L.scan_filter = lambda: None                # not this computer's saved scale
 
     async def pause(_seconds):
         ticks.append(1)
