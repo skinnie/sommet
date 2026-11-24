@@ -654,6 +654,9 @@ void DeviceService::resumeBle(int tries)
         return;                        // Pair was pressed meanwhile: that flow owns it
     QJsonObject body;
     body[QStringLiteral("forget")] = false;
+    // Started by Sommet, not by a press on Pair: never the Linux password prompt (P5Q,
+    // 2026-11-24: it came up by itself at launch).
+    body[QStringLiteral("auto")] = true;
     QNetworkRequest request(backendUrl(QStringLiteral("/api/ble/connect")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply *reply = m_network.post(request, QJsonDocument(body).toJson());

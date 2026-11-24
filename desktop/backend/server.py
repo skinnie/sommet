@@ -5486,7 +5486,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(502, {"ok": False, "error": ble_bridge.silent_hint(),
                                       "bluetooth_silent": True})
                 return
-            _open_bt_privacy_window()
+            # Only for a press on Pair: the quiet start at launch (`auto`) listens for a watch
+            # already paired and never asks for the password (P5Q, 2026-11-24: the prompt came
+            # up by itself when Sommet opened).
+            if not body.get("auto"):
+                _open_bt_privacy_window()
         try:
             ble_bridge.bridge.start(forget=bool(body.get("forget", False)))
         except ble_bridge.BleBridgeError as exc:

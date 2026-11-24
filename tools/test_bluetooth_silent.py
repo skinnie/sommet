@@ -182,6 +182,33 @@ class Uses(unittest.TestCase):
         self.assertEqual(sent[0][0], 502)
         self.assertIn("not answering", sent[0][1]["error"])
 
+    def test_the_quiet_start_at_launch_never_asks_for_the_password(self):
+        # P5Q, 2026-11-24: Sommet opened and the system's password window came up by itself.
+        class Bridge:
+            def status(self):
+                return {"running": False}
+
+            def start(self, **_):
+                pass
+        saved = (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
+                 server._watch_bt_privacy_window)
+        opened = []
+        B.bluetooth_silent = lambda **_kw: False
+        B.daemon_command = lambda _script: ([], {})
+        server._open_bt_privacy_window = lambda: opened.append(1)
+        server._watch_bt_privacy_window = lambda: None
+        B.bridge = Bridge()
+        try:
+            h = server.Handler.__new__(server.Handler)
+            h._send_json = lambda code, obj: None
+            h._handle_ble_connect({"forget": False, "auto": True})
+            self.assertEqual(opened, [], "the launch start showed the password prompt")
+            h._handle_ble_connect({"forget": False})              # a press on Pair
+            self.assertEqual(opened, [1])
+        finally:
+            (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
+             server._watch_bt_privacy_window) = saved
+
 
 if __name__ == "__main__":
     unittest.main()
