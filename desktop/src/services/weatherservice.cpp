@@ -18,6 +18,11 @@ WeatherService::WeatherService(QObject *parent) : QObject(parent)
     m_refreshTimer.setInterval(10 * 60 * 1000);
     connect(&m_refreshTimer, &QTimer::timeout, this, &WeatherService::refresh);
     m_refreshTimer.start();
+    // A failed fetch is tried again after a minute rather than at the next 10-minute refresh
+    // (André, 2026-11-24: "offline" on the X230 though it was not, after a start short on memory).
+    m_retryTimer.setSingleShot(true);
+    m_retryTimer.setInterval(60 * 1000);
+    connect(&m_retryTimer, &QTimer::timeout, this, &WeatherService::refresh);
 
     // A place set by hand survives a restart: the IP address can be another city (Faro for a
     // Vodafone line in Leiria, André 2026-11-23), and a desktop has no GPS to correct it.
@@ -241,8 +246,10 @@ void WeatherService::refresh()
         // Any failure here, network or malformed response, just leaves `available` false;
         // WeatherCard.qml shows a plain "you're offline" message rather than any raw error.
         if (reply->error() != QNetworkReply::NoError) {
+            qWarning("[weather] fetch failed: %s", qPrintable(reply->errorString()));
             setAvailable(false);
             markFetchedOnce();
+            m_retryTimer.start();
             return;
         }
 
@@ -256,10 +263,13 @@ void WeatherService::refresh()
         const auto dailyCode = daily.value(QStringLiteral("weather_code")).toArray();
 
         if (current.isEmpty() || dailyTime.isEmpty()) {
+            qWarning("[weather] answer without a forecast");
             setAvailable(false);
             markFetchedOnce();
+            m_retryTimer.start();
             return;
         }
+        m_retryTimer.stop();
 
         m_currentTemperature = current.value(QStringLiteral("temperature_2m")).toDouble();
         m_currentWeatherCode = current.value(QStringLiteral("weather_code")).toInt();

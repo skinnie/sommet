@@ -29,6 +29,8 @@ export interface WeatherData {
 }
 
 const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+// A failed fetch is tried again after a minute (desktop parity, 2026-11-24).
+const RETRY_AFTER_FAILURE_MS = 60 * 1000;
 // Same real "no location configured yet" placeholder as weatherservice.h's own
 // m_latitude/m_longitude defaults - roughly central Europe, not 0,0 (the Gulf of Guinea).
 const DEFAULT_LAT = 48.85;
@@ -270,7 +272,9 @@ export function useWeather() {
     loading: false, available: false, hasFetchedOnce: false, placeName: '', data: null,
   });
 
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
   async function refresh() {
+    if (retry.current) { clearTimeout(retry.current); retry.current = null; }
     setState(s => ({ ...s, loading: true }));
     const { latitude, longitude } = currentLocation;
     const [data, placeName] = await Promise.all([
@@ -284,6 +288,7 @@ export function useWeather() {
       placeName,
       data,
     });
+    if (data === null) retry.current = setTimeout(refresh, RETRY_AFTER_FAILURE_MS);
     // Share the place name too (Settings -> Weather shows it), if the location hasn't moved since.
     if (currentLocation.latitude === latitude && currentLocation.longitude === longitude
         && currentLocation.placeName !== placeName) {
@@ -305,7 +310,10 @@ export function useWeather() {
     if (!detectedOnce) startLocating().then(() => { if (!fetched) refresh(); });
     else refresh();
     const iv = setInterval(refresh, REFRESH_INTERVAL_MS);
-    return () => { clearInterval(iv); locationListeners.delete(onLocation); };
+    return () => {
+      clearInterval(iv); locationListeners.delete(onLocation);
+      if (retry.current) clearTimeout(retry.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

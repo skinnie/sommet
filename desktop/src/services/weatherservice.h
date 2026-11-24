@@ -106,6 +106,7 @@ private:
 
     QNetworkAccessManager m_network;
     QTimer m_refreshTimer;
+    QTimer m_retryTimer;      // one more try a minute after a failure
     bool m_loading = false;
     bool m_available = false;
     bool m_hasFetchedOnce = false;
