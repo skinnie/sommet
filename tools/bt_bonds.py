@@ -29,8 +29,11 @@ ADDR_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 
 
 def _ctl(*args, timeout=15):
+    # Without the package's library paths: with them bluetoothctl did not start at all in the
+    # Linux download, so no watch was listed and Forget removed nothing (P5Q, 2026-11-24).
+    from system_env import system_env                       # noqa: PLC0415
     return subprocess.run(["bluetoothctl", *args], capture_output=True, text=True,
-                          timeout=timeout).stdout
+                          timeout=timeout, env=system_env()).stdout
 
 
 def _info(address):

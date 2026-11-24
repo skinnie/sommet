@@ -60,7 +60,8 @@ _PATH_RE = re.compile(r"(/org/bluez/\S+)")
 
 
 def _run(args, timeout=15):
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    from system_env import system_env                       # noqa: PLC0415 (see that file)
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=system_env())
 
 
 def _find_address():

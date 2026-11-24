@@ -20,6 +20,13 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   description of Sommet's two Bluetooth scripts, so the window then says why it asks. Sommet's own
   step text is shorter too.
 - Only checked without a watch and in a test window; the polkit window is not seen yet.
+- **Forget on Linux removed nothing** (André: "forgetting on app doesn't delete from system").
+  Inside the Linux download, bluetoothctl did not start at all (the package's own GLib: "undefined
+  symbol: g_string_free_and_steal", P5Q). Sommet listed no paired watch, so Forget had nothing to
+  remove, and a start with a watch already paired was taken for a new pairing and asked for the
+  password. System programs (bluetoothctl, notify-send, busctl) now start without the package's
+  library paths (`tools/system_env.py`). Seen on the P5Q with the package's libraries: the old way
+  fails, the new list finds the watch.
 
 ---
 

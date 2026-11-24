@@ -25,7 +25,6 @@ the how-to: a Bluetooth mouse or keyboard paired before may need pairing again.
 """
 
 import json
-import os
 import pathlib
 import platform
 import shutil
@@ -130,12 +129,9 @@ def notify():
         try:
             # Without the package's own library paths: inside the AppImage they made the
             # system's notify-send fail (P5Q, 2026-11-24: "symbol lookup error").
-            env = {k: v for k, v in os.environ.items()
-                   if k not in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH",
-                                "GI_TYPELIB_PATH", "GDK_PIXBUF_MODULE_FILE", "GTK_PATH",
-                                "QT_PLUGIN_PATH", "XDG_DATA_DIRS")}
+            from system_env import system_env                   # noqa: PLC0415
             subprocess.run(["notify-send", "-a", "Sommet", "-i", "bluetooth",
-                            "Sommet: pairing your watch", NOTICE], timeout=5, env=env)
+                            "Sommet: pairing your watch", NOTICE], timeout=5, env=system_env())
         except (OSError, subprocess.SubprocessError):
             pass
 
