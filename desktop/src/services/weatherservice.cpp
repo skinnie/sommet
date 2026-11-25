@@ -24,8 +24,8 @@ WeatherService::WeatherService(QObject *parent) : QObject(parent)
     m_retryTimer.setInterval(60 * 1000);
     connect(&m_retryTimer, &QTimer::timeout, this, &WeatherService::refresh);
 
-    // A place set by hand survives a restart: the IP address can be another city (Faro for a
-    // Vodafone line in Leiria, André 2026-11-23), and a desktop has no GPS to correct it.
+    // A place set by hand survives a restart: the IP address can be another city (a home line
+    // placed at the other end of the country, 2026-11-23), and a desktop has no GPS to correct it.
     const QSettings settings;
     m_wifiLocation = settings.value(QStringLiteral("weather/wifi"), false).toBool();
     if (settings.value(QStringLiteral("weather/manual"), false).toBool()) {
@@ -357,8 +357,8 @@ void WeatherService::detectLocationFromIp()
 // IP's registered location - not true GPS.
 void WeatherService::tryIpLocation(int provider)
 {
-    // BeaconDB first, with nothing but the address it sees: it placed a Vodafone line in Leiria
-    // near Leiria, where ipapi.co says Faro (2026-11-23). Its IP data is DB-IP's (CC BY 4.0).
+    // BeaconDB first, with nothing but the address it sees: it placed a home line about 10 km
+    // from home, where ipapi.co said a city at the other end of the country (2026-11-23). Its IP data is DB-IP's (CC BY 4.0).
     static const char *const kServices[] = {
         kBeaconDb,
         "https://ipapi.co/json/",

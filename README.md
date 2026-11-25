@@ -72,7 +72,9 @@ On Linux, Bluetooth needs two system packages, `python3-dbus` and `python3-gi` (
 installs have them). Pairing asks for no password and changes nothing on the computer: Linux
 doesn't give the watch the computer's identity while pairing, so Sommet writes it into the
 watch's pairing record in the first session. Without it the watch would refuse the computer
-after its first sleep. More in [Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
+after its first sleep. A Kailash isn't covered yet: before pairing one on Linux, turn on
+**Settings → Experimental features → Keep Bluetooth privacy on**. More in
+[Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
 
 ## More
 
@@ -105,7 +107,8 @@ Emil Ljungdahl), opensportsync, marguslt, Pavel Samokha,
 [train-libre](https://github.com/rfivesix/train-libre) and
 [suunto-sml-model](https://github.com/mihaildemidoff/suunto-sml-model), with the Suunto forum
 community and wanarun.net. At runtime it uses
-[python-garminconnect](https://github.com/cyberjunky/python-garminconnect),
+[bleak](https://github.com/hbldh/bleak) and [pywinrt](https://github.com/pywinrt/pywinrt) for
+Bluetooth, [python-garminconnect](https://github.com/cyberjunky/python-garminconnect),
 [intervals.icu](https://intervals.icu/),
 [wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp), Open Food Facts, USDA FoodData
 Central, [ZXing-C++](https://github.com/zxing-cpp/zxing-cpp),

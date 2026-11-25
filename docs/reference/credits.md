@@ -291,6 +291,9 @@ vendored into Sommet.
 The desktop app's frozen Python backend (`tools/packaging/backend-requirements.txt`):
 
 - **[bleak](https://github.com/hbldh/bleak)** - Bluetooth (watches, bike computers, scales).
+- **[pywinrt](https://github.com/pywinrt/pywinrt)** (MIT) - the Windows Runtime packages
+  (`winrt-*`, pulled in by bleak on Windows) that `tools/ble_server_win.py` uses to host the
+  watch's Bluetooth service on Windows.
 - **[hid](https://pypi.org/project/hid/)** - the Python binding for USB watches.
 - **[hidapi](https://github.com/libusb/hidapi)** - the USB HID library the `hid` binding loads to
   reach the watch; shipped unmodified as a shared library inside the Windows/macOS/Linux

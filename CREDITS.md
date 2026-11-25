@@ -70,6 +70,11 @@ Services and libraries the app talks to at runtime:
 - **[cyberjunky/python-garminconnect](https://github.com/cyberjunky/python-garminconnect)** (MIT) —
   the Garmin Connect client behind activity, weight and health sync (`tools/garmin_sync.py`,
   `tools/garmin_weight.py`).
+- **[bleak](https://github.com/hbldh/bleak)** (MIT) — Bluetooth on the desktop: watches, bike
+  computers and scales.
+- **[pywinrt](https://github.com/pywinrt/pywinrt)** (MIT) — the Windows Runtime packages
+  (`winrt-*`, which bleak also uses on Windows) that let Sommet host the watch's Bluetooth
+  service on Windows (`tools/ble_server_win.py`).
 - **[intervals.icu](https://intervals.icu/)** — its public API backs activity/gear import and
   export, the wellness and weight feeds, and the profile/activity-level writes to the watch.
 - **[joaodrp/wahoo-systm-mcp](https://github.com/joaodrp/wahoo-systm-mcp)** — the Wahoo SYSTM

@@ -5436,12 +5436,15 @@ class Handler(BaseHTTPRequestHandler):
         AmbitBleModule.kt's nativeInitStarted gate on the Android side."""
         status = ble_bridge.bridge.status()
         # Linux: a watch paired here gets this computer's identity in its first session
-        # (_pairing_fix_on_status); "failed" puts a line on Home until it has worked.
+        # (_pairing_fix_on_status); "notice" puts a line on Home: "failed" until it has
+        # worked, "unsupported" (a watch model it can't complete yet, the Kailash) or "no_key"
+        # until the next pairing or Forget.
         _pairing_fix_on_status(status)
         fix = _pairing_fix()
         self._send_json(200, {**status,
                               "pairing_fix": {"pending": bool(fix and fix.pending),
-                                              "failed": bool(fix and fix.failed())},
+                                              "failed": bool(fix and fix.failed()),
+                                              "notice": fix.notice() if fix else ""},
                               "reading_moves": _BLE_MOVES_PROGRESS[0],
                               "writing_route": _BLE_ROUTE_PROGRESS[0]})
 
@@ -5619,9 +5622,15 @@ class Handler(BaseHTTPRequestHandler):
         fix = _pairing_fix()
         if ok and fix is not None:
             # Linux: this pairing gives the watch no identity of this computer; its first
-            # session completes the watch's pairing record (watch-protocol/09).
+            # session completes the watch's pairing record (watch-protocol/09). Unless the
+            # system keeps Bluetooth privacy on (Settings), which gave it one already.
+            try:
+                import bt_privacy                                # noqa: PLC0415
+                privacy_on = bt_privacy.always_on()
+            except Exception:                                    # noqa: BLE001 - read-only
+                privacy_on = False
             fix.paired(status.get("pending_passkey_device"), status.get("adapter_address"),
-                       status.get("adapter_address_type"))
+                       status.get("adapter_address_type"), privacy_on=privacy_on)
         self._send_json(200 if ok else 409,
                         {"ok": ok, **({} if ok else {"error": "no passkey request pending"})})
 

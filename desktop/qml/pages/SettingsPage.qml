@@ -1000,7 +1000,7 @@ PageFlickable {
                     Row {
                         spacing: Theme.spacingSmall
                         // A computer has no GPS: its address can be another city. A place set
-                        // here is saved and wins over it (André, 2026-11-23: Faro for Leiria).
+                        // here is saved and wins over it (2026-11-23: the IP address said the wrong city).
                         RoundedRadioButton {
                             checked: !WeatherService.manualLocation
                             text: qsTr("This computer")

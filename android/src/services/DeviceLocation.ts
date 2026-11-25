@@ -3,8 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Where this tablet or phone is, for the POIs map to open there (André, 2026-11-23). Android asks
 // the owner once. The last real position is remembered, because indoors there may be no fix and
-// the weather place comes from the IP address, which can be a far-off city (Faro for a Vodafone
-// line in Leiria, 2026-11-23). The exact position stays on the device; the weather gets it rounded
+// the weather place comes from the IP address, which can be a far-off city (a home line placed
+// at the other end of the country, 2026-11-23). The exact position stays on the device; the weather gets it rounded
 // to about 1 km (WeatherService.ts).
 //
 // By Wi-Fi, when the owner switched it on (Settings > Weather; André, 2026-11-23: "can't we also

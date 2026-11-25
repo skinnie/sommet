@@ -116,8 +116,8 @@ const IP_LOCATION_SERVICES = [
 ];
 
 export async function detectLocationFromIp(): Promise<{ latitude: number; longitude: number } | null> {
-  // BeaconDB first, with nothing but the address it sees: it placed a Vodafone line in Leiria
-  // near Leiria, where ipapi.co says Faro (2026-11-23). Its IP data is DB-IP's (CC BY 4.0).
+  // BeaconDB first, with nothing but the address it sees: it placed a home line about 10 km
+  // from home, where ipapi.co said a city at the other end of the country (2026-11-23). Its IP data is DB-IP's (CC BY 4.0).
   try {
     const res = await fetch(BEACONDB_URL, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': LOOKUP_AGENT },
@@ -177,7 +177,7 @@ interface WeatherState {
 // Where the weather is for. Shared by Home's weather card and Settings -> Weather (desktop
 // parity: one WeatherService for the whole app). A place set by hand in Settings is saved and
 // wins. Otherwise: the device's position, else the last one it had, else the IP address, which
-// can be a far-off city (Faro for a Vodafone line in Leiria, André 2026-11-23).
+// can be a far-off city (a home line placed at the other end of the country, 2026-11-23).
 // The position is rounded to 0.01 degree (about 1 km) here: the weather and place-name services
 // are outside ones, and a forecast needs no more than that.
 export interface WeatherLocation {

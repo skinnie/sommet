@@ -116,6 +116,19 @@ def _group_id(schema, suffix):
     return group if group is not None else field.fid
 
 
+def supported(schema):
+    """True when this watch's settings have both lists the fix needs: the pairing list
+    (WhitelistedBleDevices) and the Pods list that names the phone's record in it. The Kailash
+    (firmware 2.0.5) has no Pods list (pre-release review of 0.2.67, 2026-11-25): it gets no
+    write at all until its pairing record has been seen on a real Kailash."""
+    try:
+        _group_id(schema, WHITELIST_FIELD)
+        _group_id(schema, PODS_FIELD)
+    except KeyError:
+        return False
+    return True
+
+
 def phone_slot(schema, payload):
     """(index, Record) of the paired phone's record in a 0x1100 reply, or (None, None).
     The Pods record of type 6 names it by DeviceId; failing that, the record whose DeviceId
@@ -147,11 +160,17 @@ def fixed_record(rec, address, rand=os.urandom):
 
 
 def plan(schema, payload, address, rand=os.urandom):
-    """What a fix would write: {"state": ..., "slot", "payload"}. States: no_phone (no phone
-    pairing on the watch), fine (the record already has an identity), fix (payload set)."""
+    """What a fix would write: {"state": ..., "slot", "payload"}. States: unsupported (this
+    watch model's settings lack a list the fix needs: nothing is written), no_phone (no phone
+    pairing on the watch), no_key (the phone record holds no key: only pairing again helps),
+    fine (the record already has an identity), fix (payload set)."""
+    if not supported(schema):
+        return {"state": "unsupported"}
     slot, rec = phone_slot(schema, payload)
     if rec is None:
         return {"state": "no_phone"}
+    if not rec.key:
+        return {"state": "no_key", "slot": slot}
     if not needs_fix(rec):
         return {"state": "fine", "slot": slot}
     new = fixed_record(rec, address, rand)
@@ -196,6 +215,8 @@ def run(link, schema, address, write, wait=time.sleep, tries=3, pause_s=10.0):
     after the pairing, a reply after 30 s), so an unanswered write is followed by a re-read:
     the change counts only if the watch shows it, and is sent again (up to `tries` times)
     while the watch still shows the old record."""
+    if not supported(schema):
+        return {"ok": True, "state": "unsupported", "slot": None, "written": False}
     before = link.command(S.CMD_SETTINGS_READ, b"\0\0\0\0")
     step = plan(schema, before, address)
     result = {"ok": True, "state": step["state"], "slot": step.get("slot"), "written": False}
@@ -238,6 +259,11 @@ class AfterPairing:
     - "fine" (the watch already has an identity: privacy was on, or done before) and
       "no_phone" end it as well as a successful write. A failure keeps it pending and
       failed() true, which Home shows. Forget ends it.
+    - "unsupported" (a watch model whose settings lack a list the fix needs, the Kailash) and
+      "no_key" (the phone record holds no key) end it too, with a notice() that Home shows
+      until the next pairing or Forget: nothing more can be done from here.
+    - A pairing made while the system keeps Bluetooth privacy on (Settings: Keep Bluetooth
+      privacy on) gave the watch this computer's identity already: nothing to complete.
 
     `run(address, serial, over_ble)` does one try and returns ble_bond_fix's result dict.
     Nothing here logs an address, a serial or a key."""
@@ -258,34 +284,47 @@ class AfterPairing:
         self.session_tries = 0
         self.last_try = None
         self.last_cable_try = None
-        self.pending = self._load()
+        self.pending, self.final = self._load()
+
+    NOTICES = ("unsupported", "no_key")
 
     def _load(self):
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return None
-        p = data.get("pending") if isinstance(data, dict) else None
+            return None, None
+        if not isinstance(data, dict):
+            return None, None
+        p = data.get("pending")
+        final = data.get("final") if data.get("final") in self.NOTICES else None
         if isinstance(p, dict) and p.get("device") and ADDRESS.match(p.get("address") or ""):
-            return p
-        return None
+            return p, None
+        return None, final
 
     def _save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_name(self.path.name + ".new")
-            tmp.write_text(json.dumps({"pending": self.pending}), encoding="utf-8")
+            tmp.write_text(json.dumps({"pending": self.pending, "final": self.final}),
+                           encoding="utf-8")
             os.replace(tmp, self.path)
         except OSError as exc:
             self.log(f"pairing fix: could not save its state ({exc.__class__.__name__})")
 
-    def paired(self, device, address, address_type=None):
-        """Sommet's code box was answered for `device` (a BlueZ device path or its last part)."""
+    def paired(self, device, address, address_type=None, privacy_on=False):
+        """Sommet's code box was answered for `device` (a BlueZ device path or its last part).
+        `privacy_on`: the system keeps Bluetooth privacy on, so the watch got this computer's
+        identity while pairing and there is nothing to complete."""
         dev = (device or "").split("/")[-1]
         if not dev:
             return
         with self.lock:
-            if address_type not in (None, "public") or not ADDRESS.match(address or ""):
+            self.final = None
+            if privacy_on:
+                self.pending = None
+                self.log("pairing fix: Bluetooth privacy is kept on here, so the watch got this "
+                         "computer's identity while pairing; nothing to complete")
+            elif address_type not in (None, "public") or not ADDRESS.match(address or ""):
                 self.pending = None
                 self.log("pairing fix: this computer's Bluetooth address is not a fixed one, "
                          "so the watch's pairing record cannot name it (Settings: Keep "
@@ -301,14 +340,19 @@ class AfterPairing:
 
     def forgotten(self):
         with self.lock:
-            if self.pending is not None:
-                self.pending = None
+            if self.pending is not None or self.final is not None:
+                self.pending, self.final = None, None
                 self._save()
             self.session = None
 
     def failed(self):
         p = self.pending
         return bool(p and p.get("error"))
+
+    def notice(self):
+        """What Home says, or "": "failed" (tries so far did not work; it keeps trying),
+        "unsupported" or "no_key" (final, until the next pairing or Forget)."""
+        return "failed" if self.failed() else (self.final or "")
 
     def due_over_ble(self, status, usb_present):
         """Looks at the helper's status (polled by the app). True when a try over the
@@ -373,13 +417,21 @@ class AfterPairing:
                 return result
             if result.get("ok"):
                 self.pending = None
+                state = result.get("state")
+                self.final = state if state in self.NOTICES else None
                 self.log({"fix": f"pairing fix: done {how}, the watch's pairing record names "
                                  "this computer now",
                           "fine": "pairing fix: not needed, the watch already knows this "
                                   "computer",
                           "no_phone": "pairing fix: the watch holds no app pairing; nothing "
-                                      "to do"}.get(result.get("state"),
-                                                   f"pairing fix: finished {how}"))
+                                      "to do",
+                          "unsupported": "pairing fix: this watch model's pairing record is "
+                                         "not one Sommet can complete yet; nothing written "
+                                         "(Settings: Keep Bluetooth privacy on, then pair "
+                                         "again)",
+                          "no_key": "pairing fix: the watch's app pairing holds no key; "
+                                    "nothing written (Forget, then pair again)"}.get(
+                                        state, f"pairing fix: finished {how}"))
             else:
                 p["tries"] = int(p.get("tries") or 0) + 1
                 p["error"] = str(result.get("error") or "no answer")[:200]
@@ -405,12 +457,18 @@ def main(argv=None):
         link.command(S.CMD_DEVICE_INFO, b"\x02\x48\x03\x00")   # SuuntoLink's opener, see settings_write
         descriptor = schema_for_link(link)
         if not descriptor.exists():
+            # Not the file's name: it carries the watch's serial.
             print(json.dumps({"ok": False,
-                              "error": f"missing schema descriptor: {descriptor.name}"}))
+                              "error": "Sommet could not get this watch's settings layout"}))
             return 1
         result = run(link, sbem_schema.load(descriptor), args.address, args.write)
     except ValueError as exc:
         result = {"ok": False, "error": str(exc)}
+    except KeyError:
+        # A field this tool needs is missing from the watch's settings (supported() covers the
+        # known case): one plain line, never a traceback.
+        result = {"ok": False, "error": "this watch's settings are not laid out as Sommet "
+                                        "expects"}
     except (RuntimeError, TimeoutError, OSError) as exc:
         # A watch that is gone or busy: said in one line, never a traceback with link details.
         result = {"ok": False, "error": f"the watch did not answer ({exc.__class__.__name__})"}

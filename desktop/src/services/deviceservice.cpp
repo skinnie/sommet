@@ -701,8 +701,8 @@ void DeviceService::pollBleStatus()
             return;
         }
         m_bleAttemptSeconds += 1;
-        m_blePairingFixFailed = obj.value(QStringLiteral("pairing_fix")).toObject()
-                                    .value(QStringLiteral("failed")).toBool();
+        m_blePairingFixNotice = obj.value(QStringLiteral("pairing_fix")).toObject()
+                                    .value(QStringLiteral("notice")).toString();
         m_bleSubscribed = obj.value(QStringLiteral("subscribed")).toBool();
         m_bleHandshakeDone = obj.value(QStringLiteral("handshake_done")).toBool();
         const auto pendingVal = obj.value(QStringLiteral("pending_passkey_device"));
@@ -797,10 +797,11 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
     }
     const bool done = obj.value(QStringLiteral("handshake_done")).toBool();
     const bool subscribed = obj.value(QStringLiteral("subscribed")).toBool();
-    const bool fixFailed = obj.value(QStringLiteral("pairing_fix")).toObject()
-                               .value(QStringLiteral("failed")).toBool();
-    if (fixFailed != m_blePairingFixFailed) {
-        m_blePairingFixFailed = fixFailed;
+    // Linux: "failed", "unsupported" or "no_key" (tools/ble_bond_fix.py AfterPairing.notice).
+    const QString fixNotice = obj.value(QStringLiteral("pairing_fix")).toObject()
+                                  .value(QStringLiteral("notice")).toString();
+    if (fixNotice != m_blePairingFixNotice) {
+        m_blePairingFixNotice = fixNotice;
         emit bleStateChanged();
     }
     // A pairing can start later too (the passkey dialog opens on this, HomePage.qml).
@@ -873,7 +874,7 @@ void DeviceService::forgetBle()
     m_bleHandshakeDone = false;
     m_blePendingPasskeyDevice.clear();
     m_bleError.clear();
-    m_blePairingFixFailed = false;
+    m_blePairingFixNotice.clear();
     emit bleStateChanged();
 
     QNetworkReply *reply =

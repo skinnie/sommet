@@ -7,6 +7,34 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-25: 0.2.67 in short: what to know before you update
+
+Every change since 0.2.66 is listed in the sections below. Before you update:
+
+1. **Linux: pairing a watch by Bluetooth no longer asks for your password or switches
+   Bluetooth off**, so a Bluetooth mouse or keyboard stays connected. Sommet finishes the
+   pairing on the watch by itself in its first session (seen on an Ambit3 Peak). A Kailash
+   isn't covered yet: before you pair one on Linux, turn on **Settings → Experimental features →
+   Keep Bluetooth privacy on**.
+2. **The light library comes on by itself.** If you use Sommet Sync or intervals.icu, the first
+   time 0.2.67 opens it clears from this computer or phone the tracks and original files (FIT)
+   of activities older than 90 days that your server already holds. Every activity stays in
+   your list, and an older one loads its map and file from the server when you open it. To keep
+   everything on the device from then on, set **Keep on this computer** in Settings → Database
+   (Android: **Keep on this device** in Settings) to **Everything**.
+3. **Don't move Sommet Sync to another server with this version.** What the old server already
+   has is not sent to the new one.
+4. **Not yet seen on a real watch.** These are checked with tests (and the emulated watch where
+   there is one), not on the watch itself yet:
+   - removing a POI on an Ambit1 or Ambit2, and their POI and GPS data writes without the
+     "mark as synced" step;
+   - the new POI types on the Traverse and Traverse Alpha;
+   - Android keeping the watch's POIs when it sends or removes a route;
+   - setting a Kailash's clock from Android;
+   - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen).
+
+---
+
 ## 2026-11-25: Linux: pairing a watch by Bluetooth no longer touches the computer (watch-protocol/09)
 
 André: "linking a watch should never affect the system", then "b".
@@ -27,26 +55,37 @@ André: "linking a watch should never affect the system", then "b".
 - **The Settings switch stays, as a fallback**, renamed "Keep Bluetooth privacy on", off by
   default, for a watch that still forgets the computer. Its password window now describes only
   that; the next use removes 0.2.66's pairing script from `/usr/local/libexec/sommet/`.
-- Seen on André's Ambit3 Peak (firmware 2.4.17) by hand on 2026-11-25: the record read back as
-  the zero record, the write was answered over Bluetooth, and after a real link drop the watch
-  came back within a second with no code, the mouse connected throughout. The automatic path
-  (code box -> first session -> write) is checked with tests and the watch emulator only.
-  Kailash, Traverse and Traverse Alpha not tested.
+- **The Kailash gets nothing written.** Its settings (firmware 2.0.5) have the pairing list but
+  not the Pods list that says which record is the phone's, and the fix stopped on it with an
+  error (found in the review before 0.2.67). Now such a watch is left alone, and Home says
+  "Sommet can't finish pairing this watch model by itself yet, so it may not reconnect to this
+  computer after it sleeps. To keep it paired, turn on Settings → Keep Bluetooth privacy on,
+  then pair it again." A pairing record without a key is never taken for a good one: Home says
+  to Forget and pair again. With the system's privacy kept on there is nothing to complete.
+- Seen on André's Ambit3 Peak (firmware 2.4.17) on 2026-11-25, by hand first: the record read
+  back as the zero record, the write was answered over Bluetooth, and after a real link drop the
+  watch came back within a second with no code, the mouse connected throughout. Then the
+  automatic path (18:16-18:18): André pressed Forget and paired again; Sommet wrote the record
+  by itself 12 s after the code, with no password window; after a real link drop the watch came
+  back within a second with no code. The fix's cable route, the Kailash, the Traverse and the
+  Traverse Alpha are not seen yet.
 
 ---
 
-## 2026-11-24: Position by Wi-Fi, place fields only with Manual, a clear Linux password window
+## 2026-11-24: Position by Wi-Fi, place fields only with Manual, Forget on Linux
 
 - **Wi-Fi** (André: "can't we also know aprox location by wifi?", then "1 a"): a switch in
   Settings > Weather, off until turned on. The strongest Wi-Fi networks around (at most 20, not
   those ending in `_nomap`, no made-up addresses) go to BeaconDB, an open database. The GPS wins
   when it is finer. The internet-address lookup now asks BeaconDB first, with no Wi-Fi data:
-  about 10 km from Leiria for his line, where the previous service said Faro.
+  about 10 km from home for the owner's line, where the previous service named a city at the
+  other end of the country.
 - **Manual only when chosen** ("on the tablet when I click apply it switches to manual"): the place
   search, latitude, longitude and Apply show only with Manual, on both apps.
 - **Linux password window** ("it just says some code"): the first password also installs a polkit
   description of Sommet's two Bluetooth scripts, so the window then says why it asks. Sommet's own
-  step text is shorter too.
+  step text is shorter too. *Replaced on 2026-11-25: pairing asks for no password any more (see
+  above); only the Settings switch "Keep Bluetooth privacy on" still asks for one.*
 - Only checked without a watch and in a test window; the polkit window is not seen yet.
 - **Forget on Linux removed nothing** (André: "forgetting on app doesn't delete from system").
   Inside the Linux download, bluetoothctl did not start at all (the package's own GLib: "undefined
@@ -60,8 +99,8 @@ André: "linking a watch should never affect the system", then "b".
 
 ## 2026-11-23: The weather's place: the device's position, and a place set by hand is kept
 
-André: "why it says faro? i am i leiria". The place came from the IP address, and the lookup
-answers Faro for his Vodafone line, so Home's forecast was for Faro too.
+André: the forecast was for the wrong city. The place came from the IP address, and the lookup
+placed his home line at the other end of the country, so Home's forecast was for there too.
 
 - **Android:** the weather uses the device's position (the live one, else the last it had), and
   the IP address only without either. It never asks for the permission from Home; the POIs
@@ -69,7 +108,7 @@ answers Faro for his Vodafone line, so Home's forecast was for Faro too.
   and OpenStreetMap's place names.
 - **Both apps:** a place set by hand in Settings → Weather is saved and wins after a restart (it
   was lost at every start). Choosing "This device" / "This computer" forgets it.
-- **Desktop:** Settings → Weather gets the place search, so Leiria can be picked by name.
+- **Desktop:** Settings → Weather gets the place search, so a town can be picked by name.
 - Seen in the desktop test window (scratch settings): a saved place loads after a restart, Apply
   saves it, "This computer" removes it. Android type-checks and runs; a saved place and a live GPS
   fix were not seen there yet.
@@ -112,7 +151,7 @@ poi...also make it dragable and zoomable like all others". He chose it from a wo
   and on the desktop (no GPS): the weather place. A target button comes back there; **All** fits
   every POI. On the desktop the view now stays put when the list changes.
   Android remembers the last real position and listens up to 60 s: the weather place comes from
-  the IP address, and for André's Vodafone line in Leiria that says Faro.
+  the IP address, which can name the wrong city.
 - Seen in the desktop test window (made-up POIs, scratch home, no map tiles): pick, double-click,
   pin drag, map drag, name and save, Find, narrow window. Seen on the tablet with André's own
   library (nothing saved): + Add POI, pin drag, hold and drag, zoom, line tap, double-tap, Cancel.
@@ -426,7 +465,7 @@ P5Q in the afternoon, and the tablet no longer had a pairing with it, so it had 
   disconnected while pairing/bonding was in progress (status=0)".
 - Android only: the desktop types the code in its own way on Linux and in Windows' pop-up.
 
-## 2026-11-22: the first Bluetooth sync reads the log once, not three times; pairing on Linux without the password
+## 2026-11-22: the first Bluetooth sync reads the log once, not three times; a Linux switch to keep Bluetooth privacy on
 
 From the first sync with the Linux download on the P5Q (André: "pois took huge time, same for
 routes but work").
@@ -440,7 +479,8 @@ routes but work").
   - App: while a read of the watch's activities is under way, a page that opens does not start
     another (`ActivityService`, `m_watchReadsInFlight`).
 - Settings, Experimental features, Linux only: **Pair a watch by Bluetooth without the
-  password**. It keeps the system's Bluetooth privacy on for good (`Privacy = device` in
+  password** (*renamed "Keep Bluetooth privacy on" on 2026-11-25, and only a fallback since:
+  pairing asks for no password at all now*). It keeps the system's Bluetooth privacy on for good (`Privacy = device` in
   `/etc/bluetooth/main.conf`, a copy of the file kept as `main.conf.before-sommet`): the system
   asks for the password once, when the switch is turned on, and a pairing then asks for
   nothing. Off by default, and the text says the price: a Bluetooth mouse or keyboard paired
@@ -475,7 +515,8 @@ André on the P5Q (Mint): "it asks me sudo password ... and then it fails".
 - From that test: the pairing text on Linux is now two steps, one at a time. Step 1, the
   password (with the reason), shown for as long as the system prompt is up; step 2, the watch,
   only once the service is ready. The watch's offer to pair is shorter than typing a password,
-  so it had to be started twice.
+  so it had to be started twice. *Replaced on 2026-11-25: there is no password step any more,
+  so the text is one step again.*
 - The battery is read once before a Bluetooth sync starts: during the first, long one Home
   could only say "not available yet".
 

@@ -1389,11 +1389,22 @@ PageFlickable {
                     // Linux: after a pairing, Sommet writes this computer's identity into the
                     // watch's pairing record (tools/ble_bond_fix.py). Until that has worked the
                     // watch can refuse this computer after its link drops; Sommet tries again
-                    // on the next link, and over the cable when the watch is plugged in.
+                    // on the next link, and over the cable when the watch is plugged in
+                    // ("failed"). A watch model it can't complete yet (the Kailash, no Pods
+                    // list) gets nothing written ("unsupported"); a pairing that holds no key
+                    // can only be made again ("no_key").
                     Text {
-                        visible: DeviceService.blePairingFixFailed
-                        text: qsTr("The watch may not reconnect to this computer by itself. Plug " +
-                                   "it in by cable and Sommet will finish setting it up.")
+                        visible: DeviceService.blePairingFixNotice.length > 0
+                        text: DeviceService.blePairingFixNotice === "unsupported"
+                              ? qsTr("Sommet can't finish pairing this watch model by itself " +
+                                     "yet, so it may not reconnect to this computer after it " +
+                                     "sleeps. To keep it paired, turn on Settings → Keep " +
+                                     "Bluetooth privacy on, then pair it again.")
+                              : DeviceService.blePairingFixNotice === "no_key"
+                                ? qsTr("The watch's pairing with this computer is incomplete. " +
+                                       "Press Forget, then pair the watch again.")
+                                : qsTr("The watch may not reconnect to this computer by itself. " +
+                                       "Plug it in by cable and Sommet will finish setting it up.")
                         wrapMode: Text.WordWrap
                         width: parent.width
                         color: Theme.warning

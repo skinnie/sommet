@@ -139,7 +139,7 @@ class DeviceService : public QObject
     // Linux: a watch paired here is given this computer's identity in its first session
     // (tools/ble_bond_fix.py, watch-protocol/09). True while that has failed and is still to
     // do: the watch may not reconnect by itself until it is done, by Bluetooth or the cable.
-    Q_PROPERTY(bool blePairingFixFailed READ blePairingFixFailed NOTIFY bleStateChanged)
+    Q_PROPERTY(QString blePairingFixNotice READ blePairingFixNotice NOTIFY bleStateChanged)
     Q_PROPERTY(int bleAttemptSeconds READ bleAttemptSeconds NOTIFY bleStateChanged)
 
     // Real decision, 2026-08-11 (André, after a live BLE session this same night hit real
@@ -290,7 +290,7 @@ public:
     int bleMovesCount() const { return m_bleMovesCount; }
     QString blePendingPasskeyDevice() const { return m_blePendingPasskeyDevice; }
     QString bleError() const { return m_bleError; }
-    bool blePairingFixFailed() const { return m_blePairingFixFailed; }
+    QString blePairingFixNotice() const { return m_blePairingFixNotice; }
     // Real request, 2026-08-13 (André, live testing: "it is still on 'connecting'...
     // maybe we should put a timer no?") - a plain "Connecting…" with no elapsed time gave
     // no way to tell "still genuinely searching" from "stuck". Ticks once per
@@ -441,7 +441,7 @@ private:
     int m_bleMovesCount = 0;
     QString m_blePendingPasskeyDevice;
     QString m_bleError;
-    bool m_blePairingFixFailed = false;
+    QString m_blePairingFixNotice;
     int m_bleAttemptSeconds = 0;
     bool m_bleExperimentEnabled = false;
     bool m_intervalsEnabled = false;

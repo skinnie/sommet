@@ -4,6 +4,7 @@ and the re-read check. The parts that need a real settings read use the SuuntoLi
 the watch's descriptor in assets/ (not in the public repository) and are skipped without them.
 All addresses and keys here are made up."""
 
+import json
 import os
 import pathlib
 import platform
@@ -230,6 +231,43 @@ class AfterPairingRules(unittest.TestCase):
         self.assertNotIn(ADDR, fix.pending["error"])            # never the address in a message
         self.assertFalse(any(ADDR in m for m in self.logs))
 
+    def test_unsupported_and_no_key_end_it_with_a_notice_until_the_next_pairing(self):
+        for state in ("unsupported", "no_key"):
+            self.path.unlink(missing_ok=True)
+            fix = self.make()
+            fix.paired(DEV, ADDR, "public")
+            self.assertEqual(fix.notice(), "")
+            self.answers.append({"ok": True, "state": state, "written": False})
+            fix.try_now(True)
+            self.assertIsNone(fix.pending, state)
+            self.assertFalse(fix.failed())
+            self.assertEqual(fix.notice(), state)                         # Home's line
+            again = self.make()                                           # after a restart
+            self.assertEqual((again.pending, again.notice()), (None, state))
+            self.clock.t += 1000
+            self.assertFalse(again.due_over_ble(linked(), False))         # nothing more to try
+            again.paired(DEV, ADDR, "public")                             # a new pairing
+            self.assertEqual(again.notice(), "")
+            again.forgotten()
+            again.final = state
+            again.forgotten()                                             # Forget clears it
+            self.assertEqual(self.make().notice(), "")
+
+    def test_a_failure_is_the_failed_notice(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "public")
+        self.answers.append({"ok": False, "error": "the watch did not answer"})
+        fix.try_now(True)
+        self.assertEqual(fix.notice(), "failed")
+
+    def test_with_privacy_kept_on_there_is_nothing_to_complete(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "public", privacy_on=True)
+        self.assertIsNone(fix.pending)
+        self.assertEqual(fix.notice(), "")
+        self.clock.t += 100
+        self.assertFalse(fix.due_over_ble(linked(), False))
+
     def test_a_damaged_state_file_means_nothing_pending(self):
         self.path.write_text("{not json")
         self.assertIsNone(self.make().pending)
@@ -276,6 +314,10 @@ class BackendWiring(unittest.TestCase):
             def submit_passkey(self, _code):
                 return True
         s.ble_bridge.bridge = Bridge()
+        import bt_privacy
+        saved_always = bt_privacy.always_on
+        self.addCleanup(setattr, bt_privacy, "always_on", saved_always)
+        bt_privacy.always_on = lambda conf=None: False      # not this computer's main.conf
         h = s.Handler.__new__(s.Handler)
         sent = []
         h._send_json = lambda code, obj: sent.append((code, obj))
@@ -300,16 +342,90 @@ class BackendWiring(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(ran, [True])
         h._handle_ble_status()
-        self.assertEqual(sent[-1][1]["pairing_fix"], {"pending": True, "failed": True})
+        self.assertEqual(sent[-1][1]["pairing_fix"],
+                         {"pending": True, "failed": True, "notice": "failed"})
         self.assertNotIn("bt_privacy", sent[-1][1])
         state["running"] = False                                 # Forget ends it
         h._handle_ble_forget()
         h._handle_ble_status()
-        self.assertEqual(sent[-1][1]["pairing_fix"], {"pending": False, "failed": False})
+        self.assertEqual(sent[-1][1]["pairing_fix"],
+                         {"pending": False, "failed": False, "notice": ""})
+        # With the system's privacy kept on, a pairing has nothing to complete.
+        bt_privacy.always_on = lambda conf=None: True
+        state.update(pending_passkey_device="/org/bluez/hci0/" + DEV, running=True)
+        h._handle_ble_passkey({"passkey": 123456})
+        self.assertIsNone(s._pairing_fix().pending)
         text = log.read_text()
         self.assertIn("pairing fix:", text)
         self.assertNotIn(ADDR, text.upper())
         self.assertNotIn("TESTSERIAL", text)
+
+
+def _kailash_descriptor():
+    """The Kailash's own descriptor (firmware 2.0.5) from SuuntoLink's data in assets/, found by
+    its firmware so its file name (the watch's serial) is not written here."""
+    import glob                                          # follows a linked assets/ too
+    found = sorted(glob.glob(str(HERE.parent / "assets" / "**" / "descr+*+2.0.5"),
+                             recursive=True))
+    return pathlib.Path(found[0]) if found else None
+
+
+@unittest.skipUnless(_kailash_descriptor() is not None, "needs assets/ (the Kailash's descriptor)")
+class AKailashGetsNoWrite(unittest.TestCase):
+    """Pre-release review of 0.2.67 (2026-11-25): the Kailash's settings have the pairing list
+    but no Pods list, and the fix crashed on it. Now: "unsupported", nothing read or written."""
+
+    def test_unsupported_and_nothing_sent(self):
+        import sbem_schema
+        schema = sbem_schema.load(_kailash_descriptor())
+        self.assertFalse(B.supported(schema))
+        self.assertEqual(B.plan(schema, b"", ADDR), {"state": "unsupported"})
+
+        class Link:
+            sent = []
+
+            def command(self, cmd, payload):
+                self.sent.append(cmd)
+                raise AssertionError("nothing may be sent to this watch")
+        link = Link()
+        self.assertEqual(B.run(link, schema, ADDR, write=True),
+                         {"ok": True, "state": "unsupported", "slot": None, "written": False})
+        self.assertEqual(link.sent, [])
+
+
+class TheToolNeverPrintsATraceback(unittest.TestCase):
+    def test_a_missing_field_is_one_json_line(self):
+        import contextlib
+        import io
+        import write_nav
+
+        class Link:
+            def __init__(self, **_kw):
+                pass
+
+            def open(self):
+                pass
+
+            def command(self, cmd, payload):
+                return b""
+        saved = (write_nav.Link, write_nav.schema_for_link, B.run, B.sbem_schema.load)
+        try:
+            write_nav.Link = Link
+            write_nav.schema_for_link = lambda link: pathlib.Path(__file__)   # exists
+            B.sbem_schema.load = lambda path: object()
+
+            def boom(*_a, **_k):
+                raise KeyError("no field ending in '.Something' in this watch's own schema")
+            B.run = boom
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = B.main(["--address", ADDR, "--write", "--json"])
+        finally:
+            write_nav.Link, write_nav.schema_for_link, B.run, B.sbem_schema.load = saved
+        result = json.loads(out.getvalue().strip().splitlines()[-1])
+        self.assertEqual(code, 1)
+        self.assertFalse(result["ok"])
+        self.assertIn("not laid out", result["error"])
 
 
 def _descriptor():
@@ -356,6 +472,11 @@ class AgainstARealSettingsRead(unittest.TestCase):
         self.assertEqual(slot, 7)
         self.assertFalse(B.needs_fix(rec))
         self.assertEqual(B.plan(self.schema, self.real, ADDR), {"state": "fine", "slot": 7})
+
+    def test_a_phone_record_without_a_key_is_never_fine(self):
+        keyless = self.with_slot(self.real, 7, record_bytes(mac="11:22:33:44:55:66", irk=LTK,
+                                                            key="", device_id=self.phone_id))
+        self.assertEqual(B.plan(self.schema, keyless, ADDR), {"state": "no_key", "slot": 7})
 
     def test_the_planned_write_changes_only_the_phone_record(self):
         broken = self.broken()
