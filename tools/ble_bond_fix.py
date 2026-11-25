@@ -206,11 +206,19 @@ def fixed_record(rec, address, rand=os.urandom):
 
 def plan(schema, payload, address, rand=os.urandom):
     """What a fix would write: {"state": ..., "slot", "payload"}. States: unsupported (this
-    watch's settings have no pairing list: nothing is written), no_phone (no phone
+    watch's settings have no pairing list, or have no Pods list and more than one pairing
+    record: a write of several records has never been seen on such a watch; nothing is
+    written), no_phone (no phone
     pairing on the watch), no_key (the phone record holds no key: only pairing again helps),
     fine (the record already has an identity), fix (payload set)."""
     if not supported(schema):
         return {"state": "unsupported"}
+    if _pods_id(schema) is None:
+        # The Kailash holds one pairing record (7R captures); only that one-entry shape is known.
+        _p, entries = S._split_entries(payload)
+        wl_id = _group_id(schema, WHITELIST_FIELD)
+        if sum(1 for eid, _d in entries if eid == wl_id) > 1:
+            return {"state": "unsupported"}
     slot, rec = phone_slot(schema, payload)
     if rec is None:
         return {"state": "no_phone"}
@@ -304,7 +312,7 @@ class AfterPairing:
     - "fine" (the watch already has an identity: privacy was on, or done before) and
       "no_phone" end it as well as a successful write. A failure keeps it pending and
       failed() true, which Home shows. Forget ends it.
-    - "unsupported" (a watch whose settings have no pairing list; no Bluetooth model) and
+    - "unsupported" (no pairing list, or no Pods list and several pairing records) and
       "no_key" (the phone record holds no key) end it too, with a notice() that Home shows
       until the next pairing or Forget: nothing more can be done from here.
     - A pairing made while the system keeps Bluetooth privacy on (Settings: Keep Bluetooth
@@ -470,9 +478,10 @@ class AfterPairing:
                                   "computer",
                           "no_phone": "pairing fix: the watch holds no app pairing; nothing "
                                       "to do",
-                          "unsupported": "pairing fix: this watch's settings have no "
-                                         "pairing list; nothing written (Settings: Keep "
-                                         "Bluetooth privacy on, then pair again)",
+                          "unsupported": "pairing fix: Sommet can't complete this watch's "
+                                         "pairing record by itself; nothing written "
+                                         "(Settings: Keep Bluetooth privacy on, then pair "
+                                         "again)",
                           "no_key": "pairing fix: the watch's app pairing holds no key; "
                                     "nothing written (Forget, then pair again)"}.get(
                                         state, f"pairing fix: finished {how}"))
@@ -494,13 +503,19 @@ def main(argv=None):
         print(json.dumps({"ok": False, "error": "not a Bluetooth address"}))
         return 2
 
-    from write_nav import Link, schema_for_link             # noqa: PLC0415
+    from write_nav import Link                              # noqa: PLC0415
     try:
         link = Link(dry_run=False, verbose=False)
         link.open()
         link.command(S.CMD_DEVICE_INFO, b"\x02\x48\x03\x00")   # SuuntoLink's opener, see settings_write
-        descriptor = schema_for_link(link)
-        if not descriptor.exists():
+        # This watch's own layout (its serial and firmware, or read from it), never
+        # write_nav.schema_for_link's stored fallback: another model's layout would decode
+        # this watch's pairing list wrongly (pre-release review, 2026-11-25).
+        try:
+            descriptor = sbem_schema.for_link(link)
+        except (RuntimeError, TimeoutError, OSError, ValueError):
+            descriptor = None
+        if descriptor is None or not descriptor.exists():
             # Not the file's name: it carries the watch's serial.
             print(json.dumps({"ok": False,
                               "error": "Sommet could not get this watch's settings layout"}))

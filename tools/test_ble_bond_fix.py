@@ -4,6 +4,7 @@ and the re-read check. The parts that need a real settings read use the SuuntoLi
 the watch's descriptor in assets/ (not in the public repository) and are skipped without them.
 All addresses and keys here are made up."""
 
+import functools
 import json
 import os
 import pathlib
@@ -373,6 +374,7 @@ def _kailash_descriptor():
 KAILASH_CAPTURE = HERE.parent / "assets" / "APK" / "kailash" / "kailash7rsettingschange.pklg"
 
 
+@functools.lru_cache(maxsize=1)
 def _kailash_read():
     """The Kailash's settings as Suunto's 7R app read them (0x1100 reply in
     kailash7rsettingschange.pklg): 41 entries, one pairing record, a phone paired with its
@@ -382,7 +384,9 @@ def _kailash_read():
         return None
     import ble_pklg
     for m in ble_pklg.messages(str(KAILASH_CAPTURE)):
-        if m.command == S.CMD_SETTINGS_READ and len(m.payload) > 8 and m.crc_ok:
+        # The reply, not the 4-byte request: the message that carries the settings themselves
+        # (the watch writes to the phone here, so ble_pklg's IN/OUT names don't tell).
+        if m.command == S.CMD_SETTINGS_READ and S.sbem_schema.MAGIC in m.payload and m.crc_ok:
             return bytes(m.payload)
     return None
 
@@ -448,6 +452,15 @@ class AgainstARealKailashRead(unittest.TestCase):
         self.assertIn("another setting changed",
                       B.check_after(self.schema, broken, bytes(other), 0, new))
 
+    def test_several_pairing_records_are_left_alone(self):
+        prefix, entries = S._split_entries(self.broken())
+        out = bytearray(prefix) + S.sbem_schema.MAGIC
+        for eid, d in entries:
+            out += S._encode_entry(eid, d)
+            if eid == self.wl:
+                out += S._encode_entry(eid, record_bytes(device_id=0x1234))
+        self.assertEqual(B.plan(self.schema, bytes(out), ADDR), {"state": "unsupported"})
+
     def test_run_writes_the_one_entry_and_confirms_it(self):
         test = self
 
@@ -486,10 +499,10 @@ class TheToolNeverPrintsATraceback(unittest.TestCase):
 
             def command(self, cmd, payload):
                 return b""
-        saved = (write_nav.Link, write_nav.schema_for_link, B.run, B.sbem_schema.load)
+        saved = (write_nav.Link, B.sbem_schema.for_link, B.run, B.sbem_schema.load)
         try:
             write_nav.Link = Link
-            write_nav.schema_for_link = lambda link: pathlib.Path(__file__)   # exists
+            B.sbem_schema.for_link = lambda link: pathlib.Path(__file__)   # exists
             B.sbem_schema.load = lambda path: object()
 
             def boom(*_a, **_k):
@@ -499,11 +512,45 @@ class TheToolNeverPrintsATraceback(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 code = B.main(["--address", ADDR, "--write", "--json"])
         finally:
-            write_nav.Link, write_nav.schema_for_link, B.run, B.sbem_schema.load = saved
+            write_nav.Link, B.sbem_schema.for_link, B.run, B.sbem_schema.load = saved
         result = json.loads(out.getvalue().strip().splitlines()[-1])
         self.assertEqual(code, 1)
         self.assertFalse(result["ok"])
         self.assertIn("not laid out", result["error"])
+
+    def test_no_stored_layout_stands_in_for_the_watchs_own(self):
+        """Pre-release review, 2026-11-25: if the watch's own layout can't be had, nothing is
+        sent, rather than decoding its pairing list with another model's stored layout."""
+        import contextlib
+        import io
+        import write_nav
+
+        class Link:
+            def __init__(self, *a, **k):
+                pass
+
+            def open(self):
+                pass
+
+            def command(self, cmd, payload):
+                return b""
+
+        def refused(link):
+            raise RuntimeError("short reply")
+
+        def never(*_a, **_k):
+            raise AssertionError("nothing may run without the watch's own layout")
+        saved = (write_nav.Link, B.sbem_schema.for_link, B.run)
+        try:
+            write_nav.Link, B.sbem_schema.for_link, B.run = Link, refused, never
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = B.main(["--address", ADDR, "--write", "--json"])
+        finally:
+            write_nav.Link, B.sbem_schema.for_link, B.run = saved
+        result = json.loads(out.getvalue().strip().splitlines()[-1])
+        self.assertEqual(code, 1)
+        self.assertIn("settings layout", result["error"])
 
 
 def _descriptor():
