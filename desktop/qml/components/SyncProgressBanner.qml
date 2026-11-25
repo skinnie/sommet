@@ -27,6 +27,7 @@ Rectangle {
     }
 
     function stageText() {
+        if (stage === "rescue") return qsTr("Copying older activities from your previous server")
         if (stage === "moves") return qsTr("Saving activities")
         if (stage === "tracks") return qsTr("Fetching tracks")
         if (stage === "checking") return qsTr("Checking with your server")   // Android only today

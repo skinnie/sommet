@@ -1415,6 +1415,15 @@ PageFlickable {
                             sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.tone = "success"
                         }
                     }
+                    // sync/14: after pointing Sommet Sync at another server, what the light
+                    // library left only on the previous one is copied over at each sync.
+                    Text {
+                        visible: ActivityService.sommetRescueLeft > 0
+                        text: qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.")
+                              .arg(ActivityService.sommetRescueLeft).arg(ActivityService.sommetRescueServer)
+                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                        width: parent.width; wrapMode: Text.WordWrap
+                    }
 
                     // What this computer keeps (sync/13, André 2026-11-20: "the average joe don't
                     // want 4000 activities on his pc... a freak like me MAY want everything

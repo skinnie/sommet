@@ -21,8 +21,10 @@ Every change since 0.2.66 is listed in the sections below. Before you update:
    your list, and an older one loads its map and file from the server when you open it. To keep
    everything on the device from then on, set **Keep on this computer** in Settings → Database
    (Android: **Keep on this device** in Settings) to **Everything**.
-3. **Don't move Sommet Sync to another server with this version.** What the old server already
-   has is not sent to the new one.
+3. **Moving Sommet Sync to another server works.** Point Sommet at the new address (Settings →
+   Database) on each device and it sends everything to the new server. Older tracks and FIT
+   files that were kept only on the old server are copied from it first, at each sync, so keep
+   the old server running until Settings no longer lists any still on it.
 4. **Not yet seen on a real watch.** These are checked with tests (and the emulated watch where
    there is one), not on the watch itself yet:
    - removing a POI on an Ambit1 or Ambit2, and their POI and GPS data writes without the
@@ -32,6 +34,32 @@ Every change since 0.2.66 is listed in the sections below. Before you update:
    - setting a Kailash's clock from Android;
    - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen on the Peak),
      and finishing one on a Kailash, Traverse, Traverse Alpha, Vertical, Sport or Run.
+
+---
+
+## 2026-11-25: Moving Sommet Sync to another server (sync/14)
+
+André: "still fix" (before 0.2.67). Each install remembered what it had sent per install, not
+per server: pointed at a new server, it sent nothing it had sent before, and the light library
+(sync/13) had already left older tracks and FITs only on the old server.
+
+- **Another server address starts again.** Desktop (`ActivityService::setSommetSync`) and
+  Android (`setSommetSyncCfg`): when the address changes (a trailing slash or a new token alone
+  is not a change), the pull cursor, the sync ledger, the pushed tracks and FITs, the sent
+  deletions and the gear cursors are cleared, so the next sync pulls everything from the new
+  server and sends everything this device holds. The route and POI libraries keep their state
+  per server (`tools/library_sync.py`, Android `LibrarySync`). A new address for the same
+  server costs one full send and loses nothing.
+- **Older tracks left on the old server are copied back first.** At the move, the tracks the
+  light library kept only on the server, and the FITs dropped here once the server had them,
+  are listed (not intervals.icu imports, which come back from there). Each sync first fetches
+  them from the previous server with its saved address and token, keeps them as ordinary local
+  ones, and the push sends them to the new server. A 404 drops the item; a server that doesn't
+  answer leaves the rest for the next sync. Settings says how many are still only on the
+  previous server; the banner says "Copying older activities from your previous server". The
+  light library trims nothing while a copy is going on. Going back to the first server ends
+  the copy. When the list is empty the previous server's address and token are forgotten.
+- Not yet tried on a real second NAS: tested with the test server.
 
 ---
 

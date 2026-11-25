@@ -109,6 +109,26 @@ class TwoDevices(unittest.TestCase):
             r, p = dev.sync()
             self.assertEqual((r["changed"], r["sent"], p["changed"], p["sent"]), (0, 0, 0, 0))
 
+    def test_moved_to_another_server_everything_is_sent_again(self):
+        """sync/14: the pull cursor and the sent list belong to one server. Pointed at another,
+        a device sends its whole library again; a trailing slash is not another server."""
+        R.save(self.a.routes, "Moved along", gpx(7))
+        P.save_poi(self.a.pois, "Moved hut", 44.7, 5.7)
+        r, p = self.a.sync()
+        self.assertEqual((r["sent"], p["sent"]), (1, 1))
+        self.a.http = S.Http(f"http://127.0.0.1:{self.port}/sync.php/", self.token)
+        r, p = self.a.sync()
+        self.assertEqual((r["sent"], p["sent"]), (0, 0))
+        # The same test server under another name stands in for a new server.
+        self.a.http = S.Http(f"http://localhost:{self.port}/sync.php", self.token)
+        r, p = self.a.sync()
+        self.assertGreaterEqual(r["sent"], 1)
+        self.assertGreaterEqual(p["sent"], 1)
+        self.assertEqual(S._load_state(self.a.routes)["server"],
+                         f"http://localhost:{self.port}/sync.php")
+        r, p = self.a.sync()
+        self.assertEqual((r["sent"], p["sent"]), (0, 0))
+
     def test_a_rename_and_a_delete_travel(self):
         rid = R.save(self.a.routes, "Old name", gpx(2))["id"]
         pid = P.save_poi(self.a.pois, "Col", 46.0, 7.0)["id"]
