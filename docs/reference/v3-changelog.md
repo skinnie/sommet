@@ -13,9 +13,8 @@ Every change since 0.2.66 is listed in the sections below. Before you update:
 
 1. **Linux: pairing a watch by Bluetooth no longer asks for your password or switches
    Bluetooth off**, so a Bluetooth mouse or keyboard stays connected. Sommet finishes the
-   pairing on the watch by itself in its first session (seen on an Ambit3 Peak). A Kailash
-   isn't covered yet: before you pair one on Linux, turn on **Settings → Experimental features →
-   Keep Bluetooth privacy on**.
+   pairing on the watch by itself in its first session, on every model with Bluetooth (seen on
+   an Ambit3 Peak).
 2. **The light library comes on by itself.** If you use Sommet Sync or intervals.icu, the first
    time 0.2.67 opens it clears from this computer or phone the tracks and original files (FIT)
    of activities older than 90 days that your server already holds. Every activity stays in
@@ -31,7 +30,8 @@ Every change since 0.2.66 is listed in the sections below. Before you update:
    - the new POI types on the Traverse and Traverse Alpha;
    - Android keeping the watch's POIs when it sends or removes a route;
    - setting a Kailash's clock from Android;
-   - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen).
+   - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen on the Peak),
+     and finishing one on a Kailash, Traverse, Traverse Alpha, Vertical, Sport or Run.
 
 ---
 
@@ -55,13 +55,18 @@ André: "linking a watch should never affect the system", then "b".
 - **The Settings switch stays, as a fallback**, renamed "Keep Bluetooth privacy on", off by
   default, for a watch that still forgets the computer. Its password window now describes only
   that; the next use removes 0.2.66's pairing script from `/usr/local/libexec/sommet/`.
-- **The Kailash gets nothing written.** Its settings (firmware 2.0.5) have the pairing list but
-  not the Pods list that says which record is the phone's, and the fix stopped on it with an
-  error (found in the review before 0.2.67). Now such a watch is left alone, and Home says
-  "Sommet can't finish pairing this watch model by itself yet, so it may not reconnect to this
-  computer after it sleeps. To keep it paired, turn on Settings → Keep Bluetooth privacy on,
-  then pair it again." A pairing record without a key is never taken for a good one: Home says
-  to Forget and pair again. With the system's privacy kept on there is nothing to complete.
+- **The Kailash is covered too.** Its settings (firmware 2.0.5) have the pairing list but no
+  Pods list, which the fix used to find the phone's record, and it stopped on the Kailash with
+  an error (found in the review before 0.2.67). Now the phone's record is found by its own id.
+  Suunto's 7R app captures of a Kailash (`kailash7rpair`, `kailash7rsettingschange`) show one
+  record, in the Peak's layout, with an id ending in the phone service 0xF000. The write carries
+  that one entry with the read's own header, the shape a Kailash was seen to merge on
+  2026-08-10. The Kailash's Bluetooth chip program is byte-identical to the Peak's, as on the
+  Vertical, Traverse and Traverse Alpha, so the chip behaves the same. Not yet seen on a real
+  Kailash. A watch whose settings had no pairing list at all would be left alone, and Home would
+  point to the Settings switch. A pairing record without a key is never taken for a good one:
+  Home says to Forget and pair again. With the system's privacy kept on there is nothing to
+  complete.
 - Seen on André's Ambit3 Peak (firmware 2.4.17) on 2026-11-25, by hand first: the record read
   back as the zero record, the write was answered over Bluetooth, and after a real link drop the
   watch came back within a second with no code, the mouse connected throughout. Then the

@@ -10,7 +10,7 @@ If that write doesn't work over Bluetooth, Sommet tries again the next time the 
 
 Sommet 0.2.66 asked for your password during a pairing instead, to turn privacy on for it. That switched Bluetooth off and on, so a Bluetooth mouse or keyboard dropped for a moment each time.
 
-**The Kailash isn't covered yet.** Its settings are laid out differently, so Sommet writes nothing to it, and Home says *"Sommet can't finish pairing this watch model by itself yet..."*. Turn on the fallback below before you pair a Kailash on Linux. Not yet tested on the Traverse or the Traverse Alpha either. If a watch still forgets this computer after pairing, use the fallback below. If Home says *"The watch's pairing with this computer is incomplete"*, press **Forget**, then pair the watch again. A watch paired with privacy off before 0.2.67 keeps its broken pairing. Pair it once more (on the watch **Bluetooth → Unpair → Forget**, in Sommet **Forget Bluetooth device**, then **Pair → Pair with app** on the watch), and Sommet completes the new one.
+It works the same on every model with Bluetooth. The Kailash has no Pods list, so Sommet finds the phone's record by its id and writes that record alone. So far it has been seen on an Ambit3 Peak only. If a watch still forgets this computer after pairing, use the fallback below. If Home says *"The watch's pairing with this computer is incomplete"*, press **Forget**, then pair the watch again. A watch paired with privacy off before 0.2.67 keeps its broken pairing. Pair it once more (on the watch **Bluetooth → Unpair → Forget**, in Sommet **Forget Bluetooth device**, then **Pair → Pair with app** on the watch), and Sommet completes the new one.
 
 ## Fallback: turn on Bluetooth privacy
 

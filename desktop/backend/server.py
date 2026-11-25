@@ -5437,8 +5437,8 @@ class Handler(BaseHTTPRequestHandler):
         status = ble_bridge.bridge.status()
         # Linux: a watch paired here gets this computer's identity in its first session
         # (_pairing_fix_on_status); "notice" puts a line on Home: "failed" until it has
-        # worked, "unsupported" (a watch model it can't complete yet, the Kailash) or "no_key"
-        # until the next pairing or Forget.
+        # worked, "unsupported" (settings with no pairing list) or "no_key" until the next
+        # pairing or Forget.
         _pairing_fix_on_status(status)
         fix = _pairing_fix()
         self._send_json(200, {**status,

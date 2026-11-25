@@ -43,7 +43,7 @@ import settings_write as S
 
 WHITELIST_FIELD = "WhitelistedBleDevices+Device.DeviceId"
 PODS_FIELD = "Pods+Pod.Type"
-TEMPLATE = [PODS_FIELD, WHITELIST_FIELD]
+TEMPLATE = [PODS_FIELD, WHITELIST_FIELD]     # SuuntoLink's pairing write (Ambit3, Traverse)
 PHONE_POD_TYPE = 6            # Pods record pointing at the paired phone's whitelist record
 PHONE_ID_LOW = 0xF000         # the phone service's id in the low 16 bits of its DeviceId
 ZERO_MAC = "00:00:00:00:00:00"
@@ -116,29 +116,74 @@ def _group_id(schema, suffix):
     return group if group is not None else field.fid
 
 
+def _pods_id(schema):
+    """The Pods list's entry, or None for a watch whose settings have none (the Kailash)."""
+    try:
+        return _group_id(schema, PODS_FIELD)
+    except KeyError:
+        return None
+
+
 def supported(schema):
-    """True when this watch's settings have both lists the fix needs: the pairing list
-    (WhitelistedBleDevices) and the Pods list that names the phone's record in it. The Kailash
-    (firmware 2.0.5) has no Pods list (pre-release review of 0.2.67, 2026-11-25): it gets no
-    write at all until its pairing record has been seen on a real Kailash."""
+    """True when this watch's settings have the pairing list (WhitelistedBleDevices). Every
+    Bluetooth model has it: Ambit3 Peak, Sport, Run, Vertical, Traverse, Traverse Alpha and
+    Kailash. The Kailash (firmware 2.0.5) has no Pods list, so its phone record is found by its
+    DeviceId alone (phone_slot), and the write carries the pairing list only, one entry, the
+    shape the Kailash is known to merge. Evidence for the Kailash, 2026-11-25:
+    - its Bluetooth chip program is byte-identical to the Peak's (sha256 c8d818d714c6afa8...,
+      "BambiTL_S120"; traverse-alpha-vertical/09 found the same for Vertical, Traverse and
+      Traverse Alpha), so the chip drops a bond whose IRK starts with eight zero bytes there too;
+    - its watch program has the same pairing modules (appBlePairing.c, appBlePairingBsml.c);
+    - Suunto's 7R app reads its settings after pairing (assets/APK/kailash/kailash7rpair.btsnoop,
+      kailash7rsettingschange): one record, the Peak's layout, DeviceId 0xFF06F000 (low 16 bits
+      0xF000, the phone service);
+    - a one-entry 0x1101 settings write over the cable (the read's own header, then that one
+      entry) is merged and leaves the other 40 entries, the pairing record included,
+      byte-identical (André's Kailash, 2026-08-10, settings_write.py's _write_single_entry).
+      No capture holds a vendor 0x1101 to a Kailash, so the fix writes exactly that shape.
+    Not yet seen on a real Kailash: the write of the pairing record itself, and 0x1101 over
+    Bluetooth (the 7R app sets single settings with 0x1201 instead)."""
     try:
         _group_id(schema, WHITELIST_FIELD)
-        _group_id(schema, PODS_FIELD)
     except KeyError:
         return False
     return True
 
 
+def _write_payload(schema, payload, slot, new):
+    """The 0x1101 payload that changes the phone record only. With a Pods list: SuuntoLink's
+    pairing write (settings_write.build_write_payload, byte-exact against its captures). Without
+    one (the Kailash): the read's own header and the pairing list alone, the one-entry shape a
+    Kailash was seen to merge (supported())."""
+    wl_id = _group_id(schema, WHITELIST_FIELD)
+    if _pods_id(schema) is not None:
+        out, omitted = S.build_write_payload(schema, payload, TEMPLATE,
+                                             patches=[(wl_id, slot, new.to_bytes())])
+        if omitted:
+            # A record left out of the write could be lost on the watch: refuse, don't guess.
+            raise ValueError(f"cannot rewrite the pairing list as is: {', '.join(omitted)}")
+        return out
+    prefix, entries = S._split_entries(payload)
+    out, n = bytearray(prefix) + sbem_schema.MAGIC, 0
+    for eid, data in entries:
+        if eid == wl_id:
+            out += S._encode_entry(eid, new.to_bytes() if n == slot else data)
+            n += 1
+    return bytes(out)
+
+
 def phone_slot(schema, payload):
     """(index, Record) of the paired phone's record in a 0x1100 reply, or (None, None).
-    The Pods record of type 6 names it by DeviceId; failing that, the record whose DeviceId
-    carries the phone service id in its low 16 bits."""
+    The Pods record of type 6 names it by DeviceId; failing that (no such record, or no Pods
+    list at all: the Kailash), the record whose DeviceId carries the phone service id in its
+    low 16 bits."""
     _prefix, entries = S._split_entries(payload)
-    wl_id, pods_id = _group_id(schema, WHITELIST_FIELD), _group_id(schema, PODS_FIELD)
+    wl_id, pods_id = _group_id(schema, WHITELIST_FIELD), _pods_id(schema)
     records = [data for eid, data in entries if eid == wl_id]
     wanted = None
     for eid, data in entries:
-        if eid == pods_id and len(data) >= 5 and data[0] == PHONE_POD_TYPE:
+        if pods_id is not None and eid == pods_id and len(data) >= 5 \
+                and data[0] == PHONE_POD_TYPE:
             wanted = struct.unpack_from("<I", data, 1)[0]
     for i, data in enumerate(records):
         try:
@@ -161,7 +206,7 @@ def fixed_record(rec, address, rand=os.urandom):
 
 def plan(schema, payload, address, rand=os.urandom):
     """What a fix would write: {"state": ..., "slot", "payload"}. States: unsupported (this
-    watch model's settings lack a list the fix needs: nothing is written), no_phone (no phone
+    watch's settings have no pairing list: nothing is written), no_phone (no phone
     pairing on the watch), no_key (the phone record holds no key: only pairing again helps),
     fine (the record already has an identity), fix (payload set)."""
     if not supported(schema):
@@ -174,27 +219,27 @@ def plan(schema, payload, address, rand=os.urandom):
     if not needs_fix(rec):
         return {"state": "fine", "slot": slot}
     new = fixed_record(rec, address, rand)
-    out, omitted = S.build_write_payload(schema, payload, TEMPLATE,
-                                         patches=[(_group_id(schema, WHITELIST_FIELD), slot,
-                                                   new.to_bytes())])
-    if omitted:
-        # A record left out of the write could be lost on the watch: refuse rather than guess.
-        raise ValueError(f"cannot rewrite the pairing list as is: {', '.join(omitted)}")
-    return {"state": "fix", "slot": slot, "payload": out, "record": new}
+    return {"state": "fix", "slot": slot, "payload": _write_payload(schema, payload, slot, new),
+            "record": new}
 
 
 def check_after(schema, before, after, slot, new):
     """None when the re-read shows exactly the planned change: the phone record now holds the
-    new address and IRK, its keys unchanged, every other whitelist and Pods record unchanged."""
+    new address and IRK, its keys unchanged, every other whitelist and Pods record unchanged
+    (a watch with no Pods list, the Kailash: every other settings entry unchanged)."""
     _p, b_entries = S._split_entries(before)
     _p, a_entries = S._split_entries(after)
-    wl_id, pods_id = _group_id(schema, WHITELIST_FIELD), _group_id(schema, PODS_FIELD)
+    wl_id, pods_id = _group_id(schema, WHITELIST_FIELD), _pods_id(schema)
     b_wl = [d for e, d in b_entries if e == wl_id]
     a_wl = [d for e, d in a_entries if e == wl_id]
     if len(b_wl) != len(a_wl):
         return "the number of pairing records changed"
-    if [d for e, d in b_entries if e == pods_id] != [d for e, d in a_entries if e == pods_id]:
-        return "the Pods list changed"
+    if pods_id is not None:
+        if [d for e, d in b_entries if e == pods_id] != [d for e, d in a_entries if e == pods_id]:
+            return "the Pods list changed"
+    elif [(e, d) for e, d in b_entries if e != wl_id] != \
+            [(e, d) for e, d in a_entries if e != wl_id]:
+        return "another setting changed"
     for i, (b, a) in enumerate(zip(b_wl, a_wl)):
         if i == slot:
             got, was = Record(a), Record(b)
@@ -259,7 +304,7 @@ class AfterPairing:
     - "fine" (the watch already has an identity: privacy was on, or done before) and
       "no_phone" end it as well as a successful write. A failure keeps it pending and
       failed() true, which Home shows. Forget ends it.
-    - "unsupported" (a watch model whose settings lack a list the fix needs, the Kailash) and
+    - "unsupported" (a watch whose settings have no pairing list; no Bluetooth model) and
       "no_key" (the phone record holds no key) end it too, with a notice() that Home shows
       until the next pairing or Forget: nothing more can be done from here.
     - A pairing made while the system keeps Bluetooth privacy on (Settings: Keep Bluetooth
@@ -425,10 +470,9 @@ class AfterPairing:
                                   "computer",
                           "no_phone": "pairing fix: the watch holds no app pairing; nothing "
                                       "to do",
-                          "unsupported": "pairing fix: this watch model's pairing record is "
-                                         "not one Sommet can complete yet; nothing written "
-                                         "(Settings: Keep Bluetooth privacy on, then pair "
-                                         "again)",
+                          "unsupported": "pairing fix: this watch's settings have no "
+                                         "pairing list; nothing written (Settings: Keep "
+                                         "Bluetooth privacy on, then pair again)",
                           "no_key": "pairing fix: the watch's app pairing holds no key; "
                                     "nothing written (Forget, then pair again)"}.get(
                                         state, f"pairing fix: finished {how}"))

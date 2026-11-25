@@ -370,27 +370,105 @@ def _kailash_descriptor():
     return pathlib.Path(found[0]) if found else None
 
 
-@unittest.skipUnless(_kailash_descriptor() is not None, "needs assets/ (the Kailash's descriptor)")
-class AKailashGetsNoWrite(unittest.TestCase):
-    """Pre-release review of 0.2.67 (2026-11-25): the Kailash's settings have the pairing list
-    but no Pods list, and the fix crashed on it. Now: "unsupported", nothing read or written."""
+KAILASH_CAPTURE = HERE.parent / "assets" / "APK" / "kailash" / "kailash7rsettingschange.pklg"
 
-    def test_unsupported_and_nothing_sent(self):
+
+def _kailash_read():
+    """The Kailash's settings as Suunto's 7R app read them (0x1100 reply in
+    kailash7rsettingschange.pklg): 41 entries, one pairing record, a phone paired with its
+    identity. None without assets/ or tshark."""
+    import shutil
+    if not KAILASH_CAPTURE.is_file() or not shutil.which("tshark"):
+        return None
+    import ble_pklg
+    for m in ble_pklg.messages(str(KAILASH_CAPTURE)):
+        if m.command == S.CMD_SETTINGS_READ and len(m.payload) > 8 and m.crc_ok:
+            return bytes(m.payload)
+    return None
+
+
+@unittest.skipUnless(_kailash_descriptor() is not None and _kailash_read() is not None,
+                     "needs assets/ (the Kailash's descriptor and the 7R app capture) and tshark")
+class AgainstARealKailashRead(unittest.TestCase):
+    """The Kailash (firmware 2.0.5) has the pairing list but no Pods list. Until 2026-11-25 the
+    fix crashed on it, then skipped it; now it finds the phone record by its DeviceId and
+    writes that one entry, the shape a Kailash merges (settings_write._write_single_entry)."""
+
+    @classmethod
+    def setUpClass(cls):
         import sbem_schema
-        schema = sbem_schema.load(_kailash_descriptor())
-        self.assertFalse(B.supported(schema))
-        self.assertEqual(B.plan(schema, b"", ADDR), {"state": "unsupported"})
+        cls.schema = sbem_schema.load(_kailash_descriptor())
+        cls.real = _kailash_read()
+        cls.wl = B._group_id(cls.schema, B.WHITELIST_FIELD)
+        cls.phone_id = B.phone_slot(cls.schema, cls.real)[1].device_id
 
-        class Link:
-            sent = []
+    def with_record(self, payload, data):
+        prefix, entries = S._split_entries(payload)
+        out = bytearray(prefix) + S.sbem_schema.MAGIC
+        for eid, d in entries:
+            out += S._encode_entry(eid, data if eid == self.wl else d)
+        return bytes(out)
+
+    def broken(self):
+        return self.with_record(self.real, record_bytes(device_id=self.phone_id))
+
+    def test_the_phone_record_is_found_by_its_device_id(self):
+        self.assertTrue(B.supported(self.schema))
+        self.assertIsNone(B._pods_id(self.schema))
+        slot, rec = B.phone_slot(self.schema, self.real)
+        self.assertEqual(slot, 0)
+        self.assertEqual(rec.device_id & 0xFFFF, B.PHONE_ID_LOW)
+        self.assertEqual(B.Record(rec.to_bytes()).to_bytes(), rec.to_bytes())
+        self.assertEqual(B.plan(self.schema, self.real, ADDR), {"state": "fine", "slot": 0})
+
+    def test_a_privacy_off_pairing_gets_a_one_entry_write(self):
+        broken = self.broken()
+        step = B.plan(self.schema, broken, ADDR, fixed_rand(0x42))
+        self.assertEqual((step["state"], step["slot"]), ("fix", 0))
+        prefix, entries = S._split_entries(step["payload"])
+        self.assertEqual(prefix, S._split_entries(broken)[0])     # the read's header, unchanged
+        self.assertEqual([e for e, _d in entries], [self.wl])
+        new = B.Record(entries[0][1])
+        self.assertEqual(new.mac, B.watch_order(ADDR))
+        self.assertFalse(B.irk_is_blank(new.irk))
+        self.assertEqual((new.key, new.rnd, new.device_id), (LTK, RND, self.phone_id))
+
+    def test_the_re_read_check(self):
+        broken = self.broken()
+        step = B.plan(self.schema, broken, ADDR, fixed_rand(0x42))
+        new = step["record"]
+        good = self.with_record(broken, new.to_bytes())
+        self.assertIsNone(B.check_after(self.schema, broken, good, 0, new))
+        self.assertIn("did not take", B.check_after(self.schema, broken, broken, 0, new))
+        prefix, entries = S._split_entries(good)
+        eid, data = next((e, d) for e, d in entries if e != self.wl)
+        other = bytearray(prefix) + S.sbem_schema.MAGIC
+        for e, d in entries:
+            other += S._encode_entry(e, (bytes([d[0] ^ 1]) + d[1:]) if e == eid else d)
+        self.assertIn("another setting changed",
+                      B.check_after(self.schema, broken, bytes(other), 0, new))
+
+    def test_run_writes_the_one_entry_and_confirms_it(self):
+        test = self
+
+        class FakeKailash:
+            def __init__(self):
+                self.state, self.writes = test.broken(), []
 
             def command(self, cmd, payload):
-                self.sent.append(cmd)
-                raise AssertionError("nothing may be sent to this watch")
-        link = Link()
-        self.assertEqual(B.run(link, schema, ADDR, write=True),
-                         {"ok": True, "state": "unsupported", "slot": None, "written": False})
-        self.assertEqual(link.sent, [])
+                if cmd == S.CMD_SETTINGS_READ:
+                    return self.state
+                self.writes.append(payload)
+                _p, entries = S._split_entries(payload)
+                self.state = test.with_record(self.state, entries[0][1])
+                return b""
+
+        watch = FakeKailash()
+        result = B.run(watch, self.schema, ADDR, write=True, wait=lambda s: None)
+        self.assertEqual(result, {"ok": True, "state": "fix", "slot": 0, "written": True,
+                                  "error": None})
+        self.assertEqual(len(watch.writes), 1)
+        self.assertEqual(B.plan(self.schema, watch.state, ADDR)["state"], "fine")
 
 
 class TheToolNeverPrintsATraceback(unittest.TestCase):

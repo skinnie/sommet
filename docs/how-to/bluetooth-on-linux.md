@@ -27,9 +27,8 @@ watch's first session Sommet writes this computer's Bluetooth address and an ide
 the watch's pairing record itself, and changes nothing on the computer. If that doesn't work
 over Bluetooth, Sommet tries again on the next link, and Home asks you to plug the watch in by
 cable to finish it. Why, and the fallback: [Keep a Bluetooth watch paired on
-Linux](bluetooth-pairing-on-linux.md). **A Kailash isn't covered yet**: Sommet writes nothing to
-it and Home says so. Turn on **Settings → Experimental features → Keep Bluetooth privacy on**
-before you pair one.
+Linux](bluetooth-pairing-on-linux.md). It works the same on every model with Bluetooth, the
+Kailash included; so far it has been seen on an Ambit3 Peak.
 
 **Sommet 0.2.66 and earlier** asked for your password during a pairing, to turn privacy on for
 it. That switched Bluetooth off and on twice, and a Bluetooth mouse or keyboard dropped each

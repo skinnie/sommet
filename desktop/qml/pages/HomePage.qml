@@ -1390,8 +1390,8 @@ PageFlickable {
                     // watch's pairing record (tools/ble_bond_fix.py). Until that has worked the
                     // watch can refuse this computer after its link drops; Sommet tries again
                     // on the next link, and over the cable when the watch is plugged in
-                    // ("failed"). A watch model it can't complete yet (the Kailash, no Pods
-                    // list) gets nothing written ("unsupported"); a pairing that holds no key
+                    // ("failed"). A watch whose settings have no pairing list gets nothing
+                    // written ("unsupported"); a pairing that holds no key
                     // can only be made again ("no_key").
                     Text {
                         visible: DeviceService.blePairingFixNotice.length > 0

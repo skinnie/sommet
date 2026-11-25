@@ -72,8 +72,7 @@ On Linux, Bluetooth needs two system packages, `python3-dbus` and `python3-gi` (
 installs have them). Pairing asks for no password and changes nothing on the computer: Linux
 doesn't give the watch the computer's identity while pairing, so Sommet writes it into the
 watch's pairing record in the first session. Without it the watch would refuse the computer
-after its first sleep. A Kailash isn't covered yet: before pairing one on Linux, turn on
-**Settings → Experimental features → Keep Bluetooth privacy on**. More in
+after its first sleep. More in
 [Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
 
 ## More
