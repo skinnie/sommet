@@ -7,34 +7,6 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
-## 2026-11-25: 0.2.67 in short: what to know before you update
-
-Every change since 0.2.66 is listed in the sections below. Before you update:
-
-1. **Linux: pairing a watch by Bluetooth no longer asks for your password or switches
-   Bluetooth off**, so a Bluetooth mouse or keyboard stays connected. Sommet finishes the
-   pairing on the watch by itself in its first session, on every model with Bluetooth (seen on
-   an Ambit3 Peak).
-2. **The light library comes on by itself.** If you use Sommet Sync or intervals.icu, the first
-   time 0.2.67 opens it clears from this computer or phone the tracks and original files (FIT)
-   of activities older than 90 days that your server already holds. Every activity stays in
-   your list, and an older one loads its map and file from the server when you open it. To keep
-   everything on the device from then on, set **Keep on this computer** in Settings → Database
-   (Android: **Keep on this device** in Settings) to **Everything**.
-3. **Don't move Sommet Sync to another server with this version.** What the old server already
-   has is not sent to the new one.
-4. **Not yet seen on a real watch.** These are checked with tests (and the emulated watch where
-   there is one), not on the watch itself yet:
-   - removing a POI on an Ambit1 or Ambit2, and their POI and GPS data writes without the
-     "mark as synced" step;
-   - the new POI types on the Traverse and Traverse Alpha;
-   - Android keeping the watch's POIs when it sends or removes a route;
-   - setting a Kailash's clock from Android;
-   - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen on the Peak),
-     and finishing one on a Kailash, Traverse, Traverse Alpha, Vertical, Sport or Run.
-
----
-
 ## 2026-11-25: Per-model limits checked against the evidence, first fixes (watch-protocol/10)
 
 André: "why don't you check and do it all for all devices?". Every place Sommet refuses or
@@ -51,6 +23,89 @@ lists, SuuntoLink's own code and the firmware. First fixes:
 - **A Kailash no longer gets an "On the watch" source in Routes** on the desktop, and no
   failing settings read behind it. It has no routes. The old Ambit1/2 branch it fell into
   had been unused since the Ambit1/2 got real routes. Android already did this.
+
+---
+
+## 2026-11-25: 0.2.67 in short: what to know before you update
+
+Every change since 0.2.66 is listed in the sections below. Before you update:
+
+1. **Linux: pairing a watch by Bluetooth no longer asks for your password or switches
+   Bluetooth off**, so a Bluetooth mouse or keyboard stays connected. Sommet finishes the
+   pairing on the watch by itself in its first session, on every model with Bluetooth (seen on
+   an Ambit3 Peak).
+2. **The light library comes on by itself.** If you use Sommet Sync or intervals.icu, the first
+   time 0.2.67 opens it clears from this computer or phone the tracks and original files (FIT)
+   of activities older than 90 days that your server already holds. Every activity stays in
+   your list, and an older one loads its map and file from the server when you open it. To keep
+   everything on the device from then on, set **Keep on this computer** in Settings → Database
+   (Android: **Keep on this device** in Settings) to **Everything**.
+3. **Moving Sommet Sync to another server works.** Point Sommet at the new address (Settings →
+   Database) on each device and it sends everything to the new server. Older tracks and FIT
+   files that were kept only on the old server are copied from it first, at each sync, so keep
+   the old server running until Settings no longer lists any still on it.
+4. **Not yet seen on a real watch.** These are checked with tests (and the emulated watch where
+   there is one), not on the watch itself yet:
+   - removing a POI on an Ambit1 or Ambit2, and their POI and GPS data writes without the
+     "mark as synced" step;
+   - the new POI types on the Traverse and Traverse Alpha;
+   - Android keeping the watch's POIs when it sends or removes a route;
+   - setting a Kailash's clock from Android;
+   - finishing a Linux Bluetooth pairing over the cable (over Bluetooth it is seen on the Peak),
+     and finishing one on a Kailash, Traverse, Traverse Alpha, Vertical, Sport or Run.
+
+---
+
+## 2026-11-25: Moving Sommet Sync to another server (sync/14)
+
+André: "still fix" (before 0.2.67). Each install remembered what it had sent per install, not
+per server: pointed at a new server, it sent nothing it had sent before, and the light library
+(sync/13) had already left older tracks and FITs only on the old server.
+
+- **Another server address starts again.** Desktop (`ActivityService::setSommetSync`) and
+  Android (`setSommetSyncCfg`): when the address changes (a trailing slash or a new token alone
+  is not a change), the pull cursor, the sync ledger, the pushed tracks and FITs, the sent
+  deletions and the gear cursors are cleared, so the next sync pulls everything from the new
+  server and sends everything this device holds. The route and POI libraries keep their state
+  per server (`tools/library_sync.py`, Android `LibrarySync`). A new address for the same
+  server costs one full send and loses nothing.
+- **Older tracks left on the old server are copied back first.** At the move, the tracks the
+  light library kept only on the server, and the FITs dropped here once the server had them,
+  are listed (not intervals.icu imports, which come back from there). Each sync first fetches
+  them from the previous server with its saved address and token, keeps them as ordinary local
+  ones, and the push sends them to the new server. A 404 drops the item; a server that doesn't
+  answer leaves the rest for the next sync. Settings says how many are still only on the
+  previous server (desktop and Android); the desktop's sync banner says "Copying older
+  activities from your previous server". Android keeps the activity's id with each item
+  (`sommet.sync.rescue`) and lists a track only if the old server had confirmed holding it; an
+  opened older move's cached track becomes a kept one at the move. The light library trims
+  nothing while a copy is going on. Going back to the first server ends
+  the copy. When the list is empty the previous server's address and token are forgotten.
+- Pre-release review fixes: a server change saved while a sync runs waits for it to end (that
+  sync would write the old server's cursor and sent lists back). Settings has **Forget the
+  previous server**, with a confirm step, for an old server that is gone: those activities keep
+  their details but no longer show a map or file kept on a server. An item the old server
+  doesn't have (404, or no points) stops showing as kept on a server. Turning sync off keeps
+  the list too, and Settings then says to set up a server again. intervals.icu imports are left
+  out of the copy only while intervals.icu is connected, on both apps. Android sends a copied
+  FIT that has no Track, and an error while listing what to copy no longer stops a new address
+  from being saved. The desktop note reads "1 older activity" for one, in the warning style.
+- Not covered: a route or POI deleted before the move was already forgotten once the old
+  server had the deletion, so it is not sent to the new one; a device that still holds it can
+  bring it back there.
+- Desktop, tried with the built app against two test servers (tools/sommet_sync_devserver.py) in
+  a sandbox, with 88 made-up activities: on server A, 41 older tracks and 10 FITs were left only
+  there; moved to B, Settings said "41 older activities are still only on your previous
+  server", one sync copied them, and B held the same 89 files as A, byte for byte, plus all 88
+  activities; the notice and the old address and token were then gone. Moved again to an empty
+  server with the previous one down: everything on the computer was sent, the 41 waited, and
+  once the old server was back one sync finished it, byte for byte again. After the review
+  fixes, the same test again on the new build, plus Forget: with the old server down, **Keep**
+  changed nothing and **Forget** cleared the list, the old address and token and the 41 "kept on
+  a server" marks, all 88 activities still there (this run also found the Settings page failing
+  to load over a QML property named `left`, fixed before the release). Android: 15 tests (move
+  detection, a move during a sync, copy outcomes, Forget, the notice texts, a whole sync after
+  a move with the old and new tokens). Not yet tried with a real second NAS or on the tablet.
 
 ---
 

@@ -537,6 +537,14 @@ export async function markSommetSent(entries: { uid: string; updatedAt: number }
   }
 }
 
+/** Sommet Sync moved to another server (sync/14): forget which versions and deletions the old
+ *  one holds, so the next sync sends them all to the new one. */
+export async function clearSommetServerMarkers(): Promise<void> {
+  const db = await getDb();
+  await db.executeSql('DELETE FROM sommet_ledger');
+  await db.executeSql('DELETE FROM sommet_deleted_sent');
+}
+
 /** Tombstones the server already has (sent from here, or pulled from it). */
 export async function getSommetDeletedSent(): Promise<Set<string>> {
   const db = await getDb();

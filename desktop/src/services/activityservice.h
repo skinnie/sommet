@@ -58,6 +58,10 @@ class ActivityService : public QObject
     Q_PROPERTY(int sommetSyncDone READ sommetSyncDone NOTIFY sommetSyncProgressChanged)
     Q_PROPERTY(int sommetSyncTotal READ sommetSyncTotal NOTIFY sommetSyncProgressChanged)
     Q_PROPERTY(bool sommetSyncFirst READ sommetSyncFirst NOTIFY sommetSyncProgressChanged)
+    // sync/14, moving to another server: how many older activities still have their Track or
+    // original FIT only on the previous server, and that server's address (never its token).
+    Q_PROPERTY(int sommetRescueLeft READ sommetRescueLeft NOTIFY sommetRescueChanged)
+    Q_PROPERTY(QString sommetRescueServer READ sommetRescueServer NOTIFY sommetRescueChanged)
     Q_PROPERTY(bool ok READ ok NOTIFY activitiesChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     // True when activities[] came from the local database (no live watch read succeeded
@@ -85,6 +89,8 @@ public:
     int sommetSyncDone() const { return m_syncDone; }
     int sommetSyncTotal() const { return m_syncTotal; }
     bool sommetSyncFirst() const { return m_syncFirst; }
+    int sommetRescueLeft() const;
+    QString sommetRescueServer() const;
     bool ok() const { return m_ok; }
     QString lastError() const { return m_lastError; }
     bool showingCachedData() const { return m_showingCachedData; }
@@ -239,6 +245,9 @@ public:
     Q_INVOKABLE bool sommetSyncConfigured() const;   // url+token both set
     Q_INVOKABLE QString sommetSyncUrl() const;       // for the Settings field (token never exposed)
     Q_INVOKABLE void setSommetSync(const QString &url, const QString &token);
+    // sync/14: give up on what is still only on the previous server (Settings, after a confirm):
+    // those activities keep their details but no longer show a map or file kept on a server.
+    Q_INVOKABLE void forgetPreviousServer();
     // Probe the endpoint (a GET with the given creds) before saving; result via sommetSyncTestResult.
     Q_INVOKABLE void sommetSyncTest(const QString &url, const QString &token);
     // Pull-then-push. Safe no-op when unconfigured. Runs after a watch read and on demand.
@@ -303,6 +312,7 @@ signals:
     void sommetSyncError(const QString &message);
     void sommetSyncConfiguredChanged();
     void sommetSyncProgressChanged();
+    void sommetRescueChanged();
 
 private:
     void importFromBleBike(const QString &tag, const QString &endpoint, const QString &deviceName,
@@ -477,6 +487,21 @@ private:
     QStringList m_sommetPushQueue;     // uids of local rows whose GPX still needs pushing
     QStringList m_sommetFitPushQueue;  // uids of local rows whose FIT the NAS doesn't have yet
     bool m_sommetBusy = false;
+    // sync/14: Sommet Sync pointed at another server. What this install remembers sending
+    // (pull cursor, ledger, pushed Tracks and FITs, sent deletions, gear cursors) is about the old
+    // one, so it starts again; Tracks and FITs the light library left only there are listed in
+    // sommet_rescue and copied back from it (its address and token kept under
+    // connections/sommet_sync/previous) at the start of each sync, then sent to the new one.
+    static QString serverKey(const QString &url);
+    void prepareServerMove(const QString &oldUrl, const QString &oldToken, const QString &newUrl);
+    bool rescuePending() const;
+    void sommetRescueNext();
+    void finishRescueIfDone();
+    QList<QPair<QString, QString>> m_rescueQueue;   // (uid, "gpx" | "fit") left this run
+    // A server change saved while a sync runs waits for it to end: the running sync would
+    // otherwise write the old server's cursor and sent lists back after the reset.
+    bool m_syncCfgPending = false;
+    QString m_pendingSyncUrl, m_pendingSyncToken;
     int m_sommetPulled = 0;
     int m_sommetPushed = 0;
     // Sync ledger (#SYNC-8/9/11): the changed records still to send, 200 per request.

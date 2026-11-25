@@ -263,6 +263,11 @@ def plan_pull(local, tombstones, pulled, same):
     return {"put": put, "remove": remove, "kill": kill, "forget_tombstones": forget}
 
 
+def server_key(url):
+    """The server a sync state belongs to: its address without spaces or a trailing slash."""
+    return (url or "").strip().rstrip("/")
+
+
 def _load_state(d):
     try:
         with open(os.path.join(d, STATE), encoding="utf-8") as f:
@@ -272,7 +277,8 @@ def _load_state(d):
     if not isinstance(v, dict):
         v = {}
     return {"since": int(v.get("since") or 0),
-            "pushed": v["pushed"] if isinstance(v.get("pushed"), dict) else {}}
+            "pushed": v["pushed"] if isinstance(v.get("pushed"), dict) else {},
+            "server": v.get("server") if isinstance(v.get("server"), str) else None}
 
 
 def _store_state(d, state):
@@ -287,6 +293,13 @@ def sync_library(lib, http):
     """One library against the server. Returns {"ok", "changed", "sent", "deleted_sent"} or
     {"ok": True, "older_server": True}. Raises RuntimeError with words for the user."""
     state = _load_state(lib.d)
+    # The pull cursor and what was sent are about one server. Moved to another (sync/14): start
+    # again, so the new one gets everything and nothing it has is missed. A state from before
+    # 0.2.67 names no server: it is this one's.
+    here = server_key(http.url)
+    if state["server"] is not None and state["server"] != here:
+        state = {"since": 0, "pushed": {}}
+    state["server"] = here
     try:
         pulled = http.pull(lib.collection, state["since"])
     except OlderServer:

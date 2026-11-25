@@ -3,13 +3,21 @@ import {
   getAllActivities, markActivitySynced, getSommetTombstones, addSommetTombstone,
   deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
   getSommetLedger, markSommetSent, getSommetDeletedSent, markSommetDeletedSent,
+  clearSommetServerMarkers, setTrackLocal, clearTrackRemote,
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
-import { readFitForGpx, readGpxFile, removeFitForGpx, writeGpxFile } from './GpxService';
+import {
+  activityFileStem, fitFileExists, listFitStems, readFitById, readFitForGpx, readGpxFile, removeFitForGpx,
+  writeFitFile, writeGpxFile,
+} from './GpxService';
 import { streamsCache } from './StreamsCache';
-import { base64ToBytes } from './Base64';
+import { base64ToBytes, bytesToBase64 } from './Base64';
 import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 import { getKeepRecentOnly, lightCutoffMinute } from './LibraryPrefs';
+import {
+  Fetched, cachedToKeep, isServerMove, loadRescue, normalizeServerUrl, planRescue, runRescue, saveRescue,
+  uncopiedTrackIds,
+} from './ServerMove';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
 // (sync-server/sync.php), so the same history appears on desktop (Linux/Mac/Windows) and phone.
@@ -70,8 +78,119 @@ export async function getSommetSyncCfg(): Promise<SommetSyncCfg | null> {
 }
 
 export async function setSommetSyncCfg(cfg: SommetSyncCfg | null): Promise<void> {
+  const before = await getSommetSyncCfg();
+  const newUrl = cfg && cfg.url ? cfg.url : '';
+  const moving = !!before && isServerMove(before.url, newUrl);
+  // A move waits for a sync that is running (it uses the old server's marks), then applies. Only
+  // a move: the token adopted in the middle of a sync (adoptNewToken) must not wait for itself.
+  if (moving && runSommetSyncInFlight) await runSommetSyncInFlight.catch(() => undefined);
+  try {
+    await noteServerChange(before, newUrl);
+  } catch (e: any) {
+    // Never in the way of saving the new address: the old server's marks still go.
+    console.log(`[sommet-sync] server change: ${e?.message ?? e}`);
+    if (moving) await forgetServerMarks().catch(() => undefined);
+  }
   if (!cfg || !cfg.url) { await AsyncStorage.removeItem(CFG_KEY); return; }
   await AsyncStorage.setItem(CFG_KEY, JSON.stringify({ url: cfg.url.trim(), token: (cfg.token ?? '').trim() }));
+}
+
+// ── Moving to another server (sync/14, ServerMove.ts) ──────────────────────────────────────
+// Every mark of "what the server holds": activities (pull cursor, GPX and FIT sent, ledger,
+// deletions sent), gear and reminders (pull cursors) and the route and POI libraries
+// (sommet.sync.library.<collection>: their cursor and what they sent).
+const SERVER_MARK_KEYS = [LASTPULL_KEY, PUSHED_KEY, FIT_PUSHED_KEY,
+  'sommet.sync.gearLastPull', 'sommet.sync.reminderLastPull'];
+const LIBRARY_STATE_PREFIX = 'sommet.sync.library.';
+
+async function forgetServerMarks(): Promise<void> {
+  const keys = [...SERVER_MARK_KEYS];
+  try {
+    for (const k of await AsyncStorage.getAllKeys()) if (k.startsWith(LIBRARY_STATE_PREFIX)) keys.push(k);
+  } catch { /* none to add */ }
+  for (const k of keys) await AsyncStorage.removeItem(k);
+  await clearSommetServerMarkers();
+}
+
+async function intervalsConnectedNow(): Promise<boolean> {
+  try {
+    const { getIntervalsIcuCredentials } = await import('./ApiIntervalsIcu');
+    return !!(await getIntervalsIcuCredentials());
+  } catch { return false; }
+}
+
+/** The saved address is about to change from `before` to `newUrl`. On a move: list what only
+ *  the old server holds (unless an earlier move's list is still being worked through: the
+ *  light library trimmed nothing since, so nothing new is stranded), then forget every mark of
+ *  the old server. Moving back to the server still being emptied ends that rescue. */
+async function noteServerChange(before: SommetSyncCfg | null, newUrl: string): Promise<void> {
+  const pending = await loadRescue();
+  if (pending && pending.url === normalizeServerUrl(newUrl)) await saveRescue(null);
+  if (!before || !isServerMove(before.url, newUrl)) return;
+  if (!pending) {
+    const rows = await getAllActivities();
+    const onOld = await getPushedBlobs();
+    const fitsOnOld = await getPushedFits();
+    const uidOf = (r: { device?: string; date: string }) => sommetUid(r.device ?? '', r.date);
+    const hasLocalFit = new Set<string>();
+    for (const r of rows) {
+      const candidate = (r.track_remote === 1 && !r.gpx_path) || (!!r.gpx_path && (r.track_cached_at ?? 0) > 0);
+      if (candidate && fitsOnOld.has(uidOf(r)) && await fitFileExists(r.id)) hasLocalFit.add(r.id);
+    }
+    const items = planRescue(rows, { onOld, fitsOnOld, intervalsOn: await intervalsConnectedNow(), hasLocalFit, uidOf });
+    for (const r of cachedToKeep(rows, onOld, uidOf)) await setTrackLocal(r.id, r.gpx_path ?? '', 0);
+    await saveRescue(items.length ? { url: normalizeServerUrl(before.url), token: before.token, items } : null);
+  }
+  await forgetServerMarks();
+}
+
+async function rescueFetch(base: string, token: string, uid: string, fmt: 'gpx' | 'fit'): Promise<Response | null> {
+  try {
+    return await fetchT(base + '?' + new URLSearchParams({ blob: '1', uid, fmt }).toString(),
+      { method: 'GET', headers: { 'X-Sommet-Token': token } });
+  } catch { return null; }
+}
+
+/** Before each sync: copy back from the previous server what only it holds (ServerMove.ts). It
+ *  then goes to the current server with the normal send. Never throws. */
+async function rescueFromPreviousServer(currentUrl: string): Promise<void> {
+  try {
+    const r = await loadRescue();
+    if (!r) return;
+    if (r.url === normalizeServerUrl(currentUrl)) { await saveRescue(null); return; }
+    const outcome = async <T>(res: Response | null, read: (x: Response) => Promise<T>): Promise<Fetched<T>> => {
+      if (!res) return { status: 'failed' };
+      if (res.status === 404) return { status: 'missing' };
+      if (!res.ok) return { status: 'failed' };
+      try { return { status: 'ok', body: await read(res) }; } catch { return { status: 'failed' }; }
+    };
+    await runRescue(r, {
+      fetchGpx: async uid => outcome(await rescueFetch(r.url, r.token, uid, 'gpx'), x => x.text()),
+      fetchFit: async uid => outcome(await rescueFetch(r.url, r.token, uid, 'fit'),
+        async x => new Uint8Array(await x.arrayBuffer())),
+      storeGpx: async (it, gpx) => {
+        const path = await writeGpxFile(it.id, gpx, true);
+        if (!path) return false;
+        await setTrackLocal(it.id, path, 0);
+        return true;
+      },
+      storeFit: async (it, fit) => !!(await writeFitFile(it.id, bytesToBase64(fit), true)),
+      missingGpx: async it => { await clearTrackRemote(it.id); },
+      // Not over a rescue that ended meanwhile (forgotten, or the server moved back to).
+      save: async next => {
+        const cur = await loadRescue();
+        if (cur && cur.url === r.url && cur.token === r.token) await saveRescue(next);
+      },
+    });
+  } catch { /* tried again at the next sync */ }
+}
+
+/** "Forget the previous server" (Settings): the moves whose Track was not copied no longer count
+ *  as kept on a server (they keep their details, without a map or original file), and the
+ *  previous server's address and token go. The light library trims again. */
+export async function forgetPreviousServer(): Promise<void> {
+  for (const id of uncopiedTrackIds(await loadRescue())) await clearTrackRemote(id);
+  await saveRescue(null);
 }
 
 /** A request that gives up after `ms` (2026-11-19): one blob fetch that never answered held the
@@ -251,6 +370,9 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   const cfg = await getSommetSyncCfg();
   if (!cfg) return { pulled: 0, pushed: 0, ok: false, skipped: true };
   const { url, token } = cfg;
+  // A server move (sync/14): what only the previous server holds comes back first, and goes out
+  // to this one with the send below.
+  await rescueFromPreviousServer(url);
 
   const tombstones = new Set<string>(await getSommetTombstones());
   const trackRevs = await readTrackRevs();
@@ -458,10 +580,20 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   // Original FITs, one per request, read only when not yet confirmed (a few KB to a few MB each).
   const fitRaw = await AsyncStorage.getItem(FIT_PUSHED_KEY);
   const fitPushed = new Set<string>(fitRaw ? JSON.parse(fitRaw) : []);
+  // A FIT with no Track here (one copied back from a previous server whose GPX it lacked, sync/14)
+  // is found by the move's id: one directory read, not one per move.
+  let fitStems: Set<string> | null = null;
   for (const a of acts) {
     const uid = sommetUid(a.device ?? '', a.date);
-    if (tombstones.has(uid) || fitPushed.has(uid) || !a.gpx_path) continue;
-    const b64 = await readFitForGpx(a.gpx_path);
+    if (tombstones.has(uid) || fitPushed.has(uid)) continue;
+    let b64: string | null = null;
+    if (a.gpx_path) b64 = await readFitForGpx(a.gpx_path);
+    else {
+      if (!fitStems) { try { fitStems = await listFitStems(); } catch { fitStems = new Set(); } }
+      if (fitStems.size && fitStems.has(activityFileStem(a.id))) {
+        try { b64 = await readFitById(a.id); } catch { b64 = null; }
+      }
+    }
     if (!b64) continue;
     if (await pushFitBlob(url, token, uid, base64ToBytes(b64))) fitPushed.add(uid);
   }

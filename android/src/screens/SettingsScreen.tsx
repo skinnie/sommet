@@ -49,7 +49,8 @@ import { isMageneAvailable } from '../services/MageneBle';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
 import { getUsdaApiKey, setUsdaApiKey } from '../services/EmberFood';
-import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
+import { forgetPreviousServer, getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
+import { forgetConfirmText, rescueNoteText, rescueSummary } from '../services/ServerMove';
 import {
   getKeepRecentOnly, setKeepRecentOnly, getLibraryCacheMb, setLibraryCacheMb, formatCacheMb,
   getKeepRecentTiles, setKeepRecentTiles,
@@ -376,6 +377,22 @@ export default function SettingsScreen() {
   const [sommetSaved, setSommetSaved]               = useState(false);
   const [sommetStatus, setSommetStatus]             = useState('');
   const [sommetTone, setSommetTone] = useState<'success' | 'error' | 'working'>('success');
+  // sync/14: older activities still only on the previous server after a server change, and the
+  // in-page confirm of "Forget the previous server".
+  const [rescueNote, setRescueNote] = useState('');
+  const [rescueCount, setRescueCount] = useState(0);
+  const [forgetAsk, setForgetAsk] = useState(false);
+  const refreshRescueNote = useCallback(() => {
+    Promise.all([rescueSummary(), getSommetSyncCfg()])
+      .then(([s, c]) => { setRescueNote(rescueNoteText(s, !!c?.url)); setRescueCount(s?.count ?? 0); })
+      .catch(() => undefined);
+  }, []);
+  async function handleForgetPrevious() {
+    setForgetAsk(false);
+    try { await forgetPreviousServer(); } catch { /* the notice stays */ }
+    refreshRescueNote();
+    trimOldTracks().catch(() => undefined);   // the light library trims again
+  }
   // Light library (sync/13): "Keep on this device" + the space for opened older activities.
   const [keepRecent, setKeepRecentState] = useState(true);
   const [libraryCacheMb, setLibraryCacheMbState] = useState(300);
@@ -481,6 +498,7 @@ export default function SettingsScreen() {
       if (c) { setSommetSyncUrl(c.url); setSommetSyncToken(c.token); }
       setSommetSaved(!!c?.url);
     });
+    refreshRescueNote();
     getKeepRecentOnly().then(setKeepRecentState);
     getLibraryCacheMb().then(setLibraryCacheMbState);
     getKeepRecentTiles().then(setKeepTilesState);
@@ -546,6 +564,7 @@ export default function SettingsScreen() {
       await setSommetSyncCfg(url ? { url, token: sommetSyncToken.trim() } : null);
       setSommetStatus(url ? 'Saved.' : 'Sync turned off.'); setSommetTone('success');
       setSommetSaved(!!url);
+      refreshRescueNote();
     } catch (e: any) {
       setSommetStatus(e?.message ?? 'Failed to save'); setSommetTone('error');
     } finally {
@@ -560,6 +579,7 @@ export default function SettingsScreen() {
     setSommetSyncToken('');
     setSommetSaved(false);
     setSommetStatus('Stopped syncing.'); setSommetTone('success');
+    refreshRescueNote();
   }
 
   function handleKeepRecent(recent: boolean) {
@@ -603,6 +623,7 @@ export default function SettingsScreen() {
       setSommetStatus(e?.message ?? 'Sync failed'); setSommetTone('error');
     } finally {
       setSyncingSommet(false);
+      refreshRescueNote();
     }
   }
 
@@ -1311,6 +1332,20 @@ export default function SettingsScreen() {
               style={{ marginTop: 8, alignSelf: 'flex-start' }} />
           )}
           <StatusNote text={sommetStatus} tone={sommetTone} />
+          <StatusNote text={rescueNote} tone="warning" closable={false} />
+          {!!rescueNote && !forgetAsk && (
+            <Button label="Forget the previous server" variant="outline" grow={false}
+              onPress={() => setForgetAsk(true)} style={{ marginTop: 8, alignSelf: 'flex-start' }} />
+          )}
+          {!!rescueNote && forgetAsk && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.sectionDesc}>{forgetConfirmText(rescueCount)}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                <Button label="Forget" variant="filled" grow={false} onPress={handleForgetPrevious} />
+                <Button label="Keep" variant="outline" grow={false} onPress={() => setForgetAsk(false)} />
+              </View>
+            </View>
+          )}
 
           {/* What this device keeps (sync/13, André 2026-11-20: "the average joe don't want 4000
               activities on his pc or tablet... a freak like me MAY want everything offline, but

@@ -860,6 +860,11 @@ void ActivityService::openDatabase()
     // "nas" originals mode; a row not in here keeps its FIT until the NAS has it.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS sommet_fit_pushed (uid TEXT PRIMARY KEY)"));
+    // sync/14: Tracks ("gpx") and original FITs ("fit") still only on the previous Sommet Sync
+    // server after a move to another one; copied back at the start of each sync.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS sommet_rescue (uid TEXT, fmt TEXT, PRIMARY KEY (uid, fmt))"));
+    emit sommetRescueChanged();
     // sync/08: each move's track version (Sommet Sync uid -> ms). A "Split here" raises it, so the
     // other devices fetch the shortened track and FIT again instead of keeping the whole file.
     q.exec(QStringLiteral(
@@ -3583,10 +3588,219 @@ QString ActivityService::sommetSyncUrl() const
 
 void ActivityService::setSommetSync(const QString &url, const QString &token)
 {
+    if (m_sommetBusy) {
+        m_syncCfgPending = true;
+        m_pendingSyncUrl = url;
+        m_pendingSyncToken = token;
+        return;                                    // applied by sommetSyncEnded()
+    }
     QSettings s;
+    const QString oldUrl = s.value(QStringLiteral("connections/sommet_sync/url")).toString();
+    const QString oldToken = s.value(QStringLiteral("connections/sommet_sync/token")).toString();
+    if (serverKey(oldUrl) != serverKey(url)) {   // another server, not a new token for this one
+        if (!m_db.isOpen())
+            openDatabase();
+        prepareServerMove(oldUrl, oldToken, url);
+    }
     s.setValue(QStringLiteral("connections/sommet_sync/url"), url.trimmed());
     s.setValue(QStringLiteral("connections/sommet_sync/token"), token.trimmed());
     emit sommetSyncConfiguredChanged();
+}
+
+QString ActivityService::serverKey(const QString &url)
+{
+    QString k = url.trimmed();
+    while (k.endsWith(QLatin1Char('/')))
+        k.chop(1);
+    return k;
+}
+
+void ActivityService::prepareServerMove(const QString &oldUrl, const QString &oldToken,
+                                        const QString &newUrl)
+{
+    QSettings s;
+    if (rescuePending()) {
+        // A copy from a first server is still going on: it stays as it is (the light library
+        // trims nothing meanwhile, so nothing is left only on the server in between), unless
+        // this goes back to that first server, which still holds everything.
+        if (serverKey(s.value(QStringLiteral("connections/sommet_sync/previous/url")).toString())
+                == serverKey(newUrl)) {
+            QSqlQuery(QStringLiteral("DELETE FROM sommet_rescue"), m_db);
+            s.remove(QStringLiteral("connections/sommet_sync/previous"));
+        }
+    } else if (!serverKey(oldUrl).isEmpty() && m_db.isOpen()) {
+        // What the light library left only on the old server: Tracks (intervals.icu imports only
+        // while intervals.icu is connected, which then still has them; as on Android) and the
+        // original FITs dropped here once the NAS had them.
+        const bool intervals =
+            !s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString().isEmpty()
+            && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
+        QSqlQuery q(m_db);
+        q.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO sommet_rescue (uid, fmt) "
+            "SELECT COALESCE(device,'') || '|' || substr(start_time,1,16), 'gpx' FROM activities "
+            "WHERE track_remote = 1 AND COALESCE(gpx_text,'') = '' "
+            "  AND NOT (%1 AND COALESCE(source,'') = 'intervals' AND COALESCE(external_id,'') <> '')")
+            .arg(intervals ? QStringLiteral("1") : QStringLiteral("0")));
+        q.exec(QStringLiteral(
+            "INSERT OR IGNORE INTO sommet_rescue (uid, fmt) "
+            "SELECT COALESCE(a.device,'') || '|' || substr(a.start_time,1,16), 'fit' FROM activities a "
+            "WHERE COALESCE(a.fit_base64,'') = '' "
+            "  AND (COALESCE(a.device,'') || '|' || substr(a.start_time,1,16)) IN (SELECT uid FROM sommet_fit_pushed)"));
+        if (rescuePending()) {
+            s.setValue(QStringLiteral("connections/sommet_sync/previous/url"), oldUrl.trimmed());
+            s.setValue(QStringLiteral("connections/sommet_sync/previous/token"), oldToken.trimmed());
+        }
+    }
+    // Everything this install remembers about what the server holds was about the old one.
+    s.remove(QStringLiteral("connections/sommet_sync/lastPull"));
+    s.remove(QStringLiteral("connections/sommet_sync/blobsPushed"));
+    s.remove(QStringLiteral("connections/sommet_sync/gearLastPull"));
+    s.remove(QStringLiteral("connections/sommet_sync/reminderLastPull"));
+    if (m_db.isOpen()) {
+        QSqlQuery(QStringLiteral("DELETE FROM sommet_ledger"), m_db);
+        QSqlQuery(QStringLiteral("DELETE FROM sommet_fit_pushed"), m_db);
+        QSqlQuery(QStringLiteral("DELETE FROM sommet_deleted_sent"), m_db);
+    }
+    qInfo().noquote() << "[sync] another Sommet Sync server: everything is sent to it again;"
+                      << sommetRescueLeft() << "older activities to copy from the previous one";
+    emit sommetRescueChanged();
+}
+
+bool ActivityService::rescuePending() const
+{
+    if (!m_db.isOpen())
+        return false;
+    QSqlQuery q(QStringLiteral("SELECT 1 FROM sommet_rescue LIMIT 1"), m_db);
+    return q.next();
+}
+
+int ActivityService::sommetRescueLeft() const
+{
+    if (!m_db.isOpen())
+        return 0;
+    QSqlQuery q(QStringLiteral("SELECT COUNT(DISTINCT uid) FROM sommet_rescue"), m_db);
+    return q.next() ? q.value(0).toInt() : 0;
+}
+
+QString ActivityService::sommetRescueServer() const
+{
+    return rescuePending()
+        ? QSettings().value(QStringLiteral("connections/sommet_sync/previous/url")).toString()
+        : QString();
+}
+
+void ActivityService::forgetPreviousServer()
+{
+    if (!m_db.isOpen())
+        return;
+    m_rescueQueue.clear();
+    QSqlQuery(QStringLiteral(
+        "UPDATE activities SET track_remote = NULL "
+        "WHERE COALESCE(gpx_text,'') = '' AND (COALESCE(device,'') || '|' || substr(start_time,1,16)) "
+        "  IN (SELECT uid FROM sommet_rescue WHERE fmt = 'gpx')"), m_db);
+    QSqlQuery(QStringLiteral("DELETE FROM sommet_rescue"), m_db);
+    QSettings().remove(QStringLiteral("connections/sommet_sync/previous"));
+    qInfo().noquote() << "[sync] the previous server is forgotten; what was only there stays there";
+    dbLoadAll();
+    emit activitiesChanged();
+    emit sommetRescueChanged();
+}
+
+void ActivityService::finishRescueIfDone()
+{
+    if (rescuePending())
+        return;
+    QSettings s;
+    if (s.contains(QStringLiteral("connections/sommet_sync/previous/url"))) {
+        s.remove(QStringLiteral("connections/sommet_sync/previous"));   // its token goes too
+        qInfo().noquote() << "[sync] every older activity is copied from the previous server";
+    }
+    emit sommetRescueChanged();
+}
+
+// One item at a time from the previous server: a Track or a FIT that is good is kept here as an
+// ordinary one (no longer "on the server only"), so the push that follows sends it to the new
+// server; a 404 means that server has none; anything else stops the copy until the next sync.
+void ActivityService::sommetRescueNext()
+{
+    if (m_rescueQueue.isEmpty()) {
+        finishRescueIfDone();
+        setSommetProgress(QStringLiteral("moves"), 0, 0);
+        sommetPull();
+        return;
+    }
+    const auto item = m_rescueQueue.takeFirst();
+    const QSettings s;
+    QUrl u(s.value(QStringLiteral("connections/sommet_sync/previous/url")).toString());
+    QUrlQuery qq;
+    qq.addQueryItem(QStringLiteral("blob"), QStringLiteral("1"));
+    qq.addQueryItem(QStringLiteral("uid"), item.first);
+    qq.addQueryItem(QStringLiteral("fmt"), item.second);
+    u.setQuery(qq);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Sommet-Token",
+                     s.value(QStringLiteral("connections/sommet_sync/previous/token")).toString().toUtf8());
+    req.setTransferTimeout(60000);
+    QNetworkReply *reply = m_network.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, item]() {
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray raw = reply->error() == QNetworkReply::NoError ? reply->readAll() : QByteArray();
+        bool done = status == 404;                         // that server has none
+        if (status == 200 && item.second == QLatin1String("gpx") && raw.contains("<trkpt")) {
+            const QString gpx = QString::fromUtf8(raw);
+            const QJsonArray track =
+                QJsonArray::fromVariantList(parseGpx(gpx).value(QStringLiteral("track")).toList());
+            QSqlQuery up(m_db);
+            up.prepare(QStringLiteral(
+                "UPDATE activities SET gpx_text = ?, track_json = ?, track_remote = NULL, "
+                "track_cached_at = NULL "
+                "WHERE COALESCE(device,'') || '|' || substr(start_time,1,16) = ?"));
+            up.addBindValue(gpx);
+            up.addBindValue(QString::fromUtf8(QJsonDocument(track).toJson(QJsonDocument::Compact)));
+            up.addBindValue(item.first);
+            done = up.exec();
+        } else if (status == 200 && item.second == QLatin1String("fit") && raw.size() > 12
+                   && raw.mid(8, 4) == QByteArrayLiteral(".FIT")) {
+            QSqlQuery up(m_db);
+            up.prepare(QStringLiteral(
+                "UPDATE activities SET fit_base64 = ? "
+                "WHERE COALESCE(device,'') || '|' || substr(start_time,1,16) = ?"));
+            up.addBindValue(QString::fromLatin1(raw.toBase64()));
+            up.addBindValue(item.first);
+            done = up.exec();
+        } else if (status == 200) {
+            done = true;                                   // nothing usable there either
+        }
+        if (done && item.second == QLatin1String("gpx") && !(status == 200 && raw.contains("<trkpt"))) {
+            // No server has this Track: stop showing it as one kept on a server.
+            QSqlQuery none(m_db);
+            none.prepare(QStringLiteral(
+                "UPDATE activities SET track_remote = NULL WHERE COALESCE(gpx_text,'') = '' "
+                "AND COALESCE(device,'') || '|' || substr(start_time,1,16) = ?"));
+            none.addBindValue(item.first);
+            none.exec();
+        }
+        if (!done) {
+            // The previous server is down or refused: the rest waits for the next sync.
+            qInfo().noquote() << "[sync] previous server didn't answer (HTTP" << status
+                              << "): the copy goes on at the next sync";
+            m_rescueQueue.clear();
+            emit sommetRescueChanged();
+            setSommetProgress(QStringLiteral("moves"), 0, 0);
+            sommetPull();
+            return;
+        }
+        QSqlQuery del(m_db);
+        del.prepare(QStringLiteral("DELETE FROM sommet_rescue WHERE uid = ? AND fmt = ?"));
+        del.addBindValue(item.first);
+        del.addBindValue(item.second);
+        del.exec();
+        setSommetProgress(QStringLiteral("rescue"), m_syncDone + 1, m_syncTotal);
+        emit sommetRescueChanged();
+        sommetRescueNext();
+    });
 }
 
 // sync/11: the server rotated its token and still took the old one; save the new one it sent,
@@ -3644,6 +3858,18 @@ void ActivityService::sommetSyncNow()
     m_sommetPulled = 0;
     m_sommetPushed = 0;
     m_syncFirst = QSettings().value(QStringLiteral("connections/sommet_sync/lastPull")).toLongLong() == 0;
+    // sync/14: first copy back from the previous server what is still only there.
+    m_rescueQueue.clear();
+    if (rescuePending()) {
+        QSqlQuery rq(QStringLiteral("SELECT uid, fmt FROM sommet_rescue ORDER BY uid, fmt"), m_db);
+        while (rq.next())
+            m_rescueQueue.append({rq.value(0).toString(), rq.value(1).toString()});
+    }
+    if (!m_rescueQueue.isEmpty()) {
+        setSommetProgress(QStringLiteral("rescue"), 0, int(m_rescueQueue.size()));
+        sommetRescueNext();
+        return;
+    }
     setSommetProgress(QStringLiteral("moves"), 0, 0);
     sommetPull();
 }
@@ -3753,6 +3979,12 @@ void ActivityService::sommetSyncEnded()
     m_sommetBusy = false;
     m_syncFirst = false;
     setSommetProgress(QString(), 0, 0);
+    if (m_syncCfgPending) {                        // a server change saved during this sync
+        m_syncCfgPending = false;
+        setSommetSync(m_pendingSyncUrl, m_pendingSyncToken);
+        m_pendingSyncUrl.clear();
+        m_pendingSyncToken.clear();
+    }
 }
 
 bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)
@@ -4317,7 +4549,7 @@ void ActivityService::sommetPushNextFit()
 
 void ActivityService::trimLocalOriginals()
 {
-    if (originalsLocation() != QStringLiteral("nas") || !m_db.isOpen())
+    if (originalsLocation() != QStringLiteral("nas") || !m_db.isOpen() || rescuePending())
         return;
     // Recent moves keep their FIT here: the exports to intervals.icu / Garmin read it locally.
     const QString cutoff = lightCutoffMinute();   // 90 days (sync/13; was 30 for FITs alone)
@@ -4367,7 +4599,9 @@ void ActivityService::trimLocalOriginals()
 
 void ActivityService::trimOldTracks()
 {
-    if (!keepRecentOnly() || !m_db.isOpen())
+    // sync/14: nothing leaves this computer while older ones are still being copied from a
+    // previous server, so a second move can't strand anything on the server in between.
+    if (!keepRecentOnly() || !m_db.isOpen() || rescuePending())
         return;
     const QString cutoff = lightCutoffMinute();
     const QSettings s;

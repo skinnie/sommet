@@ -1415,6 +1415,57 @@ PageFlickable {
                             sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.tone = "success"
                         }
                     }
+                    // sync/14: after pointing Sommet Sync at another server (or turning it off),
+                    // what the light library left only on the previous one is copied over at
+                    // each sync. Same words and warning style as Android's Settings.
+                    Column {
+                        id: rescueBox
+                        readonly property int remaining: ActivityService.sommetRescueLeft
+                        property bool confirming: false
+                        visible: remaining > 0
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        StatusNote {
+                            width: parent.width
+                            tone: "warning"
+                            closable: false
+                            text: {
+                                const server = ActivityService.sommetRescueServer
+                                if (databaseSection.syncOn)
+                                    return rescueBox.remaining === 1
+                                        ? qsTr("1 older activity is still only on your previous server (%1). Keep it running: Sommet copies it to the new one at each sync.").arg(server)
+                                        : qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.").arg(rescueBox.remaining).arg(server)
+                                return rescueBox.remaining === 1
+                                    ? qsTr("1 older activity is only on your previous server (%1). Set up a server again and Sommet copies it over.").arg(server)
+                                    : qsTr("%1 older activities are only on your previous server (%2). Set up a server again and Sommet copies them over.").arg(rescueBox.remaining).arg(server)
+                            }
+                        }
+                        RoundedButton {
+                            visible: !rescueBox.confirming
+                            text: qsTr("Forget the previous server")
+                            onClicked: rescueBox.confirming = true
+                        }
+                        Text {
+                            visible: rescueBox.confirming
+                            text: rescueBox.remaining === 1
+                                  ? qsTr("The activity keeps its details here but loses its map and original file. Forget the previous server?")
+                                  : qsTr("The %1 activities keep their details here but lose their map and original file. Forget the previous server?").arg(rescueBox.remaining)
+                            color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                            width: parent.width; wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            visible: rescueBox.confirming
+                            spacing: Theme.spacingSmall
+                            RoundedButton {
+                                text: qsTr("Forget")
+                                onClicked: { ActivityService.forgetPreviousServer(); rescueBox.confirming = false }
+                            }
+                            RoundedButton {
+                                text: qsTr("Keep")
+                                onClicked: rescueBox.confirming = false
+                            }
+                        }
+                    }
 
                     // What this computer keeps (sync/13, André 2026-11-20: "the average joe don't
                     // want 4000 activities on his pc... a freak like me MAY want everything
