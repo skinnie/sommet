@@ -63,8 +63,9 @@ André: "linking a watch should never affect the system", then "b".
   that one entry with the read's own header, the shape a Kailash was seen to merge on
   2026-08-10. The Kailash's Bluetooth chip program is byte-identical to the Peak's, as on the
   Vertical, Traverse and Traverse Alpha, so the chip behaves the same. Not yet seen on a real
-  Kailash. A watch whose settings had no pairing list at all would be left alone, and Home would
-  point to the Settings switch. A pairing record without a key is never taken for a good one:
+  Kailash. A watch whose settings had no pairing list at all, or a Kailash holding more than one
+  pairing record (never seen), is left alone, and Home points to the Settings switch. The fix
+  only uses the watch's own settings layout, never a stored one of another model. A pairing record without a key is never taken for a good one:
   Home says to Forget and pair again. With the system's privacy kept on there is nothing to
   complete.
 - Seen on André's Ambit3 Peak (firmware 2.4.17) on 2026-11-25, by hand first: the record read
