@@ -56,10 +56,21 @@ per server: pointed at a new server, it sent nothing it had sent before, and the
   them from the previous server with its saved address and token, keeps them as ordinary local
   ones, and the push sends them to the new server. A 404 drops the item; a server that doesn't
   answer leaves the rest for the next sync. Settings says how many are still only on the
-  previous server; the banner says "Copying older activities from your previous server". The
-  light library trims nothing while a copy is going on. Going back to the first server ends
+  previous server (desktop and Android); the desktop's sync banner says "Copying older
+  activities from your previous server". Android keeps the activity's id with each item
+  (`sommet.sync.rescue`) and lists a track only if the old server had confirmed holding it; an
+  opened older move's cached track becomes a kept one at the move. The light library trims
+  nothing while a copy is going on. Going back to the first server ends
   the copy. When the list is empty the previous server's address and token are forgotten.
-- Not yet tried on a real second NAS: tested with the test server.
+- Desktop, tried with the built app against two test servers (tools/sommet_sync_devserver.py) in
+  a sandbox, with 88 made-up activities: on server A, 41 older tracks and 10 FITs were left only
+  there; moved to B, Settings said "41 older activities are still only on your previous
+  server", one sync copied them, and B held the same 89 files as A, byte for byte, plus all 88
+  activities; the notice and the old address and token were then gone. Moved again to an empty
+  server with the previous one down: everything on the computer was sent, the 41 waited, and
+  once the old server was back one sync finished it, byte for byte again. Android: 9 tests (move
+  detection, copy outcomes, a whole sync after a move with the old and new tokens). Not yet
+  tried with a real second NAS or on the tablet.
 
 ---
 
