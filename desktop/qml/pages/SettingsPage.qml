@@ -1420,9 +1420,9 @@ PageFlickable {
                     // each sync. Same words and warning style as Android's Settings.
                     Column {
                         id: rescueBox
-                        readonly property int left: ActivityService.sommetRescueLeft
+                        readonly property int remaining: ActivityService.sommetRescueLeft
                         property bool confirming: false
-                        visible: left > 0
+                        visible: remaining > 0
                         width: parent.width
                         spacing: Theme.spacingSmall
                         StatusNote {
@@ -1432,12 +1432,12 @@ PageFlickable {
                             text: {
                                 const server = ActivityService.sommetRescueServer
                                 if (databaseSection.syncOn)
-                                    return rescueBox.left === 1
+                                    return rescueBox.remaining === 1
                                         ? qsTr("1 older activity is still only on your previous server (%1). Keep it running: Sommet copies it to the new one at each sync.").arg(server)
-                                        : qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.").arg(rescueBox.left).arg(server)
-                                return rescueBox.left === 1
+                                        : qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.").arg(rescueBox.remaining).arg(server)
+                                return rescueBox.remaining === 1
                                     ? qsTr("1 older activity is only on your previous server (%1). Set up a server again and Sommet copies it over.").arg(server)
-                                    : qsTr("%1 older activities are only on your previous server (%2). Set up a server again and Sommet copies them over.").arg(rescueBox.left).arg(server)
+                                    : qsTr("%1 older activities are only on your previous server (%2). Set up a server again and Sommet copies them over.").arg(rescueBox.remaining).arg(server)
                             }
                         }
                         RoundedButton {
@@ -1447,9 +1447,9 @@ PageFlickable {
                         }
                         Text {
                             visible: rescueBox.confirming
-                            text: rescueBox.left === 1
+                            text: rescueBox.remaining === 1
                                   ? qsTr("The activity keeps its details here but loses its map and original file. Forget the previous server?")
-                                  : qsTr("The %1 activities keep their details here but lose their map and original file. Forget the previous server?").arg(rescueBox.left)
+                                  : qsTr("The %1 activities keep their details here but lose their map and original file. Forget the previous server?").arg(rescueBox.remaining)
                             color: Theme.text; font.pixelSize: Theme.fontSizeBody
                             width: parent.width; wrapMode: Text.WordWrap
                         }
