@@ -125,8 +125,12 @@ class ControlSocketServer:
     """
 
     def __init__(self, link, rx_total, agent=None, path=SOCKET_PATH,
-                 bus=None, dbus_module=None, adapter=None, glib=None, link_state=None):
+                 bus=None, dbus_module=None, adapter=None, glib=None, link_state=None,
+                 adapter_address=None):
         self.link = link
+        # (address, "public"|"random") of the adapter this daemon serves, read once at start:
+        # tools/ble_bond_fix.py writes it into the watch's pairing record (watch-protocol/09).
+        self.adapter_address = adapter_address
         self.rx_total = rx_total
         self.agent = agent
         self.link_state = link_state
@@ -158,7 +162,9 @@ class ControlSocketServer:
                    "pending_passkey_device":
                        self.agent.pending_passkey_device if self.agent else None,
                    "sync_notices": self.link.sync_notices,
-                   "last_sync_notice_at": self.link.last_sync_notice_at}
+                   "last_sync_notice_at": self.link.last_sync_notice_at,
+                   "adapter_address": (self.adapter_address or (None, None))[0],
+                   "adapter_address_type": (self.adapter_address or (None, None))[1]}
             if self.link_state is not None:
                 out.update(self.link_state.status())
             return out
@@ -1617,6 +1623,11 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     # Powered on and discoverable, or the watch has nothing to find.
     props = dbus.Interface(bus.get_object(BLUEZ, adapter), DBUS_PROP_IFACE)
     props.Set(ADAPTER_IFACE, "Powered", dbus.Boolean(True))
+    try:
+        adapter_address = (str(props.Get(ADAPTER_IFACE, "Address")),
+                           str(props.Get(ADAPTER_IFACE, "AddressType")))
+    except dbus.exceptions.DBusException:
+        adapter_address = None
 
     # Register our own pairing agent (see Agent's own docstring for why) BEFORE anything
     # that could trigger pairing - forget_suunto_bonds()/discovery/connect below - so a
@@ -1671,7 +1682,7 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     if serve_socket:
         control = ControlSocketServer(link, rx_total, agent=agent,
                                        bus=bus, dbus_module=dbus, adapter=adapter, glib=GLib,
-                                       link_state=link_state)
+                                       link_state=link_state, adapter_address=adapter_address)
         threading.Thread(target=control.serve_forever, daemon=True).start()
 
     # Real gap, found testing this live 2026-08-11: BlueZ's GATT server has no

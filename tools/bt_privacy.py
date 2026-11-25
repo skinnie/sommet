@@ -25,6 +25,7 @@ the how-to: a Bluetooth mouse or keyboard paired before may need pairing again.
 """
 
 import json
+import os
 import pathlib
 import platform
 import shutil
@@ -109,6 +110,11 @@ def check():
     """(needed, reason): whether a pairing about to start should get the privacy window."""
     if platform.system() != "Linux":
         return False, "not Linux"
+    # Test of watch-protocol/09 (André, 2026-11-25: "linking a watch should never affect the
+    # system"): pair with privacy off and fix the watch's pairing record afterwards
+    # (tools/ble_bond_fix.py) instead. Only for a Sommet started with this variable.
+    if os.environ.get("SOMMET_BT_PAIR_WITHOUT_PRIVACY") == "1":
+        return False, "test: pairing without the privacy step (ble_bond_fix.py afterwards)"
     for tool in ("pkexec", "btmgmt", "bluetoothctl"):
         if not shutil.which(tool):
             return False, f"{tool} is not installed"

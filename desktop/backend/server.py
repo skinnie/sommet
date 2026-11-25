@@ -1177,6 +1177,7 @@ BLE_LINK_TOOLS = {
     "custom_modes_field_write_test.py", "interval_timer.py",
     "custom_modes_display_field_write_test.py", "custom_modes_edit.py",
     "apps.py", "app_logging.py", "guided_workout.py", "workout_install.py", "training_plan.py",
+    "ble_bond_fix.py",
 }
 
 
@@ -1820,6 +1821,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ble_forget()
         elif self.path == "/api/ble/privacy":
             self._handle_ble_privacy(body or {})
+        elif self.path == "/api/ble/fix-pairing":
+            self._handle_ble_fix_pairing(body or {})
         elif self.path == "/api/bt/forget":
             self._handle_bt_forget(body)
         elif self.path == "/api/routes":
@@ -5525,6 +5528,27 @@ class Handler(BaseHTTPRequestHandler):
                                   "always": bool(linux and bt_privacy.always_on())})
             return
         self._send_json(200, {"linux": linux, **bt_privacy.set_always(bool(body.get("always")))})
+
+    def _handle_ble_fix_pairing(self, body):
+        """POST /api/ble/fix-pairing {"write": bool} - Linux (watch-protocol/09): after a
+        pairing made without the privacy step, puts this computer's Bluetooth address and an
+        identity key into the watch's pairing record (tools/ble_bond_fix.py), over the
+        Bluetooth link, or the cable when the watch is on it. Without "write" it only reports
+        the record's state: "fix" (needs it), "fine", or "no_phone"."""
+        status = ble_bridge.bridge.status()
+        address = status.get("adapter_address")
+        if not address:
+            self._send_json(409, {"ok": False, "error": "Sommet's Bluetooth helper is not "
+                                  "running, so this computer's Bluetooth address is not known."})
+            return
+        if status.get("adapter_address_type") not in (None, "public"):
+            self._send_json(409, {"ok": False, "error": "This computer's Bluetooth adapter "
+                                  "has no fixed address; this fix does not cover it yet."})
+            return
+        args = ["--json", "--address", address] + (["--write"] if body.get("write") else [])
+        _code, out, err = run_tool("ble_bond_fix.py", args, timeout=240)
+        payload = self._parse_last_json_line(out) or {"ok": False, "error": err.strip()[-300:] or "no answer"}
+        self._send_json(200 if payload.get("ok") else 502, payload)
 
     def _handle_ble_disconnect(self):
         """POST /api/ble/disconnect - tears the daemon down. Leaves the watch's bond alone;
