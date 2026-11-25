@@ -289,7 +289,12 @@ PageFlickable {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
             var r = null
             try { r = JSON.parse(xhr.responseText) } catch (e) { r = null }
-            if (r && r.ok) dropMagene()
+            if (r && r.ok) {
+                dropMagene()
+                // A forgotten watch is no longer looked for when Sommet opens (P5Q, 2026-11-25:
+                // the quiet start kept calling it and Pair then asked for nothing).
+                if (dev.kind === "suunto") DeviceService.forgetBle()
+            }
             else forgetDialog.msg = (r && r.error) || qsTr("Couldn't forget it")
             forgetDialog.load()
         }

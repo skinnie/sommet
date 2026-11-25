@@ -5468,7 +5468,15 @@ class Handler(BaseHTTPRequestHandler):
         request would leave the UI with nothing to poll while that's happening. The caller
         polls GET /api/ble/status instead - "subscribed"/"handshake_done"/
         "pending_passkey_device" are exactly the states a connect UI needs to show."""
-        fresh = not ble_bridge.bridge.status().get("running")
+        status = ble_bridge.bridge.status()
+        # A press on Pair with a helper already up but no watch session: a fresh start, so a
+        # new pairing gets the password step (P5Q, 2026-11-25: the quiet start at launch had
+        # the helper up, Pair asked nothing and the watch, forgotten here, was refused) and a
+        # stuck helper is replaced (X230, same day).
+        if status.get("running") and not body.get("auto") and not status.get("handshake_done"):
+            ble_bridge.bridge.stop()
+            status = ble_bridge.bridge.status()
+        fresh = not status.get("running")
         if fresh:
             # Can this computer run the Bluetooth daemon at all? Asked BEFORE the privacy step,
             # which is the password prompt: on the Linux download it used to ask for the

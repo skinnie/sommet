@@ -209,6 +209,42 @@ class Uses(unittest.TestCase):
             (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
              server._watch_bt_privacy_window) = saved
 
+    def test_pair_restarts_a_helper_with_no_watch_session(self):
+        # P5Q / X230, 2026-11-25: a helper already up (the quiet start, or a stuck one from a
+        # development run) made Pair do nothing: no password step, no new pairing.
+        class Bridge:
+            running, stops, starts = True, 0, 0
+
+            def status(self):
+                return {"running": Bridge.running, "handshake_done": False}
+
+            def stop(self):
+                Bridge.stops += 1
+                Bridge.running = False
+
+            def start(self, **_):                       # like the real one: a no-op when up
+                if not Bridge.running:
+                    Bridge.starts += 1
+                    Bridge.running = True
+        saved = (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
+                 server._watch_bt_privacy_window)
+        opened = []
+        B.bluetooth_silent = lambda **_kw: False
+        B.daemon_command = lambda _script: ([], {})
+        server._open_bt_privacy_window = lambda: opened.append(1)
+        server._watch_bt_privacy_window = lambda: None
+        B.bridge = Bridge()
+        try:
+            h = server.Handler.__new__(server.Handler)
+            h._send_json = lambda code, obj: None
+            h._handle_ble_connect({"forget": False, "auto": True})     # launch: left alone
+            self.assertEqual((Bridge.stops, Bridge.starts, opened), (0, 0, []))
+            h._handle_ble_connect({"forget": False})                   # Pair pressed
+            self.assertEqual((Bridge.stops, Bridge.starts, opened), (1, 1, [1]))
+        finally:
+            (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
+             server._watch_bt_privacy_window) = saved
+
 
 if __name__ == "__main__":
     unittest.main()

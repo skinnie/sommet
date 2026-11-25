@@ -162,6 +162,13 @@ class ControlSocketServer:
             if self.link_state is not None:
                 out.update(self.link_state.status())
             return out
+        if op == "quit":
+            # A helper this backend did not start (an earlier Sommet, a development run) can
+            # only be stopped from here; it answered status but did nothing for a day on the
+            # X230 (2026-11-25) and every Pair went to it. Same exit as the backend's terminate().
+            import signal                                    # noqa: PLC0415
+            threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGTERM)).start()
+            return {"ok": True, "pid": os.getpid()}
         if op == "set_dry_run":
             self.link.dry_run = bool(request.get("value", True))
             return {"ok": True, "dry_run": self.link.dry_run}

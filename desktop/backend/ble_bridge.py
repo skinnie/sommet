@@ -352,6 +352,17 @@ class BleBridge:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+            return
+        # One this backend did not start (an earlier Sommet, a development run): asked to quit
+        # over its socket. A helper too old to know "quit" stays; status() still reports it.
+        if _daemon_endpoint_exists():
+            try:
+                self._request({"op": "quit"}, timeout=3.0)
+            except BleBridgeError:
+                return
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and self.status().get("running"):
+                time.sleep(0.2)
 
     def _wait_for_socket(self):
         deadline = time.monotonic() + _STARTUP_TIMEOUT_S
