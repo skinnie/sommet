@@ -9,6 +9,7 @@ import { getSommetSyncCfg, getPushedBlobs, getPushedFits, fetchGpxBlob } from '.
 import { getIntervalsIcuCredentials } from './ApiIntervalsIcu';
 import { fetchIntervalsGpx, intervalsTrackQueue, loadNoTrack } from './IntervalsTracks';
 import { getKeepRecentOnly, getLibraryCacheMb, lightCutoffMinute } from './LibraryPrefs';
+import { rescuePending } from './ServerMove';
 
 // Light library (sync/13, André 2026-11-20; the desktop's trimOldTracks / fetchRemoteTrack /
 // evictTrackCache in activityservice.cpp). Every move stays in the list. With "Last 90 days" a
@@ -89,7 +90,9 @@ async function tidyOnce(): Promise<void> {
   if (!recent) { await restoreRemoteTracks(rows, nasOn); return; }
 
   const cutoff = lightCutoffMinute();
-  const picks = pickTracksToTrim(rows, {
+  // Sommet Sync moved to another server (sync/14) and the old one still holds some Tracks alone:
+  // nothing more leaves this device until they are copied over, so none ends up on neither.
+  const picks = await rescuePending() ? [] : pickTracksToTrim(rows, {
     cutoff, nasOn, intervalsOn, onNas: await getPushedBlobs(), fitsOnNas: await getPushedFits(),
   });
   for (const p of picks) {

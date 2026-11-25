@@ -49,6 +49,11 @@ export async function writeFitFile(id: string, base64: string, overwrite = false
   return path;
 }
 
+/** Whether the move's FIT (<id>.fit) is on this device. */
+export async function fitFileExists(id: string): Promise<boolean> {
+  return RNFS.exists(`${ACTIVITIES_DIR}/${activityFileStem(id)}.fit`);
+}
+
 /** Whether an activity with this id is already in the library (checked before a slow device
  *  download, e.g. a Magene ride over BLE). */
 export async function activityExists(id: string): Promise<boolean> {

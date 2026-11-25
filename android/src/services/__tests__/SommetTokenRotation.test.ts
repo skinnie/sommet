@@ -9,7 +9,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: jest.fn(async (k: string) => { delete mockStore[k]; }),
   },
 }));
-jest.mock('../../database/db', () => ({ getSommetTombstones: async () => [], getAllActivities: async () => [] }));
+jest.mock('../../database/db', () => ({ getSommetTombstones: async () => [], getAllActivities: async () => [],
+  clearSommetServerMarkers: async () => {} }));   // turning sync off is a server move (sync/14)
 jest.mock('../GpxService', () => ({}));
 jest.mock('../SportNames', () => ({}));
 jest.mock('../StreamsCache', () => ({ streamsCache: new Map() }));
