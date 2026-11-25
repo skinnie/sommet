@@ -80,9 +80,13 @@ per server: pointed at a new server, it sent nothing it had sent before, and the
   server", one sync copied them, and B held the same 89 files as A, byte for byte, plus all 88
   activities; the notice and the old address and token were then gone. Moved again to an empty
   server with the previous one down: everything on the computer was sent, the 41 waited, and
-  once the old server was back one sync finished it, byte for byte again. Android: 9 tests (move
-  detection, copy outcomes, a whole sync after a move with the old and new tokens). Not yet
-  tried with a real second NAS or on the tablet.
+  once the old server was back one sync finished it, byte for byte again. After the review
+  fixes, the same test again on the new build, plus Forget: with the old server down, **Keep**
+  changed nothing and **Forget** cleared the list, the old address and token and the 41 "kept on
+  a server" marks, all 88 activities still there (this run also found the Settings page failing
+  to load over a QML property named `left`, fixed before the release). Android: 15 tests (move
+  detection, a move during a sync, copy outcomes, Forget, the notice texts, a whole sync after
+  a move with the old and new tokens). Not yet tried with a real second NAS or on the tablet.
 
 ---
 
