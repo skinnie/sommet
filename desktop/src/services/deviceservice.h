@@ -119,10 +119,7 @@ class DeviceService : public QObject
     // to express since it's a plain "is the watch there" query, not a connection process.
     Q_PROPERTY(bool bleAttempting READ bleAttempting NOTIFY bleStateChanged)
     // The Bluetooth service is up and waits for the watch. False while the connect request is
-    // still out: on Linux that is the time of the password prompt (Bluetooth privacy), and the
-    // watch must not be put in pairing yet, its offer lasts less than typing a password
-    // (André, 2026-11-22: "the time to enter sudo password is more than the available on
-    // suunto to pair, so I always need to click a second time pair").
+    // still out (a second or two: since 2026-11-25 there is no password prompt on Linux).
     Q_PROPERTY(bool bleListening READ bleListening NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleSubscribed READ bleSubscribed NOTIFY bleStateChanged)
     Q_PROPERTY(bool bleHandshakeDone READ bleHandshakeDone NOTIFY bleStateChanged)
@@ -139,6 +136,10 @@ class DeviceService : public QObject
     // passkey-entry dialog exactly when this is non-empty.
     Q_PROPERTY(QString blePendingPasskeyDevice READ blePendingPasskeyDevice NOTIFY bleStateChanged)
     Q_PROPERTY(QString bleError READ bleError NOTIFY bleStateChanged)
+    // Linux: a watch paired here is given this computer's identity in its first session
+    // (tools/ble_bond_fix.py, watch-protocol/09). True while that has failed and is still to
+    // do: the watch may not reconnect by itself until it is done, by Bluetooth or the cable.
+    Q_PROPERTY(bool blePairingFixFailed READ blePairingFixFailed NOTIFY bleStateChanged)
     Q_PROPERTY(int bleAttemptSeconds READ bleAttemptSeconds NOTIFY bleStateChanged)
 
     // Real decision, 2026-08-11 (André, after a live BLE session this same night hit real
@@ -289,6 +290,7 @@ public:
     int bleMovesCount() const { return m_bleMovesCount; }
     QString blePendingPasskeyDevice() const { return m_blePendingPasskeyDevice; }
     QString bleError() const { return m_bleError; }
+    bool blePairingFixFailed() const { return m_blePairingFixFailed; }
     // Real request, 2026-08-13 (André, live testing: "it is still on 'connecting'...
     // maybe we should put a timer no?") - a plain "Connecting…" with no elapsed time gave
     // no way to tell "still genuinely searching" from "stuck". Ticks once per
@@ -439,6 +441,7 @@ private:
     int m_bleMovesCount = 0;
     QString m_blePendingPasskeyDevice;
     QString m_bleError;
+    bool m_blePairingFixFailed = false;
     int m_bleAttemptSeconds = 0;
     bool m_bleExperimentEnabled = false;
     bool m_intervalsEnabled = false;

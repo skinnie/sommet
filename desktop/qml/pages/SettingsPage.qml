@@ -1584,9 +1584,11 @@ PageFlickable {
                     // Bluetooth has no switch any more: it is always on (André, 2026-11-21: "let's
                     // make bluetooth always available, if it doesn't work this way people tell us").
 
-                    // --- Linux only: keep Bluetooth privacy on, so pairing a watch never asks for
-                    // the password (André, 2026-11-22: the watch's offer to pair is shorter than
-                    // typing one). It is the system's own setting (tools/bt_privacy.py
+                    // --- Linux only: keep Bluetooth privacy on. A fallback since 2026-11-25:
+                    // Sommet now completes a Linux pairing on the watch itself
+                    // (tools/ble_bond_fix.py, watch-protocol/09) and never touches the computer
+                    // (André: "linking a watch should never affect the system", then "b": the
+                    // switch stays, off). It is the system's own setting (tools/bt_privacy.py
                     // set_always): changing it asks for the password once, here, and restarts
                     // Bluetooth. Off by default: a Bluetooth mouse or keyboard paired before may
                     // need pairing again. ---
@@ -1618,7 +1620,7 @@ PageFlickable {
                         Component.onCompleted: if (visible) ask("GET", null)
                         Item { width: 1; height: Theme.spacingSmall }
                         Text {
-                            text: qsTr("Pair a watch by Bluetooth without the password")
+                            text: qsTr("Keep Bluetooth privacy on")
                             font.bold: true
                             font.pixelSize: Theme.fontSizeBody
                             color: Theme.text
@@ -1628,14 +1630,13 @@ PageFlickable {
                         Text {
                             width: parent.width
                             wrapMode: Text.WordWrap
-                            text: qsTr("On Linux, the first time a watch pairs, Sommet asks for your " +
-                                       "password to switch Bluetooth privacy on for that pairing; " +
-                                       "without it the watch refuses this computer after its first " +
-                                       "sleep. Turn this on to keep privacy on for good: your " +
-                                       "system asks for the password once, now, and Bluetooth " +
-                                       "restarts. After that a pairing asks for nothing. A " +
-                                       "Bluetooth mouse or keyboard paired before may need " +
-                                       "pairing again.")
+                            text: qsTr("Only for a watch that keeps forgetting this computer " +
+                                       "after pairing. Sommet sets a new pairing up on the watch " +
+                                       "by itself, so most people never need this. Turning it on " +
+                                       "changes a system setting: your computer asks for your " +
+                                       "password once, and Bluetooth restarts. A Bluetooth mouse " +
+                                       "or keyboard paired before may need pairing again. Then " +
+                                       "pair the watch again.")
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeBody
                         }

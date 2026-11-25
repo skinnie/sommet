@@ -584,11 +584,16 @@ def device_key():
     return hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else "watch"
 
 
-# Linux: Bluetooth privacy on while a watch pairs, off again after (tools/bt_privacy.py has the
-# why: without it the watch files the pairing under 00:00:00:00:00:00 and won't reconnect).
-# "state": idle | not needed: <reason> | on | already | failed | declined | unavailable | off.
-_BT_PRIVACY = {"window": None, "state": "idle"}
-_BT_PRIVACY_LOCK = threading.Lock()   # two connects at once: one password prompt, not two
+# Linux: a watch paired here gets this computer's identity afterwards, written into its pairing
+# record (tools/ble_bond_fix.py, watch-protocol/09). Linux gives the watch no identity while
+# pairing unless Bluetooth privacy is on, and turning privacy on switches the adapter off,
+# dropping every other Bluetooth device. Until 0.2.67 Sommet did that, with a password prompt;
+# André, 2026-11-25: "linking a watch should never affect the system", then "b" (the Settings
+# switch, privacy kept on for good, stays as the fallback). ble_bond_fix.AfterPairing decides
+# when; this file only feeds it the helper's status, the code box and the cable.
+_PAIRING_FIX = [None]
+_PAIRING_FIX_LOCK = threading.Lock()
+PAIRING_FIX_FILE = Path.home() / ".config" / "Sommet" / "ble-pairing-fix.json"
 
 
 def _ble_log(message):
@@ -600,59 +605,60 @@ def _ble_log(message):
         pass
 
 
-def _open_bt_privacy_window():
-    """Before the daemon starts: on a fresh pairing on Linux, one password prompt turns
-    privacy on. Blocks while the prompt is up; never fails the connect."""
-    if not _BT_PRIVACY_LOCK.acquire(blocking=False):
-        return                      # another connect is already showing the prompt
+def _pairing_fix():
+    """The one AfterPairing of this backend, or None off Linux (or if it could not load: the
+    status poll and the code box must keep working whatever happens here)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    with _PAIRING_FIX_LOCK:
+        if _PAIRING_FIX[0] is None:
+            try:
+                sys.path.insert(0, str(TOOLS_DIR))
+                import ble_bond_fix                          # noqa: PLC0415
+                _PAIRING_FIX[0] = ble_bond_fix.AfterPairing(PAIRING_FIX_FILE, _pairing_fix_run,
+                                                            log=_ble_log)
+            except Exception as exc:                         # noqa: BLE001 - said once, then off
+                _ble_log(f"pairing fix: not available ({exc.__class__.__name__})")
+                _PAIRING_FIX[0] = False
+        return _PAIRING_FIX[0] or None
+
+
+def _pairing_fix_run(address, serial, over_ble):
+    """One try of tools/ble_bond_fix.py --write, from a thread of its own. Ahead of the
+    background jobs waiting for the watch (the watch lock's front of the queue): the link may
+    not last, and the pairing only holds once this is done."""
+    _REQUEST_CTX.foreground = True
+    if over_ble and not use_ble():
+        return {"ok": False, "error": "the watch was no longer linked by Bluetooth"}
+    if not over_ble and use_ble():
+        return {"ok": False, "error": "the watch was no longer on the cable"}
     try:
-        if _BT_PRIVACY["window"] is not None:
-            return
-        sys.path.insert(0, str(TOOLS_DIR))
-        import bt_privacy                                    # noqa: PLC0415
-        needed, reason = bt_privacy.check()
-        if not needed:
-            _BT_PRIVACY["state"] = f"not needed: {reason}"
-            return
-        window = bt_privacy.PrivacyWindow(log=_ble_log)
-        _BT_PRIVACY["state"] = window.open()
-        if window.proc is not None:
-            _BT_PRIVACY["window"] = window
-    finally:
-        _BT_PRIVACY_LOCK.release()
+        _code, out, _err = run_tool("ble_bond_fix.py", ["--json", "--address", address, "--write"],
+                                    timeout=240, serial=None if over_ble else serial)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "the watch did not answer in 4 minutes"}
+    return Handler._parse_last_json_line(None, out) or {"ok": False, "error": "no answer"}
 
 
-def _close_bt_privacy_window():
-    """The daemon didn't start after privacy went on: turn it off now rather than leave it on
-    until the root script's own 30-minute limit."""
-    window, _BT_PRIVACY["window"] = _BT_PRIVACY["window"], None
-    if window is not None:
-        window.close()
-        _BT_PRIVACY["state"] = "off"
+def _pairing_fix_on_status(status):
+    """From GET /api/ble/status: starts a try over Bluetooth when one is due."""
+    fix = _pairing_fix()
+    try:
+        if fix is not None and fix.due_over_ble(status, USB_WATCH_PRESENT):
+            threading.Thread(target=fix.try_now, args=(True,), daemon=True).start()
+    except Exception as exc:                                 # noqa: BLE001 - never the poll
+        _ble_log(f"pairing fix: skipped ({exc.__class__.__name__})")
 
 
-def _watch_bt_privacy_window():
-    """After the daemon starts: privacy goes off again once the paired watch's link drops by
-    itself (or the daemon stops, or time runs out), then the daemon restarts on the
-    power-cycled adapter."""
-    window = _BT_PRIVACY["window"]
-    if window is None:
-        return
-    sys.path.insert(0, str(TOOLS_DIR))
-    import bt_privacy                                        # noqa: PLC0415
-
-    def restart():
-        ble_bridge.bridge.stop()
-        try:
-            ble_bridge.bridge.start()
-        except ble_bridge.BleBridgeError as exc:
-            _ble_log(f"restart after Bluetooth privacy off failed: {exc}")
-
-    def done():
-        _BT_PRIVACY["window"] = None
-        _BT_PRIVACY["state"] = "off"
-
-    bt_privacy.run_window(window, ble_bridge.bridge.status, restart, on_done=done)
+def _pairing_fix_on_usb(watches):
+    """From the cable's watch list: starts a try over the cable when that watch is plugged in."""
+    fix = _pairing_fix()
+    try:
+        serial = fix.due_over_cable(watches) if fix is not None else None
+        if serial:
+            threading.Thread(target=fix.try_now, args=(False, serial), daemon=True).start()
+    except Exception as exc:                                 # noqa: BLE001 - never the list
+        _ble_log(f"pairing fix: skipped ({exc.__class__.__name__})")
 
 
 # Which Bluetooth watch each list on screen was read from. The daemon links whichever watch
@@ -5428,7 +5434,14 @@ class Handler(BaseHTTPRequestHandler):
         heartbeat. "subscribed" is the real "transport is live" signal (the watch has
         subscribed to our notify characteristic) - same meaning as
         AmbitBleModule.kt's nativeInitStarted gate on the Android side."""
-        self._send_json(200, {**ble_bridge.bridge.status(), "bt_privacy": _BT_PRIVACY["state"],
+        status = ble_bridge.bridge.status()
+        # Linux: a watch paired here gets this computer's identity in its first session
+        # (_pairing_fix_on_status); "failed" puts a line on Home until it has worked.
+        _pairing_fix_on_status(status)
+        fix = _pairing_fix()
+        self._send_json(200, {**status,
+                              "pairing_fix": {"pending": bool(fix and fix.pending),
+                                              "failed": bool(fix and fix.failed())},
                               "reading_moves": _BLE_MOVES_PROGRESS[0],
                               "writing_route": _BLE_ROUTE_PROGRESS[0]})
 
@@ -5473,51 +5486,41 @@ class Handler(BaseHTTPRequestHandler):
         "pending_passkey_device" are exactly the states a connect UI needs to show."""
         status = ble_bridge.bridge.status()
         # A press on Pair with a helper already up but no watch session: a fresh start, so a
-        # new pairing gets the password step (P5Q, 2026-11-25: the quiet start at launch had
-        # the helper up, Pair asked nothing and the watch, forgotten here, was refused) and a
-        # stuck helper is replaced (X230, same day).
+        # stuck helper is replaced (X230, 2026-11-25: it answered status and did nothing).
         if status.get("running") and not body.get("auto") and not status.get("handshake_done"):
             ble_bridge.bridge.stop()
             status = ble_bridge.bridge.status()
         fresh = not status.get("running")
         if fresh:
-            # Can this computer run the Bluetooth daemon at all? Asked BEFORE the privacy step,
-            # which is the password prompt: on the Linux download it used to ask for the
-            # password and then fail (P5Q, 2026-11-22).
+            # Can this computer run the Bluetooth daemon at all? (The Linux download, P5Q,
+            # 2026-11-22: python3-dbus / python3-gi missing.)
             try:
                 ble_bridge.daemon_command("")
             except ble_bridge.BleBridgeError as exc:
                 self._send_json(502, {"ok": False, "error": str(exc)})
                 return
-            # Does Bluetooth on this computer answer at all? Asked fresh, and BEFORE the privacy
-            # step: that one asks for the password and switches the adapter off and on, which
-            # is no use, and no small thing, against a service that answers nothing (X230,
-            # 2026-11-23).
+            # Does Bluetooth on this computer answer at all? Asked fresh: no use starting a
+            # helper against a service that answers nothing (X230, 2026-11-23).
             if ble_bridge.bluetooth_silent(max_age=0):
                 self._send_json(502, {"ok": False, "error": ble_bridge.silent_hint(),
                                       "bluetooth_silent": True})
                 return
-            # Only for a press on Pair: the quiet start at launch (`auto`) listens for a watch
-            # already paired and never asks for the password (P5Q, 2026-11-24: the prompt came
-            # up by itself when Sommet opened).
-            if not body.get("auto"):
-                _open_bt_privacy_window()
+        # Nothing here touches the computer's Bluetooth settings: no password, no privacy
+        # change, no adapter switched off (André, 2026-11-25). A Linux pairing is completed on
+        # the watch afterwards (_pairing_fix_on_status).
         try:
             ble_bridge.bridge.start(forget=bool(body.get("forget", False)))
         except ble_bridge.BleBridgeError as exc:
-            if fresh:
-                _close_bt_privacy_window()
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
-        if fresh:
-            _watch_bt_privacy_window()
-        self._send_json(200, {"ok": True, **ble_bridge.bridge.status(),
-                              "bt_privacy": _BT_PRIVACY["state"]})
+        self._send_json(200, {"ok": True, **ble_bridge.bridge.status()})
 
     def _handle_ble_privacy(self, body):
-        """Linux: the system's own Bluetooth privacy setting (tools/bt_privacy.py).
+        """Linux: the system's own Bluetooth privacy setting (tools/bt_privacy.py), the
+        Settings switch "Keep Bluetooth privacy on": the fallback for a watch that still
+        forgets this computer after pairing (watch-protocol/09). Off by default.
         GET -> {ok, linux, always}: whether privacy is always on (`Privacy = device` in
-        /etc/bluetooth/main.conf); with it a pairing never asks for the password.
+        /etc/bluetooth/main.conf).
         POST {always: bool} -> {ok, always, error?}: changes it; the system asks for the
         password once (pkexec) and Bluetooth restarts. Blocks while that prompt is up."""
         sys.path.insert(0, str(TOOLS_DIR))
@@ -5530,11 +5533,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"linux": linux, **bt_privacy.set_always(bool(body.get("always")))})
 
     def _handle_ble_fix_pairing(self, body):
-        """POST /api/ble/fix-pairing {"write": bool} - Linux (watch-protocol/09): after a
-        pairing made without the privacy step, puts this computer's Bluetooth address and an
-        identity key into the watch's pairing record (tools/ble_bond_fix.py), over the
-        Bluetooth link, or the cable when the watch is on it. Without "write" it only reports
-        the record's state: "fix" (needs it), "fine", or "no_phone"."""
+        """POST /api/ble/fix-pairing {"write": bool} - Linux (watch-protocol/09): puts this
+        computer's Bluetooth address and an identity key into the watch's pairing record
+        (tools/ble_bond_fix.py), over the Bluetooth link, or the cable when the watch is on it.
+        Sommet does this by itself after a pairing (_pairing_fix_on_status); this is the same
+        by hand, for testing. Without "write" it only reports the record's state: "fix"
+        (needs it), "fine", or "no_phone"."""
         status = ble_bridge.bridge.status()
         address = status.get("adapter_address")
         if not address:
@@ -5583,6 +5587,9 @@ class Handler(BaseHTTPRequestHandler):
         unlike stop()+start(forget=True) which only works when this backend is the one
         that spawned it. No daemon running at all is not an error here - "already
         forgotten" is a fine outcome for a forget request."""
+        fix = _pairing_fix()
+        if fix is not None:
+            fix.forgotten()            # that pairing is gone: nothing left to complete
         if not ble_bridge.bridge.status().get("running"):
             self._send_json(200, {"ok": True, "removed": 0})
             return
@@ -5603,11 +5610,18 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(passkey, int):
             self._send_json(400, {"ok": False, "error": "passkey must be an integer"})
             return
+        status = ble_bridge.bridge.status()
         try:
             ok = ble_bridge.bridge.submit_passkey(passkey)
         except ble_bridge.BleBridgeError as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
+        fix = _pairing_fix()
+        if ok and fix is not None:
+            # Linux: this pairing gives the watch no identity of this computer; its first
+            # session completes the watch's pairing record (watch-protocol/09).
+            fix.paired(status.get("pending_passkey_device"), status.get("adapter_address"),
+                       status.get("adapter_address_type"))
         self._send_json(200 if ok else 409,
                         {"ok": ok, **({} if ok else {"error": "no passkey request pending"})})
 
@@ -5711,6 +5725,8 @@ class Handler(BaseHTTPRequestHandler):
         # the model/connected signal the UI's legacy-card visibility depends on never spends
         # a poll cycle reporting "not an Ambit1/2" and blanking Routes/POIs after a swap.
         self._heal_stale_pin(info.get("watches", []))
+        # Linux: a Bluetooth pairing still to complete is completed over the cable too.
+        _pairing_fix_on_usb(info.get("watches", []))
         info["selected"] = SELECTED_PRODUCT_ID
         info["selectedSerial"] = SELECTED_SERIAL
         # A watch linked over Bluetooth, or Testing mode's sample watch, is not on this USB list

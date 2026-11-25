@@ -154,7 +154,7 @@ class Uses(unittest.TestCase):
         self.assertIn("not answering", str(caught.exception))
         self.assertIsNone(bridge._proc)
 
-    def test_a_pairing_stops_before_the_password_prompt(self):
+    def test_a_pairing_stops_before_starting_the_helper(self):
         class Bridge:
             started = False
 
@@ -163,11 +163,10 @@ class Uses(unittest.TestCase):
 
             def start(self, **_):
                 Bridge.started = True
-        saved = (B.daemon_command, server._open_bt_privacy_window, B.bridge)
-        opened, asked = [], []
+        saved = (B.daemon_command, B.bridge, B.bluetooth_silent)
+        asked = []
         B.bluetooth_silent = lambda **kw: asked.append(kw) or True
         B.daemon_command = lambda _script: ([], {})
-        server._open_bt_privacy_window = lambda: opened.append(1)
         B.bridge = Bridge()
         try:
             sent = []
@@ -175,43 +174,52 @@ class Uses(unittest.TestCase):
             h._send_json = lambda code, obj: sent.append((code, obj))
             h._handle_ble_connect({})
         finally:
-            B.daemon_command, server._open_bt_privacy_window, B.bridge = saved
+            B.daemon_command, B.bridge, B.bluetooth_silent = saved
         self.assertEqual(asked, [{"max_age": 0}])            # asked fresh, not from memory
-        self.assertEqual(opened, [], "the password prompt was shown on a silent Bluetooth")
         self.assertFalse(Bridge.started)
         self.assertEqual(sent[0][0], 502)
         self.assertIn("not answering", sent[0][1]["error"])
 
-    def test_the_quiet_start_at_launch_never_asks_for_the_password(self):
-        # P5Q, 2026-11-24: Sommet opened and the system's password window came up by itself.
+    def test_neither_the_launch_nor_pair_asks_for_a_password(self):
+        # P5Q, 2026-11-24: the password window came up by itself when Sommet opened. Since
+        # 2026-11-25 a press on Pair asks for none either: nothing on the computer changes
+        # (André: "linking a watch should never affect the system").
         class Bridge:
             def status(self):
                 return {"running": False}
 
             def start(self, **_):
                 pass
-        saved = (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
-                 server._watch_bt_privacy_window)
-        opened = []
+        ran = []
+        real = (server.subprocess.run, server.subprocess.Popen)
+
+        def spy(real_fn):
+            def call(cmd, *a, **k):
+                ran.append(list(cmd) if isinstance(cmd, (list, tuple)) else [cmd])
+                return real_fn(cmd, *a, **k)
+            return call
+        saved = (B.daemon_command, B.bridge, B.bluetooth_silent)
         B.bluetooth_silent = lambda **_kw: False
         B.daemon_command = lambda _script: ([], {})
-        server._open_bt_privacy_window = lambda: opened.append(1)
-        server._watch_bt_privacy_window = lambda: None
         B.bridge = Bridge()
+        server.subprocess.run, server.subprocess.Popen = spy(real[0]), spy(real[1])
         try:
             h = server.Handler.__new__(server.Handler)
-            h._send_json = lambda code, obj: None
-            h._handle_ble_connect({"forget": False, "auto": True})
-            self.assertEqual(opened, [], "the launch start showed the password prompt")
-            h._handle_ble_connect({"forget": False})              # a press on Pair
-            self.assertEqual(opened, [1])
+            sent = []
+            h._send_json = lambda code, obj: sent.append((code, obj))
+            h._handle_ble_connect({"forget": False, "auto": True})     # Sommet opening
+            h._handle_ble_connect({"forget": False})                   # a press on Pair
         finally:
-            (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
-             server._watch_bt_privacy_window) = saved
+            server.subprocess.run, server.subprocess.Popen = real
+            B.daemon_command, B.bridge, B.bluetooth_silent = saved
+        self.assertEqual([c for c in ran if any(w in " ".join(map(str, c))
+                                                for w in ("pkexec", "btmgmt", "privacy"))], [])
+        self.assertEqual([code for code, _ in sent], [200, 200])
+        self.assertNotIn("bt_privacy", sent[-1][1])
 
     def test_pair_restarts_a_helper_with_no_watch_session(self):
         # P5Q / X230, 2026-11-25: a helper already up (the quiet start, or a stuck one from a
-        # development run) made Pair do nothing: no password step, no new pairing.
+        # development run) made Pair do nothing.
         class Bridge:
             running, stops, starts = True, 0, 0
 
@@ -226,24 +234,19 @@ class Uses(unittest.TestCase):
                 if not Bridge.running:
                     Bridge.starts += 1
                     Bridge.running = True
-        saved = (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
-                 server._watch_bt_privacy_window)
-        opened = []
+        saved = (B.daemon_command, B.bridge, B.bluetooth_silent)
         B.bluetooth_silent = lambda **_kw: False
         B.daemon_command = lambda _script: ([], {})
-        server._open_bt_privacy_window = lambda: opened.append(1)
-        server._watch_bt_privacy_window = lambda: None
         B.bridge = Bridge()
         try:
             h = server.Handler.__new__(server.Handler)
             h._send_json = lambda code, obj: None
             h._handle_ble_connect({"forget": False, "auto": True})     # launch: left alone
-            self.assertEqual((Bridge.stops, Bridge.starts, opened), (0, 0, []))
+            self.assertEqual((Bridge.stops, Bridge.starts), (0, 0))
             h._handle_ble_connect({"forget": False})                   # Pair pressed
-            self.assertEqual((Bridge.stops, Bridge.starts, opened), (1, 1, [1]))
+            self.assertEqual((Bridge.stops, Bridge.starts), (1, 1))
         finally:
-            (B.daemon_command, server._open_bt_privacy_window, B.bridge, B.bluetooth_silent,
-             server._watch_bt_privacy_window) = saved
+            B.daemon_command, B.bridge, B.bluetooth_silent = saved
 
 
 if __name__ == "__main__":

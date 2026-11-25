@@ -1,5 +1,8 @@
 #!/bin/bash
-# Sommet: keep Bluetooth privacy on, or put the system's setting back.
+# Sommet: keep Bluetooth privacy on, or put the system's setting back. The Settings switch
+# "Keep Bluetooth privacy on": since 0.2.67 a fallback only, Sommet completes a Linux pairing
+# on the watch itself (ble_bond_fix.py). This file differing from 0.2.66's installed copy makes
+# the next use run sommet-polkit-install again, which removes 0.2.66's pairing script.
 # Run as root by tools/bt_privacy.py through pkexec (set_always). $1 = on | off.
 # on : "Privacy = device" in /etc/bluetooth/main.conf (what docs/how-to/
 #      bluetooth-pairing-on-linux.md has by hand), a copy of the file kept once as

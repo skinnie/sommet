@@ -1261,11 +1261,10 @@ PageFlickable {
                                     { kind: "watch", label: qsTr("Suunto watch"),
                                       hint: DeviceService.bleHandshakeDone
                                             ? qsTr("A watch is already connected by Bluetooth")
-                                            // Linux: a first pairing asks for the password
-                                            // (Bluetooth privacy, tools/bt_privacy.py) BEFORE the
-                                            // watch should start pairing - its window is short.
+                                            // Linux: Sommet's own box asks for the code (no
+                                            // password since 2026-11-25, watch-protocol/09).
                                             : Qt.platform.os === "linux"
-                                              ? qsTr("Your computer may ask for your password first, so the watch remembers it. Then “Pair with app” (first time) or “Sync now” on the watch")
+                                              ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows into Sommet")
                                               // Windows' own pop-up asks for the code (André,
                                               // 2026-11-21: the way pairing works there).
                                               : Qt.platform.os === "windows"
@@ -1312,7 +1311,7 @@ PageFlickable {
                                             anchors.verticalCenter: parent.verticalCenter
                                             Text { text: modelData.label; color: Theme.text
                                                    font.pixelSize: Theme.fontSizeBody; font.bold: true }
-                                            // Wraps: the Linux hint (password first) is two lines.
+                                            // Wraps: the Linux and Windows hints are two lines.
                                             Text { text: modelData.hint; color: Theme.mutedText
                                                    width: 388 - Theme.spacingMedium * 3 - 32
                                                    wrapMode: Text.WordWrap
@@ -1350,19 +1349,13 @@ PageFlickable {
                     // Shared status line for both flows (only one runs at a time).
                     Text {
                         visible: DeviceService.bleAttempting && !DeviceService.bleSubscribed
-                        // Linux, two steps, one at a time: the password first (it switches
-                        // Bluetooth privacy on for this pairing; the request to the backend
-                        // is out for as long as the prompt is up), and only then the watch,
-                        // whose offer to pair lasts less than typing a password.
+                        // Linux: no password step any more (André, 2026-11-25: "linking a watch
+                        // should never affect the system"); Sommet's own box asks for the code.
                         text: Qt.platform.os === "linux"
-                              ? (!DeviceService.bleListening
-                                 // André, 2026-11-24: "we should be more simple and clear".
-                                 ? qsTr("Step 1 of 2: your computer asks for your password. Sommet " +
-                                        "needs it once, so the watch remembers this computer. " +
-                                        "Don't start on the watch yet.")
-                                 : qsTr("Step 2 of 2: now, on the watch, choose “Pair with app” " +
-                                        "(first time) or “Sync now”. Its offer is short: if nothing " +
-                                        "happens, choose it again."))
+                              ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
+                                     "watch now. Its offer is short: if nothing happens, choose " +
+                                     "it again. The first time, Sommet asks for the code the " +
+                                     "watch shows")
                               : Qt.platform.os === "windows"
                                 ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
                                        "watch now — its window is short. The first time, " +
@@ -1391,6 +1384,19 @@ PageFlickable {
                         visible: DeviceService.bleError.length > 0
                         text: DeviceService.bleError
                         color: Theme.error
+                        font.pixelSize: Theme.fontSizeLabel
+                    }
+                    // Linux: after a pairing, Sommet writes this computer's identity into the
+                    // watch's pairing record (tools/ble_bond_fix.py). Until that has worked the
+                    // watch can refuse this computer after its link drops; Sommet tries again
+                    // on the next link, and over the cable when the watch is plugged in.
+                    Text {
+                        visible: DeviceService.blePairingFixFailed
+                        text: qsTr("The watch may not reconnect to this computer by itself. Plug " +
+                                   "it in by cable and Sommet will finish setting it up.")
+                        wrapMode: Text.WordWrap
+                        width: parent.width
+                        color: Theme.warning
                         font.pixelSize: Theme.fontSizeLabel
                     }
                 }

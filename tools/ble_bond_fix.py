@@ -8,14 +8,20 @@ watch stores the pairing with an all-zero IRK and the address 00:00:00:00:00:00.
 link drops, the watch hands that record back to its Bluetooth chip, the chip reads "IRK
 starts with eight zero bytes" as "no bond" and throws the key away, and the next connection
 gets "key missing" (nRF51 S130 app 2.1.9 FUN_00024258/FUN_0002421c, read in
-sommet-builds/re-linux-pairing/FINDINGS.md; not yet seen on a watch).
+sommet-builds/re-linux-pairing/FINDINGS.md).
 
 So after a pairing made with privacy off, this rewrites that one record on the watch with
 a settings write (0x1101): a random IRK whose first eight bytes are not all zero, and the
 computer's adapter address (least significant byte first, as the watch stores it, address
 class 0 = public). The watch's own key (EncodingKey), EncodingRnd and EncodingDiv are kept
-byte for byte. In the watch emulator the watch then hands its chip the same record a
-privacy-on pairing gives.
+byte for byte. Seen on André's Ambit3 Peak (firmware 2.4.17), 2026-11-25: the record read
+back as the zero record, the write was answered over Bluetooth with the link up, and after a
+real link drop the watch came back within a second with no code.
+
+Since 2026-11-25 (André: "linking a watch should never affect the system", then "b") Sommet
+no longer turns privacy on while a watch pairs: the backend runs this tool by itself after a
+pairing (AfterPairing below). The Settings switch "Keep Bluetooth privacy on"
+(bt_privacy.set_always) stays as the fallback for a watch this does not cover.
 
 Works over the cable or, with AMBIT_TRANSPORT=ble, over the Bluetooth link (write_nav.Link).
 Reads only, unless --write is given. Never prints a key or an address.
@@ -25,9 +31,11 @@ Reads only, unless --write is given. Never prints a key or an address.
 import argparse
 import json
 import os
+import pathlib
 import re
 import struct
 import sys
+import threading
 import time
 
 import sbem_schema
@@ -215,6 +223,171 @@ def run(link, schema, address, write, wait=time.sleep, tries=3, pause_s=10.0):
     return result
 
 
+class AfterPairing:
+    """When the backend runs the fix by itself (Linux). One small JSON file remembers a pairing
+    still to complete, so it survives a restart of Sommet:
+
+    - paired(): Sommet's code box was answered for a watch. From then on that pairing is
+      "pending", with this computer's adapter address (public addresses only: a random one
+      changes, and the watch could not find the computer by it anyway).
+    - Over Bluetooth: in a session of that same watch (BlueZ device), SETTLE_S after the
+      handshake, at most TRIES_PER_SESSION tries RETRY_S apart. The Bluetooth jobs queue
+      (the backend's watch lock) keeps it out of a sync or a write.
+    - Over the cable: when the watch with the pending pairing's serial (known from its first
+      Bluetooth session) is plugged in; again at most every CABLE_RETRY_S.
+    - "fine" (the watch already has an identity: privacy was on, or done before) and
+      "no_phone" end it as well as a successful write. A failure keeps it pending and
+      failed() true, which Home shows. Forget ends it.
+
+    `run(address, serial, over_ble)` does one try and returns ble_bond_fix's result dict.
+    Nothing here logs an address, a serial or a key."""
+
+    SETTLE_S = 8.0
+    RETRY_S = 45.0
+    TRIES_PER_SESSION = 2
+    CABLE_RETRY_S = 600.0
+
+    def __init__(self, path, run, log=lambda message: None, clock=time.monotonic):
+        self.path = pathlib.Path(path)
+        self.run = run
+        self.log = log
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.busy = False
+        self.session = None          # clock() when this watch's Bluetooth session was first seen
+        self.session_tries = 0
+        self.last_try = None
+        self.last_cable_try = None
+        self.pending = self._load()
+
+    def _load(self):
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        p = data.get("pending") if isinstance(data, dict) else None
+        if isinstance(p, dict) and p.get("device") and ADDRESS.match(p.get("address") or ""):
+            return p
+        return None
+
+    def _save(self):
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".new")
+            tmp.write_text(json.dumps({"pending": self.pending}), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            self.log(f"pairing fix: could not save its state ({exc.__class__.__name__})")
+
+    def paired(self, device, address, address_type=None):
+        """Sommet's code box was answered for `device` (a BlueZ device path or its last part)."""
+        dev = (device or "").split("/")[-1]
+        if not dev:
+            return
+        with self.lock:
+            if address_type not in (None, "public") or not ADDRESS.match(address or ""):
+                self.pending = None
+                self.log("pairing fix: this computer's Bluetooth address is not a fixed one, "
+                         "so the watch's pairing record cannot name it (Settings: Keep "
+                         "Bluetooth privacy on is the way for this computer)")
+            else:
+                self.pending = {"device": dev, "address": address, "serial": None,
+                                "tries": 0, "error": None}
+                self.log("pairing fix: a new pairing; the watch's pairing record is completed "
+                         "in its first session")
+            self.session, self.session_tries, self.last_try, self.last_cable_try = \
+                None, 0, None, None
+            self._save()
+
+    def forgotten(self):
+        with self.lock:
+            if self.pending is not None:
+                self.pending = None
+                self._save()
+            self.session = None
+
+    def failed(self):
+        p = self.pending
+        return bool(p and p.get("error"))
+
+    def due_over_ble(self, status, usb_present):
+        """Looks at the helper's status (polled by the app). True when a try over the
+        Bluetooth link should start now. Never while a watch is on the cable: a tool would then
+        talk to that watch instead (the backend's own rule, server.use_ble)."""
+        p = self.pending
+        if p is None:
+            return False
+        linked = bool(status.get("handshake_done")) and status.get("linked_device") == p["device"]
+        if not linked:
+            self.session = None
+            return False
+        serial = (status.get("device_info") or {}).get("serial")
+        if serial and p.get("serial") != serial:
+            with self.lock:
+                if self.pending is p:
+                    p["serial"] = serial
+                    self._save()
+        now = self.clock()
+        if self.session is None:
+            self.session, self.session_tries, self.last_try = now, 0, None
+        if self.busy or usb_present:
+            return False
+        if now - self.session < self.SETTLE_S or self.session_tries >= self.TRIES_PER_SESSION:
+            return False
+        return self.last_try is None or now - self.last_try >= self.RETRY_S
+
+    def due_over_cable(self, watches):
+        """The serial to fix over the cable now, or None. `watches`: list_watches.py entries."""
+        p = self.pending
+        if p is None or self.busy or not p.get("serial"):
+            return None
+        if not any(isinstance(w, dict) and w.get("serial") == p["serial"] for w in watches or []):
+            return None
+        now = self.clock()
+        if self.last_cable_try is not None and now - self.last_cable_try < self.CABLE_RETRY_S:
+            return None
+        return p["serial"]
+
+    def try_now(self, over_ble, serial=None):
+        """One try (blocks: run it on a thread of its own). None when nothing was tried."""
+        with self.lock:
+            p = self.pending
+            if p is None or self.busy:
+                return None
+            self.busy = True
+            if over_ble:
+                self.session_tries += 1
+                self.last_try = self.clock()
+            else:
+                self.last_cable_try = self.clock()
+        how = "over Bluetooth" if over_ble else "over the cable"
+        try:
+            result = self.run(p["address"], serial, over_ble)
+        except Exception as exc:                                  # noqa: BLE001 - kept, said
+            # The class only: a subprocess error's text holds the command line (the address).
+            result = {"ok": False, "error": f"it stopped ({exc.__class__.__name__})"}
+        result = result if isinstance(result, dict) else {"ok": False, "error": "no answer"}
+        with self.lock:
+            self.busy = False
+            if self.pending is not p:                 # forgotten or paired again meanwhile
+                return result
+            if result.get("ok"):
+                self.pending = None
+                self.log({"fix": f"pairing fix: done {how}, the watch's pairing record names "
+                                 "this computer now",
+                          "fine": "pairing fix: not needed, the watch already knows this "
+                                  "computer",
+                          "no_phone": "pairing fix: the watch holds no app pairing; nothing "
+                                      "to do"}.get(result.get("state"),
+                                                   f"pairing fix: finished {how}"))
+            else:
+                p["tries"] = int(p.get("tries") or 0) + 1
+                p["error"] = str(result.get("error") or "no answer")[:200]
+                self.log(f"pairing fix: try {p['tries']} {how} did not work: {p['error']}")
+            self._save()
+        return result
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--address", required=True, help="this computer's Bluetooth adapter address")
@@ -226,17 +399,21 @@ def main(argv=None):
         return 2
 
     from write_nav import Link, schema_for_link             # noqa: PLC0415
-    link = Link(dry_run=False, verbose=False)
-    link.open()
-    link.command(S.CMD_DEVICE_INFO, b"\x02\x48\x03\x00")   # SuuntoLink's opener, see settings_write
-    descriptor = schema_for_link(link)
-    if not descriptor.exists():
-        print(json.dumps({"ok": False, "error": f"missing schema descriptor: {descriptor.name}"}))
-        return 1
     try:
+        link = Link(dry_run=False, verbose=False)
+        link.open()
+        link.command(S.CMD_DEVICE_INFO, b"\x02\x48\x03\x00")   # SuuntoLink's opener, see settings_write
+        descriptor = schema_for_link(link)
+        if not descriptor.exists():
+            print(json.dumps({"ok": False,
+                              "error": f"missing schema descriptor: {descriptor.name}"}))
+            return 1
         result = run(link, sbem_schema.load(descriptor), args.address, args.write)
     except ValueError as exc:
         result = {"ok": False, "error": str(exc)}
+    except (RuntimeError, TimeoutError, OSError) as exc:
+        # A watch that is gone or busy: said in one line, never a traceback with link details.
+        result = {"ok": False, "error": f"the watch did not answer ({exc.__class__.__name__})"}
     print(json.dumps(result) if args.json else
           "  ".join(f"{k}={v}" for k, v in result.items()))
     return 0 if result.get("ok") else 1

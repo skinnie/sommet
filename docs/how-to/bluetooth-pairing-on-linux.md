@@ -2,16 +2,21 @@
 
 **Symptom.** Your Ambit3 pairs with Sommet over Bluetooth and syncs. After the watch sleeps, or the next time you press **Sync now**, it won't connect again, and Sommet says *"The watch no longer accepts this computer's pairing"*.
 
-**Why.** When a phone pairs with the watch, it tells the watch its Bluetooth identity, and the watch saves the pairing under that address. Linux doesn't do this when its Bluetooth privacy setting is off, which is the default. The watch then saves the pairing under the address `00:00:00:00:00:00`. The link works until the watch sleeps. After that, the computer reconnects from its real address, the watch finds no pairing for it, and drops the link.
+**Why.** When a phone pairs with the watch, it tells the watch its Bluetooth identity. Linux only does this when its Bluetooth privacy setting is on, and it is off by default. Without that identity the watch saves the pairing under the address `00:00:00:00:00:00`, with an empty identity key. The link works until it drops: the watch then hands the pairing to its Bluetooth chip, the chip reads the empty key as "no pairing" and throws the pairing's key away, and the next connection is refused. (Read from the watch's Bluetooth chip firmware and seen on an Ambit3 Peak.)
 
-Sommet handles this for you when you pair from the app: it asks for your password once and turns privacy on just for the pairing (see the README, "Linux: pairing a watch over Bluetooth"). If you'd rather not give Sommet your password, use one of the fixes below.
+**What Sommet does, from 0.2.67.** Right after a pairing, in the watch's first session, Sommet writes this computer's Bluetooth address and a new identity key into the watch's pairing record. The watch's own key stays as it was. Nothing on the computer changes: no password, no setting, and a Bluetooth mouse or keyboard stays connected. Tested on an Ambit3 Peak (firmware 2.4.17): after a real link drop the watch came back within a second, with no code.
 
-## Fix it once: turn on Bluetooth privacy
+If that write doesn't work over Bluetooth, Sommet tries again the next time the watch links, and Home says *"The watch may not reconnect to this computer by itself. Plug it in by cable and Sommet will finish setting it up."* Plug the watch in and Sommet does it over the cable.
 
-The easy way: in Sommet, **Settings → Experimental features → Pair a watch by Bluetooth without
-the password**. It does the steps below for you (your system asks for the password once) and
-keeps a copy of the file as `/etc/bluetooth/main.conf.before-sommet`. Turning the switch off
-puts the setting back. By hand:
+Sommet 0.2.66 asked for your password during a pairing instead, to turn privacy on for it. That switched Bluetooth off and on, so a Bluetooth mouse or keyboard dropped for a moment each time.
+
+Not yet tested on the Kailash, the Traverse or the Traverse Alpha. If a watch still forgets this computer after pairing, use the fallback below. A watch paired with privacy off before 0.2.67 keeps its broken pairing. Pair it once more (on the watch **Bluetooth → Unpair → Forget**, in Sommet **Forget Bluetooth device**, then **Pair → Pair with app** on the watch), and Sommet completes the new one.
+
+## Fallback: turn on Bluetooth privacy
+
+The easy way: in Sommet, **Settings → Experimental features → Keep Bluetooth privacy on**. It does
+the steps below for you (your system asks for the password once) and keeps a copy of the file as
+`/etc/bluetooth/main.conf.before-sommet`. Turning the switch off puts the setting back. By hand:
 
 
 1. Check the current setting:

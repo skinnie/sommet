@@ -1,114 +1,41 @@
 #!/usr/bin/env python3
-"""bt_privacy.py without root or a real adapter: stand-in `pkexec` and `btmgmt` on PATH run
-the real root script against a fake adapter state, so the on / already / cancelled / off
-paths and the moment the window closes are all checked."""
+"""bt_privacy.py (the Settings switch "Keep Bluetooth privacy on") without root: a stand-in
+`pkexec` on PATH runs the real root script against a scratch main.conf, so on, off, a
+cancelled prompt and the polkit install are all checked. Also: the switch is off by default,
+and Sommet no longer has a pairing-time privacy step (watch-protocol/09)."""
 
 import os
 import pathlib
 import stat
 import sys
 import tempfile
-import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import bt_privacy as P  # noqa: E402
 
-P.notify = lambda: None          # no real desktop notifications from a test run
-# Never this computer's installed copies (a pairing here installs them; see test_installed_*).
+# Never this computer's installed copies (turning the switch on here installs them).
 P.INSTALLED_DIR = pathlib.Path("/nonexistent/sommet-test")
 
 
-def fake_tools(tmp, pkexec_code=None, privacy_on=False):
-    state = tmp / "privacy"
-    state.write_text("on" if privacy_on else "off")
-    calls = tmp / "calls"
-    calls.write_text("")
-    btmgmt = tmp / "btmgmt"
-    btmgmt.write_text(f"""#!/bin/bash
-echo "$*" >> {calls}
-case "$1" in
-  info) s="powered bondable le"; [ "$(cat {state})" = on ] && s="$s privacy"
-        echo "hci0: Primary controller"; echo "	current settings: $s" ;;
-  privacy) echo "$2" > {state} ;;
-esac
-""")
+def fake_tools(tmp, pkexec_code=None):
     pkexec = tmp / "pkexec"
     pkexec.write_text("#!/bin/bash\n" + (f"exit {pkexec_code}\n" if pkexec_code else 'exec "$@"\n'))
-    for f in (btmgmt, pkexec):
-        f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    pkexec.chmod(pkexec.stat().st_mode | stat.S_IEXEC)
     os.environ["PATH"] = f"{tmp}:{os.environ['PATH']}"
-    return state, calls
 
 
-def test_on_then_off():
+def test_no_pairing_time_privacy_step_any_more():
+    # André, 2026-11-25: "linking a watch should never affect the system". The pairing window
+    # (pkexec + btmgmt, Bluetooth off and on twice) is gone; ble_bond_fix.py completes the
+    # watch's pairing record instead.
+    for gone in ("PrivacyWindow", "run_window", "check", "ROOT_SCRIPT", "notify"):
+        assert not hasattr(P, gone), gone
+    assert not (pathlib.Path(P.__file__).resolve().parent / "sommet-bluetooth-privacy").exists()
+
+
+def test_the_switch_is_off_on_a_systems_default_file():
     with tempfile.TemporaryDirectory() as d:
-        state, calls = fake_tools(pathlib.Path(d))
-        w = P.PrivacyWindow(log=lambda m: None)
-        assert w.open(prompt_timeout=10) == "on" and w.proc is not None
-        assert state.read_text().strip() == "on"
-        w.close()
-        assert state.read_text().strip() == "off" and w.state == "off"
-        assert calls.read_text().count("power off") == 2
-
-
-def test_already_on_is_left_alone():
-    with tempfile.TemporaryDirectory() as d:
-        state, calls = fake_tools(pathlib.Path(d), privacy_on=True)
-        w = P.PrivacyWindow(log=lambda m: None)
-        assert w.open(prompt_timeout=10) == "already" and w.proc is None
-        w.close()
-        assert state.read_text().strip() == "on" and "power" not in calls.read_text()
-
-
-def test_cancelled_prompt():
-    with tempfile.TemporaryDirectory() as d:
-        state, _ = fake_tools(pathlib.Path(d), pkexec_code=126)
-        w = P.PrivacyWindow(log=lambda m: None)
-        assert w.open(prompt_timeout=10) == "declined" and w.proc is None
-        assert state.read_text().strip() == "off"
-
-
-def test_closes_when_the_paired_link_drops():
-    with tempfile.TemporaryDirectory() as d:
-        state, _ = fake_tools(pathlib.Path(d))
-        w = P.PrivacyWindow(log=lambda m: None)
-        w.open(prompt_timeout=10)
-        seq = [{"running": True},                                         # waiting for the code
-               {"running": True, "handshake_done": True, "linked_device": "dev"},  # paired
-               {"running": True, "handshake_done": True, "linked_device": "dev"},
-               {"running": True, "handshake_done": False, "linked_device": None}]  # dropped
-        it = iter(seq)
-        restarted, finished = [], []
-        t = P.run_window(w, lambda: next(it, {"running": True}), lambda: restarted.append(1),
-                         on_done=lambda: finished.append(1), poll_s=0.01)
-        t.join(10)
-        assert restarted == [1] and finished == [1]
-        assert state.read_text().strip() == "off"
-
-
-def test_closes_when_no_watch_comes():
-    with tempfile.TemporaryDirectory() as d:
-        state, _ = fake_tools(pathlib.Path(d))
-        w = P.PrivacyWindow(log=lambda m: None)
-        w.open(prompt_timeout=10)
-        began = time.monotonic()
-        finished = []
-        t = P.run_window(w, lambda: {"running": True}, lambda: None,
-                         on_done=lambda: finished.append(1), poll_s=0.01, idle_s=0.2)
-        t.join(10)
-        assert finished == [1] and state.read_text().strip() == "off"
-        assert time.monotonic() - began < 5
-
-
-def test_not_needed_with_a_watch_already_paired(monkeypatch=None):
-    real = P.suunto_paired
-    P.suunto_paired = lambda: True
-    try:
-        needed, reason = P.check()
-        assert not needed
-    finally:
-        P.suunto_paired = real
-
+        assert P.always_on(_conf(pathlib.Path(d))) is False
 
 
 CONF = """[General]
@@ -154,14 +81,6 @@ def test_set_always_on_then_off_changes_one_line_and_keeps_a_copy():
             assert conf.read_text() == CONF.replace("#Privacy = off", "Privacy = device")
             assert (tmp / "main.conf.before-sommet").read_text() == CONF
             assert P.always_on() is True
-            paired, which = P.suunto_paired, P.shutil.which
-            P.suunto_paired = lambda: False               # as on a computer with no watch paired
-            P.shutil.which = lambda tool, *a, **k: "/usr/bin/" + tool
-            try:
-                needed, reason = P.check()
-            finally:
-                P.suunto_paired, P.shutil.which = paired, which
-            assert needed is False and "always on" in reason, reason
             r = P.set_always(False, prompt_timeout=10)
             assert r == {"ok": True, "always": False}, r
             assert conf.read_text() == CONF
@@ -202,27 +121,29 @@ def test_installed_copies_and_polkit_description():
     with tempfile.TemporaryDirectory() as t:
         root = pathlib.Path(t)
         tools = pathlib.Path(P.__file__).resolve().parent
+        old = root / "usr/local/libexec/sommet/sommet-bluetooth-privacy"     # 0.2.66's, unused now
+        old.parent.mkdir(parents=True)
+        old.write_text("#!/bin/bash\n")
         r = subprocess.run([str(tools / "sommet-polkit-install"), str(root)], capture_output=True, text=True)
         assert r.returncode == 0 and r.stdout == "", r
+        assert not old.exists(), "the old pairing script was left installed"
         dest = root / "usr/local/libexec/sommet"
-        for name in ("sommet-bluetooth-privacy", "sommet-bluetooth-privacy-always"):
-            assert (dest / name).read_bytes() == (tools / name).read_bytes()
-            assert os.access(dest / name, os.X_OK)
+        name = "sommet-bluetooth-privacy-always"
+        assert (dest / name).read_bytes() == (tools / name).read_bytes()
+        assert os.access(dest / name, os.X_OK)
         policy = ET.parse(root / "usr/share/polkit-1/actions/io.github.skinnie.sommet.policy")
         paths = {a.get("id"): a.find("annotate").text for a in policy.getroot().iter("action")}
-        assert paths == {
-            "io.github.skinnie.sommet.pair-watch": "/usr/local/libexec/sommet/sommet-bluetooth-privacy",
-            "io.github.skinnie.sommet.pair-without-password":
-                "/usr/local/libexec/sommet/sommet-bluetooth-privacy-always"}, paths
+        assert paths == {"io.github.skinnie.sommet.keep-bluetooth-privacy":
+                         "/usr/local/libexec/sommet/sommet-bluetooth-privacy-always"}, paths
         assert all(a.find("message").text for a in policy.getroot().iter("action"))
         # The package's copy is used: the test's copies are not root's, and before that, none.
         saved = (P.INSTALLED_DIR, P.POLICY_FILE)
         P.INSTALLED_DIR, P.POLICY_FILE = dest, root / "usr/share/polkit-1/actions/io.github.skinnie.sommet.policy"
         try:
-            assert P.script_path(P.ROOT_SCRIPT) == P.ROOT_SCRIPT       # owned by this user, not root
+            assert P.script_path(P.ALWAYS_SCRIPT) == P.ALWAYS_SCRIPT   # owned by this user, not root
         finally:
             P.INSTALLED_DIR, P.POLICY_FILE = saved
-        assert P.script_path(P.ROOT_SCRIPT) == P.ROOT_SCRIPT           # nothing installed
+        assert P.script_path(P.ALWAYS_SCRIPT) == P.ALWAYS_SCRIPT       # nothing installed
 
 
 def main():

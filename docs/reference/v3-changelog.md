@@ -7,6 +7,34 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-25: Linux: pairing a watch by Bluetooth no longer touches the computer (watch-protocol/09)
+
+André: "linking a watch should never affect the system", then "b".
+
+- **No password, no adapter switched off.** Until now a first pairing on Linux asked for the
+  password and turned Bluetooth privacy on for it, which switched Bluetooth off and on and dropped
+  a Bluetooth mouse (X230, 2026-11-25). That step is gone.
+- **Why it was there, read properly.** With privacy off the Linux kernel gives the watch no
+  identity while pairing (net/bluetooth/smp.c). The watch stores the pairing with address
+  00:00:00:00:00:00 and an empty identity key; at the next link drop its Bluetooth chip (nRF51,
+  app 2.1.9) reads that as "no pairing" and drops the key, and the watch refuses the computer.
+- **What Sommet does instead.** After a pairing made with Sommet's code box, the watch's first
+  session gets this computer's adapter address and a new identity key written into its pairing
+  record (`tools/ble_bond_fix.py`, settings write 0x1101; the watch's own key is kept). Over
+  Bluetooth, two tries per link; else over the cable once that watch is plugged in. Until it
+  has worked Home says "The watch may not reconnect to this computer by itself. Plug it in by
+  cable and Sommet will finish setting it up." Forget ends it.
+- **The Settings switch stays, as a fallback**, renamed "Keep Bluetooth privacy on", off by
+  default, for a watch that still forgets the computer. Its password window now describes only
+  that; the next use removes 0.2.66's pairing script from `/usr/local/libexec/sommet/`.
+- Seen on André's Ambit3 Peak (firmware 2.4.17) by hand on 2026-11-25: the record read back as
+  the zero record, the write was answered over Bluetooth, and after a real link drop the watch
+  came back within a second with no code, the mouse connected throughout. The automatic path
+  (code box -> first session -> write) is checked with tests and the watch emulator only.
+  Kailash, Traverse and Traverse Alpha not tested.
+
+---
+
 ## 2026-11-24: Position by Wi-Fi, place fields only with Manual, a clear Linux password window
 
 - **Wi-Fi** (André: "can't we also know aprox location by wifi?", then "1 a"): a switch in

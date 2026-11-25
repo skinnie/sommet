@@ -14,65 +14,33 @@ when you press **Pair**, before it asks for anything:
 
 The cable needs neither.
 
-## Linux: pairing a watch over Bluetooth (the password prompt)
+## Linux: pairing a watch over Bluetooth
 
-**What you'll see.** The first time you pair a Suunto watch with Sommet over Bluetooth on
-Linux (**Pair another device by Bluetooth → Suunto watch**), your system asks for your
-password once, with the usual administrator prompt. A notification says why just before it,
-and the prompt names `sommet-bluetooth-privacy`. Your Bluetooth mouse, keyboard or
-headphones may disconnect for a second, then come back.
+**What you'll see.** Press **Pair** in Sommet, choose **Pair → Pair with app** on the watch, and
+type the code the watch shows into Sommet. Nothing asks for your password, and your other
+Bluetooth devices stay connected.
 
-**Order matters:** type the password **first**, and only then choose **Pair → Pair with app**
-on the watch, and type the code it shows into Sommet. The watch only offers to pair for a
-short time; if you start it on the watch before the password, it can run out, and you
-choose Pair with app again.
+**What Sommet does after that.** Linux gives the watch no identity of the computer while it
+pairs: only with Bluetooth *privacy* on, and that is off by default. Without it the watch would
+refuse the computer the first time the link drops (it sleeps, or goes out of range). So in the
+watch's first session Sommet writes this computer's Bluetooth address and an identity key into
+the watch's pairing record itself, and changes nothing on the computer. If that doesn't work
+over Bluetooth, Sommet tries again on the next link, and Home asks you to plug the watch in by
+cable to finish it. Why, and the fallback: [Keep a Bluetooth watch paired on
+Linux](bluetooth-pairing-on-linux.md).
 
-**Why Sommet asks.** When a phone pairs with the watch, it tells the watch its Bluetooth
-identity, and the watch saves the pairing under that address. Linux only does this when its
-Bluetooth *privacy* setting is on, and it is off by default. With privacy off, the watch saves
-the pairing under the address `00:00:00:00:00:00`. Everything works until the link drops
-(the watch sleeps, or goes out of range). From then on the watch refuses the computer, and
-you'd have to pair again every time. Sommet says so with *"The watch no longer accepts this
-computer's pairing"*.
+**Sommet 0.2.66 and earlier** asked for your password during a pairing, to turn privacy on for
+it. That switched Bluetooth off and on twice, and a Bluetooth mouse or keyboard dropped each
+time. If you typed that password once, Sommet also copied a script to
+`/usr/local/libexec/sommet/` and described it to the system in
+`/usr/share/polkit-1/actions/io.github.skinnie.sommet.policy`. That pairing script is not used
+any more: the next time you turn **Settings → Experimental features → Keep Bluetooth privacy
+on** on or off, Sommet removes it. To remove everything by hand, delete that folder and that
+file as administrator.
 
-**What Sommet does with your password.** Changing privacy needs administrator rights, so
-Sommet runs one short script as root through `pkexec` (`tools/bt_privacy.py`). It:
-
-1. turns Bluetooth privacy on, unless it already is. This switches Bluetooth off for about
-   a second.
-2. waits while the watch pairs and syncs.
-3. turns privacy off again, the same way, once the watch's link drops by itself. It also
-   turns it off if you stop Bluetooth in Sommet, if Sommet quits, or after 30 minutes at
-   most. If privacy was already on, Sommet leaves it on.
-
-The watch keeps the address it saved while privacy was on, so it reconnects later with
-privacy off: tested on an Ambit3 Peak, through a link drop and a computer restart. Nothing
-in `/etc` is changed, and a restart of the computer or of Bluetooth also resets privacy to
-your setting.
-
-**The first time, the password window shows a file path.** The system only shows a sentence
-for programs it has been told about. So with that first password, Sommet also copies its two
-Bluetooth scripts to `/usr/local/libexec/sommet/` and adds a short description of them,
-`/usr/share/polkit-1/actions/io.github.skinnie.sommet.policy`. From then on the window says
-"Sommet needs your password once, so the watch remembers this computer." A newer Sommet with
-other scripts shows the path once more and puts its own in place. To remove them, delete that
-folder and that file (as administrator).
-
-**When Sommet doesn't ask.**
-- A watch is already paired with this computer: that's a reconnect, not a pairing.
-- `pkexec` or `btmgmt` isn't installed (`btmgmt` is in `bluez` on Ubuntu and Debian, and in
-  `bluez-utils` on Arch).
-- You cancel the prompt. The pairing still works, but the watch won't reconnect after the
-  link drops.
-
-**Doing it yourself instead.** If you'd rather not give Sommet your password, turn privacy on
-once in `/etc/bluetooth/main.conf`, or only for the pairing with `btmgmt`. The commands, and
-how to undo them, are in
-[Keep a Bluetooth watch paired on Linux](bluetooth-pairing-on-linux.md).
-
-**Already paired before this?** A watch paired with privacy off has the `00:00:00:00:00:00`
-pairing. Pair it once more: on the watch **Bluetooth → Unpair → Forget**, in Sommet
-**Forget Bluetooth device**, then pair again as above.
+**Already paired with privacy off before 0.2.67?** That watch keeps the `00:00:00:00:00:00`
+pairing, and Sommet only completes new pairings. Pair it once more: on the watch **Bluetooth →
+Unpair → Forget**, in Sommet **Forget Bluetooth device**, then pair again as above.
 
 Android phones and iPhones send their identity when pairing (seen in Bluetooth captures of the
 Suunto app), so they aren't affected. macOS and Windows haven't been tested with this yet.
@@ -106,10 +74,9 @@ minutes, before connecting again.
 
 ## Linux: "Bluetooth on this computer is not answering"
 
-Sommet asks the system's Bluetooth service one short question before it pairs a watch, before
-it asks for your password, and before it reads a Magene, a Bryton, a Wahoo or a sensor over
-Bluetooth. If no answer comes within three seconds, Sommet stops there and says so. It does
-not ask for the password and does not switch the adapter off and on.
+Sommet asks the system's Bluetooth service one short question before it pairs a watch and
+before it reads a Magene, a Bryton, a Wahoo or a sensor over Bluetooth. If no answer comes
+within three seconds, Sommet stops there and says so.
 
 The message means the service (`bluetoothd`) is running but stuck: no app on the computer can
 use Bluetooth, and a Bluetooth mouse or keyboard may have stopped too. It is not about the

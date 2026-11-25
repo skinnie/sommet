@@ -63,10 +63,9 @@ class Command(unittest.TestCase):
             self.assertIn(word, str(e.exception))
 
 
-class NoPasswordPromptWhenItCannotWork(unittest.TestCase):
-    def test_the_check_comes_before_the_privacy_step(self):
-        saved = (server.ble_bridge.daemon_command, server._open_bt_privacy_window,
-                 server.ble_bridge.bridge)
+class NoHelperWhenItCannotWork(unittest.TestCase):
+    def test_the_check_comes_before_the_helper_starts(self):
+        saved = (server.ble_bridge.daemon_command, server.ble_bridge.bridge)
 
         class Bridge:
             started = False
@@ -76,12 +75,10 @@ class NoPasswordPromptWhenItCannotWork(unittest.TestCase):
 
             def start(self, **_):
                 Bridge.started = True
-        opened = []
 
         def refuse(_script):
             raise server.ble_bridge.BleBridgeError(server.ble_bridge.DBUS_MODULES_HINT)
         server.ble_bridge.daemon_command = refuse
-        server._open_bt_privacy_window = lambda: opened.append(1)
         server.ble_bridge.bridge = Bridge()
         try:
             sent = []
@@ -89,9 +86,7 @@ class NoPasswordPromptWhenItCannotWork(unittest.TestCase):
             h._send_json = lambda code, obj: sent.append((code, obj))
             h._handle_ble_connect({})
         finally:
-            (server.ble_bridge.daemon_command, server._open_bt_privacy_window,
-             server.ble_bridge.bridge) = saved
-        self.assertEqual(opened, [], "the password prompt was shown although Bluetooth cannot start")
+            server.ble_bridge.daemon_command, server.ble_bridge.bridge = saved
         self.assertFalse(Bridge.started)
         self.assertEqual(sent[0][0], 502)
         self.assertIn("python3-dbus", sent[0][1]["error"])

@@ -69,10 +69,10 @@ new move takes about a minute, a first full read several. On Android, Bluetooth 
 macOS Bluetooth isn't tested.
 
 On Linux, Bluetooth needs two system packages, `python3-dbus` and `python3-gi` (most desktop
-installs have them). The first time you pair a watch, your system asks for your password once:
-Sommet switches Bluetooth privacy on for that pairing, because without it the watch refuses the
-computer after its first sleep and you would pair again every time. More in
-[Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
+installs have them). Pairing asks for no password and changes nothing on the computer: Linux
+doesn't give the watch the computer's identity while pairing, so Sommet writes it into the
+watch's pairing record in the first session. Without it the watch would refuse the computer
+after its first sleep. More in [Bluetooth on Linux](docs/how-to/bluetooth-on-linux.md).
 
 ## More
 

@@ -90,17 +90,226 @@ class Checks(unittest.TestCase):
         self.assertEqual(rec.mac, ZERO(6))          # the original is not changed in place
 
 
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+DEV = "dev_AA_BB_CC_DD_EE_02"           # made up, like every address here
+
+
+def linked(dev=DEV, serial="TESTSERIAL01", done=True):
+    return {"handshake_done": done, "linked_device": dev, "device_info": {"serial": serial}}
+
+
+class AfterPairingRules(unittest.TestCase):
+    """When the backend completes a Linux pairing on the watch by itself (watch-protocol/09
+    step 2, André 2026-11-25 "b")."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = pathlib.Path(self.tmp.name) / "fix.json"
+        self.calls, self.answers, self.logs = [], [], []
+        self.clock = Clock()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def make(self):
+        def run(address, serial, over_ble):
+            self.calls.append((address, serial, over_ble))
+            return self.answers.pop(0) if self.answers else {"ok": True, "state": "fix"}
+        return B.AfterPairing(self.path, run, log=self.logs.append, clock=self.clock)
+
+    def test_nothing_runs_without_a_pairing_made_here(self):
+        fix = self.make()
+        self.clock.t += 100
+        self.assertFalse(fix.due_over_ble(linked(), False))
+        self.assertIsNone(fix.due_over_cable([{"serial": "TESTSERIAL01"}]))
+        self.assertIsNone(fix.try_now(True))
+        self.assertEqual(self.calls, [])
+        self.assertFalse(fix.failed())
+
+    def test_after_a_pairing_it_runs_once_in_that_watchs_first_session(self):
+        fix = self.make()
+        fix.paired("/org/bluez/hci0/" + DEV, ADDR, "public")
+        self.assertFalse(fix.due_over_ble(linked(done=False), False))     # still pairing
+        self.assertFalse(fix.due_over_ble(linked(), False))               # session starts now
+        self.clock.t += B.AfterPairing.SETTLE_S - 1
+        self.assertFalse(fix.due_over_ble(linked(), False))               # settling
+        self.clock.t += 1
+        self.assertTrue(fix.due_over_ble(linked(), False))
+        self.assertEqual(fix.try_now(True), {"ok": True, "state": "fix"})
+        self.assertEqual(self.calls, [(ADDR, None, True)])
+        self.assertIsNone(fix.pending)
+        self.clock.t += 1000
+        self.assertFalse(fix.due_over_ble(linked(), False))               # done: never again
+        self.assertIsNone(self.make().pending)                            # also after a restart
+        self.assertFalse(any(ADDR.lower() in m.lower() or "TESTSERIAL" in m for m in self.logs))
+
+    def test_not_for_another_watch_nor_with_a_watch_on_the_cable(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "public")
+        fix.due_over_ble(linked(dev="dev_11_22_33_44_55_66"), False)
+        self.clock.t += 60
+        self.assertFalse(fix.due_over_ble(linked(dev="dev_11_22_33_44_55_66"), False))
+        fix.due_over_ble(linked(), True)
+        self.clock.t += 60
+        self.assertFalse(fix.due_over_ble(linked(), True))     # a watch on the cable: never BLE
+        self.assertTrue(fix.due_over_ble(linked(), False))
+
+    def test_a_random_adapter_address_is_not_written(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "random")
+        self.assertIsNone(fix.pending)
+        fix.paired(DEV, "not an address", None)
+        self.assertIsNone(fix.pending)
+        self.assertTrue(self.logs)
+
+    def test_fine_and_no_phone_end_it_without_a_write(self):
+        for state in ("fine", "no_phone"):
+            fix = self.make()
+            fix.paired(DEV, ADDR, "public")
+            self.answers.append({"ok": True, "state": state, "written": False})
+            self.assertIsNotNone(fix.try_now(True))
+            self.assertIsNone(fix.pending, state)
+            self.assertFalse(fix.failed())
+
+    def test_a_failure_shows_and_is_tried_again_then_over_the_cable(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "public")
+        fix.due_over_ble(linked(), False)                         # learns the serial
+        self.clock.t += B.AfterPairing.SETTLE_S
+        self.answers += [{"ok": False, "error": "the watch did not answer"}] * 3
+        self.assertTrue(fix.due_over_ble(linked(), False))
+        fix.try_now(True)
+        self.assertTrue(fix.failed())                             # Home's line
+        self.assertEqual(B.AfterPairing(self.path, None).pending["error"],
+                         "the watch did not answer")              # kept across a restart
+        self.clock.t += 10
+        self.assertFalse(fix.due_over_ble(linked(), False))       # not at once
+        self.clock.t += B.AfterPairing.RETRY_S
+        self.assertTrue(fix.due_over_ble(linked(), False))
+        fix.try_now(True)
+        self.clock.t += 1000
+        self.assertFalse(fix.due_over_ble(linked(), False))       # two tries per session
+        fix.due_over_ble(linked(done=False), False)               # the link drops...
+        fix.due_over_ble(linked(), False)                         # ...a new session
+        self.clock.t += B.AfterPairing.SETTLE_S
+        self.assertTrue(fix.due_over_ble(linked(), False))
+        # The cable: only the watch with that serial, and not again at once.
+        self.assertIsNone(fix.due_over_cable([{"serial": "OTHER"}]))
+        self.assertEqual(fix.due_over_cable([{"serial": "TESTSERIAL01"}]), "TESTSERIAL01")
+        fix.try_now(False, "TESTSERIAL01")
+        self.assertIsNone(fix.due_over_cable([{"serial": "TESTSERIAL01"}]))
+        self.clock.t += B.AfterPairing.CABLE_RETRY_S
+        self.assertEqual(fix.due_over_cable([{"serial": "TESTSERIAL01"}]), "TESTSERIAL01")
+        self.answers.append({"ok": True, "state": "fix", "written": True})
+        fix.try_now(False, "TESTSERIAL01")
+        self.assertEqual(self.calls[-1], (ADDR, "TESTSERIAL01", False))
+        self.assertFalse(fix.failed())
+        self.assertIsNone(fix.pending)
+
+    def test_forget_ends_it_and_a_crash_counts_as_a_failure(self):
+        fix = self.make()
+        fix.paired(DEV, ADDR, "public")
+        fix.forgotten()
+        self.assertIsNone(fix.pending)
+        self.assertIsNone(B.AfterPairing(self.path, None).pending)
+
+        def boom(*_a):
+            raise TimeoutError(f"Command ['x', '--address', '{ADDR}'] timed out")
+        fix = B.AfterPairing(self.path, boom, log=self.logs.append, clock=self.clock)
+        fix.paired(DEV, ADDR, "public")
+        fix.try_now(True)
+        self.assertTrue(fix.failed())
+        self.assertNotIn(ADDR, fix.pending["error"])            # never the address in a message
+        self.assertFalse(any(ADDR in m for m in self.logs))
+
+    def test_a_damaged_state_file_means_nothing_pending(self):
+        self.path.write_text("{not json")
+        self.assertIsNone(self.make().pending)
+        self.path.write_text('{"pending": {"device": "dev_x", "address": "bad"}}')
+        self.assertIsNone(self.make().pending)
+
+
 @unittest.skipUnless(platform.system() == "Linux", "Linux only")
-class PrivacyStepSwitch(unittest.TestCase):
-    def test_the_test_switch_skips_the_privacy_step(self):
-        import bt_privacy
-        os.environ["SOMMET_BT_PAIR_WITHOUT_PRIVACY"] = "1"
-        try:
-            needed, reason = bt_privacy.check()
-        finally:
-            del os.environ["SOMMET_BT_PAIR_WITHOUT_PRIVACY"]
-        self.assertFalse(needed)
-        self.assertIn("without the privacy step", reason)
+class BackendWiring(unittest.TestCase):
+    """server.py: the code box marks the pairing, the status poll starts the try, Forget ends
+    it, and the status says when it failed."""
+
+    def setUp(self):
+        import tempfile
+        sys.path.insert(0, str(HERE.parent / "desktop" / "backend"))
+        import server
+        self.server = server
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = (server.PAIRING_FIX_FILE, server._PAIRING_FIX[0], server.ble_bridge.bridge,
+                      server._pairing_fix_run, server.USB_WATCH_PRESENT)
+        server.PAIRING_FIX_FILE = pathlib.Path(self.tmp.name) / "fix.json"
+        server._PAIRING_FIX[0] = None
+        server.USB_WATCH_PRESENT = False
+
+    def tearDown(self):
+        s = self.server
+        (s.PAIRING_FIX_FILE, s._PAIRING_FIX[0], s.ble_bridge.bridge, s._pairing_fix_run,
+         s.USB_WATCH_PRESENT) = self.saved
+        self.tmp.cleanup()
+
+    def test_code_box_then_session_then_status(self):
+        s = self.server
+        state = {"pending_passkey_device": "/org/bluez/hci0/" + DEV, "adapter_address": ADDR,
+                 "adapter_address_type": "public", "running": True}
+
+        log = pathlib.Path(self.tmp.name) / "ble_daemon.log"
+
+        class Bridge:
+            _log_path = log
+
+            def status(self):
+                return dict(state)
+
+            def submit_passkey(self, _code):
+                return True
+        s.ble_bridge.bridge = Bridge()
+        h = s.Handler.__new__(s.Handler)
+        sent = []
+        h._send_json = lambda code, obj: sent.append((code, obj))
+        h._handle_ble_passkey({"passkey": 123456})
+        self.assertEqual(sent[-1][0], 200)
+        fix = s._pairing_fix()
+        self.assertEqual(fix.pending["device"], DEV)
+
+        ran = []
+        fix.run = lambda address, serial, over_ble: ran.append(over_ble) or \
+            {"ok": False, "error": "the watch did not answer"}
+        state.update(pending_passkey_device=None, handshake_done=True, linked_device=DEV,
+                     device_info={"serial": "TESTSERIAL01"})
+        fix.clock = Clock()
+        h._handle_ble_status()                                   # the session is seen
+        fix.clock.t += B.AfterPairing.SETTLE_S
+        h._handle_ble_status()                                   # starts the try on a thread
+        for _ in range(200):
+            if not fix.busy and ran:
+                break
+            import time
+            time.sleep(0.01)
+        self.assertEqual(ran, [True])
+        h._handle_ble_status()
+        self.assertEqual(sent[-1][1]["pairing_fix"], {"pending": True, "failed": True})
+        self.assertNotIn("bt_privacy", sent[-1][1])
+        state["running"] = False                                 # Forget ends it
+        h._handle_ble_forget()
+        h._handle_ble_status()
+        self.assertEqual(sent[-1][1]["pairing_fix"], {"pending": False, "failed": False})
+        text = log.read_text()
+        self.assertIn("pairing fix:", text)
+        self.assertNotIn(ADDR, text.upper())
+        self.assertNotIn("TESTSERIAL", text)
 
 
 def _descriptor():

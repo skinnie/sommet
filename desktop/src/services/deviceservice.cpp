@@ -27,7 +27,7 @@ DeviceService::DeviceService(QObject *parent) : QObject(parent)
     // A watch paired over Bluetooth before: listen for it from launch, quietly, so its "Sync
     // now" is heard without pressing Pair (André, 2026-11-21: the service stopped with Sommet
     // and a restarted Sommet heard nothing). Only after a pairing, so a fresh install never
-    // starts Bluetooth (nor Linux's privacy prompt) on its own.
+    // starts Bluetooth on its own.
     // At once, and Home says "Looking for your watch" meanwhile (André, 2026-11-21: after 8 s
     // with nothing on screen one wonders "is this working?"; it took 21 s that evening: a 3 s
     // wait here, a 5 s retry while the backend was starting, then 11 s for a scan burst).
@@ -654,8 +654,8 @@ void DeviceService::resumeBle(int tries)
         return;                        // Pair was pressed meanwhile: that flow owns it
     QJsonObject body;
     body[QStringLiteral("forget")] = false;
-    // Started by Sommet, not by a press on Pair: never the Linux password prompt (P5Q,
-    // 2026-11-24: it came up by itself at launch).
+    // Started by Sommet, not by a press on Pair: a helper already up is left as it is (the
+    // backend restarts one only for Pair).
     body[QStringLiteral("auto")] = true;
     QNetworkRequest request(backendUrl(QStringLiteral("/api/ble/connect")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -701,6 +701,8 @@ void DeviceService::pollBleStatus()
             return;
         }
         m_bleAttemptSeconds += 1;
+        m_blePairingFixFailed = obj.value(QStringLiteral("pairing_fix")).toObject()
+                                    .value(QStringLiteral("failed")).toBool();
         m_bleSubscribed = obj.value(QStringLiteral("subscribed")).toBool();
         m_bleHandshakeDone = obj.value(QStringLiteral("handshake_done")).toBool();
         const auto pendingVal = obj.value(QStringLiteral("pending_passkey_device"));
@@ -795,6 +797,12 @@ void DeviceService::watchBleStatus(const QJsonObject &obj)
     }
     const bool done = obj.value(QStringLiteral("handshake_done")).toBool();
     const bool subscribed = obj.value(QStringLiteral("subscribed")).toBool();
+    const bool fixFailed = obj.value(QStringLiteral("pairing_fix")).toObject()
+                               .value(QStringLiteral("failed")).toBool();
+    if (fixFailed != m_blePairingFixFailed) {
+        m_blePairingFixFailed = fixFailed;
+        emit bleStateChanged();
+    }
     // A pairing can start later too (the passkey dialog opens on this, HomePage.qml).
     const auto pendingVal = obj.value(QStringLiteral("pending_passkey_device"));
     const QString pending = pendingVal.isNull() ? QString() : pendingVal.toString();
@@ -865,6 +873,7 @@ void DeviceService::forgetBle()
     m_bleHandshakeDone = false;
     m_blePendingPasskeyDevice.clear();
     m_bleError.clear();
+    m_blePairingFixFailed = false;
     emit bleStateChanged();
 
     QNetworkReply *reply =
