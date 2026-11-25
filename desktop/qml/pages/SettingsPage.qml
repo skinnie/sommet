@@ -1415,14 +1415,56 @@ PageFlickable {
                             sommetSyncStatus.text = qsTr("Stopped syncing."); sommetSyncStatus.tone = "success"
                         }
                     }
-                    // sync/14: after pointing Sommet Sync at another server, what the light
-                    // library left only on the previous one is copied over at each sync.
-                    Text {
-                        visible: ActivityService.sommetRescueLeft > 0
-                        text: qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.")
-                              .arg(ActivityService.sommetRescueLeft).arg(ActivityService.sommetRescueServer)
-                        color: Theme.text; font.pixelSize: Theme.fontSizeBody
-                        width: parent.width; wrapMode: Text.WordWrap
+                    // sync/14: after pointing Sommet Sync at another server (or turning it off),
+                    // what the light library left only on the previous one is copied over at
+                    // each sync. Same words and warning style as Android's Settings.
+                    Column {
+                        id: rescueBox
+                        readonly property int left: ActivityService.sommetRescueLeft
+                        property bool confirming: false
+                        visible: left > 0
+                        width: parent.width
+                        spacing: Theme.spacingSmall
+                        StatusNote {
+                            width: parent.width
+                            tone: "warning"
+                            closable: false
+                            text: {
+                                const server = ActivityService.sommetRescueServer
+                                if (databaseSection.syncOn)
+                                    return rescueBox.left === 1
+                                        ? qsTr("1 older activity is still only on your previous server (%1). Keep it running: Sommet copies it to the new one at each sync.").arg(server)
+                                        : qsTr("%1 older activities are still only on your previous server (%2). Keep it running: Sommet copies them to the new one at each sync.").arg(rescueBox.left).arg(server)
+                                return rescueBox.left === 1
+                                    ? qsTr("1 older activity is only on your previous server (%1). Set up a server again and Sommet copies it over.").arg(server)
+                                    : qsTr("%1 older activities are only on your previous server (%2). Set up a server again and Sommet copies them over.").arg(rescueBox.left).arg(server)
+                            }
+                        }
+                        RoundedButton {
+                            visible: !rescueBox.confirming
+                            text: qsTr("Forget the previous server")
+                            onClicked: rescueBox.confirming = true
+                        }
+                        Text {
+                            visible: rescueBox.confirming
+                            text: rescueBox.left === 1
+                                  ? qsTr("The activity keeps its details here but loses its map and original file. Forget the previous server?")
+                                  : qsTr("The %1 activities keep their details here but lose their map and original file. Forget the previous server?").arg(rescueBox.left)
+                            color: Theme.text; font.pixelSize: Theme.fontSizeBody
+                            width: parent.width; wrapMode: Text.WordWrap
+                        }
+                        Row {
+                            visible: rescueBox.confirming
+                            spacing: Theme.spacingSmall
+                            RoundedButton {
+                                text: qsTr("Forget")
+                                onClicked: { ActivityService.forgetPreviousServer(); rescueBox.confirming = false }
+                            }
+                            RoundedButton {
+                                text: qsTr("Keep")
+                                onClicked: rescueBox.confirming = false
+                            }
+                        }
                     }
 
                     // What this computer keeps (sync/13, André 2026-11-20: "the average joe don't

@@ -62,6 +62,18 @@ per server: pointed at a new server, it sent nothing it had sent before, and the
   opened older move's cached track becomes a kept one at the move. The light library trims
   nothing while a copy is going on. Going back to the first server ends
   the copy. When the list is empty the previous server's address and token are forgotten.
+- Pre-release review fixes: a server change saved while a sync runs waits for it to end (that
+  sync would write the old server's cursor and sent lists back). Settings has **Forget the
+  previous server**, with a confirm step, for an old server that is gone: those activities keep
+  their details but no longer show a map or file kept on a server. An item the old server
+  doesn't have (404, or no points) stops showing as kept on a server. Turning sync off keeps
+  the list too, and Settings then says to set up a server again. intervals.icu imports are left
+  out of the copy only while intervals.icu is connected, on both apps. Android sends a copied
+  FIT that has no Track, and an error while listing what to copy no longer stops a new address
+  from being saved. The desktop note reads "1 older activity" for one, in the warning style.
+- Not covered: a route or POI deleted before the move was already forgotten once the old
+  server had the deletion, so it is not sent to the new one; a device that still holds it can
+  bring it back there.
 - Desktop, tried with the built app against two test servers (tools/sommet_sync_devserver.py) in
   a sandbox, with 88 made-up activities: on server A, 41 older tracks and 10 FITs were left only
   there; moved to B, Settings said "41 older activities are still only on your previous

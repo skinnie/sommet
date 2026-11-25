@@ -3588,6 +3588,12 @@ QString ActivityService::sommetSyncUrl() const
 
 void ActivityService::setSommetSync(const QString &url, const QString &token)
 {
+    if (m_sommetBusy) {
+        m_syncCfgPending = true;
+        m_pendingSyncUrl = url;
+        m_pendingSyncToken = token;
+        return;                                    // applied by sommetSyncEnded()
+    }
     QSettings s;
     const QString oldUrl = s.value(QStringLiteral("connections/sommet_sync/url")).toString();
     const QString oldToken = s.value(QStringLiteral("connections/sommet_sync/token")).toString();
@@ -3623,14 +3629,19 @@ void ActivityService::prepareServerMove(const QString &oldUrl, const QString &ol
             s.remove(QStringLiteral("connections/sommet_sync/previous"));
         }
     } else if (!serverKey(oldUrl).isEmpty() && m_db.isOpen()) {
-        // What the light library left only on the old server: Tracks (not intervals.icu imports,
-        // which come back from there) and the original FITs dropped here once the NAS had them.
+        // What the light library left only on the old server: Tracks (intervals.icu imports only
+        // while intervals.icu is connected, which then still has them; as on Android) and the
+        // original FITs dropped here once the NAS had them.
+        const bool intervals =
+            !s.value(QStringLiteral("connections/intervals_icu/athleteId")).toString().isEmpty()
+            && !s.value(QStringLiteral("connections/intervals_icu/apiKey")).toString().isEmpty();
         QSqlQuery q(m_db);
         q.exec(QStringLiteral(
             "INSERT OR IGNORE INTO sommet_rescue (uid, fmt) "
             "SELECT COALESCE(device,'') || '|' || substr(start_time,1,16), 'gpx' FROM activities "
             "WHERE track_remote = 1 AND COALESCE(gpx_text,'') = '' "
-            "  AND NOT (COALESCE(source,'') = 'intervals' AND COALESCE(external_id,'') <> '')"));
+            "  AND NOT (%1 AND COALESCE(source,'') = 'intervals' AND COALESCE(external_id,'') <> '')")
+            .arg(intervals ? QStringLiteral("1") : QStringLiteral("0")));
         q.exec(QStringLiteral(
             "INSERT OR IGNORE INTO sommet_rescue (uid, fmt) "
             "SELECT COALESCE(a.device,'') || '|' || substr(a.start_time,1,16), 'fit' FROM activities a "
@@ -3677,6 +3688,23 @@ QString ActivityService::sommetRescueServer() const
     return rescuePending()
         ? QSettings().value(QStringLiteral("connections/sommet_sync/previous/url")).toString()
         : QString();
+}
+
+void ActivityService::forgetPreviousServer()
+{
+    if (!m_db.isOpen())
+        return;
+    m_rescueQueue.clear();
+    QSqlQuery(QStringLiteral(
+        "UPDATE activities SET track_remote = NULL "
+        "WHERE COALESCE(gpx_text,'') = '' AND (COALESCE(device,'') || '|' || substr(start_time,1,16)) "
+        "  IN (SELECT uid FROM sommet_rescue WHERE fmt = 'gpx')"), m_db);
+    QSqlQuery(QStringLiteral("DELETE FROM sommet_rescue"), m_db);
+    QSettings().remove(QStringLiteral("connections/sommet_sync/previous"));
+    qInfo().noquote() << "[sync] the previous server is forgotten; what was only there stays there";
+    dbLoadAll();
+    emit activitiesChanged();
+    emit sommetRescueChanged();
 }
 
 void ActivityService::finishRescueIfDone()
@@ -3744,6 +3772,15 @@ void ActivityService::sommetRescueNext()
             done = up.exec();
         } else if (status == 200) {
             done = true;                                   // nothing usable there either
+        }
+        if (done && item.second == QLatin1String("gpx") && !(status == 200 && raw.contains("<trkpt"))) {
+            // No server has this Track: stop showing it as one kept on a server.
+            QSqlQuery none(m_db);
+            none.prepare(QStringLiteral(
+                "UPDATE activities SET track_remote = NULL WHERE COALESCE(gpx_text,'') = '' "
+                "AND COALESCE(device,'') || '|' || substr(start_time,1,16) = ?"));
+            none.addBindValue(item.first);
+            none.exec();
         }
         if (!done) {
             // The previous server is down or refused: the rest waits for the next sync.
@@ -3942,6 +3979,12 @@ void ActivityService::sommetSyncEnded()
     m_sommetBusy = false;
     m_syncFirst = false;
     setSommetProgress(QString(), 0, 0);
+    if (m_syncCfgPending) {                        // a server change saved during this sync
+        m_syncCfgPending = false;
+        setSommetSync(m_pendingSyncUrl, m_pendingSyncToken);
+        m_pendingSyncUrl.clear();
+        m_pendingSyncToken.clear();
+    }
 }
 
 bool ActivityService::sommetUpsertRecord(const QJsonObject &rec)

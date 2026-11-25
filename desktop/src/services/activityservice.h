@@ -245,6 +245,9 @@ public:
     Q_INVOKABLE bool sommetSyncConfigured() const;   // url+token both set
     Q_INVOKABLE QString sommetSyncUrl() const;       // for the Settings field (token never exposed)
     Q_INVOKABLE void setSommetSync(const QString &url, const QString &token);
+    // sync/14: give up on what is still only on the previous server (Settings, after a confirm):
+    // those activities keep their details but no longer show a map or file kept on a server.
+    Q_INVOKABLE void forgetPreviousServer();
     // Probe the endpoint (a GET with the given creds) before saving; result via sommetSyncTestResult.
     Q_INVOKABLE void sommetSyncTest(const QString &url, const QString &token);
     // Pull-then-push. Safe no-op when unconfigured. Runs after a watch read and on demand.
@@ -495,6 +498,10 @@ private:
     void sommetRescueNext();
     void finishRescueIfDone();
     QList<QPair<QString, QString>> m_rescueQueue;   // (uid, "gpx" | "fit") left this run
+    // A server change saved while a sync runs waits for it to end: the running sync would
+    // otherwise write the old server's cursor and sent lists back after the reset.
+    bool m_syncCfgPending = false;
+    QString m_pendingSyncUrl, m_pendingSyncToken;
     int m_sommetPulled = 0;
     int m_sommetPushed = 0;
     // Sync ledger (#SYNC-8/9/11): the changed records still to send, 200 per request.
