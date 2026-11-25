@@ -32,6 +32,10 @@ jest.mock('../../database/db', () => ({
     const a = mockActs.find(x => x.id === id);
     if (a) { a.gpx_path = path; a.track_cached_at = cachedAt; }
   },
+  clearTrackRemote: async (id: string) => {
+    const a = mockActs.find(x => x.id === id);
+    if (a) a.track_remote = 0;
+  },
 }));
 jest.mock('../GpxService', () => ({
   readGpxFile: async (p: string) => mockFiles[p] ?? '',
@@ -40,6 +44,10 @@ jest.mock('../GpxService', () => ({
   writeGpxFile: async (id: string, gpx: string) => { mockFiles[`/a/${id}.gpx`] = gpx; return `/a/${id}.gpx`; },
   writeFitFile: async (id: string, b64: string) => { mockFiles[`/a/${id}.fit`] = b64; return `/a/${id}.fit`; },
   fitFileExists: async (id: string) => mockLocalFits.has(id),
+  activityFileStem: (id: string) => id.replace(/[^\w.-]/g, '_'),
+  listFitStems: async () => new Set(Object.keys(mockFiles).filter(k => k.endsWith('.fit'))
+    .map(k => k.slice(3, -4))),
+  readFitById: async (id: string) => mockFiles[`/a/${id}.fit`] ?? null,
 }));
 let mockCreds: any = null;
 jest.mock('../ApiIntervalsIcu', () => ({ getIntervalsIcuCredentials: async () => mockCreds }));
@@ -49,9 +57,9 @@ jest.mock('../SameMove', () => ({ sameMove: () => false, startUtcOf: () => 0 }))
 
 import {
   RESCUE_KEY, Rescue, RescueIO, isServerMove, normalizeServerUrl, planRescue, rescueNoteText, runRescue,
-  cachedToKeep,
+  cachedToKeep, forgetConfirmText, uncopiedTrackIds,
 } from '../ServerMove';
-import { runSommetSync, setSommetSyncCfg } from '../SommetSync';
+import { forgetPreviousServer, runSommetSync, setSommetSyncCfg } from '../SommetSync';
 
 const OLD = 'http://old-nas/sync.php';
 const NEW = 'http://new-nas/sync.php';
@@ -95,11 +103,25 @@ describe('pure parts', () => {
     expect(cachedToKeep(rows, onOld, uidOf).map(r => r.id)).toEqual(['c']);
   });
 
-  test('the Settings line', () => {
+  test('the Settings line, by count and with sync on or off', () => {
     expect(rescueNoteText(null)).toBe('');
-    expect(rescueNoteText({ count: 1, url: OLD })).toBe(
-      `1 older activity is still only on your previous server (${OLD}). Keep it running: Sommet copies them to the new one at each sync.`);
-    expect(rescueNoteText({ count: 3, url: OLD })).toContain('3 older activities are still only');
+    expect(rescueNoteText({ count: 1, url: OLD }, true)).toBe(
+      `1 older activity is still only on your previous server (${OLD}). Keep it running: Sommet copies it to the new one at each sync.`);
+    expect(rescueNoteText({ count: 3, url: OLD }, true)).toBe(
+      `3 older activities are still only on your previous server (${OLD}). Keep it running: Sommet copies them to the new one at each sync.`);
+    expect(rescueNoteText({ count: 1, url: OLD }, false)).toBe(
+      `1 older activity is only on your previous server (${OLD}). Set up a server again and Sommet copies it over.`);
+    expect(rescueNoteText({ count: 3, url: OLD }, false)).toBe(
+      `3 older activities are only on your previous server (${OLD}). Set up a server again and Sommet copies them over.`);
+  });
+
+  test('the forget confirm, by count', () => {
+    expect(forgetConfirmText(1)).toBe(
+      'The activity keeps its details here but loses its map and original file. Forget the previous server?');
+    expect(forgetConfirmText(4)).toBe(
+      'The 4 activities keep their details here but lose their map and original file. Forget the previous server?');
+    expect(uncopiedTrackIds({ url: OLD, token: 't', items: [
+      { id: 'a', uid: 'u1', gpx: true, fit: true }, { id: 'c', uid: 'u3', gpx: false, fit: true }] })).toEqual(['a']);
   });
 });
 
@@ -129,6 +151,17 @@ describe('copying back', () => {
     expect(await runRescue(rescue, x)).toEqual({ done: 3, left: 0, stopped: false });
     expect(x.stored).toEqual(['gpx:a', 'fit:a', 'gpx:c']);
     expect(saved.r).toBeNull();                      // nothing left: the old token is forgotten
+  });
+
+  test('a Track the server lacks (404, or no points) is reported so the move stops counting as kept there', async () => {
+    const saved = { r: rescue as Rescue | null };
+    const missing: string[] = [];
+    const x = io({ 'gpx:u1': 'missing', 'fit:u1': 'missing', 'gpx:u2': 'missing', 'gpx:u3': 'missing' }, saved);
+    x.fetchGpx = async uid => uid === 'u3' ? { status: 'ok', body: '<gpx></gpx>' } : { status: 'missing' };
+    x.missingGpx = async it => { missing.push(it.id); };
+    expect(await runRescue(rescue, x)).toEqual({ done: 3, left: 0, stopped: false });
+    expect(missing).toEqual(['a', 'b', 'c']);
+    expect(x.stored).toEqual([]);
   });
 
   test('a failure stops the run and keeps the rest for the next sync', async () => {
@@ -224,5 +257,90 @@ describe('changing the saved server', () => {
     const gpxPosts = calls.filter(c => c.url.startsWith(NEW) && c.method === 'POST' && c.url.includes('fmt=gpx'));
     expect(gpxPosts.length).toBe(2);
     expect(calls.filter(c => c.url.startsWith(NEW)).every(c => c.token === 'new-t')).toBe(true);
+  });
+
+  function serverAnswers(opts: { gpx?: 'ok' | 'missing'; fit?: 'ok' | 'missing'; slowOld?: Promise<void>;
+                                 slowPull?: Promise<void> } = {}) {
+    const calls: { url: string; method: string; token: string }[] = [];
+    (globalThis as any).fetch = jest.fn(async (url: string, init: any = {}): Promise<any> => {
+      const method = init.method ?? 'GET';
+      calls.push({ url, method, token: init.headers?.['X-Sommet-Token'] ?? '' });
+      if (url.startsWith(OLD) && url.includes('blob=1')) {
+        if (opts.slowOld) await opts.slowOld;
+        const kind = url.includes('fmt=gpx') ? opts.gpx ?? 'ok' : opts.fit ?? 'ok';
+        if (kind === 'missing') return { ok: false, status: 404, headers: { get: () => null }, text: async () => '' };
+        if (url.includes('fmt=gpx')) return { ok: true, status: 200, headers: { get: () => null }, text: async () => GPX };
+        return { ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => FIT.buffer };
+      }
+      if (method === 'GET' && !url.includes('blob=1') && opts.slowPull) await opts.slowPull;
+      const body = method === 'POST' ? { ok: true } : { records: [], deleted: [], now: 777 };
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(body),
+               json: async () => body };
+    });
+    return calls;
+  }
+
+  test('A: a move while a sync runs applies once that sync has ended', async () => {
+    seedOldServer();
+    let release!: () => void;
+    const slowPull = new Promise<void>(res => { release = res; });
+    serverAnswers({ slowPull });
+    const order: string[] = [];
+    const run = runSommetSync().then(r => { order.push('sync'); return r; });
+    await new Promise<void>(res => setTimeout(res, 10));
+    const move = setSommetSyncCfg({ url: NEW, token: 'new-t' }).then(() => { order.push('move'); });
+    await new Promise<void>(res => setTimeout(res, 10));
+    expect(order).toEqual([]);                       // the move waits
+    release();
+    await Promise.all([run, move]);
+    expect(order).toEqual(['sync', 'move']);
+    expect(mockStore['sommet.sync.lastPull']).toBeUndefined();   // the old server's cursor went after the run
+    expect(JSON.parse(mockStore[RESCUE_KEY]).url).toBe(OLD);
+  });
+
+  test('B: forgetting the previous server leaves uncopied moves without a kept Track', async () => {
+    seedOldServer();
+    mockActs.push({ id: 'c', date: '2025-01-03T08:00:00', device: 'w', gpx_path: '/a/c.gpx', track_remote: 1,
+                    track_cached_at: 0, updated_at: 3, activity_type: 'Running', duration_s: 60, distance_m: 100,
+                    d_plus: 0, synced_at: 1 });
+    await setSommetSyncCfg({ url: NEW, token: 'new-t' });
+    mockStore[RESCUE_KEY] = JSON.stringify({ url: OLD, token: 'old-t', items: [
+      { id: 'a', uid: 'w|2025-01-01T08:00', gpx: true, fit: true },
+      { id: 'c', uid: 'w|2025-01-03T08:00', gpx: false, fit: true }] });
+    await forgetPreviousServer();
+    expect(mockActs.find(a => a.id === 'a').track_remote).toBe(0);
+    expect(mockActs.find(a => a.id === 'c').track_remote).toBe(1);   // its Track is here
+    expect(mockStore[RESCUE_KEY]).toBeUndefined();
+  });
+
+  test('C and F1: a Track the old server lacks stops counting as kept there; its copied FIT still goes', async () => {
+    seedOldServer();
+    await setSommetSyncCfg({ url: NEW, token: 'new-t' });
+    const calls = serverAnswers({ gpx: 'missing', fit: 'ok' });
+    expect((await runSommetSync()).ok).toBe(true);
+    const a = mockActs.find(x => x.id === 'a');
+    expect(a.track_remote).toBe(0);
+    expect(a.gpx_path).toBe('');
+    expect(mockFiles['/a/a.fit']).toBeDefined();
+    expect(mockStore[RESCUE_KEY]).toBeUndefined();
+    const fitPosts = calls.filter(c => c.url.startsWith(NEW) && c.method === 'POST' && c.url.includes('fmt=fit'));
+    expect(fitPosts.map(c => decodeURIComponent(c.url))).toEqual([expect.stringContaining('uid=w|2025-01-01T08:00')]);
+  });
+
+  test('a rescue forgotten during a sync is not written back by that sync', async () => {
+    seedOldServer();
+    await setSommetSyncCfg({ url: NEW, token: 'new-t' });
+    let release!: () => void;
+    const slowOld = new Promise<void>(res => { release = res; });
+    serverAnswers({ gpx: 'ok', fit: 'missing', slowOld });
+    const run = runSommetSync();
+    await new Promise<void>(res => setTimeout(res, 10));
+    mockStore[RESCUE_KEY] = JSON.stringify({ url: OLD, token: 'old-t', items: [
+      { id: 'a', uid: 'w|2025-01-01T08:00', gpx: true, fit: true },
+      { id: 'z', uid: 'w|2025-02-01T08:00', gpx: true, fit: false }] });
+    await forgetPreviousServer();
+    release();
+    await run;
+    expect(mockStore[RESCUE_KEY]).toBeUndefined();
   });
 });
