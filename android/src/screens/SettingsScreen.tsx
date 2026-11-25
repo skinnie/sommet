@@ -49,8 +49,8 @@ import { isMageneAvailable } from '../services/MageneBle';
 import { isEmberUnlocked, setEmberUnlocked } from '../services/EmberUnlock';
 import { getEmberSyncCfg, setEmberSyncCfg } from '../services/EmberSync';
 import { getUsdaApiKey, setUsdaApiKey } from '../services/EmberFood';
-import { getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
-import { rescueNoteText, rescueSummary } from '../services/ServerMove';
+import { forgetPreviousServer, getSommetSyncCfg, setSommetSyncCfg, testSommetSync, runSommetSync } from '../services/SommetSync';
+import { forgetConfirmText, rescueNoteText, rescueSummary } from '../services/ServerMove';
 import {
   getKeepRecentOnly, setKeepRecentOnly, getLibraryCacheMb, setLibraryCacheMb, formatCacheMb,
   getKeepRecentTiles, setKeepRecentTiles,
@@ -377,11 +377,22 @@ export default function SettingsScreen() {
   const [sommetSaved, setSommetSaved]               = useState(false);
   const [sommetStatus, setSommetStatus]             = useState('');
   const [sommetTone, setSommetTone] = useState<'success' | 'error' | 'working'>('success');
-  // sync/14: older activities still only on the previous server after a server change.
+  // sync/14: older activities still only on the previous server after a server change, and the
+  // in-page confirm of "Forget the previous server".
   const [rescueNote, setRescueNote] = useState('');
+  const [rescueCount, setRescueCount] = useState(0);
+  const [forgetAsk, setForgetAsk] = useState(false);
   const refreshRescueNote = useCallback(() => {
-    rescueSummary().then(s => setRescueNote(rescueNoteText(s))).catch(() => undefined);
+    Promise.all([rescueSummary(), getSommetSyncCfg()])
+      .then(([s, c]) => { setRescueNote(rescueNoteText(s, !!c?.url)); setRescueCount(s?.count ?? 0); })
+      .catch(() => undefined);
   }, []);
+  async function handleForgetPrevious() {
+    setForgetAsk(false);
+    try { await forgetPreviousServer(); } catch { /* the notice stays */ }
+    refreshRescueNote();
+    trimOldTracks().catch(() => undefined);   // the light library trims again
+  }
   // Light library (sync/13): "Keep on this device" + the space for opened older activities.
   const [keepRecent, setKeepRecentState] = useState(true);
   const [libraryCacheMb, setLibraryCacheMbState] = useState(300);
@@ -1322,6 +1333,19 @@ export default function SettingsScreen() {
           )}
           <StatusNote text={sommetStatus} tone={sommetTone} />
           <StatusNote text={rescueNote} tone="warning" closable={false} />
+          {!!rescueNote && !forgetAsk && (
+            <Button label="Forget the previous server" variant="outline" grow={false}
+              onPress={() => setForgetAsk(true)} style={{ marginTop: 8, alignSelf: 'flex-start' }} />
+          )}
+          {!!rescueNote && forgetAsk && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.sectionDesc}>{forgetConfirmText(rescueCount)}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                <Button label="Forget" variant="filled" grow={false} onPress={handleForgetPrevious} />
+                <Button label="Keep" variant="outline" grow={false} onPress={() => setForgetAsk(false)} />
+              </View>
+            </View>
+          )}
 
           {/* What this device keeps (sync/13, André 2026-11-20: "the average joe don't want 4000
               activities on his pc or tablet... a freak like me MAY want everything offline, but

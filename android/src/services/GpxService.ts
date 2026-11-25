@@ -54,6 +54,19 @@ export async function fitFileExists(id: string): Promise<boolean> {
   return RNFS.exists(`${ACTIVITIES_DIR}/${activityFileStem(id)}.fit`);
 }
 
+/** The ids' file stems of every FIT on this device (one directory read, for the sync's FIT send). */
+export async function listFitStems(): Promise<Set<string>> {
+  await ensureDir();
+  const items = await RNFS.readDir(ACTIVITIES_DIR);
+  return new Set(items.filter(i => i.name.endsWith('.fit')).map(i => i.name.slice(0, -4)));
+}
+
+/** A move's FIT by its id (<id>.fit) as base64, for one with no Track here; null when none. */
+export async function readFitById(id: string): Promise<string | null> {
+  const path = `${ACTIVITIES_DIR}/${activityFileStem(id)}.fit`;
+  try { return (await RNFS.exists(path)) ? await RNFS.readFile(path, 'base64') : null; } catch { return null; }
+}
+
 /** Whether an activity with this id is already in the library (checked before a slow device
  *  download, e.g. a Magene ride over BLE). */
 export async function activityExists(id: string): Promise<boolean> {

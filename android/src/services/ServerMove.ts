@@ -93,12 +93,32 @@ export async function rescueSummary(): Promise<{ count: number; url: string } | 
   return r ? { count: r.items.length, url: r.url } : null;
 }
 
-/** The Settings line while a rescue is pending (desktop says the same). */
-export function rescueNoteText(sum: { count: number; url: string } | null): string {
+/** The Settings line while a rescue is pending (desktop says the same). `syncOn`: a server is
+ *  saved now; with none (sync turned off) the files wait until one is set up again. */
+export function rescueNoteText(sum: { count: number; url: string } | null, syncOn = true): string {
   if (!sum || sum.count <= 0) return '';
-  const what = sum.count === 1 ? '1 older activity is' : `${sum.count} older activities are`;
-  return `${what} still only on your previous server (${sum.url}). Keep it running: Sommet `
-    + 'copies them to the new one at each sync.';
+  const one = sum.count === 1;
+  if (syncOn) {
+    return `${one ? '1 older activity is' : `${sum.count} older activities are`} still only on your `
+      + `previous server (${sum.url}). Keep it running: Sommet copies ${one ? 'it' : 'them'} to the `
+      + 'new one at each sync.';
+  }
+  return `${one ? '1 older activity is' : `${sum.count} older activities are`} only on your previous `
+    + `server (${sum.url}). Set up a server again and Sommet copies ${one ? 'it' : 'them'} over.`;
+}
+
+/** The confirm step of "Forget the previous server". */
+export function forgetConfirmText(count: number): string {
+  return count === 1
+    ? 'The activity keeps its details here but loses its map and original file. Forget the previous server?'
+    : `The ${count} activities keep their details here but lose their map and original file. `
+      + 'Forget the previous server?';
+}
+
+/** The moves whose Track was not copied yet: forgetting the previous server leaves them without
+ *  one. Pure. */
+export function uncopiedTrackIds(r: Rescue | null): string[] {
+  return r ? r.items.filter(i => i.gpx).map(i => i.id) : [];
 }
 
 export type Fetched<T> = { status: 'ok'; body: T } | { status: 'missing' } | { status: 'failed' };
@@ -108,6 +128,9 @@ export interface RescueIO {
   fetchFit(uid: string): Promise<Fetched<Uint8Array>>;
   storeGpx(item: RescueItem, gpx: string): Promise<boolean>;
   storeFit(item: RescueItem, fit: Uint8Array): Promise<boolean>;
+  /** The previous server has no Track for this move after all: it no longer counts as kept on a
+   *  server. */
+  missingGpx?(item: RescueItem): Promise<void>;
   save(r: Rescue | null): Promise<void>;
 }
 
@@ -130,8 +153,10 @@ export async function runRescue(r: Rescue, io: RescueIO): Promise<{ done: number
     if (it.gpx) {
       const got = await io.fetchGpx(it.uid);
       if (got.status === 'failed') stopped = true;
-      else if (got.status === 'missing' || got.body.indexOf('<trkpt') < 0) it.gpx = false;
-      else if (await io.storeGpx(it, got.body)) it.gpx = false;
+      else if (got.status === 'missing' || got.body.indexOf('<trkpt') < 0) {
+        it.gpx = false;
+        if (io.missingGpx) await io.missingGpx(it);
+      } else if (await io.storeGpx(it, got.body)) it.gpx = false;
       else stopped = true;
     }
     if (!stopped && it.fit) {

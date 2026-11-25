@@ -3,16 +3,20 @@ import {
   getAllActivities, markActivitySynced, getSommetTombstones, addSommetTombstone,
   deleteActivitiesByUid, getActivityByUid, sommetUid, updateImportedActivity,
   getSommetLedger, markSommetSent, getSommetDeletedSent, markSommetDeletedSent,
-  clearSommetServerMarkers, setTrackLocal,
+  clearSommetServerMarkers, setTrackLocal, clearTrackRemote,
 } from '../database/db';
 import { canonicalSportName, isJunkActivity } from './SportNames';
-import { fitFileExists, readFitForGpx, readGpxFile, removeFitForGpx, writeFitFile, writeGpxFile } from './GpxService';
+import {
+  activityFileStem, fitFileExists, listFitStems, readFitById, readFitForGpx, readGpxFile, removeFitForGpx,
+  writeFitFile, writeGpxFile,
+} from './GpxService';
 import { streamsCache } from './StreamsCache';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { sameMove, startUtcOf, SameMoveRow } from './SameMove';
 import { getKeepRecentOnly, lightCutoffMinute } from './LibraryPrefs';
 import {
   Fetched, cachedToKeep, isServerMove, loadRescue, normalizeServerUrl, planRescue, runRescue, saveRescue,
+  uncopiedTrackIds,
 } from './ServerMove';
 
 // Sommet Sync (#SYNC-3): two-way sync of activities against the user's OWN self-hosted endpoint
@@ -74,7 +78,19 @@ export async function getSommetSyncCfg(): Promise<SommetSyncCfg | null> {
 }
 
 export async function setSommetSyncCfg(cfg: SommetSyncCfg | null): Promise<void> {
-  await noteServerChange(await getSommetSyncCfg(), cfg && cfg.url ? cfg.url : '');
+  const before = await getSommetSyncCfg();
+  const newUrl = cfg && cfg.url ? cfg.url : '';
+  const moving = !!before && isServerMove(before.url, newUrl);
+  // A move waits for a sync that is running (it uses the old server's marks), then applies. Only
+  // a move: the token adopted in the middle of a sync (adoptNewToken) must not wait for itself.
+  if (moving && runSommetSyncInFlight) await runSommetSyncInFlight.catch(() => undefined);
+  try {
+    await noteServerChange(before, newUrl);
+  } catch (e: any) {
+    // Never in the way of saving the new address: the old server's marks still go.
+    console.log(`[sommet-sync] server change: ${e?.message ?? e}`);
+    if (moving) await forgetServerMarks().catch(() => undefined);
+  }
   if (!cfg || !cfg.url) { await AsyncStorage.removeItem(CFG_KEY); return; }
   await AsyncStorage.setItem(CFG_KEY, JSON.stringify({ url: cfg.url.trim(), token: (cfg.token ?? '').trim() }));
 }
@@ -159,9 +175,22 @@ async function rescueFromPreviousServer(currentUrl: string): Promise<void> {
         return true;
       },
       storeFit: async (it, fit) => !!(await writeFitFile(it.id, bytesToBase64(fit), true)),
-      save: saveRescue,
+      missingGpx: async it => { await clearTrackRemote(it.id); },
+      // Not over a rescue that ended meanwhile (forgotten, or the server moved back to).
+      save: async next => {
+        const cur = await loadRescue();
+        if (cur && cur.url === r.url && cur.token === r.token) await saveRescue(next);
+      },
     });
   } catch { /* tried again at the next sync */ }
+}
+
+/** "Forget the previous server" (Settings): the moves whose Track was not copied no longer count
+ *  as kept on a server (they keep their details, without a map or original file), and the
+ *  previous server's address and token go. The light library trims again. */
+export async function forgetPreviousServer(): Promise<void> {
+  for (const id of uncopiedTrackIds(await loadRescue())) await clearTrackRemote(id);
+  await saveRescue(null);
 }
 
 /** A request that gives up after `ms` (2026-11-19): one blob fetch that never answered held the
@@ -551,10 +580,20 @@ async function runSommetSyncOnce(): Promise<SommetSyncResult> {
   // Original FITs, one per request, read only when not yet confirmed (a few KB to a few MB each).
   const fitRaw = await AsyncStorage.getItem(FIT_PUSHED_KEY);
   const fitPushed = new Set<string>(fitRaw ? JSON.parse(fitRaw) : []);
+  // A FIT with no Track here (one copied back from a previous server whose GPX it lacked, sync/14)
+  // is found by the move's id: one directory read, not one per move.
+  let fitStems: Set<string> | null = null;
   for (const a of acts) {
     const uid = sommetUid(a.device ?? '', a.date);
-    if (tombstones.has(uid) || fitPushed.has(uid) || !a.gpx_path) continue;
-    const b64 = await readFitForGpx(a.gpx_path);
+    if (tombstones.has(uid) || fitPushed.has(uid)) continue;
+    let b64: string | null = null;
+    if (a.gpx_path) b64 = await readFitForGpx(a.gpx_path);
+    else {
+      if (!fitStems) { try { fitStems = await listFitStems(); } catch { fitStems = new Set(); } }
+      if (fitStems.size && fitStems.has(activityFileStem(a.id))) {
+        try { b64 = await readFitById(a.id); } catch { b64 = null; }
+      }
+    }
     if (!b64) continue;
     if (await pushFitBlob(url, token, uid, base64ToBytes(b64))) fitPushed.add(uid);
   }
