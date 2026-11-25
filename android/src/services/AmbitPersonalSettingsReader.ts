@@ -87,10 +87,16 @@ const AMBIT12_PERSONAL_FIELDS: PersonalField[] = [
   { key: 'fitness_level', kind: 'number', control: 'number', min: 0, max: 255 },
 ];
 
+// The Ambit2 S (Colibri) and Ambit2 R (Greentit) have no barometer: SuuntoLink 4.1.15's
+// supportsAltiBaroProfile is false for both (watch-protocol/10). Their alti-baro row is left
+// out, as on the desktop (server.py LEGACY_NO_BAROMETER).
+export const NO_BAROMETER_MODELS = ['Colibri', 'Greentit'];
+
 /** Decodes the JSON from readPersonalSettings() (native/AmbitUsbModule.ts) into the same
  * DecodedSetting[] shape the Ambit3/Kailash reader produces, so the settings UI renders it
- * unchanged. Fields the watch didn't report are skipped. Returns [] on malformed input. */
-export function decodePersonalSettings(json: string): DecodedSetting[] {
+ * unchanged. Fields the watch didn't report, or doesn't have (`model`, the codename: no
+ * alti-baro without a barometer), are skipped. Returns [] on malformed input. */
+export function decodePersonalSettings(json: string, model?: string): DecodedSetting[] {
   let obj: Record<string, unknown>;
   try { obj = JSON.parse(json); } catch { return []; }
   const out: DecodedSetting[] = [];
@@ -98,6 +104,7 @@ export function decodePersonalSettings(json: string): DecodedSetting[] {
   for (const f of AMBIT12_PERSONAL_FIELDS) {
     const v = obj[f.key];
     if (typeof v !== 'number') continue;
+    if (f.key === 'alti_baro_mode' && NO_BAROMETER_MODELS.includes(model ?? '')) continue;
     // Profile fields are often unset on a watch (0) or hold a placeholder; only show a value
     // that's actually plausible, so the display never renders nonsense for a blank profile.
     if ((f.key === 'weight' || f.key === 'height' || f.key === 'max_hr' || f.key === 'rest_hr'

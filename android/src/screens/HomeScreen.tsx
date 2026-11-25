@@ -1250,10 +1250,12 @@ export default function HomeScreen() {
     // standalone BLE HR belt, so it shows whenever enabled. André, 2026-08-17.
     // Apps (2026-08-29, desktop parity): one entry -> a launcher with the Workout Builder +
     // the Suunto app catalog (AppsScreen), replacing the old separate 'Intervals' item. Same
-    // App-Zone gating as before: Ambit3-family only, connected, not Kailash/Traverse/Ambit1-2.
-    // Shown when either switch is on (Intervals = the builder, App Zone = the catalog), like the
-    // desktop's NavRail (2026-10-22).
-    ...((expFeatures.intervals || expFeatures.appZone) && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isTraverse(ambitInfo) && !isAmbit12(ambitInfo)
+    // App-Zone gating as the desktop (DeviceCapabilities.supportsApps): connected, not Kailash
+    // or Ambit1-2. The Traverse and Traverse Alpha have the Apps engine and region (their own
+    // 0x0b21 map, which AppInstall resolves), so they get it too (watch-protocol/10, 2026-11-25;
+    // not yet seen on a real Traverse). Shown when either switch is on (Intervals = the builder,
+    // App Zone = the catalog), like the desktop's NavRail (2026-10-22).
+    ...((expFeatures.intervals || expFeatures.appZone) && connected && deviceType === 'ambit' && !isKailash(ambitInfo) && !isAmbit12(ambitInfo)
       ? [{ id: 'apps', label: 'Apps', icon: 'apps' as const, onPress: () => navigation.navigate('Apps') }]
       : []),
     ...(expFeatures.smartSensor

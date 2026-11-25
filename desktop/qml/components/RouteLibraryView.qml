@@ -21,22 +21,21 @@ PageFlickable {
     // ---- state -----------------------------------------------------------------------------
     property var saved: []
     property var bryton: null          // null = no Bryton mounted
-    property var legacyRoutes: []
     property string busyKey: ""
     property string removingKey: ""     // the watch route being removed (busyKey is set too)
     property string msg: ""
     property string sortKey: "name"
+    // Every watch with routes, the Ambit1/2 included (legacy_link.py behind /api/nav). A Kailash
+    // has none, so it gets no "On the watch" source (watch-protocol/10, 2026-11-25).
     readonly property bool watchHere: HomeViewModel.connected
                                       && DeviceCapabilities.supportsRoutes
-    readonly property bool legacyWatch: HomeViewModel.connected
-                                        && !DeviceCapabilities.supportsRoutes
     // An eTrex PLUGGED (not only when it's the active device - the watch can be active too).
     readonly property bool etrexHere: GarminService.connected
 
     // The list card's source drop-down: connected devices, then the Library (always there).
     readonly property var sources: {
         const out = []
-        if (root.watchHere || root.legacyWatch) out.push({ key: "watch", label: qsTr("On the watch") })
+        if (root.watchHere) out.push({ key: "watch", label: qsTr("On the watch") })
         if (root.etrexHere) out.push({ key: "etrex", label: qsTr("On the eTrex") })
         if (root.bryton !== null) out.push({ key: "bryton", label: qsTr("On the Bryton") })
         if (BikeDevices.magene !== null && BikeDevices.mageneReachable) out.push({ key: "magene", label: qsTr("On the Magene") })
@@ -78,8 +77,6 @@ PageFlickable {
         root.api("GET", "/api/edge500/info", null, r => root.edge500Here = !!r.ok)
         if (root.watchHere && !RouteService.loading) RouteService.refresh()
         if (root.etrexHere) GarminService.refreshDeviceGpx()
-        if (root.legacyWatch)
-            root.api("GET", "/api/legacy/settings", null, r => root.legacyRoutes = r.ok ? (r.routes || []) : [])
     }
     Component.onCompleted: { refresh(); RouteService.syncLibraries() }
     // The library is shared between devices through Sommet Sync (tools/library_sync.py): read
@@ -511,7 +508,7 @@ PageFlickable {
         // eTrex: only files on the SD card (never internal memory - GARMIN_USB_IMPORT_SPEC.md).
         ThemedMenuItem { text: qsTr("Delete…"); visible: itemMenu.item.src === "saved" || itemMenu.item.src === "bryton"
                                                          || (itemMenu.item.src === "etrex" && itemMenu.item.onSdCard === true)
-                                                         || (itemMenu.item.src === "watch" && !root.legacyWatch
+                                                         || (itemMenu.item.src === "watch"
                                                              && DeviceCapabilities.supportsNavRemove)
                          onTriggered: { deleteDialog.item = itemMenu.item; deleteDialog.open() } }
     }
@@ -801,14 +798,6 @@ PageFlickable {
                         ? qsTr("This will be sent to the SD card only - writing to internal memory can break your device.")
                         : qsTr("No SD card detected in this Garmin device - sending a route is disabled. Writing to internal memory can break your device.")
                 }
-                // Ambit1/2 predate the route region: reading works, writing doesn't.
-                Text {
-                    visible: root.watchHere && root.hasPending && !HomeViewModel.isGarmin && !DeviceCapabilities.supportsRouteWrite
-                    width: parent.width; wrapMode: Text.WordWrap
-                    color: Theme.mutedText; font.pixelSize: Theme.fontSizeLabel
-                    text: qsTr("%1 can't have routes written to it from this app yet - its routes are legacy waypoints, and only adding POIs is supported. You can still export this one.")
-                        .arg(HomeViewModel.deviceDisplayName)
-                }
                 // Results of a send / upload, under the buttons (desktop picks #7).
                 StatusNote { width: parent.width; text: root.brytonMsg
                              tone: root.brytonSending ? "working" : root.brytonOk ? "success" : "error" }
@@ -851,13 +840,12 @@ PageFlickable {
                     }
                     ViewModeToggle {
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: root.source !== "watch" || !root.legacyWatch
                         mode: Theme.routesView
                         onChosen: (m) => Theme.routesView = m
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: root.sourceItems.length > 0 && !(root.source === "watch" && root.legacyWatch)
+                        visible: root.sourceItems.length > 0
                         text: qsTr("Export all…")
                         color: exportAllHover.hovered ? Theme.primary : Theme.mutedText
                         font.pixelSize: Theme.fontSizeCaption
@@ -887,30 +875,7 @@ PageFlickable {
                 }
                 StatusNote { width: parent.width; tone: "error"; text: root.msg }
 
-                // Ambit1/2: readable but not writable, no track - read-only rows (as before).
-                Column {
-                    visible: root.source === "watch" && root.legacyWatch
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    EmptyState {
-                        visible: root.legacyRoutes.length === 0
-                        glyph: Icons.routes
-                        title: qsTr("No routes on the watch")
-                    }
-                    Repeater {
-                        model: root.legacyRoutes
-                        delegate: Column {
-                            required property var modelData
-                            spacing: 2
-                            Text { color: Theme.text; font.bold: true; text: modelData.name }
-                            Text { color: Theme.mutedText
-                                   text: qsTr("%1 points, %2 m, +%3/-%4 m").arg(modelData.points_count).arg(modelData.distance_m)
-                                         .arg(modelData.altitude_asc_m).arg(modelData.altitude_dec_m) }
-                        }
-                    }
-                }
                 RouteSection {
-                    visible: !(root.source === "watch" && root.legacyWatch)
                     title: ""
                     items: root.sourceItems
                     loading: (root.source === "watch" && RouteService.loading)

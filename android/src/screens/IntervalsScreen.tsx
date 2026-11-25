@@ -19,9 +19,11 @@ import { InstallState } from '../services/AppInstall';
 import { readCustomModes } from '../services/CustomModesService';
 import { ExerciseMode } from '../services/CustomModesReader';
 
-// Workout Builder (Intervals), Ambit3 only (HomeScreen hides Apps for Traverse, Kailash and
-// Ambit 1/2 - those have no App Zone workouts in Sommet; Ambit 1/2's old Movescount apps aren't
-// implemented, see commit 0312881). Two ways, native first (André, 2026-11-06):
+// Workout Builder (Intervals), Ambit3 family and Traverse (HomeScreen hides Apps for the Kailash
+// and Ambit 1/2 - those have no App Zone workouts in Sommet; Ambit 1/2's old Movescount apps
+// aren't implemented, see commit 0312881). A Traverse has no TrainingProgram region, so its
+// planned-move write is refused in IntervalsService; the app route works. Two ways, native
+// first (André, 2026-11-06):
 //   - Native workouts: guided WORKOUT-menu workouts live in the Training Program (linked here);
 //     the planned move ("Today" card, TrainingProgram region, proven on hardware 2026-09-03) is
 //     written from this screen.

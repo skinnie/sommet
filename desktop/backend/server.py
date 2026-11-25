@@ -6119,6 +6119,11 @@ class Handler(BaseHTTPRequestHandler):
         # x10000: 10000/200/20000 in the capture are the factors 1.0 / 0.02 / 2.0).
         "weight_kg", "bikepod_calibration", "bikepod_calibration2",
     }
+    # The Ambit2 S (Colibri) and Ambit2 R (Greentit) have no barometer: SuuntoLink 4.1.15's
+    # supportsAltiBaroProfile is false for both (ambit/sport_mode.js, run per codename,
+    # watch-protocol/10), true for the Ambit1 and Ambit2. Their alti-baro row is left out and a
+    # write is refused, as for any field a watch doesn't have.
+    LEGACY_NO_BAROMETER = {0x001A, 0x001D}
     # UI key -> the CLI's own field name where they differ.
     LEGACY_WRITE_KEY = {"length_cm": "length", "weight_kg": "weight"}
     # UI value -> wire value. The watch stores these scaled; the UI edits the real quantity.
@@ -6144,6 +6149,10 @@ class Handler(BaseHTTPRequestHandler):
                 key = f.get("field")
                 if key and key.startswith("unit_"):
                     cli_key = "units." + key[len("unit_"):]
+                elif key == "alti_baro_mode" and SELECTED_PRODUCT_ID in self.LEGACY_NO_BAROMETER:
+                    results.append({"field": key, "ok": False,
+                                    "error": "this watch has no barometer"})
+                    continue
                 elif key in self.LEGACY_WRITABLE:
                     cli_key = self.LEGACY_WRITE_KEY.get(key, key)
                 else:
@@ -6219,6 +6228,8 @@ class Handler(BaseHTTPRequestHandler):
         out = {}
         for key, label, screen, control, choices, unit in self.LEGACY_SETTING_SPECS:
             if key not in raw:
+                continue
+            if key == "alti_baro_mode" and SELECTED_PRODUCT_ID in self.LEGACY_NO_BAROMETER:
                 continue
             entry = {"ok": True, "value": raw[key], "path": key,
                      "writable": key in self.LEGACY_WRITABLE, "screen": screen,

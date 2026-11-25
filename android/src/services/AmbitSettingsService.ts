@@ -91,16 +91,18 @@ export async function readAmbitSettings(report: (s: ReadSettingsState) => void):
     let isKailash = false;
     let isVertical = false;
     let deviceName: string | undefined;
+    let model: string | undefined;
     try {
       const info = await getDeviceInfo();
       isKailash = info.model === 'Hoopoe';
       isVertical = info.model === 'Kaka';
       deviceName = info.name || undefined;
+      model = info.model || undefined;
     } catch { /* non-fatal - assume Ambit3 */ }
 
     // Ambit 1/2 family: legacy personal-settings read, read-only (no `fields` -> no write).
     if (isAmbit12(deviceName)) {
-      const settings = decodePersonalSettings(await readPersonalSettings());
+      const settings = decodePersonalSettings(await readPersonalSettings(), model);
       onState({ phase: 'done', settings, deviceName, readOnly: true });
       return;
     }

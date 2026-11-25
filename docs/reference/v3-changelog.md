@@ -35,6 +35,25 @@ Every change since 0.2.66 is listed in the sections below. Before you update:
 
 ---
 
+## 2026-11-25: Per-model limits checked against the evidence, first fixes (watch-protocol/10)
+
+André: "why don't you check and do it all for all devices?". Every place Sommet refuses or
+hides something per watch model was checked against the captures, the watches' settings
+lists, SuuntoLink's own code and the firmware. First fixes:
+
+- **Apps on Android for the Traverse and Traverse Alpha**, as on the desktop. They have the
+  Apps engine and region, and the app install takes the region's place from the watch's own
+  memory map. Not yet seen on a real Traverse. Planned moves still can't go to a Traverse: it
+  has no TrainingProgram region, and the builder says so.
+- **No alti-baro profile on the Ambit2 S and Ambit2 R**, desktop and Android. They have no
+  barometer, and SuuntoLink's capability record says false for both. The row is left out and a
+  write is refused.
+- **A Kailash no longer gets an "On the watch" source in Routes** on the desktop, and no
+  failing settings read behind it. It has no routes. The old Ambit1/2 branch it fell into
+  had been unused since the Ambit1/2 got real routes. Android already did this.
+
+---
+
 ## 2026-11-25: Linux: pairing a watch by Bluetooth no longer touches the computer (watch-protocol/09)
 
 André: "linking a watch should never affect the system", then "b".
