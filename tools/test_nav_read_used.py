@@ -45,7 +45,7 @@ def main():
     whole = F.REGIONS[F.WAYPOINT_BASE][1] + F.REGIONS[F.ROUTE_BASE][1]
     with tempfile.TemporaryDirectory() as d:
         paths = [gpx(d, "a", "SommetTest", 3.06), gpx(d, "b", "Paris-Brest-Paris 2027", 3.10),
-                 gpx(d, "c", "Lille - Arras", 3.20)]
+                 gpx(d, "c", "Arras - Amiens", 3.20)]
         with contextlib.redirect_stdout(io.StringIO()):
             flash, _ = W.build_routes(paths, None)
             empty, _ = W.build_reset()

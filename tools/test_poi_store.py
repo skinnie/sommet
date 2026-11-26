@@ -233,7 +233,7 @@ class RemovePoi(unittest.TestCase):
         import tempfile
         self.tmp = tempfile.TemporaryDirectory()
         self.watch = FakeWatch()
-        for name, lat in (("SommetA", 50.6), ("Maceira Leiria", 39.69), ("SommetB", 50.61)):
+        for name, lat in (("SommetA", 50.6), ("Home Test", 45.92), ("SommetB", 50.61)):
             ble_pois.add_poi(self.watch, name, lat, 3.06)
 
     def tearDown(self):
@@ -255,7 +255,7 @@ class RemovePoi(unittest.TestCase):
         ble_pois.add_poi(self.watch, "SommetA", 50.6, 3.06)
         self.assertTrue(W.remove_pois(self.watch, [("SommetA", 50.6, 3.06)], self.tmp.name)["ok"])
         self.assertEqual(sorted(names(W.read_pois(self.watch))),
-                         ["Maceira Leiria", "SommetA", "SommetB"])
+                         ["Home Test", "SommetA", "SommetB"])
 
     def test_a_poi_not_there_writes_nothing(self):
         result = W.remove_pois(self.watch, [("SommetA", 50.7, 3.06)], self.tmp.name)
@@ -268,10 +268,10 @@ class RemovePoi(unittest.TestCase):
         self.watch.records.append(b"N" * 16 + b"\0\0" + b"2026-10-25T09:00:00\0" + bytes(13))
         result = W.remove_pois(self.watch, [("SommetB", 50.61, 3.06)], self.tmp.name)
         self.assertEqual((result["ok"], result["left"], result["emptyCleared"]), (True, 2, 1))
-        self.assertEqual(sorted(names(W.read_pois(self.watch))), ["Maceira Leiria", "SommetA"])
+        self.assertEqual(sorted(names(W.read_pois(self.watch))), ["Home Test", "SommetA"])
 
     def test_the_last_poi_leaves_an_empty_list(self):
-        for name, lat in (("SommetA", 50.6), ("Maceira Leiria", 39.69), ("SommetB", 50.61)):
+        for name, lat in (("SommetA", 50.6), ("Home Test", 45.92), ("SommetB", 50.61)):
             self.assertTrue(W.remove_pois(self.watch, [(name, lat, 3.06)], self.tmp.name)["ok"])
         self.assertEqual(self.watch.records, [])
 

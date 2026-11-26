@@ -22,11 +22,11 @@ void PoiService::setLoading(bool value)
 
 // Matches write_nav.py's show_entries() print format exactly (confirmed directly against
 // real hardware output, 2026-08-08 - see this class's own header comment):
-//   Name='Casa Lille, Nor'  RouteName=''  Timestamp='...'  RouteIndex=0  Type=0  SubType=0
+//   Name='<a home POI>'  RouteName=''  Timestamp='...'  RouteIndex=0  Type=0  SubType=0
 //   TypeIndex=0  Flags=0  Location.Latitude=506236700  Location.Longitude=30559214
 // Latitude/Longitude are degrees * 1e7, the same convention as WaypointDescriptor's own
 // lat/lon fields (show_navigation()'s `w.lat / 1e7`) - sanity-checked against a real POI
-// named after a real place (Lille) decoding to Lille's actual coordinates.
+// named after a real place, decoding to that place's actual coordinates.
 QVariantList PoiService::parseOnWatchPois(const QString &rawOutput)
 {
     QVariantList pois;

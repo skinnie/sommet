@@ -11,7 +11,7 @@ used there for `sml.DeviceLogBook`, entry `0x8d`) also answers for `sml.DeviceHi
 Suunto 7R/Container/Documents/descr+79DC39510E000100+2.0.5`, `tools/sbem_schema.py --group
 0x67` lists every field). Cross-checked field by field against what the watch's own screen and
 the `7R` iOS app's local database (`7r-trackLog.db`, `device_history` table) show for the same
-real watch: `NumberOfVisitedPlaces`/`NumberOfVisitedCountries`=1/1 (Lille, France),
+real watch: `NumberOfVisitedPlaces`/`NumberOfVisitedCountries`=1/1,
 `TravellingDays`/`TravelledDistance`/`FurthestFromHome`=0/0/0 - exact match.
 
 Two unit conversions applied here that `sbem_schema.py`'s own `decode_entry()` deliberately
@@ -23,7 +23,7 @@ plausible but not independently checked). `VisitedCities...Location.Longitude/La
 a real, separate case: plain `float32`, genuinely different from every *other* lat/lon field
 in this same schema (all `int32`, degrees*1e7) - decoding them as degrees directly gives
 implausible values (~0.05, ~0.88); as **radians** (`value * 180 / pi`), they land exactly on
-Lille's real coordinates, confirming the unit even though the descriptor's own `<MOD>` tag for
+the known location's real coordinates, confirming the unit even though the descriptor's own `<MOD>` tag for
 these two specific fields is empty.
 
     ./tools/kailash_history.py
@@ -160,7 +160,7 @@ def read_history(link, warn=print):
     # compatibility - `last_known_location` still means the same thing) only ever held the
     # final value seen, silently discarding every earlier visited place on a watch with real
     # multi-place travel history. This reference watch has only ever had exactly one real
-    # visited place (Lille) the whole time this project has tested against it, so the
+    # visited place the whole time this project has tested against it, so the
     # "overwrite" bug never had a visible symptom to catch it by - genuinely unconfirmed
     # whether a second real place preserves the same paired order assumed here (Location
     # then CountryCode, appearing in real visit order) until a watch with real multi-place

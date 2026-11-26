@@ -65,18 +65,18 @@ class PlanEncoding(unittest.TestCase):
 
 class Tiles(unittest.TestCase):
     def test_tile_of_known_point(self):
-        # Lille (50.63 N, 3.06 E) is in the ELEMNT's tile 130/86.
-        self.assertEqual(M.tile_of(50.63, 3.06), (130, 86))
+        # Chamonix (45.92 N, 6.87 E) is in the ELEMNT's tile 132/91.
+        self.assertEqual(M.tile_of(45.92, 6.87), (132, 91))
 
     def test_bounds_contain_their_points(self):
-        s, w, n, e = M.tile_bounds(130, 86)
-        self.assertTrue(s < 50.63 < n and w < 3.06 < e)
+        s, w, n, e = M.tile_bounds(132, 91)
+        self.assertTrue(s < 45.92 < n and w < 6.87 < e)
 
     def test_margin_reaches_neighbour_tile(self):
-        s, w, n, e = M.tile_bounds(130, 86)
-        near_east = (50.3, e - 0.05)
-        self.assertEqual(M.tiles_for_points([near_east], margin_km=0), [(130, 86)])
-        self.assertIn((131, 86), M.tiles_for_points([near_east], margin_km=10))
+        s, w, n, e = M.tile_bounds(132, 91)
+        near_east = ((s + n) / 2, e - 0.05)
+        self.assertEqual(M.tiles_for_points([near_east], margin_km=0), [(132, 91)])
+        self.assertIn((133, 91), M.tiles_for_points([near_east], margin_km=10))
 
     def test_parse_tiles(self):
         self.assertEqual(M.parse_tiles(["130/86,131/86", " 129/85 "]), [(130, 86), (131, 86), (129, 85)])

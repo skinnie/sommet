@@ -10,7 +10,7 @@ import { base64ToBytes } from './Base64';
 // confirmed live 2026-08-09 (KAILASH-BLE-FINDINGS.md Finding 7) - cable DeviceLog reads
 // always returned 0 samples, but the phone's own live BLE session had them. A real activity
 // decoded end to end this way, its coordinates matching the watch's own confirmed last-known
-// location (Lille, France - the same ground truth KailashHistoryReader.ts cites).
+// location (the same ground truth KailashHistoryReader.ts cites).
 //
 // Reply layout (an SBEM0102 payload behind a 6-byte prefix - findMagic() skips it):
 //   0x49  sml.BinaryDataArea.Size   uint32

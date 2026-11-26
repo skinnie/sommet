@@ -2379,7 +2379,7 @@ PageFlickable {
                 // points were kailash has been"). MapView's own real projection math
                 // auto-fits to whatever pins are given (see MapView.qml's own `markers`
                 // property comment) - a single real visited place so far on this reference
-                // watch (Lille) shows as a single centered pin, exactly as accurate as this
+                // watch shows as a single centered pin, exactly as accurate as this
                 // watch's own real travel history; more pins appear here automatically as
                 // more real travel gets recorded, no further wiring needed.
                 Column {

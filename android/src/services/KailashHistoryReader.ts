@@ -7,7 +7,7 @@ import { base64ToBytes } from './Base64';
 // Documents/descr+79DC39510E000100+2.0.5` in that project, via `tools/sbem_schema.py`) -
 // not re-derived here. See that Python tool's own docstring for how each entry was found
 // and cross-checked live against the watch's own "7R" screen and the 7R iOS app's local
-// SQLite database (1 city/country, Lille France).
+// SQLite database (1 city/country).
 //
 // Real field table (from the schema, not guessed):
 //   0x54  Device.Name                          utf8
@@ -29,7 +29,7 @@ import { base64ToBytes } from './Base64';
 // field this project has ever seen on this watch family (all int32, degrees*1e7 - see
 // RouteReader.ts/PoiService.ts). Decoding them as degrees directly gives implausible values;
 // as **radians** (`value * 180 / Math.PI`), they land on the watch's own real last-known
-// location - confirmed in kailash_history.py against Lille, France, not re-verified here
+// location - confirmed in kailash_history.py against the watch's known location, not re-verified here
 // since this ports that same confirmed formula rather than re-deriving it.
 
 function decodeUtf8(bytes: Uint8Array, start: number, end: number): string {

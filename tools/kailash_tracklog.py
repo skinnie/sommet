@@ -10,9 +10,9 @@ already - worth reading, not just trusting the numbers below:** the first pass a
 every field right except the record boundary, off by exactly one byte. That misalignment
 still produced smoothly-varying, plausible-*looking* coordinates (a real, coherent-seeming
 track through the Canadian Arctic) - "varies smoothly" alone was not proof of a correct
-decode, and it took André pointing out the real location should be Lille, France for the
+decode, and it took André pointing out the real location should be checked for the
 actual bug (a one-byte record-boundary shift) to surface. Corrected by searching the raw bytes
-directly for Lille's own real coordinates (~50.63N, ~3.06E) rather than trusting the earlier
+directly for the known location's real coordinates rather than trusting the earlier
 alignment, which is what pinned the true record start.
 
     record stride: 20 bytes, starting at region offset 1 - the region's own byte 0 is a real,
@@ -37,7 +37,7 @@ Confirmed against real hardware, 2026-08-08: 56 consecutive real-looking records
 index 0 has a completely different byte shape, unrelated third-field magnitude and an
 implausible lat - almost certainly a header/init record, not a GPS fix, and is skipped)
 spanning 2026-08-02 through 2026-08-07, coordinates matching André's own real, independently
-known location (Lille, France) closely and consistently across every real record - the actual
+known location closely and consistently across every real record - the actual
 confirmation, not just "looks smooth." Past record 56 the same fields degrade into implausible
 values - the same "real data, then unused flash" pattern already established for Ambit3's own
 ExerciseLog, not a bug.

@@ -2347,7 +2347,7 @@ André, 2026-09-29: Race Plan on Android, "Everything in one go".
   scenarios, days/nights, sleep and "Suggest my sleep", weather, alerts, PitStopper POIs, roadbook
   import) have TypeScript twins in android/src/services/race/, computed on the phone - no backend.
   tools/test_race_parity.js runs each twin against the Python on real routes (BRM 200 Thiérache,
-  Lille-Hardelot, the 2026-06-06 BRM600 FIT) + synthetic PitStopper files: 144/144 identical.
+  a 600 km brevet FIT from 2026-06-06) + synthetic PitStopper files: 144/144 identical.
 - **Screen** (RacePlanScreen, a port of RacePlanPage.qml): the same 6-step wizard and results -
   verdict, per-control table with weather, planned stops, wind fold, Suggest my sleep, days &
   nights, critical points, what-if, saved scenarios, roadbook export (share sheet).

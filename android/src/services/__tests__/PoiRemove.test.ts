@@ -79,7 +79,7 @@ function rawList(bodies: number[][]): Uint8Array {
 
 const A = record('SommetA', 50.6, 3.06);
 const B = record('SommetB', 50.61, 3.07);
-const HOME = record('Maceira Leiria', 39.69, -8.89);
+const HOME = record('Home Test', 45.92, 6.87);
 
 beforeEach(() => {
   mockLog.length = 0;
@@ -92,7 +92,7 @@ beforeEach(() => {
 test('the list without the removed POI keeps every other entry byte for byte, in order', () => {
   const read = rawList([A, [], B, HOME]);
   const entries = poiEntries(read);
-  expect(entries.map(e => e.poi?.name ?? null)).toEqual(['SommetA', null, 'SommetB', 'Maceira Leiria']);
+  expect(entries.map(e => e.poi?.name ?? null)).toEqual(['SommetA', null, 'SommetB', 'Home Test']);
 
   const { keep, empty } = poisToKeep(entries, [entries[2].poi!]);
   expect(empty).toBe(1);

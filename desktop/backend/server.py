@@ -5913,7 +5913,7 @@ class Handler(BaseHTTPRequestHandler):
         same reply - see that tool's own docstring for how the query and its two real unit
         conversions (Duration=raw/10, Location=float32 radians) were found and confirmed
         against real hardware. Live-verified end to end this same session against André's own
-        watch (1 city/country, Lille France - matches the watch's own "7R" screen exactly)."""
+        watch (1 city/country - matches the watch's own "7R" screen exactly)."""
         if demo_ambit():
             _dp = [
                 (50.63,3.06,"France"),(45.92,6.87,"France"),(46.02,7.75,"Switzerland"),
@@ -6009,7 +6009,7 @@ class Handler(BaseHTTPRequestHandler):
         confirmed altitude field and there's no FIT writer for this format (see that tool's
         own docstring). A real ~1.3MB flash read over USB, not a short SBEM query - slower
         than most endpoints here, hence the longer timeout. Live-verified this same session:
-        56 real points, distance/track matching André's own known location (Lille, France)."""
+        56 real points, distance/track matching the watch's known location."""
         code, out, err = run_tool("kailash_tracklog.py", ["--json"], timeout=300)
         info = self._parse_last_json_line(out)
         if info is None:

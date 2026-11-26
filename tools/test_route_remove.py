@@ -35,11 +35,11 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         a = gpx(d, "a", "SommetTest", 3.06)
         b = gpx(d, "b", "Paris-Brest-Paris 2027", 3.10)
-        c = gpx(d, "c", "Lille - Arras", 3.20)
+        c = gpx(d, "c", "Arras - Amiens", 3.20)
         flash = flash_of([a, b, c])
-        assert kept_names(flash, "SommetTest") == ["Paris-Brest-Par", "Lille - Arras"]
+        assert kept_names(flash, "SommetTest") == ["Paris-Brest-Par", "Arras - Amiens"]
         # the name as the watch shows it, cut to 15 bytes, finds the route too
-        assert kept_names(flash, "Paris-Brest-Par") == ["SommetTest", "Lille - Arras"]
+        assert kept_names(flash, "Paris-Brest-Par") == ["SommetTest", "Arras - Amiens"]
         # the last route: nothing left, the database is then reset
         assert kept_names(flash_of([a]), "SommetTest") == []
         try:

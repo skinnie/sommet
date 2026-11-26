@@ -1,7 +1,7 @@
 jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(async () => null), setItem: jest.fn() }));
 import { compass, summarizeHourly } from '../ActivityWeather';
 
-// The real Open-Meteo hours (Lille, 2026-09-23) the desktop's weather line was checked against:
+// The real Open-Meteo hours (2026-09-23) the desktop's weather line was checked against:
 // a 37 km ride 10:15:30-11:28:58 UTC showed "Overcast · 18–21 °C · 8 km/h S (gusts 19)".
 const HOURLY = {
   time: ['2026-09-23T09:00', '2026-09-23T10:00', '2026-09-23T11:00', '2026-09-23T12:00'],
