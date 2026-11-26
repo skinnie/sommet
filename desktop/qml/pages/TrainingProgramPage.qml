@@ -961,6 +961,7 @@ Item {
                             // and this computer's own), so its last workout can be erased.
                             enabled: !TrainingProgramService.installing
                                      && HomeViewModel.anyDevice
+                                     && DeviceCapabilities.supportsTrainingPlans
                             onClicked: TrainingProgramService.syncCalendar(
                                 root.entriesWithMode(root.defaultMode), true,
                                 draftStore.autoStartOptIn)

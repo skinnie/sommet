@@ -30,7 +30,9 @@ class EmptyPlan(unittest.TestCase):
             return 0, json.dumps({"ok": True, "written": True, "count": 0, "dates": [],
                                   "cleared": True}) + "\n", ""
 
-        for name, value in (("run_tool", fake_run_tool), ("use_ble", lambda: False)):
+        # Not a Kailash (test_backend_kailash_plans.py checks that refusal).
+        for name, value in (("run_tool", fake_run_tool), ("use_ble", lambda: False),
+                            ("selected_is_kailash", lambda: False)):
             self.addCleanup(setattr, server, name, getattr(server, name))
             setattr(server, name, value)
         self.handler = server.Handler.__new__(server.Handler)

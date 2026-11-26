@@ -112,6 +112,7 @@ QtObject {
                     "demo", DeviceService.demoMode, "serial", DeviceService.serial,
                     "entries", store.draftEntries().length, "syncedFor", store.syncedFor)
         if (!store.settings.autoSync || DeviceService.demoMode) return
+        if (!DeviceCapabilities.supportsTrainingPlans) return   // a Kailash: no plans on it
         const key = DeviceService.serial || DeviceService.model
         if (!key || key === store.syncedFor) return
         if (store.draftEntries().length === 0) return

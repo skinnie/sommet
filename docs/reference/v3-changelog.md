@@ -15,7 +15,14 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
   silent and was dropped after 8 s, link after link (André's Kailash on the X230).
 - The computer (Linux and Windows) now sends the same request, byte for byte as in the 7R
   capture, when a watch has said nothing for 2 s after subscribing. A watch that speaks first
-  gets nothing new. Not yet seen working on a real Kailash.
+  gets nothing new. Seen working on André's Kailash on the X230 (2026-11-26, the helper run from
+  the source tree): linked, the request went out 3 s after subscribing, and the watch answered
+  with its hello.
+- The automatic plan sync no longer runs on a Kailash. On that first link it had sent the
+  Kailash an App Zone read and a "Today" card write, both refused by the watch, so nothing
+  changed on it. The Kailash has no training plans (its memory map declares no TrainingProgram
+  region). The desktop's Sync to watch is greyed out for it, the backend refuses both plan
+  requests, and Android's Sync to watch says so and sends nothing.
 
 ## 2026-11-26: 0.2.68 in short: what to know before you update
 

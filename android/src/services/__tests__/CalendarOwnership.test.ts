@@ -9,6 +9,7 @@ import { entryLabel } from '../TrainingCalendarCore';
 const mockFiles = new Map<string, string>();
 let mockFlash: Uint8Array = new Uint8Array(0);
 let mockSerial: string | null = '8A153C5111000900';
+let mockModel = 'Emu';
 
 function fakeAppsRegion(names: string[]): Uint8Array {
   let region: Uint8Array = new Uint8Array(0);
@@ -37,7 +38,7 @@ jest.mock('../../native/AmbitUsbModule', () => {
     disconnect: jest.fn(async () => {}),
     getDeviceInfo: jest.fn(async () => {
       if (mockSerial == null) throw new Error('no answer');
-      return { model: 'Emu', serial: mockSerial };
+      return { model: mockModel, serial: mockSerial };
     }),
     readRegion: jest.fn(async (_base: number, len: number) => {
       const out = new Uint8Array(len).fill(0xff);
@@ -83,6 +84,24 @@ const W9 = entryLabel('2026-10-31', 'W9 Final Workout');   // put there by the P
 beforeEach(() => {
   mockFiles.clear();
   mockSerial = '8A153C5111000900';
+  mockModel = 'Emu';
+});
+
+test('a Kailash gets nothing: no read, no write, a plain error', async () => {
+  const usb = require('../../native/AmbitUsbModule');
+  usb.readRegion.mockClear();
+  usb.writeRegion.mockClear();
+  mockModel = 'Hoopoe';
+  mockFlash = fakeAppsRegion(['Couch-to-5K']);
+  const states: any[] = [];
+  const r = await syncCalendar([{ date: '2026-11-27', mode: 'Running', workoutName: 'T10s' }],
+    new Date(2026, 10, 26), true, (st) => states.push(st));
+  expect(r).toBeNull();
+  expect(states[states.length - 1]).toEqual({ phase: 'error',
+    error: 'The Kailash has no training plans, so nothing was sent to it.' });
+  expect(usb.readRegion).not.toHaveBeenCalled();
+  expect(usb.writeRegion).not.toHaveBeenCalled();
+  expect(onWatch()).toEqual(['Couch-to-5K']);
 });
 
 test("31/10 again: the PC's workout of the day stays when the tablet syncs", async () => {

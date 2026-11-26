@@ -107,6 +107,16 @@ export async function syncCalendar(
   }
   try {
     onState({ phase: 'reading' });
+    // A Kailash has no training plans: its memory map declares no TrainingProgram region, and
+    // on 2026-11-26 André's Kailash refused the App Zone read and the card write over Bluetooth
+    // (the desktop's automatic sync had sent them). Nothing is read or written. Same rule as the
+    // desktop's DeviceCapabilities.supportsTrainingPlans and server.py linked_is_kailash.
+    let model = '';
+    try { model = (await getDeviceInfo()).model ?? ''; } catch { /* unknown: the checks below decide */ }
+    if (model === 'Hoopoe') {
+      onState({ phase: 'error', error: 'The Kailash has no training plans, so nothing was sent to it.' });
+      return null;
+    }
     const apps = await resolveRegion('Apps');
     if (!apps) { onState({ phase: 'error', error: 'This watch has no App Zone (Apps) region.' }); return null; }
 

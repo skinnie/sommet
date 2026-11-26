@@ -211,6 +211,13 @@ QtObject {
     // an archive, not a restore point, and the UI must not offer to restore it.
     property bool supportsTravelArchive: _isKailash
 
+    // Training plans: guided workouts in the sport modes' WORKOUT menus (App Zone) and the
+    // "Today" cards (TrainingProgram region). Not on a Kailash: its memory map declares no
+    // TrainingProgram region (the nav --save run above), and on 2026-11-26 André's Kailash
+    // refused both the App Zone read and the card write over Bluetooth, which the automatic
+    // plan sync had sent on connect. The backend refuses too (server.py linked_is_kailash).
+    property bool supportsTrainingPlans: !_isKailash
+
     // The Ambit1/2 equivalent. Their waypoints ARE their navigation database (a route is the
     // waypoints sharing a route_name), and legacy_link.py reads them plus the watch settings
     // in one go - real data that `nav --save` could never reach, so Backup used to offer this

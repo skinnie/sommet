@@ -1160,6 +1160,20 @@ def selected_is_kailash():
     return bool(info) and info.get("model") == "Hoopoe"
 
 
+def linked_is_kailash():
+    """True when the watch these requests go to is a Kailash: the Bluetooth one while the link
+    is in use (its hello names the model), else the cable's (selected_is_kailash)."""
+    if use_ble():
+        return (ble_bridge.bridge.status().get("device_info") or {}).get("model") == "Hoopoe"
+    return selected_is_kailash()
+
+
+# A Kailash has no training plans: its memory map declares no TrainingProgram region
+# (DeviceCapabilities.qml, 2026-08-27), and on 2026-11-26 André's Kailash refused the App Zone
+# read and the card write over Bluetooth that the automatic plan sync sent it.
+KAILASH_NO_PLANS = "The Kailash has no training plans, so nothing was sent to it."
+
+
 # Is a Suunto watch on USB right now? Updated by every enumeration (/api/devices, the stale-pin
 # heal) - the app polls /api/devices, so it stays fresh without an extra USB round trip here.
 USB_WATCH_PRESENT = False
@@ -9404,6 +9418,11 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(entries, list):
             self._send_json(400, {"ok": False, "error": 'need an "entries" list'})
             return
+        if linked_is_kailash():
+            self._send_json(200, {"ok": False, "unsupported": True, "rotation": True,
+                                  "dryRun": not bool(body.get("write")),
+                                  "error": KAILASH_NO_PLANS})
+            return
         missing = [i for i, e in enumerate(entries)
                    if not (e.get("date") and e.get("mode") and e.get("workout"))]
         if missing:
@@ -9553,6 +9572,11 @@ class Handler(BaseHTTPRequestHandler):
         entries = body.get("entries")
         if not isinstance(entries, list):
             self._send_json(400, {"ok": False, "error": 'need an "entries" list'})
+            return
+        if linked_is_kailash():
+            self._send_json(200, {"ok": False, "unsupported": True, "rotation": True,
+                                  "dryRun": not bool(body.get("write")),
+                                  "error": KAILASH_NO_PLANS})
             return
         missing = [i for i, e in enumerate(entries)
                    if not (e.get("date") and e.get("mode") and isinstance(e.get("workout"), dict))]
