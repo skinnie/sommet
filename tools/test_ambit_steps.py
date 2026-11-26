@@ -84,6 +84,62 @@ def main():
     except ValueError:
         pass
 
+    # 6. each model's ids by name from its own descriptor (assets/, skipped without it), and
+    #    Android's table (AmbitSteps.ts STEPS_IDS) the same as that lookup
+    import glob
+    import pathlib
+    import re
+    here = pathlib.Path(__file__).resolve().parent
+    assets = here.parent / "assets"
+    expected = {"emu": ("descr+*+2.4.17", dict(S.REFERENCE_IDS)),
+                "kaka": ("descr+FROM-FIRMWARE-Kaka+1.1.22",
+                         {"query": 0x96, "steps": 0x13A, "timestamp": 0x13C, "recovery": 0x8F,
+                          "daily_activity": 0x90, "weekly_activity": 0x91,
+                          "total_weekly_activity": 0x92}),
+                "jabiru": ("descr+*+2.0.22",
+                           {"query": 0x8B, "steps": 0x105, "timestamp": 0x108, "recovery": None,
+                            "daily_activity": None, "weekly_activity": None,
+                            "total_weekly_activity": None})}
+    ts = (here.parent / "android" / "src" / "services" / "AmbitSteps.ts").read_text()
+    android = {}
+    consts = dict(re.findall(r"const (\w+_IDS): StepsIds = (\{[^}]*\})", ts))
+    for code, value in re.findall(r"^  (\w+): (\w+_IDS|\{[^}]*\}),", ts, re.M):
+        body = consts.get(value, value)
+        android[code] = {k: int(v, 16) for k, v in re.findall(r"(\w+): (0x[0-9a-f]+)", body)}
+    check("android table names all six", sorted(android) == sorted(
+        ["emu", "finch", "ibisbill", "kaka", "jabiru", "loon"]))
+    for code, (pattern, want) in expected.items():
+        found = sorted(glob.glob(str(assets / "**" / pattern), recursive=True))
+        if found:
+            ids = S.ids_from_schema(sbem_schema.load(found[0]))
+            check(f"{code} ids from its descriptor", ids == want)
+        mine = android.get(code, {})
+        check(f"{code} android ids", mine.get("query") == want["query"]
+              and mine.get("steps") == want["steps"] and mine.get("timestamp") == want["timestamp"]
+              and mine.get("recovery") == want["recovery"]
+              and mine.get("weekly") == want["weekly_activity"])
+    check("loon = jabiru on android", android.get("loon") == android.get("jabiru"))
+    check("sport and run = peak on android",
+          android.get("finch") == android.get("emu") == android.get("ibisbill"))
+
+    # 7. a Vertical and a Traverse reply decode with their own ids; the Traverse has no rings
+    def reply_with(ids, counts, rings=True):
+        body = b""
+        if rings:
+            body += entry(ids["recovery"], struct.pack("<2H", 40, 41))
+            body += entry(ids["weekly_activity"], struct.pack("<2H", 900, 120))
+        body += entry(ids["steps"], struct.pack("<30I", *counts))
+        body += entry(ids["timestamp"], b"2026-11-26T09:20:00+03:00\x00")
+        return struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + body
+    counts = [S.NO_COUNT] * 28 + [9100, 412]
+    for code, rings in (("kaka", True), ("jabiru", False)):
+        ids = expected[code][1]
+        out = S.decode(S.walk(reply_with(ids, counts, rings)), ids)
+        check(f"{code} days", [(d["date"], d["steps"]) for d in out["days"]] == [
+            ("2026-11-25", 9100), ("2026-11-26", 412)])
+        check(f"{code} rings", (out["activity"]["today_kcal"] == 120) if rings
+              else (out["activity"]["today_kcal"] is None and out["recovery"]["hours"] is None))
+
     if fails:
         print("FAILED:", ", ".join(fails))
         return 1
