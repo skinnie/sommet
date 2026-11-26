@@ -7,6 +7,35 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Ambit1/2 sport-mode edits on desktop, and removing an Ambit1/2 route (watch-protocol/10)
+
+Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own
+captures and by tests only.
+
+- **Desktop: Rename, Autolap, HR limits and pods now work on an Ambit1/2.** They went to the
+  Ambit3 tools, which cannot reach this family. They now write the same bytes as the Android
+  app: the sport-mode region as read, with that mode's fields changed. Both apps write
+  the first 10240 bytes of the region, which is what SuuntoLink writes on both watches.
+  Each field change was replayed against SuuntoLink's own writes (Ambit2: 16 changes and a
+  rename; Ambit1: 14 changes and a rename). The one difference is a time stamp SuuntoLink also updates; Sommet
+  keeps it as read.
+- **Ambit1 sport modes on Android were read and written at the Ambit2's places.** The Ambit1's
+  settings record is shorter, so the pods came from the GPS interval and an Autolap edit
+  changed the low HR limit. Both apps now read and write each watch at its own places.
+- Matching SuuntoLink: turning HR limits off sets them to 0 (on the Ambit1, 0/0 is the only
+  way to say "off"). The Ambit2's HR belt is two bits, and both are now switched together.
+  Renaming an Ambit2 mode also renames its entry in the watch's mode list. The desktop shows an
+  Ambit2's stored HR limits (they read 0) and keeps pod bits that have no checkbox.
+- The interval timer on an Ambit1/2 is refused with a message on the desktop, as on Android.
+- **Removing a route from an Ambit1/2**, desktop and Android (the desktop hid the button;
+  Android showed it and then failed). The route region is written again without that route,
+  with the other routes kept byte for byte. Then the waypoint list is written again without
+  that route's waypoints. Copies of both are saved first. No capture shows SuuntoLink removing
+  a route: the bytes follow the captured region layout and the route-send and POI-remove
+  writers. A watch's last route is not removed, because no capture shows an empty route region.
+
+---
+
 ## 2026-11-26: The Ambit3 Vertical's ascent history on the Health page (watch-protocol/10)
 
 - **Health shows a Vertical's own ascent views**, desktop and Android, read with its daily steps

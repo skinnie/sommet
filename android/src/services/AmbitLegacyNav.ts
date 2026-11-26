@@ -1,6 +1,6 @@
 import { readLegacyRegion, writeLegacyRegion, writeLegacyWaypoints, readLegacyNav, connect, disconnect, isBleTransportActive } from '../native/AmbitUsbModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
-import { appendLegacyRoutes, legacyRouteWaypoints, parseRoutes, routeDistanceM, MAX_LIST_WAYPOINTS } from './LegacyRoute';
+import { appendLegacyRoutes, legacyRouteWaypoints, parseRoutes, removeLegacyRouteFromRegion, routeDistanceM, MAX_LIST_WAYPOINTS } from './LegacyRoute';
 
 // Ambit1/2 (Bluebird) route-region BACKUP + RESTORE (2026-08-27, André: "legacy nav backup +
 // restore"). The legacy family has no SBEM 0x0b21 memory map, so the generic NavBackupService
@@ -267,4 +267,51 @@ export async function sendLegacyRoute(route: {
     throw new Error('The route region did not read back as written.');
   }
   return { routesKept: region?.routeCount ?? 0 };
+}
+
+// ─── Route removal (2026-11-26, watch-protocol/10 L6) ────────────────────────────────────────
+// sendLegacyRoute's two writes in reverse, the same as desktop tools/legacy_link.py route_remove:
+// the route region rebuilt without the route (LegacyRoute.removeLegacyRouteFromRegion, the other
+// routes byte for byte, 0x0b18 tail 0xFFFFFA1A), then the waypoint list rewritten without the
+// waypoints tagged with its name. No capture shows SuuntoLink removing a route. Not yet seen on a
+// real watch. The watch's last route is refused (an empty region is in no capture).
+
+/** The list without a removed route's own waypoints (route name = the route's). Kept when another
+ * route left on the watch has the same name. Same rule as desktop legacy_link.waypoints_without_route. */
+export function legacyWaypointsWithoutRoute(
+  wps: LegacyWaypoint[], routeName: string, stillUsed: string[] = [],
+): { keep: LegacyWaypoint[]; dropped: number } {
+  const target = routeName.trim();
+  if (stillUsed.some(n => n.trim() === target)) return { keep: wps, dropped: 0 };
+  const keep = wps.filter(w => w.routeName.trim() !== target);
+  return { keep, dropped: wps.length - keep.length };
+}
+
+/** Removes the route named `name` from the connected Ambit1/2, keeping the other routes and every
+ * POI. `saveCopies` keeps the route region and the waypoint list first; when the watch does not
+ * read back the new state, both copies are written back once. Assumes the connection is open. */
+export async function removeLegacyRoute(
+  name: string,
+  saveCopies: (regionB64: string, waypointsJson: string) => Promise<string>,
+): Promise<{ routesLeft: number; waypointsRemoved: number; backupPath: string }> {
+  const region = await readLegacyRouteRegion();
+  if (!region) throw new Error('The watch has no routes.');
+  const { bytes: blob, removed, left } = removeLegacyRouteFromRegion(region.bytes, name);
+  const listed = listedWaypoints(JSON.parse(await readLegacyNav()));
+  const { keep, dropped } = legacyWaypointsWithoutRoute(listed, removed.name, left);
+  const backupPath = await saveCopies(bytesToBase64(region.bytes), JSON.stringify(listed));
+  if (!(await writeLegacyRegion(ROUTE_REGION, bytesToBase64(blob), ROUTE_COMMIT_EXTRA))) {
+    throw new Error('The watch did not accept the route write.');
+  }
+  if (dropped && (await writeLegacyWaypoints(bytesToBase64(encodeWaypoints(keep)))) < 0) {
+    throw new Error(`Route removed, but the watch did not accept the waypoint list (copy: ${backupPath}).`);
+  }
+  const head = base64ToBytes(await readLegacyRegion(ROUTE_REGION, 64));
+  const backCount = dropped ? (JSON.parse(await readLegacyNav())?.waypoints ?? []).length : keep.length;
+  if (head.length < 32 || u16(head, 0) !== HEAD_MAGIC || u16(head, 4) !== left.length || backCount !== keep.length) {
+    await writeLegacyRegion(ROUTE_REGION, bytesToBase64(region.bytes), ROUTE_COMMIT_EXTRA).catch(() => false);
+    if (dropped) await writeLegacyWaypoints(bytesToBase64(encodeWaypoints(listed))).catch(() => -1);
+    throw new Error(`The watch did not keep the new routes; the copies were written back (${backupPath}).`);
+  }
+  return { routesLeft: left.length, waypointsRemoved: dropped, backupPath };
 }

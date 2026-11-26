@@ -100,7 +100,10 @@ actual street network (Porte Dauphine, Colline de Chaillot, Bois de Boulogne, St
 That last check is the one that matters: a wrong scale or anchor still yields plausible
 numbers, but the line stops following roads.
 
-Writing is **not** done. openambit's writer produces bytes that match this capture, and the
-region can now be read first — which is what makes a safe read-modify-write possible rather
-than the whole-region replace that wiped two of André's routes over BLE on 2026-08-11. It
-still needs his explicit go-ahead, a region backup, and a dry-run before any real write.
+Writing: route send (2026-10-19, `legacy_link.route_send`, Android `sendLegacyRoute`) keeps the
+routes already there byte for byte and appends the new one; route removal (2026-11-26,
+`legacy_route.remove`, Android `removeLegacyRouteFromRegion`) copies the other routes' info
+entries and point blocks unchanged, only moving down the start index of a block stored after the
+removed one, and drops the route's waypoints from the waypoint list. No capture shows SuuntoLink
+removing a route, and none shows a region with no routes, so the last route is not removed.
+Neither has been seen on a real watch yet.

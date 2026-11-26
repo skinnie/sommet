@@ -13,7 +13,8 @@ import {
   WatchNavigation, WatchRoute, WatchWaypoint,
 } from './RouteReader';
 import { readNavBases } from './MemoryMap';
-import { sendLegacyRoute } from './AmbitLegacyNav';
+import { sendLegacyRoute, removeLegacyRoute } from './AmbitLegacyNav';
+import { bytesToBase64 } from './Base64';
 import { mergeRoutes, existingRoutesToKeep, storedName } from './RouteMerge';
 import { t } from '../i18n';
 
@@ -242,14 +243,26 @@ async function writeRoutesKeepingPois(routes: Parameters<typeof writeRoutes>[0])
   }
 }
 
-/** Removes the route named `name` from the watch (Ambit3 / Traverse). The watch takes its
+/** Removes the route named `name` from the watch. Ambit3 / Traverse: the watch takes its
  * whole route list in one write, so the routes on it are read and written back without this
  * one, as uploadRoute() adds one; the POIs are kept on the native side. Removing the last
- * route writes an empty route list. */
+ * route writes an empty route list. Ambit1/2 (2026-11-26): AmbitLegacyNav.removeLegacyRoute,
+ * the route region without it and the waypoint list without its waypoints, copies of both
+ * saved first (backups/LegacyRoutes/, backups/POIs/) - the desktop's legacy_link route_remove.
+ * Not yet seen on a real Ambit1/2; their last route is refused. */
 export async function removeRouteFromWatch(name: string): Promise<void> {
   await connect();
   try {
-    if (isAmbit12((await getDeviceInfo()).name)) throw new Error(t.routeRemoveLegacy);
+    const info = await getDeviceInfo();
+    if (isAmbit12(info.name)) {
+      const serial = info.serial ?? '';
+      const r = await removeLegacyRoute(name, async (regionB64, json) => {
+        await saveWatchBackup('POIs', bytesToBase64(Uint8Array.from(json, c => c.charCodeAt(0) & 0xff)), serial);
+        return saveWatchBackup('LegacyRoutes', regionB64, serial);
+      });
+      console.log(`[routes] Ambit1/2 route removed, ${r.routesLeft} left, ${r.waypointsRemoved} waypoints dropped (copy: ${r.backupPath})`);
+      return;
+    }
     let nav: WatchNavigation;
     try {
       nav = await readAmbit3Navigation();

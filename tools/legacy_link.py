@@ -31,6 +31,8 @@ memory), so there's nothing safe to send for THAT specific piece yet.
     ./tools/legacy_link.py gps-orbit-status
     ./tools/legacy_link.py gps-orbit-write FILE
     ./tools/legacy_link.py route-send ROUTE.gpx... [--write]
+    ./tools/legacy_link.py route-remove NAME [--write]
+    ./tools/legacy_link.py sport-mode-edit MODE '{"autolapM": 1000}' [--write]
 """
 
 import json
@@ -420,6 +422,102 @@ def sport_mode_write(modes, dry_run=False):
         pathlib.Path(path).unlink(missing_ok=True)
 
 
+def sport_mode_edit(mode, patch, write=False, backup_dir=None):
+    """Changes one sport mode's settings on an Ambit1/2: name, autolap, HR limits, pods (the
+    `patch` keys of legacy_sport_modes.patch_region, which says where each byte comes from).
+
+    Read-modify-write of the region's first 10240 bytes, the extent SuuntoLink writes: read them
+    (0x0b17), change that mode's fields, write them back (0x0b16 + the 0x0b18 commit tail
+    [0x2000][0xFFFFFFFF]) and read them again to check. The same bytes as the Android app's
+    AmbitLegacySportModes.writeLegacySportMode. `mode` is the mode's name. Without `write` nothing
+    is sent; with it, the region as read goes to <backup_dir> first."""
+    import time                                               # noqa: PLC0415
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+
+    region = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
+    if len(region) != LSM.REGION_WRITE_BYTES:
+        raise RuntimeError(f"read {len(region)} of the sport-mode region's "
+                           f"{LSM.REGION_WRITE_BYTES} bytes: nothing written")
+    used = LSM.region_used(region)
+    new = LSM.patch_region(region, mode, patch)
+    changed = sum(1 for a, b in zip(region, new) if a != b)
+    result = {"ok": True, "wrote": False, "mode": mode, "bytes_changed": changed}
+    if not write or not changed:
+        return result
+    from write_nav import DEFAULT_BACKUP_DIR                  # noqa: PLC0415
+    folder = pathlib.Path(backup_dir or DEFAULT_BACKUP_DIR / "legacy_sport_modes")
+    folder.mkdir(parents=True, exist_ok=True)
+    backup = folder / time.strftime("sportmodes-%Y%m%d-%H%M%S.bin")
+    backup.write_bytes(region)
+    flash_write(LSM.REGION_ADDR, new, LSM.COMMIT_EXTRA)
+    back = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
+    if back[:used] != new[:used]:
+        raise RuntimeError(f"the watch did not read back what was written (the copy: {backup})")
+    result.update(wrote=True, backup=str(backup))
+    return result
+
+
+def waypoints_without_route(waypoints, route_name, still_used=()):
+    """The waypoint list without a removed route's own waypoints: those whose route_name is that
+    route's (as route_send tags them, and SuuntoLink before it). Kept when another route left on
+    the watch has the same name. Returns (keep, dropped)."""
+    target = str(route_name).strip()
+    if target in {str(n).strip() for n in still_used}:
+        return list(waypoints), 0
+    keep = [w for w in waypoints if str(w.get("route_name", "")).strip() != target]
+    return keep, len(waypoints) - len(keep)
+
+
+def route_remove(name, write=False, backup_dir=None):
+    """Removes one route from an Ambit1/2, keeping every other route and every POI.
+
+    The reverse of route_send, through the same two writes: the route region rebuilt without it
+    (legacy_route.remove: the other routes byte for byte, flash_write with the 0x0b18 tail
+    0xFFFFFA1A), then the waypoint list rewritten without that route's waypoints (0x0b04 + one
+    0x0b05 each, as poi_remove). No capture shows SuuntoLink removing a route; the bytes are the
+    captured region format, as route_send and the backup restore write it. The last route is not
+    removed (an empty region is in no capture). Without `write` nothing is sent; with it, the
+    region and the list are saved to <backup_dir> first, both are read back, and on a wrong
+    read-back both copies are written back once."""
+    import time                                               # noqa: PLC0415
+    import legacy_route                                       # noqa: PLC0415
+
+    region = read_route_region()
+    if region is None:
+        raise RuntimeError("the watch has no routes")
+    blob, removed = legacy_route.remove(region, name)
+    current = waypoints()
+    if not current.get("ok"):
+        raise RuntimeError(current.get("error", "could not read the watch's waypoint list"))
+    listed = current.get("waypoints", [])
+    left = legacy_route.parse(blob)["routes"]
+    keep, dropped = waypoints_without_route(listed, removed["name"], [r["name"] for r in left])
+    result = {"ok": True, "wrote": False, "removed": removed["name"].strip(),
+              "routes_left": len(left), "waypoints_removed": dropped}
+    if not write:
+        return result
+    from write_nav import DEFAULT_BACKUP_DIR                  # noqa: PLC0415
+    backup_dir = pathlib.Path(backup_dir or DEFAULT_BACKUP_DIR / "legacy_nav")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    (backup_dir / f"legacy-routes-{stamp}.bin").write_bytes(region)
+    (backup_dir / f"legacy-waypoints-{stamp}.json").write_text(json.dumps(current))
+    restore_route_region(blob)
+    if dropped:
+        waypoints_restore(keep)
+    head = route_head()
+    back = waypoints() if dropped else {"ok": True, "waypoints": keep}
+    if (head.get("route_count") != len(left) or not back.get("ok")
+            or len(back.get("waypoints", [])) != len(keep)):
+        restore_route_region(region)
+        if dropped:
+            waypoints_restore(listed)
+        raise RuntimeError("the watch did not keep the new routes; the copies were written back "
+                           f"({backup_dir / f'legacy-routes-{stamp}.bin'})")
+    result.update(wrote=True, backup=str(backup_dir / f"legacy-routes-{stamp}.bin"))
+    return result
+
+
 def route_send(gpx_paths, write=False, backup_dir=None):
     """Adds routes to an Ambit1/2, keeping every route and POI already on it - the order
     SuuntoLink uses (Ambit1 capture zzambit1full): the route region (0x041EB0, commit tail
@@ -481,7 +579,14 @@ def route_send(gpx_paths, write=False, backup_dir=None):
 _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-clear",
              "gps-orbit-status", "gps-orbit-write",
              "sport-mode-write-presets", "routes", "route-head",
-             "route-region-save", "route-region-restore", "nav-restore-json", "route-send")
+             "route-region-save", "route-region-restore", "nav-restore-json", "route-send",
+             "route-remove", "sport-mode-edit")
+
+
+def _opt(flag):
+    """The value after `flag` on the command line, or None."""
+    args = sys.argv[2:]
+    return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else None
 
 
 def main():
@@ -531,6 +636,26 @@ def main():
                 sys.exit(f"usage: {sys.argv[0]} route-send GPX... [--write]")
             try:
                 result = route_send(files, write="--write" in sys.argv[2:])
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "route-remove":
+            # route-remove NAME [--write] [--backup-dir DIR] : remove one route (keeps the rest).
+            if len(sys.argv) < 3 or sys.argv[2].startswith("--"):
+                sys.exit(f"usage: {sys.argv[0]} route-remove NAME [--write] [--backup-dir DIR]")
+            try:
+                result = route_remove(sys.argv[2], write="--write" in sys.argv[3:],
+                                      backup_dir=_opt("--backup-dir"))
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "sport-mode-edit":
+            # sport-mode-edit MODE PATCH_JSON [--write] [--backup-dir DIR] : one mode's settings.
+            if len(sys.argv) < 4:
+                sys.exit(f"usage: {sys.argv[0]} sport-mode-edit MODE PATCH_JSON [--write] "
+                         "[--backup-dir DIR]")
+            try:
+                result = sport_mode_edit(sys.argv[2], json.loads(sys.argv[3]),
+                                         write="--write" in sys.argv[4:],
+                                         backup_dir=_opt("--backup-dir"))
             except ValueError as exc:
                 result = {"ok": False, "error": str(exc)}
         elif cmd == "sport-mode-write-presets":
