@@ -235,6 +235,9 @@ void HealthService::rebuild()
     m_watchRecovery = QJsonDocument::fromJson(
         QSettings().value(QStringLiteral("health/watchRecovery")).toString().toUtf8())
         .object().toVariantMap();
+    m_watchAscent = QJsonDocument::fromJson(
+        QSettings().value(QStringLiteral("health/watchAscent")).toString().toUtf8())
+        .object().toVariantMap();
     m_rhr = mergeByDate({m_iRhr, m_gRhr, manualSeries(QStringLiteral("rhr"))});
     m_steps = mergeByDate({m_iSteps, m_gSteps, watchStepsSeries()});
     // HRV is TWO SEPARATE tracks, never blended (they are different measurements - see the

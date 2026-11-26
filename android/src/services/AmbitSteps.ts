@@ -32,14 +32,21 @@ const DAYS = 30;
  *  lookup by name in tools/ambit_steps.py ids_from_schema; tools/test_ambit_steps.py checks this
  *  table against the descriptors). A model without ActivityTracking (the Traverse) has no
  *  recovery or weekly ids. Android has no descriptor at hand, hence the table. */
-export interface StepsIds { query: number; steps: number; timestamp: number; recovery?: number; weekly?: number }
+export interface StepsIds {
+  query: number; steps: number; timestamp: number; recovery?: number; weekly?: number;
+  // Ambit3 Vertical only: its ascent history (sommet-builds/vertical-ascent-re/FINDINGS.md).
+  ascent?: { totalTime: number; total: number; days: number; year: number;
+             since: number; sinceTotal: number; sinceDays: number; sinceMonths: number };
+}
 const PEAK_IDS: StepsIds = { query: 0x97, steps: 0x12e, timestamp: 0x130, recovery: 0x92, weekly: 0x94 };
 const TRAVERSE_IDS: StepsIds = { query: 0x8b, steps: 0x105, timestamp: 0x108 };
 export const STEPS_IDS: Record<string, StepsIds> = {
   emu: PEAK_IDS,                                               // Ambit3 Peak 2.4.17
   finch: PEAK_IDS,                                             // Ambit3 Sport 2.4.17
   ibisbill: PEAK_IDS,                                          // Ambit3 Run 2.4.17
-  kaka: { query: 0x96, steps: 0x13a, timestamp: 0x13c, recovery: 0x8f, weekly: 0x91 },   // Vertical 1.1.22
+  kaka: { query: 0x96, steps: 0x13a, timestamp: 0x13c, recovery: 0x8f, weekly: 0x91,  // Vertical 1.1.22
+          ascent: { totalTime: 0x12d, total: 0x12e, days: 0x131, year: 0x132,
+                    since: 0x133, sinceTotal: 0x134, sinceDays: 0x137, sinceMonths: 0x138 } },
   jabiru: TRAVERSE_IDS,                                        // Traverse 2.0.22
   loon: TRAVERSE_IDS,                                          // Traverse Alpha 2.0.22 (same program)
 };
@@ -67,11 +74,19 @@ export interface ActivityDay { date: string; kcal: number; today: boolean }
 /** Recovery time at the watch's newest quarter-hour sample (`time`, watch local clock,
  *  "YYYY-MM-DDTHH:MM"), and its peak over the `spanHours` the watch kept. */
 export interface WatchRecovery { time: string; hours: number; peak: number; spanHours: number }
+export interface WatchAscent {
+  /** The watch's own views: Week ascent (7 days to today), This year, Total ascent (+ hours of
+   *  climbing), and the total since the user's last reset. Metres. */
+  week_m: number; year_m: number; total_m: number | null; total_hours: number | null;
+  since: { date: string | null; total_m: number | null };
+  time: string;                                       // the watch's clock at the read
+}
 export interface WatchSteps {
   timestamp: string;
   days: StepsDay[];
   activity: ActivityDay[];
   recovery: WatchRecovery | null;
+  ascent?: WatchAscent;
 }
 
 const MAGIC = [0x53, 0x42, 0x45, 0x4d, 0x30, 0x31, 0x30, 0x32]; // "SBEM0102"
@@ -131,7 +146,9 @@ export function decodeWatchSteps(b64: string, ids: StepsIds = PEAK_IDS): WatchSt
   let stamp = '';
   const recoveryRaw: number[] = [];
   const weekRaw: number[] = [];
+  const byId = new Map<number, [number, number]>();
   for (const [id, s, e] of sbemEntries(b, at)) {
+    if (!byId.has(id)) byId.set(id, [s, e]);
     const ring = id === ids.recovery ? recoveryRaw : id === ids.weekly ? weekRaw : null;
     if (ring) for (let o = s; o + 2 <= e; o += 2) ring.push(b[o] | (b[o + 1] << 8));
     if (id === ids.steps && steps === null) steps = [s, e];
@@ -167,7 +184,53 @@ export function decodeWatchSteps(b64: string, ids: StepsIds = PEAK_IDS): WatchSt
       spanHours: rec.length / 4,
     };
   }
-  return { timestamp: stamp, days, activity, recovery };
+  const ascent = ids.ascent ? decodeAscent(b, byId, ids.ascent, stamp) : undefined;
+  return { timestamp: stamp, days, activity, recovery, ...(ascent ? { ascent } : {}) };
+}
+
+/** The Ambit3 Vertical's ascent history from the same reply (tools/ambit_steps.py
+ *  decode_ascent): metres and seconds, rings oldest first, 0 a value. Not yet seen on a real
+ *  Vertical. */
+function decodeAscent(b: Uint8Array, byId: Map<number, [number, number]>,
+                      a: NonNullable<StepsIds['ascent']>, stamp: string): WatchAscent | undefined {
+  const total = byId.get(a.total);
+  if (!total) return undefined;
+  const list = (id: number, width: 2 | 4): number[] => {
+    const span = byId.get(id);
+    const out: number[] = [];
+    if (!span) return out;
+    for (let o = span[0]; o + width <= span[1]; o += width) {
+      out.push(width === 2 ? (b[o] | (b[o + 1] << 8)) : u32(b, o));
+    }
+    return out;
+  };
+  const one = (id: number) => { const v = list(id, 4); return v.length ? v[0] : null; };
+  const sum = (v: number[]) => v.reduce((x, y) => x + y, 0);
+  const seconds = one(a.totalTime);
+  const sinceSpan = byId.get(a.since);
+  let sinceDate: string | null = null;
+  if (sinceSpan) {
+    let end = sinceSpan[0];
+    while (end < sinceSpan[1] && b[end] !== 0) end++;
+    const text = String.fromCharCode(...Array.from(b.subarray(sinceSpan[0], end)));
+    if (/^\d{4}-\d{2}-\d{2}/.test(text)) sinceDate = text.slice(0, 10);
+  }
+  return {
+    week_m: sum(list(a.days, 2)),
+    year_m: sum(list(a.year, 4)),
+    total_m: one(a.total),
+    total_hours: seconds === null ? null : Math.floor(seconds / 3600),
+    since: { date: sinceDate, total_m: one(a.sinceTotal) },
+    time: stamp.slice(0, 16),
+  };
+}
+
+const ASCENT_KEY = 'health.watchAscent';
+
+/** The Vertical's ascent history at its last read, or null. */
+export async function loadWatchAscent(): Promise<WatchAscent | null> {
+  const a = await readJson(ASCENT_KEY);
+  return a && typeof a.week_m === 'number' ? a : null;
 }
 
 /** Every day Sommet has read from the watch, oldest first: [{date, steps}]. Kept beyond the
@@ -343,6 +406,8 @@ export async function syncWatchSteps(): Promise<number> {
     const watch = String(info?.serial ?? '').trim() || 'watch';
     const stepsByWatch = await mergeWatchSteps(decoded.days, watch);
     await mergeWatchActivity(decoded, watch, stepsByWatch);
+    // The newest read of a Vertical's ascent wins: it is that watch's own running record.
+    if (decoded.ascent) await AsyncStorage.setItem(ASCENT_KEY, JSON.stringify(decoded.ascent));
     return decoded.days.length;
   } catch (e: any) {
     console.log('[steps] daily steps read failed:', e?.message ?? e);

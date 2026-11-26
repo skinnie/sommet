@@ -8,7 +8,8 @@ import { MetricChart } from '../components/MetricChart';
 import { fmtDate } from '../i18n';
 import { fetchWellness, WellnessDay } from '../services/WellnessService';
 import {
-  loadWatchActivity, loadWatchRecovery, loadWatchSteps, weekActivity, weekSteps, type WatchRecovery,
+  loadWatchActivity, loadWatchAscent, loadWatchRecovery, loadWatchSteps, weekActivity, weekSteps,
+  type WatchAscent, type WatchRecovery,
 } from '../services/AmbitSteps';
 import { isHrStrapAvailable, measureHrv, type HrStrapReading } from '../services/HrStrapService';
 import { isStrapHrvEnabled } from '../services/StrapHrvPref';
@@ -85,6 +86,7 @@ export default function HealthScreen() {
   const navigation = useNavigation<any>();
   const [days, setDays] = useState<HealthDay[]>([]);
   const [recovery, setRecovery] = useState<WatchRecovery | null>(null);
+  const [ascent, setAscent] = useState<WatchAscent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -100,6 +102,7 @@ export default function HealthScreen() {
     try {
       setDays(withWatchSteps(list, await loadWatchSteps(), await loadWatchActivity()));
       setRecovery(await loadWatchRecovery());
+      setAscent(await loadWatchAscent());
     } finally {
       setLoading(false);
     }
@@ -244,7 +247,7 @@ export default function HealthScreen() {
       {/* Current values first, then the trends - the summary before the detail. */}
       {/* One tile per number (desktop picks #12): resting HR, HRV and sleep compare with the 7
           days before, and an old value says how old it is. The tiles share each row evenly. */}
-      {(present.length > 0 || recovery || week.days > 0) && (
+      {(present.length > 0 || recovery || week.days > 0 || ascent) && (
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border, borderRadius: v3Radius.card }]}>
           <View style={styles.tiles} onLayout={e => setTilesWidth(Math.floor(e.nativeEvent.layout.width))}>
             {present.map(m => {
@@ -283,6 +286,43 @@ export default function HealthScreen() {
                 caption={`${fmtDate(recovery.time.slice(0, 10)) || recovery.time.slice(0, 10)} ${recovery.time.slice(11, 16)}`
                   + ` · peak ${recoveryText(recovery.peak)}`}
               />
+            )}
+            {/* The Ambit3 Vertical's own ascent views at its last read (desktop HealthPage). */}
+            {ascent && (
+              <>
+                <StatTile
+                  style={{ width: tileWidth }}
+                  label="Week ascent (watch)"
+                  value={String(Math.round(ascent.week_m))}
+                  unit="m"
+                  caption={`${fmtDate(ascent.time.slice(0, 10)) || ascent.time.slice(0, 10)} ${ascent.time.slice(11, 16)}`}
+                />
+                <StatTile
+                  style={{ width: tileWidth }}
+                  label="This year (watch)"
+                  value={String(Math.round(ascent.year_m))}
+                  unit="m"
+                  caption="ascent"
+                />
+                {ascent.total_m !== null && (
+                  <StatTile
+                    style={{ width: tileWidth }}
+                    label="Total ascent (watch)"
+                    value={String(Math.round(ascent.total_m))}
+                    unit="m"
+                    caption={ascent.total_hours !== null ? `${ascent.total_hours} h climbing` : ''}
+                  />
+                )}
+                {ascent.since.date && ascent.since.total_m !== null && (
+                  <StatTile
+                    style={{ width: tileWidth }}
+                    label="Ascent since reset (watch)"
+                    value={String(Math.round(ascent.since.total_m))}
+                    unit="m"
+                    caption={`since ${fmtDate(ascent.since.date) || ascent.since.date}`}
+                  />
+                )}
+              </>
             )}
           </View>
         </View>

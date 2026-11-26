@@ -57,6 +57,9 @@ class HealthService : public QObject
     Q_PROPERTY(QVariantList watchActivity READ watchActivity NOTIFY changed)
     Q_PROPERTY(double latestWatchActivity READ latestWatchActivity NOTIFY changed)
     Q_PROPERTY(QVariantMap watchRecovery READ watchRecovery NOTIFY changed)
+    // The Ambit3 Vertical's ascent history at its last read: {week_m, year_m, total_m,
+    // total_hours, since: {date, total_m}, time, ...} (ActivityService, health/watchAscent).
+    Q_PROPERTY(QVariantMap watchAscent READ watchAscent NOTIFY changed)
     Q_PROPERTY(double latestHrv READ latestHrv NOTIFY changed)
     Q_PROPERTY(double latestBodyBattery READ latestBodyBattery NOTIFY changed)
     Q_PROPERTY(double latestSleep READ latestSleep NOTIFY changed)
@@ -107,6 +110,7 @@ public:
     QVariantList watchActivity() const { return m_watchActivity; }
     double latestWatchActivity() const { return lastValue(m_watchActivity); }
     QVariantMap watchRecovery() const { return m_watchRecovery; }
+    QVariantMap watchAscent() const { return m_watchAscent; }
     double latestHrv() const { return lastValue(m_hrv); }
     double latestBodyBattery() const { return lastValue(m_bodyBattery); }
     double latestSleep() const { return lastValue(m_sleep); }
@@ -146,6 +150,7 @@ private:
     QVariantList m_sleepScore;
     QVariantList m_watchActivity;                                 // Ambit3 daily activity kcal
     QVariantMap m_watchRecovery;                                  // Ambit3 recovery snapshot
+    QVariantMap m_watchAscent;                                    // Vertical ascent history
     static QVariantList buildSleepScores(const QVariantList &nights);
     QVariantList m_hrvAmbit;                                      // Ambit3 morning-HRV (own line)
     bool m_hrvInstalling = false;

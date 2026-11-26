@@ -7,6 +7,19 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: The Ambit3 Vertical's ascent history on the Health page (watch-protocol/10)
+
+- **Health shows a Vertical's own ascent views**, desktop and Android, read with its daily steps
+  (the same read-only DeviceHistory read): Week ascent (today and the 6 days before), This year,
+  Total ascent with its hours of climbing, and the ascent since the user's last reset on the
+  watch. From the Vertical 1.1.22 program (read and run on the PC's MSP430X core,
+  sommet-builds/vertical-ascent-re/FINDINGS.md): metres and seconds, every record oldest first;
+  a move's ascent counts once its log is saved, or at midnight. Not yet seen on a real Vertical.
+- The same research found the Vertical's step days in the right order (unlike the Kailash), and
+  that a day without steps reads 0 on a Vertical, not "no count".
+
+---
+
 ## 2026-11-26: More Kailash settings, and Android writes one Kailash setting at a time (watch-protocol/10)
 
 - **Kailash: 20 more settings**, desktop and Android: notifications off, GPS position format,

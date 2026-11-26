@@ -100,6 +100,12 @@ Item {
     }
     // The Ambit3's recovery snapshot from the last watch read: {time, hours, peak, spanHours}.
     readonly property bool hasRecovery: HealthService.watchRecovery.hours !== undefined
+    // The Ambit3 Vertical's ascent history at its last read (its own Week ascent / This year /
+    // Total ascent / since-reset views).
+    readonly property bool hasAscent: HealthService.watchAscent.total_m !== undefined
+    readonly property string ascentRead: !hasAscent ? "" :
+        DateFormat.date(String(HealthService.watchAscent.time).slice(0, 10))
+        + " " + String(HealthService.watchAscent.time).slice(11, 16)
     function recoveryText(h) {
         var m = Math.round(h * 60)
         return m < 60 ? m + qsTr(" min") : Math.floor(m / 60) + qsTr(" h ") + (m % 60) + qsTr(" min")
@@ -154,6 +160,7 @@ Item {
                 width: parent.width
                 visible: HealthService.rhr.length > 0 || HealthService.steps.length > 0
                          || HealthService.watchActivity.length > 0 || root.hasRecovery
+                         || root.hasAscent
                 // One tile per number (desktop picks #12). Wraps: with every source on, the
                 // tiles are wider than the card.
                 Flow {
@@ -213,6 +220,38 @@ Item {
                                  DateFormat.date(String(HealthService.watchRecovery.time).slice(0, 10))
                                  + " " + String(HealthService.watchRecovery.time).slice(11, 16)
                                  + qsTr(" · peak ") + root.recoveryText(HealthService.watchRecovery.peak)
+                    }
+                    StatTile {
+                        width: tiles.tileWidth
+                        visible: root.hasAscent
+                        label: qsTr("Week ascent (watch)")
+                        value: root.hasAscent ? WatchUnits.altitude(HealthService.watchAscent.week_m) : ""
+                        caption: root.ascentRead
+                    }
+                    StatTile {
+                        width: tiles.tileWidth
+                        visible: root.hasAscent
+                        label: qsTr("This year (watch)")
+                        value: root.hasAscent ? WatchUnits.altitude(HealthService.watchAscent.year_m) : ""
+                        caption: qsTr("ascent")
+                    }
+                    StatTile {
+                        width: tiles.tileWidth
+                        visible: root.hasAscent
+                        label: qsTr("Total ascent (watch)")
+                        value: root.hasAscent ? WatchUnits.altitude(HealthService.watchAscent.total_m) : ""
+                        caption: root.hasAscent ? qsTr("%1 h climbing").arg(HealthService.watchAscent.total_hours) : ""
+                    }
+                    StatTile {
+                        width: tiles.tileWidth
+                        visible: root.hasAscent && !!HealthService.watchAscent.since
+                                 && HealthService.watchAscent.since.date
+                        label: qsTr("Ascent since reset (watch)")
+                        value: root.hasAscent && HealthService.watchAscent.since
+                               ? WatchUnits.altitude(HealthService.watchAscent.since.total_m) : ""
+                        caption: root.hasAscent && HealthService.watchAscent.since
+                                 && HealthService.watchAscent.since.date
+                                 ? qsTr("since ") + DateFormat.date(HealthService.watchAscent.since.date) : ""
                     }
                     StatTile {
                         width: tiles.tileWidth

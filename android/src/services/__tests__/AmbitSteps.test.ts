@@ -199,3 +199,32 @@ describe('steps ids per model', () => {
     expect(decodeWatchSteps(replyWith(STEPS_IDS.kaka, twoDays, true))).toBeNull();
   });
 });
+
+// The Ambit3 Vertical's ascent history from the same reply (sommet-builds/vertical-ascent-re).
+describe('Vertical ascent history', () => {
+  const { STEPS_IDS } = require('../AmbitSteps');
+  const u16s = (v: number[]) => v.flatMap(x => [x & 0xff, (x >> 8) & 0xff]);
+  const text = (s: string) => [...Array.from(s).map(c => c.charCodeAt(0)), 0];
+  it('sums the watch\'s week and year, and reads its totals and reset date', () => {
+    const k = STEPS_IDS.kaka;
+    const magic = Array.from('SBEM0102').map(c => c.charCodeAt(0));
+    const bytes = [
+      ...u32s([0]), 1, 0, ...magic,
+      ...entry(k.ascent.totalTime, u32s([7 * 3600 + 1800])),
+      ...entry(k.ascent.total, u32s([52345])),
+      ...entry(k.ascent.days, u16s([0, 120, 0, 450, 30, 0, 210])),
+      ...entry(k.ascent.year, u32s([1000, 2000, 0, 0, 0, 0, 0, 0, 0, 0, 4100, 810])),
+      ...entry(k.ascent.since, text('2026-11-24T00:00:00')),
+      ...entry(k.ascent.sinceTotal, u32s([810])),
+      ...entry(k.steps, u32s([...Array(29).fill(0), 412])),
+      ...entry(k.timestamp, text('2026-11-26T09:20:00+03:00')),
+    ];
+    const r = decodeWatchSteps(bytesToBase64(new Uint8Array(bytes)), k)!;
+    expect(r.ascent).toEqual({ week_m: 810, year_m: 7910, total_m: 52345, total_hours: 7,
+      since: { date: '2026-11-24', total_m: 810 }, time: '2026-11-26T09:20' });
+    expect(r.days[r.days.length - 1]).toEqual({ date: '2026-11-26', steps: 412, today: true });
+  });
+  it('gives a Peak reply no ascent', () => {
+    expect(decodeWatchSteps(reply(counts))!.ascent).toBeUndefined();
+  });
+});

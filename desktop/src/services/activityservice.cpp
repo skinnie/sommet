@@ -567,6 +567,18 @@ void ActivityService::readWatchSteps(int productId, const QString &serial)
         if (!best.isEmpty())
             s.setValue(QStringLiteral("health/watchRecovery"),
                        QString::fromUtf8(QJsonDocument(best).toJson(QJsonDocument::Compact)));
+
+        // health/watchAscent = the Ambit3 Vertical's ascent history at its last read (week, this
+        // year, total, since the reset; tools/ambit_steps.py decode_ascent), with the watch's
+        // time. The newest read wins: it is that watch's own running record, not a daily count.
+        const auto ascent = root.value(QStringLiteral("ascent")).toObject();
+        if (!ascent.isEmpty()) {
+            QJsonObject snap = ascent;
+            snap.insert(QStringLiteral("time"), root.value(QStringLiteral("timestamp")).toString().left(16));
+            snap.insert(QStringLiteral("watch"), watch);
+            s.setValue(QStringLiteral("health/watchAscent"),
+                       QString::fromUtf8(QJsonDocument(snap).toJson(QJsonDocument::Compact)));
+        }
     });
 }
 

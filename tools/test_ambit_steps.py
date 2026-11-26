@@ -103,8 +103,13 @@ def main():
     ts = (here.parent / "android" / "src" / "services" / "AmbitSteps.ts").read_text()
     android = {}
     consts = dict(re.findall(r"const (\w+_IDS): StepsIds = (\{[^}]*\})", ts))
-    for code, value in re.findall(r"^  (\w+): (\w+_IDS|\{[^}]*\}),", ts, re.M):
-        body = consts.get(value, value)
+    table = ts[ts.index("export const STEPS_IDS"):]
+    table = table[:table.index("\n};")]
+    rows = re.split(r"\n  (?=\w+: )", table)[1:]          # one chunk per model, nested braces kept
+    for row in rows:
+        code, value = row.split(":", 1)
+        ref = re.match(r"\s*(\w+_IDS)", value)
+        body = consts[ref.group(1)] if ref else value.split("ascent:")[0]
         android[code] = {k: int(v, 16) for k, v in re.findall(r"(\w+): (0x[0-9a-f]+)", body)}
     check("android table names all six", sorted(android) == sorted(
         ["emu", "finch", "ibisbill", "kaka", "jabiru", "loon"]))
@@ -112,7 +117,13 @@ def main():
         found = sorted(glob.glob(str(assets / "**" / pattern), recursive=True))
         if found:
             ids = S.ids_from_schema(sbem_schema.load(found[0]))
-            check(f"{code} ids from its descriptor", ids == want)
+            check(f"{code} ids from its descriptor", {k: ids[k] for k in want} == want)
+            ascent = {k: v for k, v in ids.items() if k.startswith("ascent")}
+            check(f"{code} ascent ids", ascent == ({
+                "ascent_total_time": 0x12D, "ascent_total": 0x12E, "ascent_days": 0x131,
+                "ascent_year": 0x132, "ascent_since": 0x133, "ascent_since_total": 0x134,
+                "ascent_since_days": 0x137, "ascent_since_months": 0x138} if code == "kaka"
+                else {k: None for k in ascent}))
         mine = android.get(code, {})
         check(f"{code} android ids", mine.get("query") == want["query"]
               and mine.get("steps") == want["steps"] and mine.get("timestamp") == want["timestamp"]
@@ -139,6 +150,42 @@ def main():
             ("2026-11-25", 9100), ("2026-11-26", 412)])
         check(f"{code} rings", (out["activity"]["today_kcal"] == 120) if rings
               else (out["activity"]["today_kcal"] is None and out["recovery"]["hours"] is None))
+
+    # 8. the Vertical's ascent history from the same reply (vertical-ascent-re/FINDINGS.md):
+    #    sums as its views show them, dated from the timestamp, 0 kept as a value
+    v = dict(expected["kaka"][1])
+    v.update({"ascent_total_time": 0x12D, "ascent_total": 0x12E, "ascent_days": 0x131,
+              "ascent_year": 0x132, "ascent_since": 0x133, "ascent_since_total": 0x134,
+              "ascent_since_days": 0x137, "ascent_since_months": 0x138})
+    week = [0, 120, 0, 450, 30, 0, 210]
+    year = [1000, 2000, 0, 0, 0, 0, 0, 0, 0, 0, 4100, 810]
+    since_days = [300, 0, 510]                       # reset 3 days ago, today last
+    since_months = [810]
+    body = (entry(0x12D, struct.pack("<I", 7 * 3600 + 1800)) + entry(0x12E, struct.pack("<I", 52345))
+            + entry(0x131, struct.pack(f"<{len(week)}H", *week))
+            + entry(0x132, struct.pack("<12I", *year))
+            + entry(0x133, b"2026-11-24T00:00:00\x00") + entry(0x134, struct.pack("<I", 810))
+            + entry(0x137, struct.pack("<3H", *since_days)) + entry(0x138, struct.pack("<I", 810))
+            + entry(v["steps"], struct.pack("<30I", *([0] * 29 + [412])))
+            + entry(v["timestamp"], b"2026-11-26T09:20:00+03:00\x00"))
+    out = S.decode(S.walk(struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + body), v)
+    a = out.get("ascent") or {}
+    check("ascent week", a.get("week_m") == 810 and a["week"][-1] == {"date": "2026-11-26", "m": 210}
+          and a["week"][0]["date"] == "2026-11-20")
+    check("ascent year", a.get("year_m") == 7910 and a["year"][10] == {"month": "2026-11", "m": 4100})
+    check("ascent total", a.get("total_m") == 52345 and a.get("total_hours") == 7
+          and a.get("total_seconds") == 7 * 3600 + 1800)
+    check("ascent since", a.get("since", {}).get("date") == "2026-11-24"
+          and a["since"]["total_m"] == 810
+          and [d["date"] for d in a["since"]["days"]] == ["2026-11-24", "2026-11-25", "2026-11-26"]
+          and a["since"]["months"] == [{"month": "2026-11", "m": 810}])
+    check("steps 0 kept on a Vertical", out["days"][0] == {"date": "2026-10-28", "steps": 0, "today": False})
+    # the reset day doesn't match the first daily value (clock moved back): totals only
+    body2 = body.replace(b"2026-11-24T00:00:00", b"2026-11-23T00:00:00")
+    a2 = S.decode(S.walk(struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + body2), v)["ascent"]
+    check("ascent since days dropped when misplaced", a2["since"]["days"] is None
+          and a2["since"]["total_m"] == 810)
+    check("no ascent on a Peak reply", "ascent" not in S.decode(S.walk(reply(counts)), S.REFERENCE_IDS))
 
     if fails:
         print("FAILED:", ", ".join(fails))

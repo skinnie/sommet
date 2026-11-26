@@ -94,6 +94,15 @@ FIELD_NAMES = {
     "daily_activity": ".ActivityTracking+DailyActivity",
     "weekly_activity": ".ActivityTracking+WeeklyActivity",
     "total_weekly_activity": ".ActivityTracking+TotalWeeklyActivity",
+    # Ambit3 Vertical only: its ascent history (sommet-builds/vertical-ascent-re/FINDINGS.md).
+    "ascent_total_time": ".AscentDescent.Cumulative.TotalAscentTime",
+    "ascent_total": ".AscentDescent.Cumulative.TotalAscent",
+    "ascent_days": ".AscentDescent.Cumulative.LastDays+Ascent",
+    "ascent_year": ".AscentDescent.Cumulative.CurrentYear+Ascent",
+    "ascent_since": ".AscentDescent.Resettable.Timestamp",
+    "ascent_since_total": ".AscentDescent.Resettable.TotalAscent",
+    "ascent_since_days": ".AscentDescent.Resettable.LastDays+Ascent",
+    "ascent_since_months": ".AscentDescent.Resettable.LastMonths+Ascent",
 }
 
 
@@ -184,11 +193,73 @@ def decode(entries, ids):
 
     raw = {k: u16s(k) for k in ("recovery", "daily_activity", "weekly_activity",
                                     "total_weekly_activity")}
-    return {
+    out = {
         "timestamp": stamp,
         "days": days,
         **decode_activity(raw, when),
         "activity_tracking": raw,
+    }
+    ascent = decode_ascent(by_id, ids, when.date())
+    if ascent is not None:
+        out["ascent"] = ascent
+    return out
+
+
+def _months_back(day, n):
+    """"YYYY-MM" of the month `n` months before `day`'s."""
+    y, m = day.year, day.month - n
+    while m < 1:
+        y, m = y - 1, m + 12
+    return f"{y:04d}-{m:02d}"
+
+
+def decode_ascent(by_id, ids, today):
+    """The Ambit3 Vertical's ascent history, as its own views show it, or None for a watch
+    without one. Metres and seconds; every ring oldest first, the newest (today, this month)
+    last; 0 is a value, not "no data" (Kaka 1.1.22 firmware, read and emulated 2026-11-26,
+    sommet-builds/vertical-ascent-re/FINDINGS.md; not yet seen on a real Vertical):
+      week   = the 7-day ring (today and the 6 days before), its sum is "Week ascent"
+      year   = 12 months, element i = month i+1 of this year, its sum is "This year"
+      total  = Cumulative.TotalAscent, hours = TotalAscentTime / 3600 ("Total ascent")
+      since  = the resettable set: its date, total, and 30 daily or 12 monthly values."""
+    if ids.get("ascent_total") is None or ids.get("ascent_total") not in by_id:
+        return None
+
+    def u(key, fmt):
+        data = b"".join(by_id.get(ids.get(key), [])) if ids.get(key) is not None else b""
+        size = struct.calcsize(fmt)
+        return list(struct.unpack(f"<{len(data) // size}{fmt[-1]}", data[:len(data) // size * size]))
+
+    def one(key):
+        v = u(key, "<I")
+        return v[0] if v else None
+
+    def daily(values):
+        n = len(values)
+        return [{"date": (today - datetime.timedelta(days=n - 1 - i)).isoformat(), "m": v}
+                for i, v in enumerate(values)]
+
+    week, year = u("ascent_days", "<H"), u("ascent_year", "<I")
+    since_days, since_months = u("ascent_since_days", "<H"), u("ascent_since_months", "<I")
+    stamp = (by_id.get(ids.get("ascent_since")) or [b""])[0].split(b"\0")[0].decode("ascii", "replace")
+    since_date = stamp[:10] if len(stamp) >= 10 and stamp[4] == "-" else None
+    days_out = daily(since_days)
+    # Under 30 days the first daily value is the reset day; if it isn't (the clock went back),
+    # the daily bars can't be placed: totals only.
+    if since_days and len(since_days) < 30 and days_out[0]["date"] != since_date:
+        days_out = None
+    seconds = one("ascent_total_time")
+    return {
+        "week_m": sum(week), "week": daily(week),
+        "year_m": sum(year),
+        "year": [{"month": f"{today.year:04d}-{i + 1:02d}", "m": v} for i, v in enumerate(year)],
+        "total_m": one("ascent_total"),
+        "total_seconds": seconds,
+        "total_hours": None if seconds is None else seconds // 3600,
+        "since": {"date": since_date, "total_m": one("ascent_since_total"),
+                  "days": days_out,
+                  "months": [{"month": _months_back(today, len(since_months) - 1 - i), "m": v}
+                             for i, v in enumerate(since_months)]},
     }
 
 
