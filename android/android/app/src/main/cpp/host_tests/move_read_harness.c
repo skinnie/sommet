@@ -236,7 +236,7 @@ static void push_cb(void *ref, ambit_log_entry_t *e)
 }
 
 static int g_walked;
-static void progress_cb(void *ref, uint32_t total, uint32_t done, uint32_t pct)
+static void progress_cb(void *ref, uint16_t total, uint16_t done, uint8_t pct)
 {
     (void)ref; (void)total; (void)pct;
     g_walked = (int)done;

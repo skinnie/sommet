@@ -59,7 +59,12 @@ def build(out):
     srcs = sorted(p for p in (CPP / "libambit").glob("*.c") if p.name not in LEFT_OUT)
     srcs += [SHARED / "device_driver_ambit3_navigation.c", SHARED / "device_driver_ambit3_sport_modes.c",
              CPP / "host_tests" / "move_read_harness.c"]
-    base = ["gcc", "-std=gnu11", "-g", "-O0", "-w", "-include", "endian.h",
+    # What gcc 14 (the build robot's) refuses must fail here too: gcc 13 only warned about a
+    # wrongly typed callback (2026-11-26). No -w: it would silence these -Werror= too; the
+    # compiler's output is captured and shown only when a file fails.
+    base = ["gcc", "-std=gnu11", "-g", "-O0", "-Werror=incompatible-pointer-types",
+            "-Werror=implicit-function-declaration", "-Werror=int-conversion", "-Werror=implicit-int",
+            "-include", "endian.h",
             "-I", str(CPP / "libambit"), "-I", str(CPP / "libambit" / "hidapi"), "-I", str(SHARED)]
     for extra in (["-fsanitize=address", "-fno-omit-frame-pointer"], []):
         objs = [out.parent / f"{i}-{p.stem}.o" for i, p in enumerate(srcs)]
