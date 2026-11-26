@@ -95,6 +95,33 @@ int libambit_sbem0102_write(libambit_sbem0102_t *object, uint16_t command, libam
     return ret;
 }
 
+/* The move list (0x1200, log headers) comes in pages of six headers (SuuntoLink USB captures:
+ * lars_Ambit3Peak_2017-03 twelve pages, ambit3language twenty-five). A watch with many moves
+ * needs many pages, and one damaged or lost page used to end the whole list (2026-11-26, GitHub
+ * #26). Asking a page again is safe: the cursor travels in the request, the watch keeps none
+ * (tools/ble_server.py RETRY_SAFE, checked in the Peak 2.4.17 firmware and the emulated watch).
+ * Only this read is asked again here; other SBEM commands may be writes. Four tries, as the flash
+ * read (pmem20.c read_log_chunk) and the desktop (READ_RETRIES 3 after the first). */
+#define SBEM0102_LOG_HEADERS_TRIES 4
+
+static int command_with_retry(libambit_sbem0102_t *object, uint16_t command, uint8_t *send_data,
+                              size_t send_len, uint8_t **reply, size_t *replylen, size_t min_len)
+{
+    int tries = (command == ambit_command_ambit3_log_headers) ? SBEM0102_LOG_HEADERS_TRIES : 1;
+    for (int attempt = 0; attempt < tries; attempt++) {
+        *reply = NULL;
+        *replylen = 0;
+        if (libambit_protocol_command(object->ambit_object, command, send_data, send_len, reply, replylen, 0) == 0
+            && *replylen >= min_len) {
+            return 0;
+        }
+        libambit_protocol_free(*reply);
+        *reply = NULL;
+        *replylen = 0;
+    }
+    return -1;
+}
+
 int libambit_sbem0102_command_request(libambit_sbem0102_t *object, uint16_t command, libambit_sbem0102_data_t *data_objects, libambit_sbem0102_data_t *reply_data)
 {
     int ret = -1;
@@ -141,7 +168,7 @@ int libambit_sbem0102_command_request(libambit_sbem0102_t *object, uint16_t comm
     // Reset reply data before starting to fill it
     libambit_sbem0102_data_free(reply_data);
 
-    if (libambit_protocol_command(object->ambit_object, command, send_data, offset, &reply, &replylen, 0) == 0) {
+    if (command_with_retry(object, command, send_data, offset, &reply, &replylen, 0) == 0) {
         // Check that the reply contains an SBEM0102 header
         if (replylen >= sizeof(header) && memcmp(reply + 6, header + 6, 8) == 0) {
             if (replylen > sizeof(header)) {
@@ -159,11 +186,15 @@ int libambit_sbem0102_command_request(libambit_sbem0102_t *object, uint16_t comm
 
                     // Free old reply before calling again
                     libambit_protocol_free(reply);
+                    reply = NULL;
 
-                    if (libambit_protocol_command(object->ambit_object, command, send_data, offset, &reply, &replylen, 0) != 0 ||
-                        replylen < 6) {
+                    if (command_with_retry(object, command, send_data, offset, &reply, &replylen, 6) != 0) {
+                        // A page that never came: the list is not whole, so it is not used.
+                        // Until 2026-11-26 this went on to report success with an empty list,
+                        // after freeing the previous page's reply a second time.
                         libambit_sbem0102_data_free(reply_data);
-                        break;
+                        free(send_data);
+                        return -1;
                     }
 
                     if (replylen > 6) {

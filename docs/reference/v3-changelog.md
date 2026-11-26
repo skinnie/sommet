@@ -7,6 +7,33 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Android and iOS: many moves on the watch (GitHub #26)
+
+A user with an Ambit3 Peak: reading the watch took very long on Android, which then could not
+reach the watch, while the desktop could. Three causes, found in the app's own move download
+(libambit, shared by Android and iOS) and fixed:
+
+- **Every move was downloaded again at every sync.** openambit reads a move again whenever the
+  watch calls it "not synced", even when the phone already has it. Suunto's apps mark moves
+  synced (SuuntoLink captures: 71 of 71, 147 of 150); Sommet does not unless asked, so on a
+  watch only Sommet syncs every move stayed "not synced". With 30 moves that is about 3 MB,
+  15 to 20 minutes over Bluetooth, at every sync. A move the phone has is now skipped, as on
+  the desktop.
+- **One damaged page of the move list crashed the app.** The list comes in pages of six moves
+  (twelve pages for 71 moves in a SuuntoLink capture). A page that failed freed memory twice,
+  and the read reported success with no moves. A page is now asked again up to four times, as
+  the desktop does; if it never comes, the read ends with an error.
+- A damaged flash piece of a move was already asked again since 0.2.67 (four tries).
+
+New test `tools/test_android_move_read.py` builds the app's own Ambit3 driver with gcc and runs
+it against a fake watch. It uses made-up pages with lost replies, the saved logs of a Traverse
+(37 moves, one past the end of its region) and a Peak (5 moves), and the twelve real pages of
+SuuntoLink's capture of a Peak with 71 moves. The moves match the desktop's reader, and the
+unfixed code fails it (the crash, and the moves read again). Not yet seen on a real watch with
+many moves.
+
+---
+
 ## 2026-11-25: Per-model limits checked against the evidence, first fixes (watch-protocol/10)
 
 André: "why don't you check and do it all for all devices?". Every place Sommet refuses or

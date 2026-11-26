@@ -743,10 +743,14 @@ static int parse_log_header_block(ambit_object_t *object, libambit_sbem0102_data
             skip = 0;
         }
         
-        if (skip && !log_header.synced) {
-            LOG_INFO("Log not previously synchronized, force update");
-            skip = 0;
-        }
+        /* openambit read a move again whenever the watch called it not synced, even when the
+         * caller already had it. Suunto's apps mark every move synced (SuuntoLink captures:
+         * 71 of 71 headers synced in lars_Ambit3Peak_2017-03, 147 of 150 in ambit3language),
+         * Sommet does not unless asked (off by default), so on a Sommet-only watch every move
+         * stayed "not synced" and every sync downloaded all of them again: with 30 moves about
+         * 3 MB, 15 to 20 minutes over Bluetooth (GitHub #26, 2026-11-26). A move the caller
+         * already has is now skipped, synced or not, as the desktop does (it reads only the
+         * moves past the count it knows, tools/ble_activities.py). */
         
         if (!skip) {
             LOG_INFO("Reading data of log %d of %d", *log_entries_walked + 1, log_entries_total);
