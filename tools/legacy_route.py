@@ -235,6 +235,55 @@ def append(region, new_routes):
     return head + info_blob.ljust(INFO_LEN * ROUTE_INFO_SLOTS, b"\x00") + pts_blob
 
 
+def remove(region, name):
+    """The route region without the first route named `name` (compared without the padding
+    spaces, as the lists show it), and that route's {name, point_count}.
+
+    The reverse of append(): the other routes' info entries and point blocks are copied BYTE FOR
+    BYTE, the blocks in the order they are stored (SuuntoLink does not store them in route
+    order); only the start index of a route whose block lay after the removed one moves down by
+    its point count. The head is rebuilt as append() builds it (counts, CRC). No capture shows
+    SuuntoLink removing a route: these are the captured region's own layout and the writer
+    route_send already uses. Raises ValueError for an unknown name, for the watch's last route
+    (an empty region is in no capture, and openambit never writes one), and for point blocks
+    that overlap or leave gaps (not a region this code wrote or has seen)."""
+    if not region or len(region) < HEAD_LEN or int.from_bytes(region[:2], "little") != HEAD_MAGIC:
+        raise ValueError("the watch has no routes")
+    _m, _u2, _u3, count, _u4, points, _crc, _pad = struct.unpack(_HEAD, region[:HEAD_LEN])
+    infos = [bytes(region[HEAD_LEN + INFO_LEN * i:HEAD_LEN + INFO_LEN * (i + 1)]) for i in range(count)]
+    names = [i[:16].split(b"\x00")[0].decode("latin-1").strip() for i in infos]
+    target = str(name).strip()
+    if target not in names:
+        raise ValueError(f"no route named {name!r} on the watch")
+    k = names.index(target)
+    if count == 1:
+        raise ValueError("this is the watch's only route: removing the last one is not done yet "
+                         "(no capture shows an empty route region)")
+    starts = [struct.unpack_from("<I", i, 16)[0] for i in infos]
+    counts = [struct.unpack_from("<H", i, 20)[0] for i in infos]
+    spans = sorted(zip(starts, counts))
+    if (sum(counts) != points or spans[0][0] != 0
+            or any(a + n != b for (a, n), (b, _) in zip(spans, spans[1:]))):
+        raise ValueError("the routes' point blocks overlap or leave gaps: nothing removed")
+    pts = bytes(region[POINTS_OFFSET:POINTS_OFFSET + POINT_LEN * points])
+    if len(pts) != POINT_LEN * points:
+        raise ValueError("route region read short: nothing removed")
+    s, c = starts[k], counts[k]
+    new_pts = pts[:POINT_LEN * s] + pts[POINT_LEN * (s + c):]
+    kept = []
+    for i, info in enumerate(infos):
+        if i == k:
+            continue
+        if starts[i] > s:
+            info = info[:16] + struct.pack("<I", starts[i] - c) + info[20:]
+        kept.append(info)
+    info_blob = b"".join(kept)
+    checksum = crc16_ccitt_false(info_blob + new_pts)
+    head = struct.pack(_HEAD, HEAD_MAGIC, 0, 1, count - 1, 0, points - c, checksum, b"\x00" * 18)
+    return (head + info_blob.ljust(INFO_LEN * ROUTE_INFO_SLOTS, b"\x00") + new_pts,
+            {"name": infos[k][:16].split(b"\x00")[0].decode("latin-1"), "point_count": c})
+
+
 def route_waypoints(route_name, waypoints):
     """A route's own waypoints as entries of the watch's waypoint list, the way SuuntoLink
     writes them on an Ambit1 (capture zzambit1full, 0x0b05): name, the route's name, type 17

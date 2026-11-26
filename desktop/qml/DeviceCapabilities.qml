@@ -55,10 +55,12 @@ QtObject {
     // byte for byte) plus the route's waypoints in the waypoint list. Kailash has no routes.
     property bool supportsRouteWrite: !_isKailash
 
-    // Removing one POI or one route from the watch (2026-10-25): Ambit3 family / Traverse only,
-    // through write_nav.py delpoi/delroute (the Android app's own removal, ported). Ambit1/2
-    // keep theirs in the legacy waypoint region, which this does not write.
-    property bool supportsNavRemove: !_isKailash && !_isLegacy
+    // Removing one POI or one route from the watch (2026-10-25): Ambit3 family / Traverse through
+    // write_nav.py delpoi/delroute (the Android app's own removal, ported). Ambit1/2 routes too
+    // (2026-11-26, watch-protocol/10 L6): legacy_link.py route-remove rebuilds their route region
+    // without it and drops its waypoints from the waypoint list, as Android does. Not yet seen on
+    // a real watch; the watch's last route is refused (no capture shows an empty region).
+    property bool supportsNavRemove: !_isKailash
     // Ambit1/2 POIs too: the whole waypoint list is rewritten without the POI (2026-11-21).
     property bool supportsPoiRemove: !_isKailash
 

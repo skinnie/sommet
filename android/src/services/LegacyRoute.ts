@@ -14,7 +14,8 @@ import { Buffer } from 'buffer';
  *
  * parse* read; appendLegacyRoutes/legacyRouteWaypoints BUILD the bytes for a route send (same
  * as tools/legacy_route.py append/route_waypoints, parity-tested) - the write itself is
- * AmbitLegacyNav.sendLegacyRoute.
+ * AmbitLegacyNav.sendLegacyRoute. removeLegacyRouteFromRegion is legacy_route.py remove(), for
+ * AmbitLegacyNav.removeLegacyRoute.
  */
 
 export const ROUTE_REGION_ADDR = 0x041eb0;
@@ -190,6 +191,52 @@ export function appendLegacyRoutes(region: Uint8Array | null, routes: NewLegacyR
   ov.setUint32(8, total, true); ov.setUint16(12, crc16(cat([info, pts])), true);
   out.set(info, HEAD_LEN); out.set(pts, POINTS_OFFSET);
   return out;
+}
+
+/** The route region without the first route named `name` (compared without padding spaces, as
+ *  the lists show it) - tools/legacy_route.py remove(), byte for byte. The other routes' info
+ *  entries and point blocks are copied unchanged, the blocks in their stored order; only the start
+ *  index of a route whose block lay after the removed one moves down. Head rebuilt as
+ *  appendLegacyRoutes builds it. No capture shows SuuntoLink removing a route: this is the captured
+ *  region layout, written the way route send writes it. Throws for an unknown name, for the
+ *  watch's last route (no capture shows an empty region) and for overlapping point blocks. */
+export function removeLegacyRouteFromRegion(region: Uint8Array | null, name: string):
+    { bytes: Uint8Array; removed: { name: string; pointCount: number }; left: string[] } {
+  if (!region || region.length < HEAD_LEN || (region[0] | (region[1] << 8)) !== HEAD_MAGIC) {
+    throw new Error('The watch has no routes.');
+  }
+  const dv = new DataView(region.buffer, region.byteOffset, region.byteLength);
+  const count = dv.getUint16(4, true), points = dv.getUint32(8, true);
+  const infos = Array.from({ length: count }, (_, i) => region.slice(HEAD_LEN + INFO_LEN * i, HEAD_LEN + INFO_LEN * (i + 1)));
+  const rawName = (info: Uint8Array) => { const z = info.subarray(0, 16).indexOf(0); return Buffer.from(info.subarray(0, z < 0 ? 16 : z)).toString('latin1'); };
+  const names = infos.map(i => rawName(i).trim());
+  const k = names.indexOf(name.trim());
+  if (k < 0) throw new Error(`No route named "${name}" on the watch.`);
+  if (count === 1) throw new Error("This is the watch's only route: removing the last one is not done yet (no capture shows an empty route region).");
+  const starts = infos.map(i => new DataView(i.buffer).getUint32(16, true));
+  const counts = infos.map(i => new DataView(i.buffer).getUint16(20, true));
+  const spans = starts.map((s, i) => [s, counts[i]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const tiled = counts.reduce((n, c) => n + c, 0) === points && spans[0][0] === 0
+    && spans.every((sp, i) => i === 0 || spans[i - 1][0] + spans[i - 1][1] === sp[0]);
+  if (!tiled) throw new Error("The routes' point blocks overlap or leave gaps: nothing removed.");
+  const pts = region.slice(POINTS_OFFSET, POINTS_OFFSET + POINT_LEN * points);
+  if (pts.length !== POINT_LEN * points) throw new Error('Route region read short: nothing removed.');
+  const s = starts[k], c = counts[k];
+  const cat = (a: Uint8Array[]) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let p = 0; for (const x of a) { o.set(x, p); p += x.length; } return o; };
+  const newPts = cat([pts.subarray(0, POINT_LEN * s), pts.subarray(POINT_LEN * (s + c))]);
+  const kept = infos.filter((_, i) => i !== k).map((info, j) => {
+    const i = j < k ? j : j + 1;
+    if (starts[i] > s) new DataView(info.buffer).setUint32(16, starts[i] - c, true);
+    return info;
+  });
+  const info = cat(kept);
+  const out = new Uint8Array(POINTS_OFFSET + newPts.length);
+  const ov = new DataView(out.buffer);
+  ov.setUint16(0, HEAD_MAGIC, true); out[2] = 0; out[3] = 1;
+  ov.setUint16(4, count - 1, true); ov.setUint16(6, 0, true);
+  ov.setUint32(8, points - c, true); ov.setUint16(12, crc16(cat([info, newPts])), true);
+  out.set(info, HEAD_LEN); out.set(newPts, POINTS_OFFSET);
+  return { bytes: out, removed: { name: rawName(infos[k]), pointCount: c }, left: kept.map(rawName) };
 }
 
 /** A route's waypoints as waypoint-list entries, as SuuntoLink writes them on an Ambit1: the

@@ -4838,8 +4838,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_route_remove(self, body):
         """Body: {"name"}, the route as /api/nav lists it. Rewrites the routes database with every
         other route, or resets it when none is left, and puts back the POIs that write erases
-        (write_nav.remove_route). Ambit3 family only, like the Android twin
-        NavigationService.removeRouteFromWatch()."""
+        (write_nav.remove_route). Ambit1/2: legacy_link.route_remove (below). Same as the Android
+        twin NavigationService.removeRouteFromWatch()."""
         name = body.get("name") or ""
         if not name.strip():
             self._send_json(400, {"ok": False, "error": "which route? \"name\" is empty"})
@@ -4863,8 +4863,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if selected_is_legacy():
-            self._send_json(409, {"ok": False, "error":
-                                  "Removing a route is not available on the Ambit1 and Ambit2 yet."})
+            # Ambit1/2 (watch-protocol/10 L6): the route region rebuilt without it, the other
+            # routes byte for byte, then the waypoint list without its waypoints - route-send's
+            # two writes in reverse (legacy_link.route_remove; Android AmbitLegacyNav.
+            # removeLegacyRoute). Copies of both go to backups first. The last route is refused.
+            code, out, err = run_tool("legacy_link.py", ["route-remove", name, "--write"],
+                                      timeout=900)
+            result = self._parse_last_json_line(out) or {
+                "ok": False, "error": (err or out or "").strip() or "route removal failed"}
+            self._send_json(200 if result.get("ok") else 502, {**result, "raw_output": out})
             return
         code, out, err = run_tool("write_nav.py", ["delroute", "--name", name, "--write"],
                                   timeout=300)
@@ -7743,10 +7750,15 @@ class Handler(BaseHTTPRequestHandler):
 
         modes = []
         for i, m in enumerate(app_modes or []):
-            use_hw = 0
-            for key, bit in self._AMBIT2_POD_BITS:
-                if m.get(key):
-                    use_hw |= bit
+            # The raw pods field, not one rebuilt from the five checkboxes: rebuilt, bits no
+            # checkbox names (0x0002 with the HR belt, 0x0004) were lost, and a pod toggle then
+            # wrote that loss to the watch (2026-11-26). Same for the HR limits, read as stored.
+            use_hw = m.get("useHw")
+            if use_hw is None:
+                use_hw = 0
+                for key, bit in self._AMBIT2_POD_BITS:
+                    if m.get(key):
+                        use_hw |= bit
             displays = cm_modes[i].get("displays", []) if i < len(cm_modes) else []
             modes.append({
                 "name": m.get("name", ""),
@@ -7758,7 +7770,8 @@ class Handler(BaseHTTPRequestHandler):
                 "recordingInterval": m.get("recordingInterval", 0),
                 "gpsInterval": m.get("gpsInterval", 0),
                 "autolap": m.get("autolapM", 0),
-                "hrHigh": 0, "hrLow": 0, "hrLimitsUse": 0,
+                "hrHigh": m.get("hrMax", 0), "hrLow": m.get("hrMin", 0),
+                "hrLimitsUse": 1 if m.get("useHrLimits") else 0,
                 "autoStart": 0, "autoPause": 0, "autoScrolling": 0,
                 "intTimerFlags": 0, "intTimerCount": 0,
                 "intervalTimer": {"enabled": False, "type": "time",
@@ -8264,6 +8277,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"from\" or \"to\""})
             return
         confirm = bool(body.get("confirm", False))
+        if selected_is_legacy():
+            self._legacy_sport_mode_edit(from_name, {"name": str(to_name).strip()}, confirm)
+            return
         args = ["--from", from_name, "--to", to_name, "--json"]
         if confirm:
             args.append("--write")
@@ -8288,6 +8304,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"mode\" or \"fields\""})
             return
         confirm = bool(body.get("confirm", False))
+        if selected_is_legacy():
+            unknown = sorted(set(fields) - set(self.LEGACY_FIELD_PATCH))
+            if unknown:
+                self._send_json(400, {"ok": False, "error": "on an Ambit1/2 Sommet writes "
+                                      + ", ".join(self.LEGACY_FIELD_PATCH) + "; not "
+                                      + ", ".join(unknown)})
+                return
+            try:
+                patch = {self.LEGACY_FIELD_PATCH[k]: (bool(int(v)) if k == "HrLimitsUse" else int(v))
+                         for k, v in fields.items()}
+            except (TypeError, ValueError):
+                self._send_json(400, {"ok": False, "error": "field values must be numbers"})
+                return
+            self._legacy_sport_mode_edit(mode, patch, confirm)
+            return
         args = ["--mode", mode]
         for name, value in fields.items():
             args += ["--set", f"{name}={value}"]
@@ -8303,6 +8334,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
+    # The Sport Modes page's field names -> tools/legacy_sport_modes.patch_region's (the Android
+    # writer's LegacyModePatch names).
+    LEGACY_FIELD_PATCH = {"Autolap": "autolapM", "HrHigh": "heartrateMax", "HrLow": "heartrateMin",
+                          "HrLimitsUse": "useHrLimits", "UseHw": "useHw"}
+
+    def _legacy_sport_mode_edit(self, mode, patch, confirm):
+        """Ambit1/2 rename and field edits (watch-protocol/10 L4): one read-modify-write of the
+        sport-mode region through tools/legacy_link.py sport-mode-edit, the same bytes the Android
+        app writes (AmbitLegacySportModes.writeLegacySportMode). Without `confirm` the watch is
+        read and nothing is written. The SBEM tools the other watches use cannot reach this
+        family."""
+        if "name" in patch and not patch["name"]:
+            self._send_json(400, {"ok": False, "error": "the new name is empty"})
+            return
+        args = ["sport-mode-edit", mode, json.dumps(patch)]
+        if confirm:
+            args += ["--write", "--backup-dir", str(BACKUP_DIR / "legacy_sport_modes")]
+        code, out, err = run_tool("legacy_link.py", args, timeout=300)
+        info = self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "the sport-mode write failed"}
+        self._send_json(200 if info.get("ok") else 502, info)
+
     def _handle_customodes_interval_timer(self, body):
         """POST /api/customodes/interval-timer. Body: {"mode": str, "enabled": bool,
         "type": "time"|"distance", "high": int, "low": int, "repetitions": int,
@@ -8313,6 +8366,12 @@ class Handler(BaseHTTPRequestHandler):
         mode = body.get("mode")
         if not mode or "enabled" not in body:
             self._send_json(400, {"error": "missing \"mode\" or \"enabled\""})
+            return
+        if selected_is_legacy():
+            # Not written on this family yet, on desktop or Android: the Ambit1's bytes are in its
+            # capture (docs/ambit1_sport_mode_format.md 5a), the Ambit2's are not.
+            self._send_json(409, {"ok": False, "error": "Sommet does not change the interval "
+                                  "timer of an Ambit1 or Ambit2 yet."})
             return
         args = ["--mode", mode]
         args.append("--enable" if body.get("enabled") else "--disable")

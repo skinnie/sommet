@@ -59,8 +59,18 @@ flag, not one of the five UI checkboxes; left undecoded.
 
 ## 3. Sport-mode WRITE
 
-SuuntoLink writes the whole sport-mode region (0x2000–~0x4800) via 0x0b16 data_write in
-0x200-byte chunks (same mechanism openambit's sport-mode write already uses). Setting pods
-correctly on write = encode `hrbelt_and_pods` from the table above. Read side is done
-(`tools/legacy_sport_modes.py`); a pod-aware write is a small follow-up on the existing
-0x0b16 path.
+SuuntoLink writes the region's first 10240 bytes (0x2000–0x47FF) on every save, all 159 times
+in this capture: 10 x 1024-byte 0x0b16 chunks (the Ambit1 capture: 20 x 512), then the 0x0b18
+tail `[0x2000][0xFFFFFFFF]`. One save is up to three such writes (the mode's settings, its
+displays, its group), and each also puts a Unix time in the mode's `0x01FF` record (two u32:
+settings, displays) or the group's `0x02FF`. A first edit of a mode adds those records.
+
+Settings edits, each seen alone in this capture (blob offsets, 90-byte layout): pods 22 (the HR
+belt switches bits 0+1 together: 0x0003 <-> 0x0000), autolap 30, HR limits 32/34/36 (off writes
+0/0/0), plus GPS 26, recording 28, alti-baro 24, auto pause 40, auto scroll 42, backlight 84,
+display mode 86, quick navigation 88. A rename writes the 16-byte name and the mode's group name
+(`0x0210` > `0x0212`, 24 bytes; the group whose one `0x0214` is the mode's place in `0x0100`).
+
+Sommet writes the name, autolap, HR limits and pods this way on both apps
+(`tools/legacy_sport_modes.py patch_region`, `AmbitLegacySportModes.ts`), leaving the time
+records as read; `tools/test_legacy_sport_mode_edit.py` replays the captured writes.
