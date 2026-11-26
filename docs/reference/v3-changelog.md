@@ -7,6 +7,25 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Found in the review before 0.2.68
+
+- **Android, Kailash: the compass declination is shown and typed in degrees,** as on the
+  desktop. The watch keeps it in radians; Android showed that number as degrees and wrote a
+  typed 12 as 12 radians.
+- **Ambit1/2: removing a route whose name has 16 characters takes its waypoints with it.** A
+  waypoint holds 15 characters of its route's name, so such a route (SuuntoLink can make one)
+  left its waypoints behind, shown as a route again.
+- **Desktop Testing mode: a display edit no longer reaches a real Ambit1/2** that is plugged in
+  or pinned. It changes the practice copy, as every other edit there.
+- **Ambit1/2: a sport mode can't be renamed to a name another mode or multisport has,** desktop
+  and Android, as when creating one. Every later change finds a mode by its name.
+- **Ambit1: turning HR limits on with both limits at 0 is refused** with the reason, desktop and
+  Android. The Ambit1 has no on/off for them, so it said done and nothing changed.
+- **Ambit1/2: when the watch doesn't keep a sport-mode write, the sport modes as they were are
+  written back,** desktop and Android, as route removal and app install already did.
+
+---
+
 ## 2026-11-26: Ambit2 multisports, Adventure Racing, Ambit3 delete on desktop and Ambit1 Suunto Apps (watch-protocol/10)
 
 Nothing here was seen on a real watch: it is checked against SuuntoLink's own captures, its

@@ -89,6 +89,11 @@ describe('legacyWaypointsWithoutRoute', () => {
   it('keeps them when another route left has the same name', () => {
     expect(legacyWaypointsWithoutRoute(list, 'Dramont', ['Dramont'])).toEqual({ keep: list, dropped: 0 });
   });
+  it('matches a 16-character route on the 15 characters a waypoint holds', () => {
+    const long = [wp('Start', 'Adventure Racin'), wp('Home')];
+    expect(legacyWaypointsWithoutRoute(long, 'Adventure Racing').dropped).toBe(1);
+    expect(legacyWaypointsWithoutRoute(long, 'Adventure Racing', ['Adventure Racing']).dropped).toBe(0);
+  });
 });
 
 describe('removeLegacyRoute', () => {

@@ -249,6 +249,9 @@ export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, 
     if (patch.heartrateMin !== undefined) setU16(blob + lay.hrMin, patch.heartrateMin);
   }
   if (patch.useHrLimits !== undefined && lay.useHr !== null) setU16(blob + lay.useHr, patch.useHrLimits ? 1 : 0);
+  if (patch.useHrLimits && lay.useHr === null && !u16(out, blob + lay.hrMax) && !u16(out, blob + lay.hrMin)) {
+    throw new Error('On the Ambit1 HR limits are on only with a max or a min above 0 (it has no on/off field): nothing changed.');
+  }
   if (patch.useHw !== undefined) {
     const old = u16(data, blob + lay.pods);
     let v = patch.useHw & 0xffff;
@@ -257,7 +260,7 @@ export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, 
   }
   if (patch.name !== undefined) {
     const oldName = cString(data.subarray(blob, blob + NAME_LEN));
-    out.set(latin1(patch.name, NAME_LEN), blob);
+    const newName = cString(latin1(patch.name, NAME_LEN));
     // The mode's place in the 0x0100 list, and the groups of 0x0200 that name only it.
     const used = regionUsed(data);
     let place = -1;
@@ -266,6 +269,27 @@ export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, 
       children(data, c.off, c.off + c.len).filter(m => m.tag === 0x0101)
         .forEach((m, k) => { if (m.off <= blob && blob < m.off + m.len) place = k; });
     }
+    if (!sameBytes(newName, oldName)) {
+      // Every later edit finds a mode by name: refuse one another mode or multisport has, as the
+      // create functions do.
+      const taken = blobs.filter(b => b.off !== blob).map(b => cString(data.subarray(b.off, b.off + NAME_LEN)));
+      for (const c of children(data, 4, used)) {
+        if (c.tag !== 0x0200) continue;
+        for (const g of children(data, c.off, c.off + c.len)) {
+          if (g.tag !== 0x0210) continue;
+          const kids = children(data, g.off, g.off + g.len);
+          const nameRec = kids.find(k => k.tag === 0x0212);
+          const members = kids.filter(k => k.tag === 0x0214 && k.len === 2).map(k => u16(data, k.off));
+          if (nameRec && !(members.length === 1 && members[0] === place)) {
+            taken.push(cString(data.subarray(nameRec.off, nameRec.off + nameRec.len)));
+          }
+        }
+      }
+      if (taken.some(t => sameBytes(t, newName))) {
+        throw new Error(`The watch already has a sport mode or multisport named "${patch.name.trim()}".`);
+      }
+    }
+    out.set(latin1(patch.name, NAME_LEN), blob);
     for (const c of children(data, 4, used)) {
       if (c.tag !== 0x0200) continue;
       for (const g of children(data, c.off, c.off + c.len)) {
@@ -309,7 +333,10 @@ async function rewriteLegacyRegion(patch: (data: Uint8Array) => Uint8Array): Pro
     // A display edit moves the used extent; the bytes a shorter list freed were written 0xFF.
     const check = Math.max(used, regionUsed(out));
     if (!sameBytes(back.subarray(0, check), out.subarray(0, check))) {
-      throw new Error('The watch did not read back what was written (a copy is in backups/LegacySportModes).');
+      const putBack = await writeLegacyRegion(REGION_ADDR, b64, SPORT_MODE_COMMIT_EXTRA).catch(() => false);
+      throw new Error('The watch did not read back what was written; '
+        + (putBack ? 'the sport modes as they were have been written back' : 'writing them back failed too')
+        + ' (a copy is in backups/LegacySportModes).');
     }
     return back;
   } finally {

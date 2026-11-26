@@ -4,8 +4,8 @@
 // SuuntoLink's own captured writes on both watches through the Python writer. Not seen on a real
 // watch since the Ambit1 layout and the 10240-byte extent were added (2026-11-26).
 
-const mockState: { flash: Uint8Array; writes: { addr: number; len: number; extra: number }[]; short: boolean } =
-  { flash: new Uint8Array(0), writes: [], short: false };
+const mockState: { flash: Uint8Array; writes: { addr: number; len: number; extra: number }[]; short: boolean; loseFirst: boolean } =
+  { flash: new Uint8Array(0), writes: [], short: false, loseFirst: false };
 const mockBackups: string[] = [];
 
 jest.mock('../../native/AmbitUsbModule', () => {
@@ -20,7 +20,7 @@ jest.mock('../../native/AmbitUsbModule', () => {
     writeLegacyRegion: jest.fn(async (addr: number, b64: string, extra: number) => {
       const data = Uint8Array.from(Buffer.from(b64, 'base64'));
       mockState.writes.push({ addr, len: data.length, extra });
-      mockState.flash = data;
+      if (!(mockState.loseFirst && mockState.writes.length === 1)) mockState.flash = data;
       return true;
     }),
   };
@@ -103,10 +103,34 @@ describe('Ambit1/2 sport-mode patch (same bytes as the desktop)', () => {
   it('refuses an unknown mode', () => {
     expect(() => patchLegacySportModeRegion(synthetic(90), 5, { autolapM: 1 })).toThrow(/not found/);
   });
+
+  it('refuses a rename to a name another mode or multisport has (same cases as the desktop)', () => {
+    for (const [size, mode, name] of [[90, 1, 'Running'], [90, 1, 'Duathlon'], [76, 1, 'Running']] as [number, number, string][]) {
+      expect(() => patchLegacySportModeRegion(synthetic(size), mode, { name })).toThrow(/already has/);
+    }
+    expect(Array.from(patchLegacySportModeRegion(synthetic(90), 0, { name: 'Running' }))).toEqual(Array.from(synthetic(90)));
+    expect(() => patchLegacySportModeRegion(synthetic(90), 1, { name: 'Bike' })).not.toThrow();
+  });
+
+  it('Ambit1: HR limits "on" with 0/0 is refused (no on/off field)', () => {
+    const off = patchLegacySportModeRegion(synthetic(76), 0, { useHrLimits: false, heartrateMax: 150, heartrateMin: 90 });
+    expect(() => patchLegacySportModeRegion(off, 0, { useHrLimits: true })).toThrow(/Ambit1/);
+    expect(() => patchLegacySportModeRegion(off, 0, { useHrLimits: true, heartrateMax: 180, heartrateMin: 0 })).not.toThrow();
+  });
 });
 
 describe('writeLegacySportMode', () => {
-  beforeEach(() => { mockState.writes = []; mockState.short = false; mockBackups.length = 0; });
+  beforeEach(() => { mockState.writes = []; mockState.short = false; mockState.loseFirst = false; mockBackups.length = 0; });
+
+  it('writes the region as it was back once when the watch does not keep the write', async () => {
+    const region = new Uint8Array(10240).fill(0xff);
+    region.set(synthetic(90).subarray(0, 1024));
+    mockState.flash = region;
+    mockState.loseFirst = true;
+    await expect(writeLegacySportMode(1, { autolapM: 700 })).rejects.toThrow(/written back/);
+    expect(mockState.writes.length).toBe(2);
+    expect(Array.from(mockState.flash)).toEqual(Array.from(region));
+  });
 
   it('writes SuuntoLink\'s 10240 bytes with the 0x0b18 tail, after a copy', async () => {
     const region = new Uint8Array(10240).fill(0xff);

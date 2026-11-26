@@ -279,6 +279,30 @@ def test_pods_rule():
         assert got == want, (size, hex(start), hex(sent), hex(got))
 
 
+def test_rename_clash_and_ambit1_hr():
+    """Review before 0.2.68: a rename to a name another mode or multisport has is refused (every
+    later edit finds a mode by name); on the Ambit1, HR limits "on" with 0/0 is refused (it has no
+    on/off field, so nothing would change)."""
+    for size, mode, name in ((90, 1, "Running"), (90, 1, "Duathlon"), (76, 1, "Running")):
+        try:
+            LSM.patch_region(synthetic(size), mode, {"name": name})
+            raise AssertionError(f"renamed to {name!r} on the {size}-byte layout")
+        except ValueError as exc:
+            assert "already has" in str(exc), exc
+    assert LSM.patch_region(synthetic(90), 0, {"name": "Running"}) == synthetic(90)
+    LSM.patch_region(synthetic(90), 1, {"name": "Bike"})
+    off = synthetic(76)
+    off = LSM.patch_region(off, 0, {"useHrLimits": False, "heartrateMax": 150, "heartrateMin": 90})
+    try:
+        LSM.patch_region(off, 0, {"useHrLimits": True})
+        raise AssertionError("Ambit1 HR limits turned on with 0/0")
+    except ValueError as exc:
+        assert "Ambit1" in str(exc), exc
+    on = LSM.patch_region(off, 0, {"useHrLimits": True, "heartrateMax": 180, "heartrateMin": 0})
+    blob = LSM.named_blobs(on)[0][0]
+    assert _u16(on, blob + 28) == 180
+
+
 def test_sport_mode_edit():
     region = synthetic(90).ljust(LSM.REGION_WRITE_BYTES, b"\xff")
     state = {"flash": region, "writes": []}
@@ -304,6 +328,22 @@ def test_sport_mode_edit():
         except RuntimeError:
             pass
         assert len(state["writes"]) == 1
+        # A write the watch does not keep: the region as read is written back once.
+        LSM.read_region_live = lambda length=0: state["flash"][:length]
+        before = state["flash"]
+        state["writes"].clear()
+
+        def lost_write(addr, data, extra):
+            state["writes"].append((addr, len(data), extra))
+            if len(state["writes"]) > 1:
+                state["flash"] = data
+        legacy_link.flash_write = lost_write
+        try:
+            legacy_link.sport_mode_edit("Cycling", {"autolapM": 700}, write=True, backup_dir=tmp)
+            raise AssertionError("a lost write was reported as written")
+        except RuntimeError as exc:
+            assert "written back" in str(exc), exc
+        assert len(state["writes"]) == 2 and state["flash"] == before
 
 
 if __name__ == "__main__":
@@ -311,6 +351,7 @@ if __name__ == "__main__":
         print(hex(synthetic_hash()[0]))
         sys.exit(0)
     test_synthetic()
+    test_rename_clash_and_ambit1_hr()
     test_pods_rule()
     test_sport_mode_edit()
     if not (AMBIT2.exists() and AMBIT1.exists() and AMBIT1_LANG.exists()):

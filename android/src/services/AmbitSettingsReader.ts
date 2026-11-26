@@ -144,7 +144,9 @@ export const KAILASH_SETTINGS_FIELDS: SettingField[] = [
   { key: 'notifications_off', entryId: 0x13, kind: 'bool', byteWidth: 1 },
   { key: 'gps_position_format', entryId: 0x04, kind: 'enum', byteWidth: 1,
     choices: [{ value: 0, label: 'WGS84 d' }, { value: 1, label: 'WGS84 dm' }, { value: 2, label: 'WGS84 dms' }, { value: 3, label: 'UTM' }, { value: 4, label: 'MGRS' }, { value: 5, label: 'British (BNG)' }, { value: 6, label: 'Finnish (ETRS-TM35FIN)' }, { value: 7, label: 'Finnish (KKJ)' }, { value: 8, label: 'Irish (IG)' }, { value: 9, label: 'Swedish (RT90)' }, { value: 10, label: 'Swiss (CH1903)' }, { value: 11, label: 'UTM - NAD27 Alaska' }, { value: 12, label: 'UTM - NAD27 Conus' }, { value: 13, label: 'UTM - NAD83' }, { value: 14, label: 'NZTM2000' }] },
-  { key: 'compass_declination', entryId: 0x05, kind: 'number', byteWidth: 4, float: true },
+  // Radians on the watch, degrees on screen: the generated KAILASH_FIELDS row and the desktop.
+  { key: 'compass_declination', entryId: 0x05, kind: 'number', byteWidth: 4, float: true,
+    scale: Math.PI / 180, control: 'declination', unit: '\u00b0', min: -90, max: 90 },
   { key: 'button_lock_time_mode', entryId: 0x06, kind: 'enum', byteWidth: 1,
     choices: [{ value: 0, label: 'All buttons' }, { value: 1, label: 'Actions only' }] },
   { key: 'gps_time_keeping', entryId: 0x0a, kind: 'enum', byteWidth: 1,

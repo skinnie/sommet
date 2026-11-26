@@ -4912,7 +4912,7 @@ class Handler(BaseHTTPRequestHandler):
             # Ambit1/2 (watch-protocol/10 L6): the route region rebuilt without it, the other
             # routes byte for byte, then the waypoint list without its waypoints - route-send's
             # two writes in reverse (legacy_link.route_remove; Android AmbitLegacyNav.
-            # removeLegacyRoute). Copies of both go to backups first. The last route is refused.
+            # removeLegacyRoute). Copies of both go to backups first. The last route may go too (an empty region, Q12 b).
             code, out, err = run_tool("legacy_link.py", ["route-remove", name, "--write"],
                                       timeout=900)
             result = self._parse_last_json_line(out) or {
@@ -8886,8 +8886,9 @@ class Handler(BaseHTTPRequestHandler):
                                    "error": "need a mode name and a non-empty edits list"})
             return
         # Ambit1/2: their own region writer (legacy_link.py sport-mode-displays).
-        # custom_modes_edit.py is the SBEM/CustomModes tool and does not apply.
-        if selected_is_legacy():
+        # custom_modes_edit.py is the SBEM/CustomModes tool and does not apply. Testing mode
+        # edits the demo image below, never a real Ambit1/2 that is plugged in or pinned.
+        if selected_is_legacy() and not demo_ambit():
             self._handle_customodes_displays_legacy(mode, edits,
                                                     bool((body or {}).get("confirm")))
             return

@@ -456,7 +456,13 @@ def _sport_mode_region_rmw(mode, patcher, write, backup_dir):
     # A display edit moves the used extent; the bytes a shorter list freed were written 0xFF.
     check = max(used, LSM.region_used(new))
     if back[:check] != new[:check]:
-        raise RuntimeError(f"the watch did not read back what was written (the copy: {backup})")
+        try:                                                  # as route_remove and _apps_rmw
+            flash_write(LSM.REGION_ADDR, region, LSM.COMMIT_EXTRA)
+            again = "the sport modes as they were have been written back"
+        except Exception as exc:                              # noqa: BLE001
+            again = f"writing them back failed too ({exc})"
+        raise RuntimeError(f"the watch did not read back what was written; {again} "
+                           f"(the copy: {backup})")
     result.update(wrote=True, backup=str(backup))
     return result
 
@@ -679,11 +685,14 @@ def sport_mode_menu(variant):
 def waypoints_without_route(waypoints, route_name, still_used=()):
     """The waypoint list without a removed route's own waypoints: those whose route_name is that
     route's (as route_send tags them, and SuuntoLink before it). Kept when another route left on
-    the watch has the same name. Returns (keep, dropped)."""
-    target = str(route_name).strip()
-    if target in {str(n).strip() for n in still_used}:
+    the watch has the same name. Names are compared on the 15 characters a waypoint's route name
+    holds (the route region holds 16). Returns (keep, dropped)."""
+    def key(n):
+        return str(n).encode("latin-1", "replace")[:15].decode("latin-1").strip()
+    target = key(route_name)
+    if target in {key(n) for n in still_used}:
         return list(waypoints), 0
-    keep = [w for w in waypoints if str(w.get("route_name", "")).strip() != target]
+    keep = [w for w in waypoints if key(w.get("route_name", "")) != target]
     return keep, len(waypoints) - len(keep)
 
 

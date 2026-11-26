@@ -281,9 +281,11 @@ export async function sendLegacyRoute(route: {
 export function legacyWaypointsWithoutRoute(
   wps: LegacyWaypoint[], routeName: string, stillUsed: string[] = [],
 ): { keep: LegacyWaypoint[]; dropped: number } {
-  const target = routeName.trim();
-  if (stillUsed.some(n => n.trim() === target)) return { keep: wps, dropped: 0 };
-  const keep = wps.filter(w => w.routeName.trim() !== target);
+  // A waypoint's route name holds 15 characters, the route region's 16: compare on 15.
+  const key = (n: string) => n.slice(0, 15).trim();
+  const target = key(routeName);
+  if (stillUsed.some(n => key(n) === target)) return { keep: wps, dropped: 0 };
+  const keep = wps.filter(w => key(w.routeName) !== target);
   return { keep, dropped: wps.length - keep.length };
 }
 

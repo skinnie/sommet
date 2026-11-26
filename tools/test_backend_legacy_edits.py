@@ -107,6 +107,18 @@ class Legacy(unittest.TestCase):
         self.assertIn("--write", args)
         self.assertEqual(self.sent[0][0], 200)
 
+    def test_display_edit_in_testing_mode_never_reaches_the_ambit(self):
+        # Review before 0.2.68: Testing mode edits the demo image, never a pinned Ambit1/2.
+        saved = server.demo_ambit
+        server.demo_ambit = lambda: True
+        try:
+            edits = [{"op": "add", "type": "1-row"}]
+            self.h._handle_customodes_displays({"mode": "Running", "edits": edits, "confirm": True})
+        finally:
+            server.demo_ambit = saved
+        self.assertFalse([a for _s, a in self.calls if a and a[0] == "sport-mode-displays"],
+                         self.calls)
+
     def test_display_edit_unknown_op_refused(self):
         self.h._handle_customodes_displays({"mode": "Running", "confirm": True,
                                             "edits": [{"op": "move", "display": 0}]})

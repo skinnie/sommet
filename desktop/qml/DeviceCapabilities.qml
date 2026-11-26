@@ -59,7 +59,7 @@ QtObject {
     // write_nav.py delpoi/delroute (the Android app's own removal, ported). Ambit1/2 routes too
     // (2026-11-26, watch-protocol/10 L6): legacy_link.py route-remove rebuilds their route region
     // without it and drops its waypoints from the waypoint list, as Android does. Not yet seen on
-    // a real watch; the watch's last route is refused (no capture shows an empty region).
+    // a real watch; the last route may go too (an empty region, in no capture).
     property bool supportsNavRemove: !_isKailash
     // Ambit1/2 POIs too: the whole waypoint list is rewritten without the POI (2026-11-21).
     property bool supportsPoiRemove: !_isKailash

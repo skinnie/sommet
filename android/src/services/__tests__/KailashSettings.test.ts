@@ -82,10 +82,12 @@ describe('Kailash settings', () => {
     expect(Array.from(sent.entries[0][1])).toEqual([...i32(451234567), ...i32(75000000)]);
   });
 
-  it('writes the declination as a float32', async () => {
+  it('writes the declination typed in degrees as float32 radians, as the desktop', async () => {
     const r = await writeSetting('compass_declination', 2.5, KAILASH_SETTINGS_FIELDS, 'kailash');
     expect(r.ok).toBe(true);
     const data = splitEntries(mockWrites[0])!.entries[0][1];
-    expect(new DataView(data.buffer, data.byteOffset, 4).getFloat32(0, true)).toBe(2.5);
+    expect(new DataView(data.buffer, data.byteOffset, 4).getFloat32(0, true)).toBeCloseTo(2.5 * Math.PI / 180, 6);
+    const f = KAILASH_SETTINGS_FIELDS.find(x => x.key === 'compass_declination')!;
+    expect([f.control, f.unit, f.min, f.max]).toEqual(['declination', '\u00b0', -90, 90]);
   });
 });

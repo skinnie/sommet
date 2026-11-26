@@ -340,6 +340,10 @@ def patch_region(data, mode, patch):
             _put_u16(out, blob + lay["hr_min"], patch["heartrateMin"])
     if use is not None and lay["use_hr"] is not None:
         _put_u16(out, blob + lay["use_hr"], 1 if use else 0)
+    if use and lay["use_hr"] is None and not (_u16(out, blob + lay["hr_max"])
+                                              or _u16(out, blob + lay["hr_min"])):
+        raise ValueError("on the Ambit1 HR limits are on only with a max or a min above 0 "
+                         "(it has no on/off field): nothing changed")
     if "useHw" in patch:
         old = _u16(data, blob + lay["pods"])
         new = int(patch["useHw"]) & 0xFFFF
@@ -348,8 +352,18 @@ def patch_region(data, mode, patch):
         _put_u16(out, blob + lay["pods"], new)
     if "name" in patch:
         old_name = bytes(data[blob:blob + NAME_LEN]).split(b"\x00")[0]
-        out[blob:blob + NAME_LEN] = _name_bytes(patch["name"], NAME_LEN)
+        new_name = _name_bytes(patch["name"], NAME_LEN).split(b"\x00")[0]
         place = _mode_place(data, blob)
+        if new_name != old_name:
+            # Every later edit finds a mode by name: refuse one another mode or multisport has,
+            # as create_mode and create_multisport do.
+            taken = {bytes(data[o:o + NAME_LEN]).split(b"\x00")[0] for o, _ in blobs if o != blob}
+            taken |= {bytes(data[no:no + nl]).split(b"\x00")[0]
+                      for no, nl, members in _groups(data) if members != [place]}
+            if new_name in taken:
+                raise ValueError("the watch already has a sport mode or multisport named "
+                                 f"{new_name.decode('latin-1')!r}")
+        out[blob:blob + NAME_LEN] = _name_bytes(patch["name"], NAME_LEN)
         for name_off, name_len, members in _groups(data):
             if (members == [place] and name_len == GROUP_NAME_LEN
                     and bytes(data[name_off:name_off + name_len]).split(b"\x00")[0] == old_name):

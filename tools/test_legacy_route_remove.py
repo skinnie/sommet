@@ -102,6 +102,15 @@ def test_waypoints_match_suuntolink(packets):
     assert legacy_link.waypoints_without_route(wps, "Gare du Nord to", ["Gare du Nord to"]) == (wps, 0)
 
 
+def test_long_route_name():
+    """A route region name holds 16 characters, a waypoint's route name 15: a 16-character route
+    (SuuntoLink can write one) still takes its own waypoints with it (review before 0.2.68)."""
+    wps = [{"name": "Start", "route_name": "Adventure Racin"}, {"name": "Home", "route_name": ""}]
+    keep, dropped = legacy_link.waypoints_without_route(wps, "Adventure Racing")
+    assert dropped == 1 and keep == [wps[1]], (keep, dropped)
+    assert legacy_link.waypoints_without_route(wps, "Adventure Racing", ["Adventure Racing"]) == (wps, 0)
+
+
 def test_route_remove(region, packets):
     wps = [_waypoint(p) for p in packets[-21:]]
     state = {"region": region, "list": list(wps), "writes": []}
@@ -162,6 +171,7 @@ def test_android_parity():
 
 if __name__ == "__main__":
     test_refusals()
+    test_long_route_name()
     test_android_parity()
     if not CAPTURE.exists():
         print("legacy route remove: refusals and parity OK; capture absent, rest skipped")
