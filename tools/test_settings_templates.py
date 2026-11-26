@@ -93,6 +93,36 @@ class Tables(unittest.TestCase):
             self.assertEqual(S._display_range(key), (0, 120))
 
 
+class KailashTable(unittest.TestCase):
+    """watch-protocol/10 K7 (2026-11-26): every Kailash key is a field of its own descriptor and
+    an entry of the settings reply its 7R app read (one-entry writes need the entry there), and
+    Android lists the same keys with the same entries."""
+
+    def test_every_key_is_in_the_descriptor_the_reply_and_android(self):
+        import glob
+        import re
+        found = sorted(glob.glob(str(HERE.parent / "assets" / "**" / "descr+*+2.0.5"), recursive=True))
+        if not found:
+            self.skipTest("needs assets/ (the Kailash's descriptor)")
+        schema = sbem_schema.load(found[0])
+        ids = {}
+        for key, suffix in S.KAILASH_SETTINGS.items():
+            field = S._find_field(schema, suffix)
+            group = S._group_containing(schema, field.fid)
+            ids[key] = group if group is not None else field.fid
+        reply_ids = set(range(0x01, 0x28)) | {0x35, 0x36}   # kailash7rsettingschange 0x1100 reply
+        self.assertEqual({k: hex(v) for k, v in ids.items() if v not in reply_ids}, {})
+        ts = (HERE.parent / "android" / "src" / "services" / "AmbitSettingsReader.ts").read_text()
+        block = ts[ts.index("export const KAILASH_SETTINGS_FIELDS"):]
+        block = block[:block.index("\n];")]
+        android = {k: int(v, 16) for k, v in re.findall(r"key: '(\w+)', entryId: (0x[0-9a-f]+)", block)}
+        # enabled_navigation_systems: a read-only desktop row Android leaves out on purpose (the
+        # field doesn't follow the watch's real GPS/GLONASS choice; watch-protocol/10 batch A).
+        self.assertEqual(android, {k: v for k, v in ids.items() if k != "enabled_navigation_systems"})
+        for left in ("GpsBackgroundMode", "DualTimeActive", "DaylightSaving", "Alarms"):
+            self.assertFalse(any(left in v for v in S.KAILASH_SETTINGS.values()), left)
+
+
 def _captures(prefix):
     return [p for p in sorted(glob.glob(str(PCAP / (prefix + "*")))) if os.path.isfile(p)]
 

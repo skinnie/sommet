@@ -7,6 +7,24 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: More Kailash settings, and Android writes one Kailash setting at a time (watch-protocol/10)
+
+- **Kailash: 20 more settings**, desktop and Android: notifications off, GPS position format,
+  compass declination, button lock, GPS time keeping, the vertical speed unit (per minute or
+  per hour), which views show (exercise compass, ABC compass, stopwatch, swimming drill,
+  countdown timer, activity tracking, alti-baro, step counter) and the six shortcuts. All are in
+  the Kailash's own settings list and in the settings it sends; "notifications off" is what
+  Suunto's 7R app itself sets. Not yet seen written on the watch. Left out: the daily alarm,
+  dual time and daylight saving (set on the watch), and GPS background mode (not in the
+  settings the watch sends).
+- **Android writes a Kailash setting as that one entry**, as the desktop has since 2026-08-10
+  (André's Kailash merged such a write and kept every other setting). Before, Android wrote the
+  whole settings list back, which also re-sent the paired phone's pairing record and its keys.
+- A comment in the Android settings code no longer gives the home location decoded from a
+  Kailash capture.
+
+---
+
 ## 2026-11-26: Android and iOS: many moves on the watch (GitHub #26)
 
 A user with an Ambit3 Peak: reading the watch took very long on Android, which then could not

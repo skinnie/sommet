@@ -278,10 +278,11 @@ export async function writeSetting(
   // they cannot drift apart).
   //
   // The Ambit3 family (Ambit3 + Traverse) sends ONLY the screen this field belongs to, so the
-  // paired phone's BLE bond keys never ride along. Kailash has no such per-screen template and
-  // no bond keys in a cable reply, so it takes the original whole-blob patch: change the one
-  // field in place and write the whole settings blob back. (0x1201 single-entry pushes are the
-  // BLE path; over cable Kailash uses the same 0x1101 write as everyone else.)
+  // paired phone's BLE bond keys never ride along. The Kailash has no per-screen template; it
+  // gets the one entry alone (the read's own header, then that entry), as the desktop's
+  // _write_single_entry does since 2026-08-10, when André's Kailash merged such a write over the
+  // cable and kept the other 40 entries byte-identical. Until 2026-11-26 Android wrote the whole
+  // blob back, which also re-sent the paired phone's bond record (entry 0x35, keys included).
   const screen = device === 'kailash' ? null : KEY_SCREEN[device][key];
   const entryStart = offset - (field.byteOffset ?? 0);
   const entryData = new Uint8Array(before.subarray(entryStart, entryStart + field.byteWidth + (field.byteOffset ?? 0)));
@@ -289,9 +290,17 @@ export async function writeSetting(
 
   let payload: Uint8Array | null = null;
   if (device === 'kailash') {
-    const patched = new Uint8Array(before);
-    encodeField(patched, offset, field, value);
-    payload = patched;
+    const split = splitEntries(before);
+    const current = split?.entries.find(([id]) => id === field.entryId)?.[1];
+    if (split && current) {
+      const data = new Uint8Array(current);            // the whole entry (HomeLocation holds two)
+      encodeField(data, field.byteOffset ?? 0, field, value);
+      const entry = encodeEntry(field.entryId, data);
+      payload = new Uint8Array(split.prefix.length + MAGIC.length + entry.length);
+      payload.set(split.prefix, 0);
+      payload.set(MAGIC, split.prefix.length);
+      payload.set(entry, split.prefix.length + MAGIC.length);
+    }
   } else if (screen) {
     payload = buildWritePayload(device, before, screen, {
       entryId: field.entryId,

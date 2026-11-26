@@ -238,6 +238,35 @@ KAILASH_SETTINGS = {
     # offer it as a GLONASS switch. Wherever the watch keeps its real GNSS setting, it is
     # not in the 0x1100 blob and has not been found yet.
     "enabled_navigation_systems": "EnabledNavigationSystems",
+    # 2026-11-26 (watch-protocol/10 K7, André: "do it all for all devices"): the rest of the
+    # Kailash's own settings list, written with the same one-entry write (proven on this watch
+    # 2026-08-10). NotificationsOff is what the 7R app itself pushes (entry 0x13 in
+    # kailashsnotificationsandsethome); the others are in its descriptor and the user guide
+    # (2.2, 3.18) but no capture has a vendor app writing them: not yet seen written on the
+    # watch. Left out on purpose (André 2026-11-25: set on the watch, not from an app): the
+    # daily alarm, dual time and daylight saving. GpsBackgroundMode (0x2a) is in the descriptor
+    # but not in the watch's settings reply (7R captures: 41 entries, 0x01-0x27, 0x35, 0x36), so
+    # there is nothing to patch.
+    "notifications_off": "NotificationsOff",
+    "gps_position_format": "GpsPositionFormat",
+    "compass_declination": "Compass.Declination",
+    "button_lock_time_mode": "ButtonLock.TimeMode",
+    "gps_time_keeping": "Time.GPSTimeKeeping",
+    "vertical_speed_time_unit": "Units.VerticalSpeedTimeUnit",
+    "view_exercise_compass": "Displays.ExerciseCompass",
+    "view_abc_compass": "Displays.AbcCompass",
+    "view_stopwatch": "Displays.Stopwatch",
+    "view_swimming_drill": "Displays.SwimmingDrill",
+    "view_countdown_timer": "Displays.CountdownTimer",
+    "view_activity_tracking": "Displays.ActivityTracking",
+    "view_alti_baro": "Displays.AltiBaro",
+    "view_step_counter": "Displays.StepCounter",
+    "shortcut_altitude": "Shortcuts.ShortcutAltitude",
+    "shortcut_sunset_sunrise": "Shortcuts.ShortcutSunsetSunrise",
+    "shortcut_steps": "Shortcuts.ShortcutSteps",
+    "shortcut_battery": "Shortcuts.ShortcutBattery",
+    "shortcut_seconds": "Shortcuts.ShortcutSeconds",
+    "shortcut_baro_trend": "Shortcuts.ShortcutBaroTrend",
     # NOTE: Kailash's clock (sml.DeviceSettings.Time.TimeISO8601, entry 0x34) is NOT
     # written through this table/write_one() - a `device_time` entry lived here briefly
     # based on a since-disproven hypothesis (that it went through this same 0x1101
