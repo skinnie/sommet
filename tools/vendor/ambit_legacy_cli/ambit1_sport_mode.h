@@ -23,13 +23,7 @@ int ambit1_find_modes_ex(const uint8_t *buf, uint32_t len, uint32_t *offsets,
 /* `sport-mode-read`: decode every mode to JSON. Never writes. */
 int ambit1_cmd_read(ambit_object_t *dev, const ambit_device_info_t *info);
 
-/* `sport-mode-patch`: read-modify-write. dry_run skips the write; dump_path (optional)
- * receives the exact bytes that would be sent, for offline diffing. */
-int ambit1_cmd_patch(ambit_object_t *dev, const ambit_device_info_t *info,
-                      const char *patch_path, int dry_run, const char *dump_path);
-
-/* `sport-mode-restore`: write a previously dumped 8192-byte region back verbatim. */
-int ambit1_cmd_restore(ambit_object_t *dev, const ambit_device_info_t *info,
-                        const char *path, int dry_run);
+/* No writer here any more: tools/legacy_link.py writes this region (flash-write, 10240 bytes
+ * + the 0x0b18 commit tail, as SuuntoLink does) - see ambit1_sport_mode.c's header. */
 
 #endif /* AMBIT1_SPORT_MODE_H */

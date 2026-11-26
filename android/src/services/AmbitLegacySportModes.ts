@@ -1,6 +1,7 @@
 import { readLegacyRegion, writeLegacyRegion, connect, disconnect, isBleTransportActive, getDeviceInfo } from '../native/AmbitUsbModule';
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { saveWatchBackup } from './WatchBackup';
+import { Display, decodeDisplayList } from './CustomModesReader';
 
 // Ambit 1/2 (Bluebird) sport-mode READ - the one thing openambit can't do for this family
 // (it only blind-writes). Ported from the desktop tools/legacy_sport_modes.py, validated
@@ -207,6 +208,7 @@ function latin1(name: string, size: number): Uint8Array {
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 const cString = (b: Uint8Array) => { const z = b.indexOf(0); return z < 0 ? b : b.subarray(0, z); };
+const latin1Name = (b: Uint8Array) => Array.from(cString(b), c => String.fromCharCode(c)).join('');
 
 /**
  * The sport-mode region `data` (as read off the watch) with one mode's settings changed - the
@@ -276,12 +278,10 @@ export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, 
   return out;
 }
 
-/**
- * Edit one Ambit1/2 sport mode's fields and write region 0x2000 back. `modeIndex` is the index in
- * readLegacySportModes()' output. Returns the re-read mode list so the caller can confirm the watch
- * applied it. A copy of the region as read is kept on the phone first (backups/LegacySportModes/).
- */
-export async function writeLegacySportMode(modeIndex: number, patch: LegacyModePatch): Promise<LegacyMode[]> {
+/** Read-modify-write of the region's first 10240 bytes (SuuntoLink's extent): read, `patch` them,
+ * write them back with the 0x0b18 commit tail and read them again to check. A copy of the region
+ * as read is kept on the phone first (backups/LegacySportModes/). Returns the bytes read back. */
+async function rewriteLegacyRegion(patch: (data: Uint8Array) => Uint8Array): Promise<Uint8Array> {
   // Ambit1/2 are USB-only (no BLE), but keep the same transport guard the rest of the app uses:
   // over an already-open link don't re-connect, over USB open a short-lived connection for the
   // whole read-patch-write-verify cycle (the raw readLegacyRegion/writeLegacyRegion need g_device).
@@ -295,17 +295,277 @@ export async function writeLegacySportMode(modeIndex: number, patch: LegacyModeP
       throw new Error(`Read ${data.length} of the sport-mode region's ${REGION_WRITE_BYTES} bytes: nothing written.`);
     }
     const used = regionUsed(data);
-    const out = patchLegacySportModeRegion(data, modeIndex, patch);
-    if (sameBytes(out, data)) return parseRegion(data); // nothing to change
+    const out = patch(data);
+    if (sameBytes(out, data)) return data; // nothing to change
     await saveWatchBackup('LegacySportModes', b64, (await getDeviceInfo()).serial ?? '');
     const ok = await writeLegacyRegion(REGION_ADDR, bytesToBase64(out), SPORT_MODE_COMMIT_EXTRA);
     if (!ok) throw new Error('The watch did not accept the sport-mode write.');
     const back = base64ToBytes(await readLegacyRegion(REGION_ADDR, REGION_WRITE_BYTES)); // same connection
-    if (!sameBytes(back.subarray(0, used), out.subarray(0, used))) {
+    // A display edit moves the used extent; the bytes a shorter list freed were written 0xFF.
+    const check = Math.max(used, regionUsed(out));
+    if (!sameBytes(back.subarray(0, check), out.subarray(0, check))) {
       throw new Error('The watch did not read back what was written (a copy is in backups/LegacySportModes).');
     }
-    return parseRegion(back);
+    return back;
   } finally {
     if (!overBle) await disconnect().catch(() => {});
   }
+}
+
+/**
+ * Edit one Ambit1/2 sport mode's fields and write region 0x2000 back. `modeIndex` is the index in
+ * readLegacySportModes()' output. Returns the re-read mode list so the caller can confirm the watch
+ * applied it.
+ */
+export async function writeLegacySportMode(modeIndex: number, patch: LegacyModePatch): Promise<LegacyMode[]> {
+  return parseRegion(await rewriteLegacyRegion(data => patchLegacySportModeRegion(data, modeIndex, patch)));
+}
+
+// ─── Displays and the sport-mode menu (2026-11-26, watch-protocol/10 L5, L2) ──────────────────────
+// The same record format as the Ambit3's display list, so it decodes with CustomModesReader's
+// decodeDisplayList (a screen of the wearer's is a display of type 10, the built-in views come
+// after them). The edits are tools/legacy_sport_modes.py patch_displays, byte for byte (that file
+// says which SuuntoLink capture each change is replayed from; tools/test_legacy_display_edit.py
+// replays them and __tests__/LegacyDisplays.test.ts checks this port gives the same bytes):
+//   0x0106 { 0x0107 [u16 layout][u16 type], one 0x0108 per row: { 0x0109 [u16 row][u16 item],
+//            0x010A [u16 value]... } }
+// A row with item 0 and 0x010A values is the multi-value row. Every enclosing length (0x0105, the
+// mode's 0x0101, 0x0100, the root) moves by the size change and the rest of the region is 0xFF.
+// The screen offers a row change (as it does on the Ambit3); add / remove / layout are the
+// desktop's, through the same bytes.
+const TAG_DISPLAYS = 0x0105;
+const TAG_DISPLAY = 0x0106;
+const TAG_LAYOUT = 0x0107;
+const TAG_ROW_BOX = 0x0108;
+const TAG_ROW = 0x0109;
+const TAG_VIEW = 0x010a;
+const USER_DISPLAY = 0x000a;
+const MAX_DISPLAYS = 8;      // SuuntoLink getMaxDisplays() for Bluebird/Duck/Colibri/Greentit
+const MAX_ROW_VALUES = 5;    // sportmode_rows.json maxValuesPerMultiRow; the captures' longest
+export const LEGACY_LAYOUT_IDS: Record<string, number> = { '3-row': 260, '2-row': 261, '1-row': 262, graph: 257 };
+type Row = [number, number, number[]];
+// A new display's rows, as SuuntoLink wrote every display it created in both captures.
+const NEW_DISPLAY_ROWS: Record<number, Row[]> = {
+  260: [[0, 10, []], [1, 11, []], [2, 0, [5]]],
+  261: [[0, 10, []], [1, 0, [5]]],
+  262: [[0, 10, []]],
+  257: [[0, 6, []], [1, 32, []], [2, 5, []]],
+};
+export const LEGACY_ROW_LABELS = ['Top', 'Center', 'Bottom'];
+
+export type LegacyDisplayEdit =
+  | { op: 'add'; type: string }
+  | { op: 'remove'; display: number }
+  | { op: 'setType'; display: number; type: string }
+  | { op: 'setRow'; display: number; row: string; values: number[] };
+
+const le16 = (v: number) => [v & 0xff, (v >> 8) & 0xff];
+const tlvOf = (tag: number, body: number[]) => [...le16(tag), ...le16(body.length), ...body];
+
+function displayRecord(layout: number, rows: Row[], kind = USER_DISPLAY): number[] {
+  let body = tlvOf(TAG_LAYOUT, [...le16(layout), ...le16(kind)]);
+  for (const [row, item, values] of rows) {
+    const box = [...tlvOf(TAG_ROW, [...le16(row), ...le16(item)]), ...values.flatMap(v => tlvOf(TAG_VIEW, le16(v)))];
+    body = [...body, ...tlvOf(TAG_ROW_BOX, box)];
+  }
+  return tlvOf(TAG_DISPLAY, body);
+}
+
+/** A 0x0106 record -> layout, type and rows, or null when it is not the captured shape. */
+function parseDisplay(rec: Uint8Array): { layout: number; type: number; rows: Row[] } | null {
+  if (rec.length < 4 || u16(rec, 0) !== TAG_DISPLAY || 4 + u16(rec, 2) !== rec.length) return null;
+  const kids = children(rec, 4, rec.length);
+  if (!kids.length || kids[0].tag !== TAG_LAYOUT || kids[0].len !== 4) return null;
+  const out = { layout: u16(rec, kids[0].off), type: u16(rec, kids[0].off + 2), rows: [] as Row[] };
+  for (const k of kids.slice(1)) {
+    const cells = children(rec, k.off, k.off + k.len);
+    if (k.tag !== TAG_ROW_BOX || !cells.length || cells[0].tag !== TAG_ROW || cells[0].len !== 4) return null;
+    if (cells.slice(1).some(c => c.tag !== TAG_VIEW || c.len !== 2)) return null;
+    out.rows.push([u16(rec, cells[0].off), u16(rec, cells[0].off + 2), cells.slice(1).map(c => u16(rec, c.off))]);
+  }
+  if (!sameBytes(Uint8Array.from(displayRecord(out.layout, out.rows, out.type)), rec)) return null;
+  return out;
+}
+
+/** Header offsets of the 0x0100 list and of the mode's 0x0101, and its 0x0105 body (or null). */
+function modeRecords(data: Uint8Array, modeIndex: number) {
+  const blobs = modeBlobs(data);
+  if (modeIndex < 0 || modeIndex >= blobs.length) {
+    throw new Error(`Sport mode ${modeIndex} not found (region has ${blobs.length}).`);
+  }
+  const blob = blobs[modeIndex].off;
+  for (const c of children(data, 4, regionUsed(data))) {
+    if (c.tag !== 0x0100) continue;
+    for (const m of children(data, c.off, c.off + c.len)) {
+      if (m.tag === 0x0101 && m.off <= blob && blob < m.off + m.len) {
+        const disp = children(data, m.off, m.off + m.len).find(k => k.tag === TAG_DISPLAYS);
+        return { modes: c.off - 4, mode: m.off - 4, displays: disp ?? null };
+      }
+    }
+  }
+  throw new Error('The sport mode is not inside the region\'s mode list.');
+}
+
+function displayIndex(edit: { op: string; display?: number }, count: number): number {
+  const i = Number(edit.display);
+  if (!Number.isInteger(i)) throw new Error(`${edit.op}: which display?`);
+  if (i < 0 || i >= count) throw new Error(`${edit.op}: display ${i} not found (the mode has ${count}).`);
+  return i;
+}
+
+function layoutOf(edit: { op: string; type?: string }): number {
+  const layout = LEGACY_LAYOUT_IDS[String(edit.type ?? '').trim().toLowerCase()];
+  if (layout === undefined) throw new Error(`${edit.op}: unknown layout ${JSON.stringify(edit.type)}.`);
+  return layout;
+}
+
+function setRow(rec: number[], edit: { row: string; values: number[] }): number[] {
+  const disp = parseDisplay(Uint8Array.from(rec));
+  if (!disp) throw new Error('setRow: this display is not in the layout the captures show; not changed.');
+  const rowNbr = LEGACY_ROW_LABELS.map(l => l.toLowerCase()).indexOf(String(edit.row ?? '').trim().toLowerCase());
+  const rows = disp.rows.filter(r => r[0] === rowNbr);
+  if (rowNbr < 0 || rows.length !== 1) throw new Error(`setRow: this display has no ${JSON.stringify(edit.row)} row.`);
+  const values = (edit.values ?? []).map(Number);
+  if (values.some(v => !Number.isInteger(v))) throw new Error('setRow: the values must be field numbers.');
+  if (values.some(v => !(v > 0 && v < 0xfffe))) throw new Error('setRow: a value of 0 (empty) or above 0xFFFD is in no capture.');
+  const row = rows[0];
+  if (row[1] === 0 && row[2].length) {            // the multi-value row
+    if (values.length < 1 || values.length > MAX_ROW_VALUES) throw new Error(`setRow: this row holds 1 to ${MAX_ROW_VALUES} values.`);
+    row[2] = values;
+  } else if (row[1] !== 0 && !row[2].length) {    // a one-value row
+    if (values.length !== 1) throw new Error('setRow: this row shows one value.');
+    row[1] = values[0];
+  } else {
+    throw new Error('setRow: an empty row is in no capture; not changed.');
+  }
+  return displayRecord(disp.layout, disp.rows, disp.type);
+}
+
+/**
+ * The sport-mode region `data` with one mode's displays edited - the same bytes as
+ * tools/legacy_sport_modes.py patch_displays. `modeIndex` is the index in readLegacySportModes()'
+ * output; the edits apply in order, each display index counting the mode's own screens as they are
+ * after the edits before it. Throws for anything the captures do not show.
+ */
+export function patchLegacyDisplayRegion(data: Uint8Array, modeIndex: number, edits: LegacyDisplayEdit[]): Uint8Array {
+  const where = modeRecords(data, modeIndex);
+  if (!where.displays) throw new Error('This sport mode has no display list.');
+  const { off: dbody, len: dlen } = where.displays;
+  const records: number[][] = [];
+  for (const c of children(data, dbody, dbody + dlen)) {
+    if (c.tag !== TAG_DISPLAY) throw new Error(`Record 0x${c.tag.toString(16)} in the display list is in no capture; nothing changed.`);
+    records.push(Array.from(data.subarray(c.off - 4, c.off + c.len)));
+  }
+  if (records.reduce((n, r) => n + r.length, 0) !== dlen) throw new Error('The display list does not parse to its end; nothing changed.');
+  const kinds = records.map(r => parseDisplay(Uint8Array.from(r))?.type);
+  let nUser = 0;
+  while (nUser < kinds.length && kinds[nUser] === USER_DISPLAY) nUser++;
+  if (kinds.slice(nUser).includes(USER_DISPLAY)) {
+    throw new Error('This mode\'s own screens are not all before the built-in ones; nothing changed.');
+  }
+  const user = records.slice(0, nUser);
+  const builtin = records.slice(nUser);
+  for (const edit of edits) {
+    if (edit.op === 'add') {
+      const layout = layoutOf(edit);
+      if (user.length >= MAX_DISPLAYS) throw new Error(`add: this watch holds at most ${MAX_DISPLAYS} displays per mode.`);
+      user.push(displayRecord(layout, NEW_DISPLAY_ROWS[layout]));
+    } else if (edit.op === 'remove') {
+      const i = displayIndex(edit, user.length);
+      if (user.length <= 1) throw new Error('remove: a mode keeps at least one display.');
+      user.splice(i, 1);
+    } else if (edit.op === 'setType') {
+      const i = displayIndex(edit, user.length);
+      const layout = layoutOf(edit);
+      user[i] = displayRecord(layout, NEW_DISPLAY_ROWS[layout]);
+    } else if (edit.op === 'setRow') {
+      const i = displayIndex(edit, user.length);
+      user[i] = setRow(user[i], edit);
+    } else {
+      throw new Error(`Unknown display edit ${JSON.stringify((edit as { op?: string }).op)}.`);
+    }
+  }
+  const body = [...user, ...builtin].flat();
+  const delta = body.length - dlen;
+  const used = regionUsed(data);
+  const total = dbody + body.length + (used - dbody - dlen);
+  if (total > data.length) throw new Error(`The sport modes would need ${total} of the region's ${data.length} bytes.`);
+  const out = new Uint8Array(data.length).fill(0xff);
+  out.set(data.subarray(0, dbody));
+  out.set(body, dbody);
+  out.set(data.subarray(dbody + dlen, used), dbody + body.length);
+  for (const header of [dbody - 4, where.mode, where.modes, 0]) {
+    const v = Math.max(0, Math.min(0xffff, u16(out, header + 2) + delta));
+    out[header + 2] = v & 0xff;
+    out[header + 3] = v >> 8;
+  }
+  return out;
+}
+
+/** Edit one Ambit1/2 mode's displays and write region 0x2000 back (the same read-modify-write as
+ * writeLegacySportMode). Returns the re-read region decoded. */
+export async function writeLegacyDisplays(modeIndex: number, edits: LegacyDisplayEdit[]): Promise<LegacyRegion> {
+  return decodeLegacyRegion(await rewriteLegacyRegion(data => patchLegacyDisplayRegion(data, modeIndex, edits)));
+}
+
+/** One entry of the watch's sport-mode menu (a 0x0210 group): several legs = a multisport. */
+export interface LegacyGroup {
+  name: string;
+  activityId: number;
+  legs: number[];              // places in the 0x0100 mode list
+  legNames: (string | null)[];
+  isMultisport: boolean;
+}
+
+export interface LegacyRegion {
+  modes: LegacyMode[];
+  displays: Display[][];       // per mode, same order as `modes`
+  groups: LegacyGroup[];
+}
+
+/** The region decoded: the named modes (as readLegacySportModes), each one's displays, and the menu
+ * groups (tools/legacy_sport_modes.py sport_mode_groups). The multisports are read only: no capture
+ * shows how SuuntoLink builds one. */
+export function decodeLegacyRegion(data: Uint8Array): LegacyRegion {
+  const modes = parseRegion(data);
+  const blobs = modeBlobs(data);
+  const used = regionUsed(data);
+  const places: string[] = [];
+  const displays: Display[][] = blobs.map(() => []);
+  for (const c of children(data, 4, used)) {
+    if (c.tag !== 0x0100) continue;
+    for (const m of children(data, c.off, c.off + c.len).filter(k => k.tag === 0x0101)) {
+      const kids = children(data, m.off, m.off + m.len);
+      const settings = kids.find(k => k.tag === TAG_SETTINGS && k.len >= NAME_LEN);
+      places.push(settings ? latin1Name(data.subarray(settings.off, settings.off + NAME_LEN)) : '');
+      const k = blobs.findIndex(b => m.off <= b.off && b.off < m.off + m.len);
+      const disp = kids.find(x => x.tag === TAG_DISPLAYS);
+      if (k >= 0 && disp) displays[k] = decodeDisplayList(data, disp.off, disp.len);
+    }
+  }
+  const groups: LegacyGroup[] = [];
+  for (const c of children(data, 4, used)) {
+    if (c.tag !== 0x0200) continue;
+    for (const g of children(data, c.off, c.off + c.len)) {
+      if (g.tag !== 0x0210) continue;
+      const group: LegacyGroup = { name: '', activityId: 0, legs: [], legNames: [], isMultisport: false };
+      for (const k of children(data, g.off, g.off + g.len)) {
+        if (k.tag === 0x0212) group.name = latin1Name(data.subarray(k.off, k.off + k.len));
+        else if (k.tag === 0x0213 && k.len === 2) group.activityId = u16(data, k.off);
+        else if (k.tag === 0x0214 && k.len === 2) group.legs.push(u16(data, k.off));
+      }
+      if (!group.name) continue;
+      group.legNames = group.legs.map(i => (i >= 0 && i < places.length ? places[i] : null));
+      group.isMultisport = group.legs.length > 1;
+      groups.push(group);
+    }
+  }
+  return { modes, displays, groups };
+}
+
+/** Read the connected Ambit1/2's sport modes, their displays and the menu groups, in one read. */
+export async function readLegacySportModeRegion(): Promise<LegacyRegion> {
+  const b64 = await readLegacyRegion(REGION_ADDR, REGION_BYTES);
+  if (!b64) return { modes: [], displays: [], groups: [] };
+  return decodeLegacyRegion(base64ToBytes(b64));
 }

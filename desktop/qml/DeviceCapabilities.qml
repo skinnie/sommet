@@ -235,11 +235,22 @@ QtObject {
     // shape as the Ambit3's, so one page renders both. André, 2026-08-23: "all watches
     // should look like ambit 3, but for sure with adapted features".
     property bool supportsSportModes: true
-    // ...the "adapted features" part. Displays ARE decoded on the Ambit1 now
-    // (ambit1_sport_mode.c, built-in system screens stripped), so the Displays card shows
-    // real screens for it too. Multisport it genuinely does not have at all.
+    // ...the "adapted features" part. Displays are decoded on all four Ambit1/2 models, the
+    // same way as the Ambit3 (a screen is a display of type 10), and edited through
+    // tools/legacy_link.py sport-mode-displays (2026-11-26, watch-protocol/10 L5): add, remove,
+    // change the layout, change a row, each as a SuuntoLink capture shows it. Not yet seen on a
+    // real Ambit1 or Ambit2.
     property bool supportsSportModeDisplays: true
-    property bool supportsMultisport: !_isLegacy
+    // Multisport follows SuuntoLink's own capability record for the connected codename
+    // (sport_mode.js supportsMultisportModes, assets/sportmode_rows.json, served by
+    // /api/customodes/capabilities): Ambit3 family and Ambit2 / Ambit2 S yes, Ambit1, Ambit2 R,
+    // Traverse no. It was `!_isLegacy`, which hid the Ambit2's own Triathlon (watch-protocol/10
+    // L2). Until the record has loaded this is false; the page reads it there.
+    property bool supportsMultisport: CustomModesService.capabilities.supportsMultisportModes === true
+    // Creating or editing a multisport: the Ambit3 family's SBEM writer only. On an Ambit2 /
+    // Ambit2 S the multisports are listed read only: one capture shows SuuntoLink rewriting the
+    // Triathlon after deleting a mode, which is not enough to know how it builds one.
+    property bool supportsMultisportWrite: supportsMultisport && !_isLegacy
     property bool supportsApps: !_isLegacy
     property bool supportsNavigation: !_isLegacy
     property bool supportsBluetooth: !_isLegacy

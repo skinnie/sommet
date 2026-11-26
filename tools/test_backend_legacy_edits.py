@@ -5,7 +5,9 @@ Until 2026-11-26 the Sport Modes page's rename and field edits went to the SBEM 
 cannot reach this family) and route removal answered 409. Checked here, no watch: each request
 becomes the legacy_link.py command with the patch the Android writer uses, unknown fields and
 the interval timer are refused before anything runs, and the Ambit2 read hands the page the raw
-pods field and the stored HR limits (what an edit starts from).
+pods field and the stored HR limits (what an edit starts from). Display edits (2026-11-26, L5)
+go to legacy_link.py sport-mode-displays for all four models (the Ambit1's used to go to the C
+patcher, which wrote no commit tail), and the read lists the multisport groups (read only).
 
     python3 tools/test_backend_legacy_edits.py
 """
@@ -20,6 +22,7 @@ sys.path.insert(0, str(HERE))
 import server  # noqa: E402
 import legacy_sport_modes  # noqa: E402
 from test_legacy_sport_mode_edit import synthetic  # noqa: E402
+import test_legacy_display_edit  # noqa: E402
 
 
 class Legacy(unittest.TestCase):
@@ -82,11 +85,55 @@ class Legacy(unittest.TestCase):
         region[blob + 32:blob + 38] = bytes([180, 0, 60, 0, 1, 0])           # 180/60, on
         legacy_sport_modes.read_region_live = lambda length=0: bytes(region)
         server.run_tool = lambda script, args, **kw: (0, json.dumps({"ok": False}) + "\n", "")
-        self.h._customodes_read_ambit2()
+        self.h._customodes_read_legacy()
         code, obj = self.sent[0]
         m = obj["exerciseModes"][0]
         self.assertEqual((code, m["useHw"], m["hrHigh"], m["hrLow"], m["hrLimitsUse"]),
                          (200, 0x0107, 180, 60, 1))
+
+    def test_display_edits(self):
+        edits = [{"op": "add", "type": "1-row"},
+                 {"op": "setRow", "display": 0, "row": "Top", "values": [11]}]
+        self.h._handle_customodes_displays({"mode": "Running", "edits": edits, "confirm": True})
+        (script, args), = self.calls
+        self.assertEqual((script, args[:2], json.loads(args[2])),
+                         ("legacy_link.py", ["sport-mode-displays", "Running"], edits))
+        self.assertIn("--write", args)
+        self.assertEqual(self.sent[0][0], 200)
+
+    def test_display_edit_unknown_op_refused(self):
+        self.h._handle_customodes_displays({"mode": "Running", "confirm": True,
+                                            "edits": [{"op": "move", "display": 0}]})
+        self.assertEqual(self.sent[0][0], 400)
+        self.assertEqual(self.calls, [])
+
+    def test_read_lists_multisport_and_displays(self):
+        # The display test's synthetic Ambit2 region: Running and Cycling, the Duathlon of both.
+        legacy_sport_modes.read_region_live = lambda length=0: test_legacy_display_edit.synthetic(90)
+        server.run_tool = lambda script, args, **kw: (0, json.dumps({"ok": False}) + "\n", "")
+        self.h._customodes_read_legacy()
+        code, obj = self.sent[0]
+        self.assertEqual((code, obj["formatType"]), (200, "ambit2"))
+        self.assertEqual(obj["sportModes"], [{"name": "Duathlon", "activityId": 2, "legs": [0, 1],
+                                              "legNames": ["Running", "Cycling"],
+                                              "isMultisport": True}])
+        self.assertEqual([m["usedByMultisport"] for m in obj["exerciseModes"]], [True, True])
+
+    def test_ambit1_read_keeps_its_interval_timer(self):
+        region = bytearray(test_legacy_display_edit.synthetic(76))
+        blob = legacy_sport_modes.named_blobs(region)[0][0]
+        for off, value in ((34, 56), (36, 1), (38, 5), (40, 0x0100), (48, 150), (60, 390)):
+            region[blob + off:blob + off + 2] = value.to_bytes(2, "little")
+        legacy_sport_modes.read_region_live = lambda length=0: bytes(region)
+        server.run_tool = lambda script, args, **kw: (0, json.dumps({"ok": False}) + "\n", "")
+        self.h._ambit1_app_names = lambda: {}
+        self.h._customodes_read_legacy()
+        code, obj = self.sent[0]
+        m = obj["exerciseModes"][0]
+        self.assertEqual((code, obj["formatType"], obj["sportModes"]), (200, "ambit1", []))
+        self.assertEqual((m["autoPause"], m["intTimerFlags"], m["intervalTimer"]),
+                         (56, 1, {"enabled": True, "type": "time", "high": 150, "low": 390,
+                                  "repetitions": 5}))
 
 
 if __name__ == "__main__":

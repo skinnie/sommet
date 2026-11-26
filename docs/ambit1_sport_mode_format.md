@@ -329,3 +329,14 @@ why a display row can only say "Suunto App Slot 1". The app's name lives **insid
 compiled binary: the real region decodes to **"Storm alarm"** and **"Sunrise/Sunset"**.
 
 The `IAMRULE` payload itself is byte-compatible, which is what makes apps cross-device.
+
+## 11. Displays (2026-11-26)
+
+The Ambit1's display records are the Ambit2's, byte for byte: see
+`docs/ambit2_protocol_findings.md` section 4 for the record, which displays are the user's
+(`0x0107` type 10) and every display change SuuntoLink made in `zzambit1full.pcap`. The
+desktop edited them with `ambit_legacy_cli ambit1-sport-mode-patch` until then: 8192 bytes and
+no `0x0b18` commit tail, and a new display cloned from another one on the watch. That command
+is gone; display edits go through `tools/legacy_link.py sport-mode-displays` (10240 bytes in
+512-byte chunks, then the commit tail, as SuuntoLink writes this region).
+

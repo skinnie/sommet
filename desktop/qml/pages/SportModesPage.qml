@@ -435,7 +435,9 @@ PageFlickable {
         }
 
         Repeater {
-            model: CustomModesService.multisportModes
+            // Only where the capability record gives multisport, as the header above and the
+            // Android list (an Ambit1 or Ambit2 R region is not shown a multisport).
+            model: DeviceCapabilities.supportsMultisport ? CustomModesService.multisportModes : []
             delegate: Card {
                 id: msCard
                 required property var modelData
@@ -500,9 +502,11 @@ PageFlickable {
                          && !CustomModesService.writingMode
                 onClicked: createModeDialog.open()
             }
+            // Creating/editing a multisport: not on the Ambit2 / Ambit2 S, whose multisports
+            // are listed above read only (DeviceCapabilities.supportsMultisportWrite).
             RoundedButton {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: DeviceCapabilities.supportsMultisport && root.deviceMaxMultisport > 0
+                visible: DeviceCapabilities.supportsMultisportWrite && root.deviceMaxMultisport > 0
                 text: qsTr("Multisport")
                 enabled: !CustomModesService.writingMode
                 onClicked: multisportEditor.open()

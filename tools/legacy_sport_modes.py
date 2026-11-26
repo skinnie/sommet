@@ -25,14 +25,17 @@ docs/ambit1_sport_mode_format.md section 4 (the same offsets as ambit1_sport_mod
 GPS interval and the autolap out of the low HR limit.
 
 This module only reads the watch. patch_region() builds the bytes of one sport-mode edit
-(read-modify-write: the region as read, with one mode's fields changed); the write itself is
-legacy_link.sport_mode_edit(). Android does the same in AmbitLegacySportModes.ts.
+(read-modify-write: the region as read, with one mode's fields changed) and patch_displays() those
+of a display edit; the writes themselves are legacy_link.sport_mode_edit() and
+sport_mode_displays_edit(). sport_mode_groups() lists the 0x0200 groups (the watch's sport-mode
+menu, multisports included), read only. Android does the same in AmbitLegacySportModes.ts.
 """
 
 import argparse
 import json
 import os
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -260,6 +263,12 @@ def _mode_place(data, blob_off):
     return None
 
 
+def named_mode_places(data):
+    """The place in the 0x0100 list (what a group's 0x0214 legs count) of each named mode, in the
+    order named_blobs and read_app_modes list them."""
+    return [_mode_place(data, off) for off, _ln in named_blobs(data)]
+
+
 def _groups(data):
     """[(name_offset, name_length, [mode places])] for each 0x0210 group in 0x0200."""
     out = []
@@ -341,6 +350,261 @@ def patch_region(data, mode, patch):
                     and bytes(data[name_off:name_off + name_len]).split(b"\x00")[0] == old_name):
                 out[name_off:name_off + name_len] = _name_bytes(patch["name"], GROUP_NAME_LEN)
     return bytes(out)
+
+
+# ─── Editing a mode's displays (2026-11-26, watch-protocol/10 L5) ─────────────────────────────
+# One display, as every display in both captures holds it (and openambit's serialize_display
+# writes it):
+#   0x0106 { 0x0107 [u16 layout][u16 type],
+#            one 0x0108 per row: { 0x0109 [u16 row][u16 item], 0x010A [u16 value]... } }
+# type 0x000A is a screen the wearer set up (custom_modes.USER_DISPLAY_TYPE, the same word on the
+# Ambit3); 4, 5, 6, 7, 50, 65 and 70 are the watch's own views (compass, navigation, map...). The
+# user screens are always a prefix of the mode's 0x0105 list. A row whose item is 0 and which
+# holds 0x010A values is the multi-value row (the values it steps through); any other row shows
+# its item.
+#
+# What SuuntoLink wrote, each change alone between two consecutive region writes
+# (tools/test_legacy_display_edit.py replays every one byte for byte, the display time in the
+# mode's 0x01FF aside, left as read like the settings time):
+#   add      a new display after the last user one, its rows as NEW_DISPLAY_ROWS. Ambit2 (Treino
+#            Forção): 1-row, 2-row, 3-row, graph. Ambit1 (Running): graph, 3-row, and 2-row +
+#            1-row + graph in one save.
+#   remove   the display cut out. Ambit2: Treino Forção's graph.
+#   setType  the display replaced, in place, by a new one of the other layout. Ambit1: Running's
+#            3-row -> 1-row and 3-row -> 2-row.
+#   setRow   the Top or Center item (Ambit2 70 -> 11, 21 -> 33; Ambit1 5 -> 68, 28 -> 10), and the
+#            multi-value row's list replaced by another of a different length (Ambit2 3 -> 5
+#            values, Ambit1 4 -> 5).
+# Every enclosing length (0x0105, the mode's 0x0101, 0x0100, the root) moves by the size change,
+# what follows shifts, and the rest of the region is 0xFF, as in every captured write. The
+# display records are byte-identical on the two watches, so each change is written on all four
+# models; the remove is seen only on the Ambit2 and setType only on the Ambit1.
+TAG_DISPLAYS, TAG_DISPLAY, TAG_LAYOUT = 0x0105, 0x0106, 0x0107
+TAG_ROW_BOX, TAG_ROW, TAG_VIEW = 0x0108, 0x0109, 0x010A
+USER_DISPLAY = 0x000A
+MAX_DISPLAYS = 8               # SuuntoLink getMaxDisplays() for Bluebird/Duck/Colibri/Greentit
+MAX_ROW_VALUES = 5             # sportmode_rows.json maxValuesPerMultiRow; the captures' longest
+# The Sport Modes page's layout names -> the id the 0x0107 record stores.
+LAYOUT_IDS = {"3-row": 260, "2-row": 261, "1-row": 262, "graph": 257}
+# A new display's rows, (row, item, multi-value list), as SuuntoLink wrote every display it
+# created in both captures, for a new mode as for an added or retyped display.
+NEW_DISPLAY_ROWS = {
+    260: ((0, 10, ()), (1, 11, ()), (2, 0, (5,))),
+    261: ((0, 10, ()), (1, 0, (5,))),
+    262: ((0, 10, ()),),
+    257: ((0, 6, ()), (1, 32, ()), (2, 5, ())),
+}
+ROW_NUMBERS = {"top": 0, "center": 1, "bottom": 2}
+
+
+def _tlv(tag, body):
+    return struct.pack("<HH", tag, len(body)) + bytes(body)
+
+
+def display_record(layout, rows, kind=USER_DISPLAY):
+    """One 0x0106 display: `rows` is [(row, item, [values...])]."""
+    body = _tlv(TAG_LAYOUT, struct.pack("<HH", layout, kind))
+    for row, item, values in rows:
+        box = _tlv(TAG_ROW, struct.pack("<HH", row, item))
+        box += b"".join(_tlv(TAG_VIEW, struct.pack("<H", v)) for v in values)
+        body += _tlv(TAG_ROW_BOX, box)
+    return _tlv(TAG_DISPLAY, body)
+
+
+def parse_display(record):
+    """A 0x0106 record -> {"layout", "type", "rows": [[row, item, [values]]]}, or None when it
+    holds anything but the captured shape (then it is never rewritten)."""
+    if len(record) < 4 or _u16(record, 0) != TAG_DISPLAY or 4 + _u16(record, 2) != len(record):
+        return None
+    kids = list(_children(record, 4, len(record)))
+    if not kids or kids[0][0] != TAG_LAYOUT or kids[0][2] != 4:
+        return None
+    out = {"layout": _u16(record, kids[0][1]), "type": _u16(record, kids[0][1] + 2), "rows": []}
+    for tag, body, ln in kids[1:]:
+        cells = list(_children(record, body, body + ln))
+        if tag != TAG_ROW_BOX or not cells or cells[0][0] != TAG_ROW or cells[0][2] != 4:
+            return None
+        if any(t != TAG_VIEW or n != 2 for t, _b, n in cells[1:]):
+            return None
+        out["rows"].append([_u16(record, cells[0][1]), _u16(record, cells[0][1] + 2),
+                            [_u16(record, b) for _t, b, _n in cells[1:]]])
+    if display_record(out["layout"], out["rows"], out["type"]) != bytes(record):
+        return None
+    return out
+
+
+def _mode_records(data, mode):
+    """Where a mode sits: {"modes": 0x0100 header offset, "mode": its 0x0101 header offset,
+    "displays": (body offset, body length) of its 0x0105 or None}. `mode` as patch_region."""
+    blobs = named_blobs(data)
+    if isinstance(mode, str):
+        names = [data[o:o + NAME_LEN].split(b"\x00")[0].decode("latin-1") for o, _ in blobs]
+        if mode not in names:
+            raise ValueError(f"no sport mode named {mode!r} on the watch")
+        index = names.index(mode)
+    else:
+        index = int(mode)
+        if not 0 <= index < len(blobs):
+            raise ValueError(f"sport mode {index} not found (the watch has {len(blobs)})")
+    blob = blobs[index][0]
+    for tag, body, ln in _children(data, 4, region_used(data)):
+        if tag != TAG_MODES:
+            continue
+        for t, b, n in _children(data, body, body + ln):
+            if t == TAG_MODE and b <= blob < b + n:
+                disp = [(b2, n2) for t2, b2, n2 in _children(data, b, b + n) if t2 == TAG_DISPLAYS]
+                return {"modes": body - 4, "mode": b - 4, "displays": disp[0] if disp else None}
+    raise ValueError("the sport mode is not inside the region's mode list")
+
+
+def _display_index(edit, user):
+    try:
+        i = int(edit.get("display"))
+    except (TypeError, ValueError):
+        raise ValueError(f"{edit.get('op')}: which display? got {edit.get('display')!r}") from None
+    if not 0 <= i < len(user):
+        raise ValueError(f"{edit.get('op')}: display {i} not found (the mode has {len(user)})")
+    return i
+
+
+def _layout_of(edit):
+    layout = LAYOUT_IDS.get(str(edit.get("type", "")).strip().lower())
+    if layout is None:
+        raise ValueError(f"{edit.get('op')}: unknown layout {edit.get('type')!r} "
+                         f"(one of {', '.join(LAYOUT_IDS)})")
+    return layout
+
+
+def _set_row(record, edit):
+    """`record` with one row's values changed, the way SuuntoLink changed them."""
+    disp = parse_display(record)
+    if disp is None:
+        raise ValueError("setRow: this display is not in the layout the captures show; not changed")
+    row_nbr = ROW_NUMBERS.get(str(edit.get("row", "")).strip().lower())
+    rows = [r for r in disp["rows"] if r[0] == row_nbr]
+    if row_nbr is None or len(rows) != 1:
+        raise ValueError(f"setRow: this display has no {edit.get('row')!r} row")
+    try:
+        values = [int(v) for v in edit.get("values") or []]
+    except (TypeError, ValueError):
+        raise ValueError("setRow: the values must be field numbers") from None
+    if any(not 0 < v < 0xFFFE for v in values):
+        raise ValueError("setRow: a value of 0 (empty) or above 0xFFFD is in no capture")
+    row = rows[0]
+    if row[1] == 0 and row[2]:                     # the multi-value row
+        if not 1 <= len(values) <= MAX_ROW_VALUES:
+            raise ValueError(f"setRow: this row holds 1 to {MAX_ROW_VALUES} values")
+        row[2] = values
+    elif row[1] != 0 and not row[2]:               # a one-value row
+        if len(values) != 1:
+            raise ValueError("setRow: this row shows one value")
+        row[1] = values[0]
+    else:
+        raise ValueError("setRow: an empty row is in no capture; not changed")
+    return display_record(disp["layout"], disp["rows"], disp["type"])
+
+
+def patch_displays(data, mode, edits):
+    """The sport-mode region `data` with one mode's displays edited. `mode` as patch_region;
+    `edits` are the Sport Modes page's, applied in order (each display index counts the mode's
+    user screens as they are after the edits before it):
+      {"op": "add", "type": "3-row"|"2-row"|"1-row"|"graph"}   after the last user screen
+      {"op": "remove", "display": N}                            (never the last one)
+      {"op": "setType", "display": N, "type": ...}              a new display of that layout
+      {"op": "setRow", "display": N, "row": "Top"|"Center"|"Bottom", "values": [field ids]}
+    Every byte outside that mode's 0x0105 list is left as read, apart from the four lengths that
+    enclose it and the shift. Raises ValueError for anything the captures do not show."""
+    where = _mode_records(data, mode)
+    if where["displays"] is None:
+        raise ValueError("this sport mode has no display list")
+    dbody, dlen = where["displays"]
+    records = []
+    for tag, body, ln in _children(data, dbody, dbody + dlen):
+        if tag != TAG_DISPLAY:
+            raise ValueError(f"record 0x{tag:04x} in the display list is in no capture; "
+                             "nothing changed")
+        records.append(bytes(data[body - 4:body + ln]))
+    if sum(len(r) for r in records) != dlen:
+        raise ValueError("the display list does not parse to its end; nothing changed")
+    kinds = [(parse_display(r) or {}).get("type") for r in records]
+    n_user = 0
+    while n_user < len(kinds) and kinds[n_user] == USER_DISPLAY:
+        n_user += 1
+    if USER_DISPLAY in kinds[n_user:]:
+        raise ValueError("this mode's own screens are not all before the built-in ones; "
+                         "nothing changed")
+    user, builtin = records[:n_user], records[n_user:]
+    for edit in edits:
+        op = edit.get("op") if isinstance(edit, dict) else None
+        if op == "add":
+            layout = _layout_of(edit)
+            if len(user) >= MAX_DISPLAYS:
+                raise ValueError(f"add: this watch holds at most {MAX_DISPLAYS} displays per mode")
+            user.append(display_record(layout, NEW_DISPLAY_ROWS[layout]))
+        elif op == "remove":
+            i = _display_index(edit, user)
+            if len(user) <= 1:
+                raise ValueError("remove: a mode keeps at least one display")
+            del user[i]
+        elif op == "setType":
+            i = _display_index(edit, user)
+            layout = _layout_of(edit)
+            user[i] = display_record(layout, NEW_DISPLAY_ROWS[layout])
+        elif op == "setRow":
+            i = _display_index(edit, user)
+            user[i] = _set_row(user[i], edit)
+        else:
+            raise ValueError(f"unknown display edit {op!r}")
+    new_body = b"".join(user + builtin)
+    delta = len(new_body) - dlen
+    used = region_used(data)
+    out = bytearray(data[:dbody]) + new_body + bytes(data[dbody + dlen:used])
+    if len(out) > len(data):
+        raise ValueError(f"the sport modes would need {len(out)} of the region's {len(data)} bytes")
+    for header in (dbody - 4, where["mode"], where["modes"], 0):
+        _put_u16(out, header + 2, _u16(out, header + 2) + delta)
+    return bytes(out) + b"\xff" * (len(data) - len(out))
+
+
+def sport_mode_groups(data):
+    """The region's 0x0200 groups, as tools/custom_modes.py lists an Ambit3's SPORT_MODES: one per
+    entry in the watch's sport-mode menu, [{"name", "activityId", "legs", "legNames",
+    "isMultisport"}]. A group with several legs is a multisport (the Ambit2 capture's Triathlon:
+    Cycling, Running, Openwater swim); a leg is a place in the 0x0100 mode list. Read only:
+    Sommet does not write groups (one capture shows SuuntoLink rewriting one, after deleting a
+    mode, which is not enough to know how it builds them). The Ambit1 region has none."""
+    used = region_used(data)
+    places = []
+    for tag, body, ln in _children(data, 4, used):
+        if tag == TAG_MODES:
+            for t, b, n in _children(data, body, body + ln):
+                if t == TAG_MODE:
+                    name = ""
+                    for t2, b2, n2 in _children(data, b, b + n):
+                        if t2 == TAG_SETTINGS and n2 >= NAME_LEN:
+                            name = bytes(data[b2:b2 + NAME_LEN]).split(b"\x00")[0].decode("latin-1")
+                    places.append(name)
+    out = []
+    for tag, body, ln in _children(data, 4, used):
+        if tag != TAG_GROUPS:
+            continue
+        for t, b, n in _children(data, body, body + ln):
+            if t != TAG_GROUP:
+                continue
+            group = {"name": "", "activityId": 0, "legs": []}
+            for t2, b2, n2 in _children(data, b, b + n):
+                if t2 == TAG_GROUP_NAME:
+                    group["name"] = bytes(data[b2:b2 + n2]).split(b"\x00")[0].decode("latin-1")
+                elif t2 == 0x0213 and n2 == 2:
+                    group["activityId"] = _u16(data, b2)
+                elif t2 == TAG_GROUP_MODE and n2 == 2:
+                    group["legs"].append(_u16(data, b2))
+            if not group["name"]:
+                continue
+            group["legNames"] = [places[i] if 0 <= i < len(places) else None for i in group["legs"]]
+            group["isMultisport"] = len(group["legs"]) > 1
+            out.append(group)
+    return out
 
 
 def read_app_modes(from_file=None):

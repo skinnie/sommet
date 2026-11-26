@@ -33,6 +33,7 @@ memory), so there's nothing safe to send for THAT specific piece yet.
     ./tools/legacy_link.py route-send ROUTE.gpx... [--write]
     ./tools/legacy_link.py route-remove NAME [--write]
     ./tools/legacy_link.py sport-mode-edit MODE '{"autolapM": 1000}' [--write]
+    ./tools/legacy_link.py sport-mode-displays MODE '[{"op": "add", "type": "1-row"}]' [--write]
 """
 
 import json
@@ -422,15 +423,11 @@ def sport_mode_write(modes, dry_run=False):
         pathlib.Path(path).unlink(missing_ok=True)
 
 
-def sport_mode_edit(mode, patch, write=False, backup_dir=None):
-    """Changes one sport mode's settings on an Ambit1/2: name, autolap, HR limits, pods (the
-    `patch` keys of legacy_sport_modes.patch_region, which says where each byte comes from).
-
-    Read-modify-write of the region's first 10240 bytes, the extent SuuntoLink writes: read them
-    (0x0b17), change that mode's fields, write them back (0x0b16 + the 0x0b18 commit tail
-    [0x2000][0xFFFFFFFF]) and read them again to check. The same bytes as the Android app's
-    AmbitLegacySportModes.writeLegacySportMode. `mode` is the mode's name. Without `write` nothing
-    is sent; with it, the region as read goes to <backup_dir> first."""
+def _sport_mode_region_rmw(mode, patcher, write, backup_dir):
+    """Read-modify-write of the sport-mode region's first 10240 bytes, the extent SuuntoLink
+    writes: read them (0x0b17), `patcher(region)` -> the new bytes, write them back (0x0b16 + the
+    0x0b18 commit tail [0x2000][0xFFFFFFFF]) and read them again to check. Without `write`
+    nothing is sent; with it, the region as read goes to <backup_dir> first."""
     import time                                               # noqa: PLC0415
     import legacy_sport_modes as LSM                          # noqa: PLC0415
 
@@ -439,7 +436,7 @@ def sport_mode_edit(mode, patch, write=False, backup_dir=None):
         raise RuntimeError(f"read {len(region)} of the sport-mode region's "
                            f"{LSM.REGION_WRITE_BYTES} bytes: nothing written")
     used = LSM.region_used(region)
-    new = LSM.patch_region(region, mode, patch)
+    new = patcher(region)
     changed = sum(1 for a, b in zip(region, new) if a != b)
     result = {"ok": True, "wrote": False, "mode": mode, "bytes_changed": changed}
     if not write or not changed:
@@ -451,10 +448,36 @@ def sport_mode_edit(mode, patch, write=False, backup_dir=None):
     backup.write_bytes(region)
     flash_write(LSM.REGION_ADDR, new, LSM.COMMIT_EXTRA)
     back = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
-    if back[:used] != new[:used]:
+    # A display edit moves the used extent; the bytes a shorter list freed were written 0xFF.
+    check = max(used, LSM.region_used(new))
+    if back[:check] != new[:check]:
         raise RuntimeError(f"the watch did not read back what was written (the copy: {backup})")
     result.update(wrote=True, backup=str(backup))
     return result
+
+
+def sport_mode_edit(mode, patch, write=False, backup_dir=None):
+    """Changes one sport mode's settings on an Ambit1/2: name, autolap, HR limits, pods (the
+    `patch` keys of legacy_sport_modes.patch_region, which says where each byte comes from).
+    One _sport_mode_region_rmw. The same bytes as the Android app's
+    AmbitLegacySportModes.writeLegacySportMode. `mode` is the mode's name."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    return _sport_mode_region_rmw(mode, lambda region: LSM.patch_region(region, mode, patch),
+                                  write, backup_dir)
+
+
+def sport_mode_displays_edit(mode, edits, write=False, backup_dir=None):
+    """Edits one sport mode's displays on an Ambit1/2: add, remove, change a display's layout,
+    change a row's values (the Sport Modes page's staged edits, in order; legacy_sport_modes.
+    patch_displays says which capture each byte comes from). One _sport_mode_region_rmw, so the
+    extent, chunks and commit tail are the settings edit's. Until 2026-11-26 the desktop sent the
+    Ambit1's display edits to ambit_legacy_cli ambit1-sport-mode-patch, which wrote 8192 bytes
+    and no commit tail (an edit the watch drops after a reconnect) and refused the Ambit2. The
+    Android app writes the same bytes for a row change (AmbitLegacySportModes.
+    writeLegacyDisplayRow). `mode` is the mode's name."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    return _sport_mode_region_rmw(mode, lambda region: LSM.patch_displays(region, mode, edits),
+                                  write, backup_dir)
 
 
 def waypoints_without_route(waypoints, route_name, still_used=()):
@@ -580,7 +603,7 @@ _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-cle
              "gps-orbit-status", "gps-orbit-write",
              "sport-mode-write-presets", "routes", "route-head",
              "route-region-save", "route-region-restore", "nav-restore-json", "route-send",
-             "route-remove", "sport-mode-edit")
+             "route-remove", "sport-mode-edit", "sport-mode-displays")
 
 
 def _opt(flag):
@@ -656,6 +679,21 @@ def main():
                 result = sport_mode_edit(sys.argv[2], json.loads(sys.argv[3]),
                                          write="--write" in sys.argv[4:],
                                          backup_dir=_opt("--backup-dir"))
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "sport-mode-displays":
+            # sport-mode-displays MODE EDITS_JSON [--write] [--backup-dir DIR] : one mode's
+            # displays, the Sport Modes page's edit list.
+            if len(sys.argv) < 4:
+                sys.exit(f"usage: {sys.argv[0]} sport-mode-displays MODE EDITS_JSON [--write] "
+                         "[--backup-dir DIR]")
+            try:
+                edits = json.loads(sys.argv[3])
+                if not isinstance(edits, list):
+                    raise ValueError("EDITS_JSON must be a list of edits")
+                result = sport_mode_displays_edit(sys.argv[2], edits,
+                                                  write="--write" in sys.argv[4:],
+                                                  backup_dir=_opt("--backup-dir"))
             except ValueError as exc:
                 result = {"ok": False, "error": str(exc)}
         elif cmd == "sport-mode-write-presets":

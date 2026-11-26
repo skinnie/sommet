@@ -7584,17 +7584,9 @@ class Handler(BaseHTTPRequestHandler):
         # docs/ambit1_sport_mode_format.md), so ONLY the decoder differs; every consumer
         # above this line is shared.
         if selected_is_legacy():
-            # Dispatch by product_id so an Ambit2 (0x0019 etc.) goes STRAIGHT to its 90-byte
-            # reader and never runs the Ambit1 76-byte reader first. That reader opens the
-            # device only to reject a non-0x0010 pid, which is pure USB churn on a family whose
-            # region reads are already fragile - and the crash the Mac session hit (a SIGSEGV in
-            # the HID set_report on a wedged watch, now crash-hardened in hid-libusb.c) is likelier
-            # the more times the watch is opened/read in a row. 0x0010 keeps its own path (which
-            # still falls through to the Ambit2 reader if the Ambit1 read itself comes back empty).
-            if SELECTED_PRODUCT_ID == 0x0010:
-                self._handle_customodes_read_ambit1()
-            else:
-                self._customodes_read_ambit2()
+            # Ambit1 and Ambit2/2S/2R: one region read, decoded the same way for all four
+            # (watch-protocol/10 L5, 2026-11-26) - see _customodes_read_legacy.
+            self._customodes_read_legacy()
             return
 
         # Testing mode decodes the fixture through the SAME tool, via its own --from, so
@@ -7608,109 +7600,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200 if info.get("ok") else 502, info)
 
-    def _handle_customodes_read_ambit1(self):
-        """The Ambit1 half of GET /api/customodes - its real modes, mapped onto exactly the
-        shape tools/custom_modes.py's to_json() emits so CustomModesService and
-        SportModesPage need no per-device branch.
-
-        Fields the Ambit1 genuinely does not have are reported honestly rather than faked:
-          displays  - decoded as of 2026-08-23, built-in system screens stripped.
-          rules     - one app per mode on this device, not decoded here either.
-          hrLimitsUse - the Ambit1 has NO use_heartrate_limits field at all (that is the
-                      `usehrlimits` capability Devices.xml reports missing). The limits
-                      themselves are real and stored; only the on/off flag has nowhere to
-                      live, which is why SuuntoLink's own checkbox never sticks. Derived
-                      from whether a limit is actually set."""
-        sys.path.insert(0, str(TOOLS_DIR))
-        import legacy_link                                      # noqa: PLC0415
-        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
-        old = os.environ.get("AMBIT_PRODUCT_ID")
-        if env_pid:
-            os.environ["AMBIT_PRODUCT_ID"] = env_pid
-        try:
-            with WATCH_LOCK:
-                info = legacy_link.ambit1_sport_mode_read()
-        except RuntimeError:
-            info = None    # not an Ambit1 (0x0010) - fall through to the Ambit2 reader below
-        finally:
-            if env_pid:
-                if old is None:
-                    os.environ.pop("AMBIT_PRODUCT_ID", None)
-                else:
-                    os.environ["AMBIT_PRODUCT_ID"] = old
-
-        # Ambit2 (and the rest of the Bluebird family): ambit1_sport_mode_read is 0x0010-only.
-        # legacy_sport_modes.read_app_modes reads region 0x2000's 90-byte layout
-        # (docs/ambit2_protocol_findings.md); map those modes into the SAME exerciseModes shape
-        # so the rich list/detail editor renders them too - extends the 2026-08-23 "all watches
-        # look like ambit 3" Ambit1 intent (this method's own docstring) to the Ambit2.
-        if not (info and info.get("ok") and info.get("modes")):
-            self._customodes_read_ambit2()
-            return
-
-        app_names = self._ambit1_app_names()
-        modes = []
-        for i, m in enumerate(info.get("modes") or []):
-            hr_high, hr_low = m.get("hrMax", 0), m.get("hrMin", 0)
-            modes.append({
-                "name": m.get("name", ""),
-                "activityId": m.get("activityId", 0),
-                "appCount": 0,
-                "customModeId": i,
-                "useHw": m.get("pods", 0),
-                "altiBaroMode": m.get("altiBaroMode", 0),
-                "recordingInterval": m.get("recordingInterval", 0),
-                "gpsInterval": m.get("gpsInterval", 0),
-                "autolap": m.get("autolapM", 0),
-                "hrHigh": hr_high,
-                "hrLow": hr_low,
-                "hrLimitsUse": 1 if (hr_high or hr_low) else 0,
-                "autoStart": 0,
-                "autoPause": m.get("autoPause", 0),
-                "autoScrolling": 0,
-                "intTimerFlags": m.get("useIntervalTimer", 0),
-                "intTimerCount": m.get("intervalRepetitions", 0),
-                "intervalTimer": {
-                    "enabled": m.get("useIntervalTimer", 0) == 1,
-                    # 0x0100 = time (seconds), 0x0000 = distance (metres) - confirmed both
-                    # ways against SuuntoLink's own writes, see the format doc.
-                    "type": "time" if m.get("intervalMaxUnit") == 0x0100 else "distance",
-                    "high": m.get("intervalMax", 0),
-                    "low": m.get("intervalMin", 0),
-                    "repetitions": m.get("intervalRepetitions", 0),
-                },
-                "backlightMode": 0,
-                "displayMode": 0,
-                "quickNavigation": 0,
-                # Real displays, decoded off the watch (ambit1_sport_mode.c). The built-in
-                # system screens are already stripped there, so this count matches what the
-                # Ambit3 page shows for its own watch - and stays inside the device's own
-                # 8-display maximum.
-                "displays": self._ambit1_label_displays(m.get("displays") or [],
-                                                        app_names),
-                "rules": [],
-            })
-        self._send_json(200, {
-            "ok": True, "formatType": "ambit1",
-            "exerciseModes": modes, "sportModes": []})
-
     # Bit values for the Ambit2 hrbelt_and_pods field, matching tools/legacy_sport_modes.POD_BITS
     # and SportModesPage.qml's podBits - so useHw round-trips through the same rich editor.
     _AMBIT2_POD_BITS = (("hrBelt", 0x0001), ("powerPod", 0x0040), ("cadencePod", 0x0080),
                         ("footPod", 0x0100), ("bikePod", 0x0800))
 
-    def _customodes_read_ambit2(self):
-        """The Ambit2 half of GET /api/customodes, mapped onto the SAME exerciseModes shape the
-        Ambit1 path produces so the rich list/detail editor renders the Ambit2 too.
+    def _customodes_read_legacy(self):
+        """The Ambit1/2 half of GET /api/customodes, in the exerciseModes/sportModes shape
+        tools/custom_modes.py gives the Ambit3, so the one list/detail page renders all of them
+        (André, 2026-08-23: "all watches should look like ambit 3, but for sure with adapted
+        features").
 
-        Region 0x2000 is BXML - the SAME nested format the Ambit3 CustomModes region uses (root
-        0x0003 -> modes 0x0100 -> mode 0x0101 -> settings 0x0102 + display config 0x0105-0x010a,
-        with the SAME field-type/template ids as custom_modes.py's FIELD_TYPES). So two proven
-        decoders split the work on ONE region read: legacy_sport_modes.read_app_modes for the
-        90-byte SETTINGS (name/activity/pods/autolap/gps - custom_modes.py mis-reads those on the
-        Ambit2's blob), and custom_modes.py for the DISPLAYS (its 90-byte settings decode is
-        wrong here but its BXML display decode is exactly right - HW-confirmed against André's
-        Ambit2, 2026-08-28). Merged by file order (both walk the region top-to-bottom)."""
+        Region 0x2000 is the same nested format as the Ambit3's CustomModes region (root 0x0003
+        -> modes 0x0100 -> mode 0x0101 -> settings 0x0102 + displays 0x0105-0x010a, groups
+        0x0200), so one region read is split between two decoders: legacy_sport_modes for the
+        settings (the 90-byte Ambit2 and 76-byte Ambit1 blobs, which custom_modes.py mis-reads)
+        and the sport-mode menu (its 0x0200 groups: the multisports), custom_modes.py for the
+        DISPLAYS (HW-confirmed against André's Ambit2, 2026-08-28), matched by each mode's place
+        in the 0x0100 list.
+
+        Until 2026-11-26 the Ambit1 went through ambit_legacy_cli ambit1-sport-mode-read, which
+        found its own screens by the longest run of displays common to the end of every mode.
+        Its screens are now the ones whose display type is 10, as on the Ambit2 and Ambit3 and
+        as the display writer (legacy_sport_modes.patch_displays) counts them; the two rules
+        agree on every captured Ambit1 region (tools/test_legacy_display_edit.py).
+
+        Ambit1 only: the interval timer and auto pause, decoded at the 76-byte blob's offsets
+        (docs/ambit1_sport_mode_format.md 4-5a, its SuuntoLink capture), and the apps' names on
+        the rows that show one. The Ambit1 has no use_heartrate_limits field: limits of 0/0 are
+        its "off"."""
         sys.path.insert(0, str(TOOLS_DIR))
         import legacy_sport_modes                               # noqa: PLC0415
         env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
@@ -7721,14 +7639,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with WATCH_LOCK:
                 region = legacy_sport_modes.read_region_live()  # ONE region-dump off the watch
-            # Settings from the 90-byte reader; displays from the BXML reader - both off the same
-            # bytes, no second watch read (write region to a temp file custom_modes.py --from can
-            # decode without touching USB).
+            # Both decoders off the same bytes, no second watch read (custom_modes.py --from
+            # decodes a file without touching USB).
             with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
                 tf.write(region)
                 tmp = tf.name
             try:
                 app_modes = legacy_sport_modes.read_app_modes(from_file=tmp)
+                raw = [m for m in legacy_sport_modes.parse_region(region) if m.get("activity_name")]
                 cm_code, cm_out, cm_err = run_tool("custom_modes.py", ["--json", "--from", tmp])
                 cm = self._parse_last_json_line(cm_out)
                 if cm and cm.get("ok"):
@@ -7738,7 +7656,9 @@ class Handler(BaseHTTPRequestHandler):
                     os.unlink(tmp)
                 except OSError:
                     pass
-        except (RuntimeError, OSError) as exc:
+            groups = legacy_sport_modes.sport_mode_groups(region)
+            places = legacy_sport_modes.named_mode_places(region)
+        except (RuntimeError, OSError, ValueError) as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
         finally:
@@ -7748,6 +7668,10 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     os.environ["AMBIT_PRODUCT_ID"] = old
 
+        ambit1 = any(m.get("_blob_len") == legacy_sport_modes.AMBIT1_BLOB_LEN for m in raw)
+        app_names = self._ambit1_app_names() if ambit1 else None
+        in_multisport = {leg for g in groups if g["isMultisport"] for leg in g["legs"]}
+        in_menu = {leg for g in groups if not g["isMultisport"] for leg in g["legs"]}
         modes = []
         for i, m in enumerate(app_modes or []):
             # The raw pods field, not one rebuilt from the five checkboxes: rebuilt, bits no
@@ -7759,7 +7683,27 @@ class Handler(BaseHTTPRequestHandler):
                 for key, bit in self._AMBIT2_POD_BITS:
                     if m.get(key):
                         use_hw |= bit
-            displays = cm_modes[i].get("displays", []) if i < len(cm_modes) else []
+            # custom_modes.py lists every 0x0101, named or not: take the one this mode is in.
+            place = places[i] if i < len(places) else None
+            at = place if place is not None else i
+            displays = cm_modes[at].get("displays", []) if at < len(cm_modes) else []
+            if ambit1:
+                # An app's row says "Suunto App Slot N" until it is named from the Apps region.
+                displays = self._ambit1_label_displays(displays, app_names)
+            settings = raw[i] if i < len(raw) else {}
+            timer = {"enabled": False, "type": "time", "high": 0, "low": 0, "repetitions": 0}
+            auto_pause = timer_flags = 0
+            if settings.get("_blob_len") == legacy_sport_modes.AMBIT1_BLOB_LEN:
+                timer_flags = settings.get("use_interval_timer", 0)
+                timer = {"enabled": settings.get("use_interval_timer", 0) == 1,
+                         # 0x0100 = time (seconds), 0x0000 = distance (metres) - confirmed both
+                         # ways against SuuntoLink's own writes, see the format doc.
+                         "type": "time" if settings.get("interval_timer_max_unit") == 0x0100
+                         else "distance",
+                         "high": settings.get("interval_timer_max", 0),
+                         "low": settings.get("interval_timer_min", 0),
+                         "repetitions": settings.get("interval_repetitions", 0)}
+                auto_pause = settings.get("auto_pause", 0)
             modes.append({
                 "name": m.get("name", ""),
                 "activityId": m.get("activityId", 0),
@@ -7772,16 +7716,25 @@ class Handler(BaseHTTPRequestHandler):
                 "autolap": m.get("autolapM", 0),
                 "hrHigh": m.get("hrMax", 0), "hrLow": m.get("hrMin", 0),
                 "hrLimitsUse": 1 if m.get("useHrLimits") else 0,
-                "autoStart": 0, "autoPause": 0, "autoScrolling": 0,
-                "intTimerFlags": 0, "intTimerCount": 0,
-                "intervalTimer": {"enabled": False, "type": "time",
-                                  "high": 0, "low": 0, "repetitions": 0},
+                "autoStart": 0, "autoPause": auto_pause, "autoScrolling": 0,
+                "intTimerFlags": timer_flags,
+                "intTimerCount": timer["repetitions"],
+                "intervalTimer": timer,
                 "backlightMode": 0, "displayMode": 0, "quickNavigation": 0,
                 "displays": displays, "rules": [],
+                # As custom_modes.py marks an Ambit3's modes: a multisport's leg (SuuntoLink will
+                # not delete one), and whether the mode has an entry of its own in the menu.
+                "usedByMultisport": place in in_multisport,
+                "inWatchMenu": place in in_menu,
             })
+        # The menu's entries, the multisports among them (Ambit2/2S capture: Triathlon). Read
+        # only on this family: no capture shows how SuuntoLink builds or edits one.
+        sport_modes = [{"name": g["name"], "activityId": g["activityId"], "legs": g["legs"],
+                        "legNames": g["legNames"], "isMultisport": g["isMultisport"]}
+                       for g in groups]
         self._send_json(200, {
-            "ok": True, "formatType": "ambit2",
-            "exerciseModes": modes, "sportModes": []})
+            "ok": True, "formatType": "ambit1" if ambit1 else "ambit2",
+            "exerciseModes": modes, "sportModes": sport_modes})
 
     # Ambit1 Apps region. Base/size come from SuuntoLink's own Devices.xml per-device record
     # (rulestorelocation / rulestoresize), NOT libambit's PMEM20_APP_START - that constant is
@@ -8552,152 +8505,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"ok": True, "results": results})
 
-    def _handle_customodes_displays_ambit1(self, mode, edits, confirm):
-        """The Ambit1 half of POST /api/customodes/displays.
+    # The display edits the Ambit1/2 writer takes (legacy_sport_modes.patch_displays).
+    LEGACY_DISPLAY_OPS = ("add", "remove", "setType", "setRow")
 
-        Supports `setRow`, `add`, `remove` and `setType`. setRow is a fixed-size, in-place patch; add
-        and remove RESIZE the record, so the patcher corrects the four nested lengths
-        (DISPLAYS / MODE / MODES / root) and re-derives every offset afterwards. `setType`
-        is done as replace-with-a-clone plus the layout's default rows, which is
-        what SuuntoLink itself does (verified in its own capture: a 3-row retyped to 1-row
-        came back as rows [10], not the old values).
+    def _handle_customodes_displays_legacy(self, mode, edits, confirm):
+        """The Ambit1/2 half of POST /api/customodes/displays (watch-protocol/10 L5): the staged
+        edits (add, remove, setType, setRow) applied in order and written once, through
+        tools/legacy_link.py sport-mode-displays - a read-modify-write of the sport-mode region
+        with the extent, chunks and 0x0b18 commit tail SuuntoLink uses, a copy first and a
+        read-back after, the same writer as the settings edits. Every byte follows a SuuntoLink
+        capture (legacy_sport_modes.patch_displays says which); the Android app writes the same
+        bytes for a row change. Display indices count the mode's own screens, as the page does.
 
-        Row addressing matches what the reader emitted: display indices count USER displays
-        only, with the computed built-in tail excluded on both sides."""
-        # Layout key -> the template id the watch stores, matching SportModesPage's own
-        # displayTypes table (the Ambit1 uses the same ids as the Ambit3).
-        LAYOUT_ID = {"3-row": 260, "2-row": 261, "1-row": 262, "graph": 257}
-        # The row values SuuntoLink itself writes for a freshly-created / retyped display,
-        # read straight out of its own USB capture (assets/pcap/2026-08-23-ambit1-suuntolink):
-        #   260 rows [10,11,0] views [5]   261 rows [10,0] views [5]
-        #   262 rows [10]                  257 rows [6,32,5]
-        # These match SportModesPage's own displayTypes defaults exactly, so the UI's staged
-        # preview and what lands on the watch agree.
-        LAYOUT_DEFAULT_ROWS = {
-            260: [10, 11, 5],
-            261: [10, 5],
-            262: [10],
-            257: [6, 32, 5],
-        }
-        rows = []
-        unsupported = []
-        for e in edits:
-            if not isinstance(e, dict):
-                continue
-            if e.get("op") in ("setRow", "add", "remove", "setType"):
-                rows.append(e)
-                continue
-            unsupported.append(e.get("op"))
-        if not rows:
-            self._send_json(400, {
-                "ok": False,
-                "error": "this watch supports changing a display row's data, and adding or "
-                         f"removing a display; {sorted(set(unsupported))} is not supported "
-                         "here (it would change a layout's row count, which resizes the "
-                         "record differently)"})
+        Until 2026-11-26 this was the Ambit1 only, through ambit_legacy_cli
+        ambit1-sport-mode-patch: 8192 bytes and no commit tail (lost after a reconnect, Android's
+        2026-08-27 notes), a new display cloned from another one on the watch rather than
+        SuuntoLink's, and the Ambit2/2S/2R refused. Without `confirm` nothing is written."""
+        unknown = sorted({str(e.get("op")) if isinstance(e, dict) else repr(e) for e in edits}
+                         - set(self.LEGACY_DISPLAY_OPS))
+        if unknown:
+            self._send_json(400, {"ok": False, "error": "on an Ambit1/2 the display edits are "
+                                  + ", ".join(self.LEGACY_DISPLAY_OPS) + "; not "
+                                  + ", ".join(unknown)})
             return
-
-        # mode name -> index, from the watch's own current order
-        try:
-            sys.path.insert(0, str(TOOLS_DIR))
-            import legacy_link                                  # noqa: PLC0415
-            env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
-            old_env = os.environ.get("AMBIT_PRODUCT_ID")
-            if env_pid:
-                os.environ["AMBIT_PRODUCT_ID"] = env_pid
-            try:
-                with WATCH_LOCK:
-                    info = legacy_link.ambit1_sport_mode_read()
-            finally:
-                if env_pid:
-                    if old_env is None:
-                        os.environ.pop("AMBIT_PRODUCT_ID", None)
-                    else:
-                        os.environ["AMBIT_PRODUCT_ID"] = old_env
-        except RuntimeError as exc:
-            self._send_json(502, {"ok": False, "error": str(exc)})
-            return
-        if not info.get("ok"):
-            self._send_json(502, info)
-            return
-        names = [m.get("name", "") for m in info.get("modes") or []]
-        if mode not in names:
-            self._send_json(404, {"ok": False, "error": f"no sport mode named {mode!r}"})
-            return
-        mode_idx = names.index(mode)
-        ROW_INDEX = {"top": 0, "center": 1, "bottom": 2}
-
-        lines = []
-        for e in rows:
-            op = e.get("op")
-            if op == "setType":
-                disp = e.get("display")
-                layout = LAYOUT_ID.get(str(e.get("type", "")).strip().lower())
-                if disp is None or layout is None:
-                    unsupported.append(f"setType:{e.get('type')}")
-                    continue
-                lines.append(f"{mode_idx}|display-set-type|{int(disp)}:{layout}")
-                # ...then the layout's default row values, so the result matches both
-                # SuuntoLink's own behaviour and the preview the UI already staged.
-                for ri, field in enumerate(LAYOUT_DEFAULT_ROWS.get(layout, [])):
-                    lines.append(f"{mode_idx}|row|{int(disp)}:{ri}:0:{int(field)}")
-                continue
-            if op == "add":
-                layout = LAYOUT_ID.get(str(e.get("type", "")).strip().lower())
-                if layout is None:
-                    unsupported.append(f"add:{e.get('type')}")
-                    continue
-                # A new display is cloned from a real one on the watch with this layout, so
-                # the added record is always structurally valid - see the patcher's own
-                # comment. If the watch has no display of that layout to clone, the patcher
-                # rejects it rather than synthesising one.
-                lines.append(f"{mode_idx}|display-add|{layout}")
-                continue
-            if op == "remove":
-                disp = e.get("display")
-                if disp is None:
-                    continue
-                lines.append(f"{mode_idx}|display-remove|{int(disp)}")
-                continue
-            disp = e.get("display")
-            row = ROW_INDEX.get(str(e.get("row", "")).strip().lower())
-            values = e.get("values") or []
-            if disp is None or row is None:
-                continue
-            for vi, field in enumerate(values):
-                lines.append(f"{mode_idx}|row|{int(disp)}:{row}:{vi}:{int(field)}")
-        if not lines:
-            self._send_json(400, {"ok": False, "error": "no usable row edits in the request"})
-            return
-
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("\n".join(lines) + "\n")
-            patch_path = f.name
-        try:
-            args = ["ambit1-sport-mode-patch", patch_path]
-            if not confirm:
-                args.append("--dry-run")
-            env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
-            old_env = os.environ.get("AMBIT_PRODUCT_ID")
-            if env_pid:
-                os.environ["AMBIT_PRODUCT_ID"] = env_pid
-            try:
-                with WATCH_LOCK:
-                    result = legacy_link.run(args)
-            finally:
-                if env_pid:
-                    if old_env is None:
-                        os.environ.pop("AMBIT_PRODUCT_ID", None)
-                    else:
-                        os.environ["AMBIT_PRODUCT_ID"] = old_env
-        except RuntimeError as exc:
-            self._send_json(502, {"ok": False, "error": str(exc)})
-            return
-        finally:
-            Path(patch_path).unlink(missing_ok=True)
-
-        result["unsupportedOps"] = sorted(set(o for o in unsupported if o))
-        self._send_json(200 if result.get("ok") else 502, result)
+        args = ["sport-mode-displays", mode, json.dumps(edits)]
+        if confirm:
+            args += ["--write", "--backup-dir", str(BACKUP_DIR / "legacy_sport_modes")]
+        code, out, err = run_tool("legacy_link.py", args, timeout=300)
+        info = self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "the display write failed"}
+        self._send_json(200 if info.get("ok") else 502, info)
 
     def _handle_customodes_displays(self, body):
         """POST /api/customodes/displays - structural display edits, applied as ONE write.
@@ -8720,11 +8557,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False,
                                    "error": "need a mode name and a non-empty edits list"})
             return
-        # Ambit1: its own patcher and its own region format (76-byte settings, displays as
-        # in-place TLV). custom_modes_edit.py is the SBEM/CustomModes tool and does not apply.
+        # Ambit1/2: their own region writer (legacy_link.py sport-mode-displays).
+        # custom_modes_edit.py is the SBEM/CustomModes tool and does not apply.
         if selected_is_legacy():
-            self._handle_customodes_displays_ambit1(mode, edits,
-                                                     bool((body or {}).get("confirm")))
+            self._handle_customodes_displays_legacy(mode, edits,
+                                                    bool((body or {}).get("confirm")))
             return
 
         args = ["--mode", mode, "--edits", json.dumps(edits), "--json"]

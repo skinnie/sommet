@@ -7,6 +7,33 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Ambit1/2 displays on both apps, and the Ambit2's multisports (watch-protocol/10)
+
+Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own
+captures and by tests only.
+
+- **Desktop: Ambit1 display edits now use the same writer as the other sport-mode edits.** They
+  used to write 8192 bytes and no commit tail, which the watch drops after a reconnect. A new
+  display was also copied from another display on the watch, not built the way SuuntoLink
+  builds one. They now write the region's first 10240 bytes and the commit tail, as SuuntoLink
+  does.
+- **Desktop: display edits on the Ambit2, Ambit2 S and Ambit2 R.** Add a display, remove one,
+  change its layout, and change what a row shows, as on the Ambit1. Each change was replayed
+  against SuuntoLink's own writes. The Ambit2 capture has four adds, one removal and three row
+  changes. The Ambit1 capture has five adds, two layout changes and three row changes. The
+  display records are the same on both watches: a removal is seen only on the Ambit2 and a
+  layout change only on the Ambit1.
+- **Android: an Ambit1/2 mode's displays are shown**, as on the Ambit3 (before, none were
+  shown), and a row can be changed. The bytes are the same as the desktop's.
+- **The Ambit2 and Ambit2 S show their multisports** (the Triathlon in the capture), on both
+  apps, because SuuntoLink's own record says these two watches have multisport. The Ambit1
+  and Ambit2 R do not. The list is read only: no capture shows how SuuntoLink creates or
+  edits a multisport, so the Multisport button stays hidden on this family.
+- The desktop now finds an Ambit1's own screens the way it does on the other watches: by the
+  display's type. The old rule gives the same answer on every captured Ambit1 region.
+
+---
+
 ## 2026-11-26: Ambit1/2 sport-mode edits on desktop, and removing an Ambit1/2 route (watch-protocol/10)
 
 Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own

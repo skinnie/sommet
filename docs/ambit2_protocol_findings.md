@@ -74,3 +74,46 @@ display mode 86, quick navigation 88. A rename writes the 16-byte name and the m
 Sommet writes the name, autolap, HR limits and pods this way on both apps
 (`tools/legacy_sport_modes.py patch_region`, `AmbitLegacySportModes.ts`), leaving the time
 records as read; `tools/test_legacy_sport_mode_edit.py` replays the captured writes.
+
+## 4. Displays and the sport-mode menu (2026-11-26, watch-protocol/10 L5, L2)
+
+The display list (`0x0105`) is the same record format as the Ambit3's, byte-identical on the
+Ambit1 and the Ambit2 (every display in both captures, 20,000+ records, has this shape):
+
+    0x0106 { 0x0107 [u16 layout][u16 type],
+             one 0x0108 per row: { 0x0109 [u16 row][u16 item], 0x010A [u16 value]... } }
+
+Layouts 260 = 3 rows, 261 = 2, 262 = 1, 257 = graph. `type` 10 is a screen the wearer set up;
+4, 5, 6, 7, 50, 65 and 70 are the watch's own views (compass, navigation, map...), and they
+always come after the user screens. A row whose item is 0 and which holds `0x010A` values is
+the multi-value row; any other row shows its item. openambit's serialize_display writes the
+same, with `0x000a` as the type of every display it writes.
+
+What SuuntoLink changed, each alone between two region writes (each also moves the display
+time, the second u32 of the mode's `0x01FF`):
+
+| change | Ambit2 (Treino Forção) | Ambit1 (Running) |
+|---|---|---|
+| add a display (after the last user one) | 1-row, 2-row, 3-row, graph | graph, 3-row, then 2-row + 1-row + graph in one save |
+| remove a display | a graph | - |
+| change a display's layout (in place) | - | 3-row -> 1-row, 3-row -> 2-row |
+| Top / Center value | 70 -> 11, 21 -> 33 | 5 -> 68, 28 -> 10 |
+| multi-value row | 3 -> 5 values | 4 -> 5 values |
+
+A new display (added or retyped) always has the same rows: 3-row Top 10, Center 11, Bottom
+[5]; 2-row Top 10, Center [5]; 1-row Top 10; graph 6, 32, 5. Every enclosing length (`0x0105`,
+the mode's `0x0101`, `0x0100`, the root) moves by the size change, what follows shifts, and the
+rest of the 10240 bytes is 0xFF. Sommet writes these changes on both apps
+(`tools/legacy_sport_modes.py patch_displays`, `AmbitLegacySportModes.ts
+patchLegacyDisplayRegion`; the Android screen offers the row change),
+`tools/test_legacy_display_edit.py` replays every one of them.
+
+The `0x0200` groups are the watch's sport-mode menu: `0x0212` name (24 bytes), `0x0213`
+activity, one `0x0214` per leg (a place in the `0x0100` list), `0x02FE` a u32 that numbers the
+entries, `0x02FF` a save time. A group with several legs is a multisport: the capture's
+Triathlon (activity 19). Both apps list them read only. The one multisport change in the
+capture is SuuntoLink deleting the Transition mode: that write drops the Triathlon group, the
+next one writes it back at the end with legs Cycling, Running, Openwater swim (it had Openwater
+swim, Transition, Cycling, Transition, Running). That is not enough to know how SuuntoLink
+builds or edits one, so neither app writes groups yet.
+

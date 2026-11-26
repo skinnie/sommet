@@ -1,9 +1,9 @@
 import { connect, disconnect, getDeviceInfo, readCustomModesRaw } from '../native/AmbitUsbModule';
 import { base64ToBytes } from './Base64';
 import { setCustomModesCache } from './CustomModesCache';
-import { decode, ExerciseMode } from './CustomModesReader';
+import { decode, Display, ExerciseMode } from './CustomModesReader';
 import { isAmbit12 } from './AmbitSettingsService';
-import { readLegacySportModes, LegacyMode } from './AmbitLegacySportModes';
+import { readLegacySportModeRegion, LegacyGroup, LegacyMode } from './AmbitLegacySportModes';
 import {
   renameMode as renameModeRaw, RenameModeResult,
   writeField as writeFieldRaw, WriteFieldResult,
@@ -32,16 +32,19 @@ export interface ReadCustomModesState {
   phase: 'idle' | 'connecting' | 'reading' | 'done' | 'error';
   modes?: ExerciseMode[];
   // True when the connected watch is an Ambit1/2 read via the legacy path (region 0x2000),
-  // not the Ambit3 CustomModes region. The screen renders these read-only and skips the
-  // Ambit3-only structural/summary read (which would crash on this family).
+  // not the Ambit3 CustomModes region. The screen edits these through AmbitLegacySportModes and
+  // skips the Ambit3-only structural/summary read (which would crash on this family).
   legacy?: boolean;
+  // Ambit1/2: the watch's sport-mode menu (region 0x2000's groups), the multisports among them.
+  // Read only (watch-protocol/10 L2).
+  legacyGroups?: LegacyGroup[];
   error?: string;
 }
 
-// Ambit1/2 legacy mode -> the ExerciseMode shape the Sport Modes screen renders. displays is
-// left empty (legacy display config isn't decoded here); useHw carries the raw hrbelt/pods
-// bitfield so the pod row shows.
-function legacyToExerciseMode(m: LegacyMode): ExerciseMode {
+// Ambit1/2 legacy mode -> the ExerciseMode shape the Sport Modes screen renders. The displays
+// are the same record format as the Ambit3's and decode the same way (2026-11-26, desktop parity;
+// they used to be left empty); useHw carries the raw hrbelt/pods bitfield so the pod row shows.
+function legacyToExerciseMode(m: LegacyMode, displays: Display[]): ExerciseMode {
   return {
     settings: {
       name: m.name,
@@ -54,7 +57,7 @@ function legacyToExerciseMode(m: LegacyMode): ExerciseMode {
       hrLow: m.heartrateMin,
       hrLimitsUse: m.useHrLimits ? 1 : 0,
     },
-    displays: [],
+    displays,
   };
 }
 
@@ -81,8 +84,9 @@ export async function readCustomModes(
       let legacy = false;
       try { legacy = isAmbit12((await getDeviceInfo()).name); } catch { /* assume Ambit3 */ }
       if (legacy) {
-        const modes = (await readLegacySportModes()).map(legacyToExerciseMode);
-        onState({ phase: 'done', modes, legacy: true });
+        const region = await readLegacySportModeRegion();
+        const modes = region.modes.map((m, i) => legacyToExerciseMode(m, region.displays[i] ?? []));
+        onState({ phase: 'done', modes, legacy: true, legacyGroups: region.groups });
         return;
       }
     }

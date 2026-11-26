@@ -437,6 +437,23 @@ function numberDisplays(displays: Display[]): void {
   });
 }
 
+/** One mode's EXERCISE_MODES_DISPLAYS body -> its displays, numbered. Also the Ambit1/2 region's
+ * (AmbitLegacySportModes.decodeLegacyRegion): its display list is this same record format. */
+export function decodeDisplayList(bytes: Uint8Array, offset: number, length: number): Display[] {
+  const displays: Display[] = [];
+  let cursor = offset;
+  const end = offset + length;
+  while (cursor < end) {
+    const tag = readTag(bytes, cursor);
+    if (!tag) break;
+    const content = cursor + 4;
+    if (tag.tagId === EXERCISE_MODES_DISPLAY) displays.push(decodeDisplay(bytes, content, tag.length));
+    cursor = content + tag.length;
+  }
+  numberDisplays(displays);
+  return displays;
+}
+
 export interface ExerciseMode {
   settings: ExerciseModeSettings;
   displays: Display[];
@@ -457,17 +474,7 @@ function decodeExerciseMode(bytes: Uint8Array, offset: number, length: number): 
     if (tag.tagId === EXERCISE_MODES_SETTING_NAME_LEN64) {
       mode.settings = decodeSettings(bytes, content);
     } else if (tag.tagId === EXERCISE_MODES_DISPLAYS) {
-      let subCursor = content;
-      const subEnd = content + tag.length;
-      while (subCursor < subEnd) {
-        const subTag = readTag(bytes, subCursor);
-        if (!subTag) break;
-        const subContent = subCursor + 4;
-        if (subTag.tagId === EXERCISE_MODES_DISPLAY) {
-          mode.displays.push(decodeDisplay(bytes, subContent, subTag.length));
-        }
-        subCursor = subContent + subTag.length;
-      }
+      mode.displays.push(...decodeDisplayList(bytes, content, tag.length));
     }
     cursor = content + tag.length;
   }

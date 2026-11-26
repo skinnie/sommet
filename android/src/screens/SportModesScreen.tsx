@@ -8,7 +8,9 @@ import {
 } from 'react-native';
 import { ExerciseMode, FIELD_TYPES, fieldTypeLabel, builtInScreenName } from '../services/CustomModesReader';
 import { clearCustomModesCache } from '../services/CustomModesCache';
-import { writeLegacySportMode, LegacyModePatch } from '../services/AmbitLegacySportModes';
+import {
+  writeLegacySportMode, LegacyModePatch, writeLegacyDisplays, LegacyGroup, LEGACY_ROW_LABELS,
+} from '../services/AmbitLegacySportModes';
 import {
   readCustomModes, renameCustomMode, writeCustomModeField, writeCustomModeDisplayField,
 } from '../services/CustomModesService';
@@ -82,9 +84,15 @@ export default function SportModesScreen() {
   const variant = route.params?.variant;
   const maxDisplays = maxDisplaysForVariant(variant);
   const [modes, setModes] = useState<ExerciseMode[] | null>(null);
-  // Ambit1/2: read via the legacy 0x2000 path, rendered read-only (no Ambit3 editor/structural
-  // read, which crashes on this family). See CustomModesService.readCustomModes.
+  // Ambit1/2: read via the legacy 0x2000 path and edited through AmbitLegacySportModes (settings,
+  // display rows); no Ambit3 structural read, which crashes on this family. See
+  // CustomModesService.readCustomModes.
   const [isLegacy, setIsLegacy] = useState(false);
+  // Ambit1/2: the watch's menu groups; the multisports among them are listed read only, on the
+  // models SuuntoLink's capability record gives multisport (Ambit2, Ambit2 S; watch-protocol/10 L2).
+  const [legacyGroups, setLegacyGroups] = useState<LegacyGroup[]>([]);
+  const legacyMultisport = isLegacy && !!(variant && SPORT_MODE_ROWS.variants[variant]?.supportsMultisportModes)
+    ? legacyGroups.filter(g => g.isMultisport) : [];
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | undefined>();
   const [writingMode, setWritingMode] = useState<string | null>(null);
@@ -135,13 +143,16 @@ export default function SportModesScreen() {
 
   async function handleRead() {
     let legacy = false;
+    let groups: LegacyGroup[] = [];
     await readCustomModes(s => {
       setPhase(s.phase);
       setError(s.error);
       if (s.modes) applyModes(s.modes);
       if (s.legacy) legacy = true;
+      if (s.legacyGroups) groups = s.legacyGroups;
     }, overBle);
     setIsLegacy(legacy);
+    setLegacyGroups(groups);
     // Ambit1/2 have no Ambit3 structural view, and readSportModes() reads the same CustomModes
     // region that crashes on this family - skip it entirely for legacy (the read-only list is
     // all that's shown). Otherwise load the structural view (menu order, multisport, slots).
@@ -233,6 +244,29 @@ export default function SportModesScreen() {
     }, savedAs);
   }
 
+  // Ambit1/2 display row: the region rewritten with that row's value changed (the desktop's setRow,
+  // same bytes - AmbitLegacySportModes.patchLegacyDisplayRegion). The row is the field's own row
+  // number (Top / Center / Bottom); a multi-value row gets the one value picked here.
+  function legacyRowWrite(modeName: string, display: number, field: number, typeName: string) {
+    const list = modes ?? [];
+    const idx = list.findIndex(m => m.settings.name === modeName);
+    const shown = idx >= 0 ? list[idx].displays : [];
+    const row = LEGACY_ROW_LABELS[shown[display]?.fields[field]?.index ?? -1];
+    const value = FIELD_TYPES.find(f => f.name === typeName)?.value;
+    if (idx < 0 || !row || value === undefined || shown[display].isBuiltIn) {
+      Alert.alert(t.error, `Sport mode "${modeName}": that row cannot be changed.`);
+      return;
+    }
+    // The mode's own screens come first, so the display's place counts them only.
+    const userIndex = shown.slice(0, display).filter(d => !d.isBuiltIn).length;
+    withWrite(modeName, async () => {
+      try {
+        await writeLegacyDisplays(idx, [{ op: 'setRow', display: userIndex, row, values: [value] }]);
+        return { ok: true };
+      } catch (e: any) { return { ok: false, error: e?.message ?? String(e) }; }
+    }, modeName, 'display');
+  }
+
   function handleRename(originalName: string) {
     const newName = (nameEdits[originalName] ?? '').trim();
     if (!newName || newName === originalName) return;
@@ -277,6 +311,7 @@ export default function SportModesScreen() {
     if (!picker) return;
     const { mode, display, field } = picker;
     setPicker(null);
+    if (isLegacy) { legacyRowWrite(mode, display, field, typeName); return; }
     withWrite(mode, () =>
       writeCustomModeDisplayField(mode, display, field, undefined, typeName, () => {}, overBle), mode, 'display');
   }
@@ -602,6 +637,24 @@ export default function SportModesScreen() {
               <TouchableOpacity style={[styles(theme).smallBtn, styles(theme).deleteBtn]} disabled={manageBusy} onPress={() => confirmDelete(m.name, true)}>
                 <Text style={styles(theme).deleteBtnText}>{t.sportModesDeleteBtn}</Text>
               </TouchableOpacity>
+            </View>
+          </Card>
+        );
+      })}
+
+      {/* Ambit2 / Ambit2 S: their multisports (the watch's menu groups with several legs), read only -
+          no capture shows how SuuntoLink builds or edits one. */}
+      {legacyMultisport.map(m => {
+        const activity = ACTIVITY_TYPES[m.activityId];
+        return (
+          <Card key={`legacy-multi-${m.name}`} style={{ width: '100%' }}>
+            <View style={styles(theme).listRow}>
+              <Icon name="activity" size={22} color={activity ? activity.color : theme.mutedText} />
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles(theme).cardTitle}>{m.name}</Text>
+                <Text style={styles(theme).sectionDesc}>{m.legNames.map(n => n ?? '?').join(' → ')}</Text>
+              </View>
+              <Text style={styles(theme).multiBadge}>{t.sportModesMultiBadge}</Text>
             </View>
           </Card>
         );
