@@ -189,9 +189,11 @@ def to_app_mode(m):
 #   HR       on: max/min (+ use_heartrate_limits 1 on the Ambit2). Off: max = min = 0 (+ use 0):
 #            SuuntoLink zeroes them (Ambit2 239/30/1 -> 0/0/0), and on the Ambit1, which has no
 #            "use" field, 0/0 is the only way to say off.
-#   pods     u16 bit field. The HR belt is bit 0 on the Ambit1 (0x0107 -> 0x0106) but bits 0+1
-#            on the Ambit2 (0x0003 -> 0x0000 -> 0x0003): the pages toggle bit 0, so on the
-#            Ambit2 bit 1 follows it.
+#   pods     u16 bit field: belt bit 0, power 6, cadence 7, foot 8, bike 11. Bit 1 (0x0002) is
+#            set whenever the belt or any pod is used, in every pods value of both captures
+#            (Ambit1 0x0107 -> 0x0106 keeps it with the foot pod on; Ambit2 0x0003 -> 0x0000 ->
+#            0x0003, belt only). When the belt or a pod is switched, bit 1 follows that rule on
+#            every model (André 2026-11-26, Q14 a); a value nothing switched in is kept as read.
 REGION_WRITE_BYTES = 10240
 COMMIT_EXTRA = 0xFFFFFFFF
 TAG_ROOT, TAG_MODES, TAG_MODE = 0x0003, 0x0100, 0x0101
@@ -341,8 +343,8 @@ def patch_region(data, mode, patch):
     if "useHw" in patch:
         old = _u16(data, blob + lay["pods"])
         new = int(patch["useHw"]) & 0xFFFF
-        if (old ^ new) & 0x0001:                     # the HR belt was switched
-            new = (new | lay["hr_belt"]) if new & 0x0001 else (new & ~lay["hr_belt"])
+        if (old ^ new) & SENSOR_BITS:                # the belt or a pod was switched
+            new = (new | SENSOR_SEARCH) if new & SENSOR_BITS else (new & ~SENSOR_SEARCH)
         _put_u16(out, blob + lay["pods"], new)
     if "name" in patch:
         old_name = bytes(data[blob:blob + NAME_LEN]).split(b"\x00")[0]
@@ -673,6 +675,7 @@ _SUPPORTS = {
     "Greentit": {"alti": False, "foot": True, "bike": False, "power": False, "cadence": False},
 }
 SENSOR_SEARCH = 0x0002   # set with any pod or the belt: every pods value in both captures
+SENSOR_BITS = 0x0001 | 0x0040 | 0x0080 | 0x0100 | 0x0800   # belt, power, cadence, foot, bike
 NEW_MODE_DISPLAYS = b"".join(display_record(layout, rows, kind) for layout, kind, rows in (
     (260, 10, ((0, 10, ()), (1, 11, ()), (2, 0, (5,)))),
     (273, 4, ((0, 8, ()), (1, 8, ()), (2, 0, (16, 1, 65534)))),

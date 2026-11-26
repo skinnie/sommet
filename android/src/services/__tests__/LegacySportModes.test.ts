@@ -73,7 +73,23 @@ describe('Ambit1/2 sport-mode patch (same bytes as the desktop)', () => {
       regions[size] = patchLegacySportModeRegion(regions[size], mode, patch);
       h = fnv(regions[size], h);
     }
-    expect(h.toString(16)).toBe((0x1df68f5d).toString(16));
+    expect(h.toString(16)).toBe((0x3cef0abf).toString(16));
+  });
+
+  it('pods: bit 1 follows "any sensor used" when the belt or a pod is switched (André, Q14 a)', () => {
+    // Same cases as tools/test_legacy_sport_mode_edit.py PODS_RULE.
+    const cases: [number, number, number, number][] = [
+      [90, 0x0803, 0x0802, 0x0802], [76, 0x0003, 0x0002, 0x0000], [90, 0x0000, 0x0001, 0x0003],
+      [76, 0x0107, 0x0106, 0x0106], [90, 0x0003, 0x0043, 0x0043], [90, 0x0101, 0x0105, 0x0105],
+    ];
+    for (const [size, start, sent, want] of cases) {
+      const r = synthetic(size);
+      const name = [...'Running'].map((c) => c.charCodeAt(0));
+      const off = r.findIndex((_, i) => name.every((b, j) => r[i + j] === b)) + (size === 90 ? 22 : 18);
+      r[off] = start & 0xff; r[off + 1] = start >> 8;
+      const got = patchLegacySportModeRegion(r, 0, { useHw: sent });
+      expect([size, start, sent, got[off] | (got[off + 1] << 8)]).toEqual([size, start, sent, want]);
+    }
   });
 
   it('Ambit1 offsets: autolap at 26, HR at 28/30, pods at 18, no "use" field', () => {

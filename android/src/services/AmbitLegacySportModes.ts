@@ -24,6 +24,9 @@ const CONTAINERS = new Set([
   0x0003, 0x0100, 0x0101, 0x0105, 0x0106, 0x0107, 0x0108, 0x0109, 0x0200, 0x0210,
 ]);
 const POD = { hrBelt: 0x0003, powerPod: 0x0040, cadencePod: 0x0080, footPod: 0x0100, bikePod: 0x0800 };
+// Bit 1 is set whenever the belt or any pod is used: every pods value in both captures.
+const SENSOR_SEARCH = 0x0002;
+const SENSOR_BITS = 0x0001 | 0x0040 | 0x0080 | 0x0100 | 0x0800; // belt, power, cadence, foot, bike
 
 const AMBIT1_BLOB = 76;
 const AMBIT2_BLOB = 90;
@@ -219,8 +222,9 @@ const latin1Name = (b: Uint8Array) => Array.from(cString(b), c => String.fromCha
  *            one 0x0214 is the mode's place in 0x0100, named like it) is renamed too, in its 24-byte
  *            0x0212 - SuuntoLink's rename "Indoor training" -> "Treino Forção" did both.
  *   HR       on: max/min (+ use 1 on the Ambit2). Off: max = min = 0 (+ use 0), as SuuntoLink writes.
- *   useHw    the HR belt is bit 0 on the Ambit1 but bits 0+1 on the Ambit2 (SuuntoLink 0x0003 <->
- *            0x0000); the screen toggles bit 0, so on the Ambit2 bit 1 follows it.
+ *   useHw    belt bit 0, power 6, cadence 7, foot 8, bike 11. Bit 1 (0x0002) is set whenever the
+ *            belt or any pod is used, in every pods value of both captures; when the belt or a pod
+ *            is switched, bit 1 follows that rule on every model (André 2026-11-26, Q14 a).
  */
 export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, patch: LegacyModePatch): Uint8Array {
   const blobs = modeBlobs(data);
@@ -248,7 +252,7 @@ export function patchLegacySportModeRegion(data: Uint8Array, modeIndex: number, 
   if (patch.useHw !== undefined) {
     const old = u16(data, blob + lay.pods);
     let v = patch.useHw & 0xffff;
-    if ((old ^ v) & 0x0001) v = (v & 0x0001) ? (v | lay.hrBelt) : (v & ~lay.hrBelt); // the HR belt was switched
+    if ((old ^ v) & SENSOR_BITS) v = (v & SENSOR_BITS) ? (v | SENSOR_SEARCH) : (v & ~SENSOR_SEARCH); // the belt or a pod was switched
     setU16(blob + lay.pods, v);
   }
   if (patch.name !== undefined) {
@@ -614,7 +618,6 @@ const SUPPORTS: Record<string, { alti: boolean; foot: boolean; bike: boolean; po
   Colibri: { alti: false, foot: true, bike: true, power: true, cadence: true },
   Greentit: { alti: false, foot: true, bike: false, power: false, cadence: false },
 };
-const SENSOR_SEARCH = 0x0002;
 export const LEGACY_NEW_MODE_DISPLAYS: number[] = ([
   [260, 10, [[0, 10, []], [1, 11, []], [2, 0, [5]]]],
   [273, 4, [[0, 8, []], [1, 8, []], [2, 0, [16, 1, 65534]]]],

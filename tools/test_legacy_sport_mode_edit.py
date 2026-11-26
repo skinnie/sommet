@@ -239,7 +239,7 @@ def synthetic_hash():
 
 def test_synthetic():
     h, regions = synthetic_hash()
-    assert h == 0x1DF68F5D, hex(h)
+    assert h == 0x3CEF0ABF, hex(h)
     r = regions[90]
     groups = [bytes(r[o:o + n]).split(b"\0")[0] for o, n, _m in LSM._groups(r)]
     assert groups == ["Corrida Ação".encode("latin-1"), b"Bike 16 chars!!!", b"Duathlon"]
@@ -255,6 +255,28 @@ def test_synthetic():
             raise AssertionError(f"{bad!r} accepted")
         except ValueError:
             pass
+
+
+# (size, pods on the watch, pods the page sends, pods written). Bit 1 is set whenever the belt or
+# a pod is used (every pods value in both captures); it follows that rule when the belt or a pod
+# is switched (André 2026-11-26, Q14 a) and is left as read otherwise.
+PODS_RULE = [
+    (90, 0x0803, 0x0802, 0x0802),   # belt off, bike pod left: bit 1 stays (was cleared before Q14)
+    (76, 0x0003, 0x0002, 0x0000),   # belt off, nothing left: bit 1 goes (was kept before Q14)
+    (90, 0x0000, 0x0001, 0x0003),   # belt on alone: SuuntoLink's Ambit2 0x0000 -> 0x0003
+    (76, 0x0107, 0x0106, 0x0106),   # SuuntoLink's Ambit1 belt off with the foot pod on
+    (90, 0x0003, 0x0043, 0x0043),   # power pod on next to the belt
+    (90, 0x0101, 0x0105, 0x0105),   # only the 0x0004 bit changed: bit 1 left as read
+]
+
+
+def test_pods_rule():
+    for size, start, sent, want in PODS_RULE:
+        r = bytearray(synthetic(size))
+        off = LSM.named_blobs(r)[0][0] + LSM.LAYOUTS[size]["pods"]
+        struct.pack_into("<H", r, off, start)
+        got = struct.unpack_from("<H", LSM.patch_region(bytes(r), 0, {"useHw": sent}), off)[0]
+        assert got == want, (size, hex(start), hex(sent), hex(got))
 
 
 def test_sport_mode_edit():
@@ -289,6 +311,7 @@ if __name__ == "__main__":
         print(hex(synthetic_hash()[0]))
         sys.exit(0)
     test_synthetic()
+    test_pods_rule()
     test_sport_mode_edit()
     if not (AMBIT2.exists() and AMBIT1.exists() and AMBIT1_LANG.exists()):
         print("legacy sport-mode edit: synthetic OK; captures absent, rest skipped")

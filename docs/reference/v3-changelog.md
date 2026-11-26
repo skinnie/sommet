@@ -27,6 +27,11 @@ own code and by tests only.
   the write. The Delete link shows only where SuuntoLink allows one. The desktop's create and
   delete on these watches always reported "not confirmed", even when the watch was written:
   fixed. The Multisport button now offers the watch's sport modes as legs (it offered none).
+- **Ambit1/2 sensors: the "any sensor" flag follows SuuntoLink's rule, desktop and Android.**
+  When the HR belt or a pod is switched on a sport mode, the flag SuuntoLink sets whenever a
+  sensor is used is now set or cleared to match (André's choice). Before, it followed the belt
+  only, so turning the belt off with a pod still on cleared it on the Ambit2. Every recorded
+  SuuntoLink change still comes out byte for byte.
 - **Ambit1: put a Suunto App on a sport mode (desktop).** From the Suunto Apps part of a row's
   picker, on the bottom row of a 3-field display, one app per mode, as SuuntoLink's two
   captured installs do; both come out byte for byte. A second app is written only in the case
