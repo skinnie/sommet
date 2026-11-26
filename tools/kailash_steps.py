@@ -21,6 +21,10 @@ seen on a real Kailash:
     ring started at slot 0. That is right on 1 day in 30 only, so their dates are NOT used here:
     they are returned raw (`history_raw`), for a comparison of two reads on different days to
     place them (the slots that changed between them end at yesterday).
+  - Seen on a real Kailash (André's, USB, 2026-11-26): 31 samples while its clock read
+    2015-11-12; after a GPS fix set the clock to 2026-11-26 the reply held ONE sample, today
+    (15 steps, as the watch showed). Days outside the ring's 30 are left out, so a reply can be
+    shorter than 31; the last sample is still today.
   - Reading changes nothing on the watch (emulated: no storage write, a second read identical).
     This tool never writes: no 0x1101, no 0x1201 (NextTime 0x8f does nothing on the Kailash;
     the sample writer would change the ring).
@@ -111,12 +115,12 @@ def samples(entries, group_id):
 
 
 def decode(entries, group_id):
-    """{"today": {"time", "date", "steps"}, "history_raw": [30 counts or None]}. Refuses a
-    reply that isn't 30 history samples and one for today."""
+    """{"today": {"time", "date", "steps"}, "history_raw": [up to 30 counts or None]}. The last
+    sample is today; refuses a reply with none, or with more than 30 days before it."""
     found = samples(entries, group_id)
-    if len(found) != HISTORY_DAYS + 1:
-        raise ValueError(f"{len(found)} step samples, {HISTORY_DAYS + 1} expected "
-                         "(30 days and today) - not the layout this tool knows")
+    if not 1 <= len(found) <= HISTORY_DAYS + 1:
+        raise ValueError(f"{len(found)} step samples, 1 to {HISTORY_DAYS + 1} expected "
+                         "(up to 30 days, then today) - not the layout this tool knows")
     when, steps = found[-1]
     if len(when) < 10 or when[4] != "-" or when[7] != "-":
         raise ValueError(f"unexpected time in today's sample {when!r}")

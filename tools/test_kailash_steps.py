@@ -77,13 +77,24 @@ def main():
     check("paged cursors asked", [struct.unpack_from("<I", p, 0)[0] for _c, p in link.sent]
           == [0, 0x2000, 0x4000, 0x6000])
 
-    # 3. anything but 30 days and today is refused, not guessed
-    short = struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + group(0x8E, b"".join(elems[:20]))
-    try:
-        K.decode(K.read_raw(FakeLink([short]), 0x91), 0x8E)
-        check("short reply refused", False)
-    except ValueError:
-        pass
+    # 3. today alone: André's Kailash right after a GPS fix set its clock from 2015 to 2026
+    #    (USB, 2026-11-26 21:03; the watch showed about 15 steps). The values of that real reply.
+    alone = struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + group(
+        0x8E, sample("2026-11-26T21:03:09+00:00", 15))
+    got = K.decode(K.read_raw(FakeLink([alone]), 0x91), 0x8E)
+    check("today alone", got["today"] == {"time": "2026-11-26T21:03:09+00:00",
+                                          "date": "2026-11-26", "steps": 15}
+          and got["history_raw"] == [])
+    #    more than 30 days before today, or no sample at all, is refused, not guessed
+    too_many = struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + group(
+        0x8E, b"".join([elems[0]] + elems))
+    empty = struct.pack("<IH", 0, 1) + sbem_schema.MAGIC + group(0x8E, b"")
+    for name, reply in (("32 samples refused", too_many), ("no sample refused", empty)):
+        try:
+            K.decode(K.read_raw(FakeLink([reply]), 0x91), 0x8E)
+            check(name, False)
+        except ValueError:
+            pass
 
     # 4. the tool only ever asks 0x1200 (no 0x1101, no 0x1201)
     check("read only", all(c == 0x1200 for c, _p in link.sent))
