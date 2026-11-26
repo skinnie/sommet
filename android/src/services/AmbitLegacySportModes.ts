@@ -527,8 +527,7 @@ export interface LegacyRegion {
 }
 
 /** The region decoded: the named modes (as readLegacySportModes), each one's displays, and the menu
- * groups (tools/legacy_sport_modes.py sport_mode_groups). The multisports are read only: no capture
- * shows how SuuntoLink builds one. */
+ * groups (tools/legacy_sport_modes.py sport_mode_groups), the multisports among them. */
 export function decodeLegacyRegion(data: Uint8Array): LegacyRegion {
   const modes = parseRegion(data);
   const blobs = modeBlobs(data);
@@ -829,8 +828,69 @@ export function deleteLegacyMultisportRegion(data: Uint8Array, name: string, var
   return deleteRecords(data, [gone], places);
 }
 
+// ─── Creating a multisport (2026-11-26, watch-protocol/10 L2) ────────────────────────────────────
+// tools/legacy_sport_modes.py create_multisport, byte for byte (that file says where each byte
+// comes from: the Ambit2 capture's write 1 -> 2, SuuntoLink's editor making a Triathlon, replayed by
+// tools/test_legacy_sport_mode_manage.py; __tests__/LegacySportModeManage.test.ts checks this port
+// gives the same bytes). One entry appended to 0x0200: 0x0210 { 0x0212 name (24), 0x0213 sport, one
+// 0x0214 per leg in the order picked, 0x02FE lowest free id, 0x02FF time }. SuuntoLink's limits:
+// Ambit2 and 2S only, Multisport / Triathlon / Adventure racing, 2 to 6 legs from the modes with an
+// entry of their own and those only a multisport uses, 2 multisports, 10 sport modes. Not edited.
+export const LEGACY_MULTISPORT_ACTIVITIES = [2, 19, 61];       // activity.js getMultisportPhrases
+export const LEGACY_MULTISPORT_VARIANTS = new Set(['Duck', 'Colibri']);
+const MAX_MULTISPORT_MODES = 2;
+const MIN_LEGS = 2, MAX_LEGS = 6;
+
+/** The modes SuuntoLink's leg picker offers: those with a menu entry of their own, then those only
+ * a multisport uses (the factory Transition). */
+export function legacyMultisportLegChoices(data: Uint8Array): string[] {
+  const { modes } = modeList(data);
+  const { groups } = groupList(data);
+  const own = new Set(groups.filter(g => g.legs.length === 1).map(g => g.legs[0]));
+  const used = new Set(groups.filter(g => g.legs.length > 1).flatMap(g => g.legs));
+  const places = [...modes.keys()].filter(p => own.has(p))
+    .concat([...modes.keys()].filter(p => used.has(p) && !own.has(p)));
+  return places.map(p => modes[p].name).filter(n => n);
+}
+
+/** The region with one new multisport, as SuuntoLink's editor makes one. `legs` are mode names in
+ * the order the watch steps through them. */
+export function createLegacyMultisportRegion(data: Uint8Array, name: string, activityId: number, legs: string[],
+                                             variant: string, now?: number): Uint8Array {
+  checkFamily(data, variant);
+  if (!LEGACY_MULTISPORT_VARIANTS.has(variant)) throw new Error(`The ${variant} has no multisport modes.`);
+  const raw = String(name ?? '').trim();
+  if (!raw) throw new Error('A multisport needs a name.');
+  if (Array.from(raw).length > NAME_LEN) throw new Error(`A multisport name holds ${NAME_LEN} characters on this watch.`);
+  if (!LEGACY_MULTISPORT_ACTIVITIES.includes(activityId)) {
+    throw new Error(`Sport ${activityId} cannot hold several sports: pick Multisport, Triathlon or Adventure racing.`);
+  }
+  const { at: groupsAt, groups } = groupList(data);
+  if (groupsAt === null) throw new Error('This Ambit2 region has no sport-mode menu (0x0200): nothing changed.');
+  const { modes } = modeList(data);
+  if (groups.some(g => g.name === raw) || modes.some(m => m.name === raw)) {
+    throw new Error(`The watch already has a sport mode or multisport named "${raw}".`);
+  }
+  const use = legacyUsage(data);
+  if (use.multisport >= MAX_MULTISPORT_MODES) throw new Error(`${use.multisport}/${MAX_MULTISPORT_MODES} multisport modes used: delete one first.`);
+  if (use.used >= use.max) throw new Error(`${use.used}/${use.max} sport modes used: delete one first.`);
+  if (legs.length < MIN_LEGS || legs.length > MAX_LEGS) {
+    throw new Error(`A multisport takes ${MIN_LEGS} to ${MAX_LEGS} sport modes, not ${legs.length}.`);
+  }
+  const choices = new Set(legacyMultisportLegChoices(data));
+  const places = legs.map(leg => {
+    if (!choices.has(leg)) throw new Error(`"${leg}" is not a sport mode SuuntoLink offers as a leg.`);
+    return modes.findIndex(m => m.name === leg);
+  });
+  const stamp = now ?? Math.floor(Date.now() / 1000);
+  const entry = tlvOf(0x0210, [...tlvOf(0x0212, Array.from(latin1(raw, GROUP_NAME_LEN))),
+    ...tlvOf(0x0213, le16(activityId)), ...places.flatMap(p => tlvOf(0x0214, le16(p))),
+    ...tlvOf(0x02fe, le32(lowestFree(new Set(groups.map(g => g.id))))), ...tlvOf(0x02ff, le32(stamp))]);
+  return rewriteRecords(data, [], [[groupsAt + 4 + u16(data, groupsAt + 2), entry, [groupsAt, 0]]]);
+}
+
 export interface LegacyMenuEntry { name: string; activityId: number; legNames: (string | null)[]; multisport: boolean; deletable: boolean; reason: string }
-export interface LegacyMenu { used: number; max: number; multisport: number; entries: LegacyMenuEntry[] }
+export interface LegacyMenu { used: number; max: number; multisport: number; entries: LegacyMenuEntry[]; legChoices: string[] }
 
 /** The watch's sport modes and multisports with what may be deleted, and the count SuuntoLink keeps. */
 export function legacyMenu(data: Uint8Array, variant: string): LegacyMenu {
@@ -844,13 +904,18 @@ export function legacyMenu(data: Uint8Array, variant: string): LegacyMenu {
     const reason = why(() => deleteLegacyMultisportRegion(data, g.name, variant));
     entries.push({ name: g.name, activityId: g.activityId, legNames: g.legNames, multisport: true, deletable: !reason, reason });
   }
-  return { ...legacyUsage(data), entries };
+  return { ...legacyUsage(data), entries, legChoices: legacyMultisportLegChoices(data) };
 }
 
 /** Create one sport mode on the connected Ambit1/2 (one region read-modify-write). `variant` is
  * the watch's codename: it picks the record format and the settings SuuntoLink gives a new mode. */
 export async function createLegacySportMode(name: string, activityId: number, variant: string): Promise<LegacyRegion> {
   return withMenu(await rewriteLegacyRegion(data => createLegacyModeRegion(data, name, activityId, variant)));
+}
+
+/** Create one multisport on the connected Ambit2 / 2S (one region read-modify-write). */
+export async function createLegacyMultisport(name: string, activityId: number, legs: string[], variant: string): Promise<LegacyRegion> {
+  return withMenu(await rewriteLegacyRegion(data => createLegacyMultisportRegion(data, name, activityId, legs, variant)));
 }
 
 /** Delete one sport mode, or with `multisport` one multisport, on the connected Ambit1/2. */

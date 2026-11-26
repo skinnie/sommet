@@ -28,9 +28,10 @@ This module only reads the watch. patch_region() builds the bytes of one sport-m
 (read-modify-write: the region as read, with one mode's fields changed) and patch_displays() those
 of a display edit; the writes themselves are legacy_link.sport_mode_edit() and
 sport_mode_displays_edit(). sport_mode_groups() lists the 0x0200 groups (the watch's sport-mode
-menu, multisports included). create_mode() / delete_mode() / delete_multisport() build the bytes
-of a create or delete as SuuntoLink makes them (legacy_link.sport_mode_create / _delete write
-them). Android does the same in AmbitLegacySportModes.ts.
+menu, multisports included). create_mode() / delete_mode() / delete_multisport() /
+create_multisport() build the bytes of a create or delete as SuuntoLink makes them
+(legacy_link.sport_mode_create / _delete / multisport_create write them). Android does the same in
+AmbitLegacySportModes.ts.
 """
 
 import argparse
@@ -573,8 +574,9 @@ def sport_mode_groups(data):
     entry in the watch's sport-mode menu, [{"name", "activityId", "legs", "legNames",
     "isMultisport"}]. A group with several legs is a multisport (the Ambit2 capture's Triathlon:
     Cycling, Running, Openwater swim); a leg is a place in the 0x0100 mode list. create_mode
-    adds a sport mode's own entry and delete_mode / delete_multisport remove entries, as
-    SuuntoLink does; a multisport is not built or edited here. The Ambit1 region has none."""
+    adds a sport mode's own entry, create_multisport a multisport's, and delete_mode /
+    delete_multisport remove entries, as SuuntoLink does; a multisport is not edited here (no
+    capture). The Ambit1 region has none."""
     used = region_used(data)
     places = []
     for tag, body, ln in _children(data, 4, used):
@@ -952,12 +954,99 @@ def delete_multisport(data, name, variant):
     return _delete(data, [gone], sorted(set(gone["legs"]) - still))
 
 
+# ─── Creating a multisport (2026-11-26, watch-protocol/10 L2) ───────────────────────────────────
+# SuuntoLink's showCreateMultisportMode (ui/sport_mode_editor.js): a name (getMaxNameLength, 16 on
+# this family), one of getMultisportPhrases' three sports (Multisport 2, Triathlon 19, Adventure
+# racing 61) and 2 to 6 legs (the form starts with two, MAX_MULTISPORT_SPORT_MODES = 6), each picked
+# from showSelectSportMode's list: the modes with a menu entry of their own and the modes only a
+# multisport uses (hiddenModes, the factory Transition). Repeats are allowed. Saved with one
+# addSportModeGroup(getNextGroupId, {ActivityID, Name, CustomModeIDs}). The editor offers it while
+# fewer than MAX_MULTISPORT_MODES = 2 multisports exist and countSportModes is under 10, and only on
+# the models whose capability record has supportsMultisportModes (Duck, Colibri).
+#
+# Captured once: ambit2_suuntolink_settings_sportmodes.pcap write 1 -> 2, the Triathlon made right
+# after the old one was deleted. Nothing else changes: one entry appended to 0x0200,
+#     0x0210 { 0x0212 name (24), 0x0213 sport, one 0x0214 per leg (its place in 0x0100), in the
+#              order picked, 0x02FE the lowest free entry id (1 there), 0x02FF the save time }
+# and the 0x0200 and root lengths grow by its size. Deleting it again (delete_multisport, its legs
+# all having entries of their own) gives write 1 back. Not captured on the 2S (same record format).
+# Editing an existing multisport is in no capture (the Triathlon is never changed after its create
+# in the 159 writes), so it is not written here.
+MAX_MULTISPORT_MODES = 2                   # sport_mode_editor.js MAX_MULTISPORT_MODES
+MIN_MULTISPORT_LEGS, MAX_MULTISPORT_LEGS = 2, 6
+MULTISPORT_ACTIVITIES = (2, 19, 61)        # activity.js getMultisportPhrases
+MULTISPORT_VARIANTS = frozenset(("Duck", "Colibri"))   # sport_mode.js supportsMultisportModes
+
+
+def multisport_leg_choices(data):
+    """The modes SuuntoLink's leg picker offers, by name in list order: those with a menu entry of
+    their own, then those only a multisport uses."""
+    _modes_at, modes = _mode_list(data)
+    _groups_at, groups = _group_list(data)
+    own = {g["legs"][0] for g in groups if len(g["legs"]) == 1}
+    used = {leg for g in groups if len(g["legs"]) > 1 for leg in g["legs"]}
+    places = [p for p in range(len(modes)) if p in own] + \
+             [p for p in range(len(modes)) if p in used - own]
+    return [modes[p][2] for p in places if modes[p][2]]
+
+
+def create_multisport(data, name, activity_id, legs, variant, now=None):
+    """The region `data` with one new multisport, as SuuntoLink's editor makes one (see above).
+    `legs` are mode names in the order the watch steps through them. Raises ValueError for anything
+    SuuntoLink would refuse or no capture shows."""
+    import time                                             # noqa: PLC0415
+    _check_family(data, variant)
+    if variant not in MULTISPORT_VARIANTS:
+        raise ValueError(f"the {variant} has no multisport modes (SuuntoLink's capability record)")
+    raw = str(name or "").strip()
+    if not raw:
+        raise ValueError("a multisport needs a name")
+    if len(raw.encode("latin-1", "replace")) > NAME_LEN:
+        raise ValueError(f"a multisport name holds {NAME_LEN} characters on this watch")
+    activity_id = int(activity_id)
+    if activity_id not in MULTISPORT_ACTIVITIES:
+        raise ValueError(f"sport {activity_id} cannot hold several sports; pick Multisport (2), "
+                         "Triathlon (19) or Adventure racing (61)")
+    groups_at, groups = _group_list(data)
+    if groups_at is None:
+        raise ValueError("this Ambit2 region has no sport-mode menu (0x0200): nothing changed")
+    _modes_at, modes = _mode_list(data)
+    if raw in {g["name"] for g in groups} | {m[2] for m in modes}:
+        raise ValueError(f"the watch already has a sport mode or multisport named {raw!r}")
+    use = usage(data)
+    if use["multisport"] >= MAX_MULTISPORT_MODES:
+        raise ValueError(f"{use['multisport']}/{MAX_MULTISPORT_MODES} multisport modes used: "
+                         "delete one first")
+    if use["used"] >= use["max"]:
+        raise ValueError(f"{use['used']}/{use['max']} sport modes used: delete one first")
+    legs = [str(x) for x in (legs or [])]
+    if not MIN_MULTISPORT_LEGS <= len(legs) <= MAX_MULTISPORT_LEGS:
+        raise ValueError(f"a multisport takes {MIN_MULTISPORT_LEGS} to {MAX_MULTISPORT_LEGS} sport "
+                         f"modes, not {len(legs)}")
+    choices = multisport_leg_choices(data)
+    names = [m[2] for m in modes]
+    places = []
+    for leg in legs:
+        if leg not in choices:
+            raise ValueError(f"{leg!r} is not a sport mode SuuntoLink offers as a leg")
+        places.append(names.index(leg))
+    stamp = int(time.time()) if now is None else int(now)
+    body = (_tlv(TAG_GROUP_NAME, _name_bytes(raw, GROUP_NAME_LEN))
+            + _tlv(TAG_GROUP_ACTIVITY, struct.pack("<H", activity_id))
+            + b"".join(_tlv(TAG_GROUP_MODE, struct.pack("<H", p)) for p in places)
+            + _tlv(TAG_GROUP_ID, struct.pack("<I", _lowest_free({g["id"] for g in groups})))
+            + _tlv(TAG_GROUP_STAMP, struct.pack("<I", stamp)))
+    end = groups_at + 4 + _u16(data, groups_at + 2)
+    return _rewrite(data, [], [(end, _tlv(TAG_GROUP, body), [groups_at, 0])])
+
+
 def menu(data, variant):
     """What the apps show and may delete: {"used", "max", "multisport", "modes": [{"name",
     "activityId", "deletable", "reason"}], "multisports": [{"name", "activityId", "legNames",
-    "deletable", "reason"}]}. `reason` says why one may not be deleted."""
+    "deletable", "reason"}], "legChoices": [names]}. `reason` says why one may not be deleted;
+    `legChoices` are the modes a new multisport may use (multisport_leg_choices)."""
     use = usage(data)
-    out = dict(use, modes=[], multisports=[])
+    out = dict(use, modes=[], multisports=[], legChoices=multisport_leg_choices(data))
     for name, place in zip([data[o:o + NAME_LEN].split(b"\x00")[0].decode("latin-1")
                             for o, _ in named_blobs(data)], named_mode_places(data)):
         try:

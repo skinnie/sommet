@@ -161,13 +161,54 @@ PageFlickable {
     // The last create or delete the watch refused, in SuuntoLink's words ("10/10 sport modes
     // used: delete one first"); cleared by the next one that goes through.
     property string manageMessage: ""
+    // The last Suunto App install the watch refused, shown in the mode's detail view.
+    property string appMessage: ""
 
     Connections {
         target: CustomModesService
         function onManageResult(ok, message) { root.manageMessage = ok ? "" : message }
     }
+    // An app install writes the sport modes too (the mode's link and row): read them again so
+    // the page shows the watch's own state, and say why when it was refused (the Ambit1's
+    // install, watch-protocol/10 L1, answers with SuuntoLink's limits).
+    Connections {
+        target: AppsService
+        function onLastInstallResultChanged() {
+            const r = AppsService.lastInstallResult
+            if (!r || r.dryRun)
+                return
+            root.appMessage = r.ok ? "" : (r.error || "")
+            if (r.ok)
+                CustomModesService.refresh()
+        }
+    }
     readonly property int deviceMaxMultisport:
         caps.maxMultisportModes !== undefined ? caps.maxMultisportModes : 0
+    // SuuntoLink's getMaxNameLength: 16 on the Ambit1/2 family and the Traverse, 63 elsewhere.
+    readonly property int maxModeNameLength:
+        (DeviceCapabilities.supportsLegacySportModeManage || DeviceService.model === "Jabiru"
+         || DeviceService.model === "Loon") ? 16 : 63
+
+    // The modes a new multisport may use, as SuuntoLink's leg picker lists them (ui/
+    // sport_mode_editor.js showSelectSportMode): those with a menu entry of their own and those
+    // only a multisport uses (the factory Transition).
+    function multisportLegChoices() {
+        const out = []
+        const all = CustomModesService.modes
+        for (let i = 0; i < all.length; i++)
+            if (all[i].inWatchMenu === true || all[i].usedByMultisport === true)
+                out.push({ name: all[i].name, activityId: all[i].activityId })
+        return out
+    }
+    // Every name in the watch menu, so a new mode or multisport is not given one already taken.
+    function takenModeNames() {
+        const out = []
+        for (let i = 0; i < CustomModesService.modes.length; i++)
+            out.push(CustomModesService.modes[i].name)
+        for (let j = 0; j < CustomModesService.multisportModes.length; j++)
+            out.push(CustomModesService.multisportModes[j].name)
+        return out
+    }
 
     // The four layouts a display can take, with the template id the watch stores for each
     // and the default rows the backend fills a new one with (custom_modes_edit._DEFAULT_ROWS,
@@ -481,8 +522,9 @@ PageFlickable {
                             font.pixelSize: Theme.fontSizeCaption
                         }
                     }
-                    // Ambit2 / 2S: deleted as SuuntoLink deletes one, with the modes only it
-                    // uses (its Transition legs).
+                    // Deleted as SuuntoLink deletes one (never the last menu entry): on an Ambit2
+                    // / 2S with the modes only it uses (its Transition legs), on an Ambit3 the
+                    // entry alone.
                     Text {
                         id: msDelete
                         anchors.verticalCenter: parent.verticalCenter
@@ -530,16 +572,21 @@ PageFlickable {
                 text: qsTr("Create")
                 enabled: root.sportModesUsed < root.deviceMaxSportModes
                          && !CustomModesService.writingMode
-                onClicked: createModeDialog.open()
+                onClicked: createModeDialog.openFresh(root.takenModeNames())
             }
-            // Creating/editing a multisport: not on the Ambit2 / Ambit2 S, whose multisports
-            // are listed above read only (DeviceCapabilities.supportsMultisportWrite).
+            // Creating a multisport, where the capability record gives multisport (the Ambit3
+            // family, the Ambit2 and Ambit2 S): SuuntoLink's limits, 2 multisports and the 10
+            // sport modes they count in. It opened with no modes to pick legs from until
+            // 2026-11-26 (open() instead of openCreate()).
             RoundedButton {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: DeviceCapabilities.supportsMultisportWrite && root.deviceMaxMultisport > 0
+                visible: DeviceCapabilities.supportsMultisportCreate && root.deviceMaxMultisport > 0
                 text: qsTr("Multisport")
                 enabled: !CustomModesService.writingMode
-                onClicked: multisportEditor.open()
+                         && root.sportModesUsed < root.deviceMaxSportModes
+                         && CustomModesService.multisportModes.length < root.deviceMaxMultisport
+                onClicked: multisportEditor.openCreate(root.multisportLegChoices(),
+                                                       root.takenModeNames())
             }
         }
 
@@ -640,9 +687,10 @@ PageFlickable {
                             font.pixelSize: Theme.fontSizeCaption
                             font.italic: true
                         }
-                        // Ambit1/2 (watch-protocol/10 L3): only on a mode SuuntoLink would delete
-                        // (never a multisport's leg, the Transition with no menu entry, the last
-                        // one). Small and muted like a display's Remove; asks first.
+                        // Only on a mode SuuntoLink would delete (never a multisport's leg, the
+                        // Transition with no menu entry, the last one): the Ambit1/2 family
+                        // (watch-protocol/10 L3) and, since 2026-11-26, the Ambit3 family, as
+                        // Android. Small and muted like a display's Remove; asks first.
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             visible: modeCard.modelData.deletable === true && !CustomModesService.writingMode
@@ -716,6 +764,15 @@ PageFlickable {
                 font.pixelSize: Theme.fontSizeTitle
                 color: Theme.text
             }
+        }
+
+        Text {
+            width: parent.width
+            visible: root.appMessage.length > 0
+            text: root.appMessage
+            wrapMode: Text.WordWrap
+            color: Theme.error
+            font.pixelSize: Theme.fontSizeBody
         }
 
         Card {
@@ -1568,12 +1625,15 @@ PageFlickable {
     CreateSportModeDialog {
         id: createModeDialog
         anchors.centerIn: Overlay.overlay
+        // The Ambit1/2 family gets SuuntoLink's own create list, Adventure Racing among it.
+        suuntoLinkList: DeviceCapabilities.supportsLegacySportModeManage
+        maxNameLength: root.maxModeNameLength
         onCreateRequested: (name, activityId) =>
             CustomModesService.createMode(name, activityId, DeviceService.model)
     }
 
-    // Delete one sport mode or multisport (Ambit1/2, watch-protocol/10 L3): the watch's region
-    // is saved first, then rewritten without it.
+    // Delete one sport mode or multisport (Ambit1/2, watch-protocol/10 L3; the Ambit3 family as
+    // Android, 2026-11-26): the watch's region is saved first, then rewritten without it.
     ThemedDialog {
         id: deleteDialog
         property string targetName: ""
@@ -1589,8 +1649,13 @@ PageFlickable {
         width: Math.min(440, (parent ? parent.width : 440) - 32)
         standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Text {
-            text: deleteDialog.multisport
+            // An Ambit2 multisport takes the modes only it uses with it, as SuuntoLink's capture
+            // shows; an Ambit3's leaves them (tools/sport_mode_manage.py delete_multisport).
+            text: deleteDialog.multisport && DeviceCapabilities.supportsLegacySportModeManage
                   ? qsTr("\"%1\" and the sport modes only it uses are removed from the watch. "
+                         + "A copy of the watch's sport modes is saved first.").arg(deleteDialog.targetName)
+                  : deleteDialog.multisport
+                  ? qsTr("\"%1\" is removed from the watch; the sport modes it uses stay. "
                          + "A copy of the watch's sport modes is saved first.").arg(deleteDialog.targetName)
                   : qsTr("\"%1\" is removed from the watch. A copy of the watch's sport modes "
                          + "is saved first.").arg(deleteDialog.targetName)
@@ -1610,6 +1675,7 @@ PageFlickable {
     MultisportEditorDialog {
         id: multisportEditor
         anchors.centerIn: Overlay.overlay
+        maxNameLength: root.maxModeNameLength
         onSaveRequested: (action, originalName, name, activityId, legs) => {
             // Editing sends the combo's ORIGINAL name as the one to find and the new one as a
             // rename, since a rename and a leg change arrive together from one Save.

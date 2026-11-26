@@ -532,6 +532,33 @@ def search_catalog(query="", variant=None, category_id=None, limit=50):
     return results
 
 
+def ambit3_delete_flags(info):
+    """Marks what SuuntoLink lets the Sport Modes page delete on an Ambit3, Vertical or Traverse,
+    in place on custom_modes.py's read (the Ambit1/2 read carries the same two fields): its
+    ui/sport_mode_editor.js addSportMode greys the bin when the watch menu has one entry left or the
+    mode has no entry of its own, and refuses a mode a multisport uses
+    (TXT_SPORT_MODE_NOT_DELETABLE); a multisport may go unless it is the last entry. The delete is
+    tools/sport_mode_manage.py --delete / --delete-multisport (/api/customodes/mode, /multisport),
+    replayed byte for byte against SuuntoLink's capture removeandaddsportsmodeandmultisport."""
+    entries = [m for m in info.get("sportModes") or [] if m.get("name")]
+    last = len(entries) <= 1
+    for mode in info.get("exerciseModes") or []:
+        if last:
+            reason = "the watch keeps at least one sport mode"
+        elif mode.get("usedByMultisport"):
+            reason = "a multisport uses this sport mode: delete that first"
+        elif not mode.get("inWatchMenu"):
+            reason = "this sport mode has no entry of its own in the watch menu"
+        else:
+            reason = ""
+        mode["deletable"] = not reason
+        mode["deleteReason"] = reason
+    for entry in entries:
+        if entry.get("isMultisport"):
+            entry["deletable"] = not last
+    return info
+
+
 def catalog_entry_binary(rule_id):
     """The one real entry's own compiled bytecode, sliced straight out of catalog.bin by
     its real offset/length (extract_apps_catalog.py's own doing) - never loads the whole
@@ -7797,6 +7824,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"ok": False, "error": "custom_modes.py --json produced "
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
+        if info.get("ok"):
+            ambit3_delete_flags(info)
         self._send_json(200 if info.get("ok") else 502, info)
 
     # Bit values for the Ambit2 hrbelt_and_pods field, matching tools/legacy_sport_modes.POD_BITS
@@ -7857,6 +7886,9 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             groups = legacy_sport_modes.sport_mode_groups(region)
             places = legacy_sport_modes.named_mode_places(region)
+            # The Ambit1's app links (0x010C), one app per mode (watch-protocol/10 L1).
+            import legacy_apps                                  # noqa: PLC0415
+            app_links = {p: len(refs) for p, (_h, refs) in legacy_apps.mode_links(region).items()}
             # What may be deleted, with SuuntoLink's reason when not, and its 10-mode count
             # (watch-protocol/10 L3). The rules are the same on the four models; only the
             # record length (76 = Ambit1) tells them apart here.
@@ -7915,7 +7947,7 @@ class Handler(BaseHTTPRequestHandler):
             modes.append({
                 "name": m.get("name", ""),
                 "activityId": m.get("activityId", 0),
-                "appCount": 0,
+                "appCount": app_links.get(place, 0),
                 "customModeId": i,
                 "useHw": use_hw,
                 "altiBaroMode": m.get("altiBaroMode", 0),
@@ -7938,8 +7970,8 @@ class Handler(BaseHTTPRequestHandler):
                 "deleteReason": (menu["modes"][i]["reason"] if menu and i < len(menu["modes"])
                                  else "the sport-mode list could not be checked"),
             })
-        # The menu's entries, the multisports among them (Ambit2/2S capture: Triathlon). Read
-        # only on this family: no capture shows how SuuntoLink builds or edits one.
+        # The menu's entries, the multisports among them (Ambit2/2S capture: Triathlon). Created
+        # and deleted as SuuntoLink does; no capture shows it editing one.
         multi_del = {m["name"]: m for m in (menu or {}).get("multisports", [])}
         sport_modes = [{"name": g["name"], "activityId": g["activityId"], "legs": g["legs"],
                         "legNames": g["legNames"], "isMultisport": g["isMultisport"],
@@ -8315,8 +8347,11 @@ class Handler(BaseHTTPRequestHandler):
 
         The sports a mode can be, for the "Select activity" picker - all 84 from
         assets/activity_types.json, each flagged with whether it is one of the three that
-        can hold several legs (Multisport, Triathlon, Adventure racing), plus the 2-6 leg
-        bounds. All of it SuuntoLink's own, via tools/sport_mode_manage.py --activities.
+        can hold several legs (Multisport, Triathlon, Adventure racing) and whether it is in
+        SuuntoLink's own create list (ui/input.js movescountActivity, `suuntoLinkCreate`: what
+        an Ambit1/2 create offers, the three multisport sports included, as SuuntoLink creates
+        an Adventure Racing mode in both captures), plus the 2-6 leg bounds. All of it
+        SuuntoLink's own, via tools/sport_mode_manage.py --activities.
 
         Static-file lookup; no watch touched.
         """
@@ -8332,11 +8367,14 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, ImportError) as e:
                 self._send_json(502, {"ok": False, "error": f"activity catalogue: {e}"})
                 return
+            import legacy_sport_modes                        # noqa: PLC0415
             multi = set(rows.get("multisportActivities") or [])
+            offered = legacy_sport_modes.SELECTABLE_ACTIVITIES
             limits = rows.get("limits") or {}
             parsed = {"ok": True,
                       "activities": [{"id": a["id"], "name": a["name"], "color": a.get("color", ""),
-                                      "isMultisport": a["id"] in multi}
+                                      "isMultisport": a["id"] in multi,
+                                      "suuntoLinkCreate": a["id"] in offered}
                                      for a in sorted(activities.values(), key=lambda x: x["name"])],
                       "minLegs": limits.get("minMultisportLegs", 2),
                       "maxLegs": limits.get("maxMultisportLegs", 6)}
@@ -8355,8 +8393,15 @@ class Handler(BaseHTTPRequestHandler):
         args = list(args) + ["--json"]
         if (body or {}).get("confirm"):
             args.append("--write")
+            if not demo_ambit():
+                # The region as read, before it is changed (the delete dialog says so).
+                args += ["--backup-dir", str(BACKUP_DIR / "sport_modes")]
         if demo_ambit():
             args += ["--from", demo_custom_modes_path(), "--variant", DEMO["variant"]]
+        elif isinstance((body or {}).get("variant"), str) and body["variant"].isalpha():
+            # The page sends the watch's codename with a create: the Traverse's 5 modes and
+            # 16-byte names are its own limits, not the Ambit3 Peak's the tool falls back to.
+            args += ["--variant", body["variant"]]
         code, out, err = run_tool("sport_mode_manage.py", args)
         parsed = self._parse_last_json_line(out)
         if parsed is None:
@@ -8447,13 +8492,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if selected_is_legacy() and not demo_ambit():
             # Ambit2 / 2S: the captured delete (SuuntoLink's Triathlon, with the Transition only
-            # it used). Building or changing one is not written on this family (watch-protocol/10
-            # L2).
+            # it used) and the captured create (write 1 -> 2 of the same capture, legs in the
+            # order picked; tools/legacy_sport_modes.py create_multisport). Changing one is in no
+            # capture (watch-protocol/10 L2).
             if action == "delete":
                 self._legacy_sport_mode_manage(["sport-mode-delete", name, "--multisport"], body)
                 return
-            self._send_json(200, {"ok": False, "error": "Sommet does not build or change a "
-                                  "multisport on an Ambit2 yet; it can delete one."})
+            if action == "create":
+                if not isinstance(activity, int) or not isinstance(legs, list) \
+                        or not all(isinstance(x, str) for x in legs):
+                    self._send_json(400, {"ok": False, "error": "a multisport needs an "
+                                          "activityId and legs (a list of mode names)"})
+                    return
+                self._legacy_sport_mode_manage(
+                    ["multisport-create", name, str(activity), json.dumps(legs)], body)
+                return
+            self._send_json(200, {"ok": False, "error": "Sommet does not change a multisport "
+                                  "on an Ambit2 yet (no capture shows SuuntoLink doing it); it "
+                                  "can create and delete one."})
             return
         if action == "delete":
             self._sport_mode_manage(["--delete-multisport", name], body)
@@ -8648,6 +8704,24 @@ class Handler(BaseHTTPRequestHandler):
         read-only 0x0b17 flash read, using apps.read_apps_region()'s own fast path (probes
         the region's real directory instead of a blind 200,000-byte read - see that
         function's own docstring)."""
+        if selected_is_legacy() and not demo_ambit():
+            # Ambit1/2: the Ambit3's Apps directory reader does not speak to this family. The
+            # Ambit1's apps come off its own store (tools/legacy_link.py apps-list, the layout
+            # SuuntoLink's captures write; ruleIdx = the app's place in that store); the Ambit2
+            # family's are not read (no capture of its store holding one).
+            if selected_legacy_variant() != "Bluebird":
+                self._send_json(200, {"ok": True, "entries": []})
+                return
+            args = ["apps-list"] + (["--catalog", str(CATALOG_DIR)]
+                                    if (CATALOG_DIR / "catalog.json").exists() else [])
+            code, out, err = run_tool("legacy_link.py", args, timeout=300)
+            info = self._parse_last_json_line(out) or {"ok": False, "error": (err or out).strip()}
+            if info.get("ok"):
+                info["entries"] = [{"ruleIdx": e["storePlace"], "name": e.get("name") or "",
+                                    "mode": e["mode"], "ruleId": e.get("ruleId")}
+                                   for e in info.get("entries", [])]
+            self._send_json(200 if info.get("ok") else 502, info)
+            return
         code, out, err = run_tool("apps.py", ["--json"], timeout=60)
         info = self._parse_last_json_line(out)
         if info is None:
@@ -8936,6 +9010,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing \"mode\", \"display\", \"field\", "
                                    "or \"ruleId\""})
             return
+        if selected_is_legacy() and not demo_ambit():
+            self._legacy_apps_install(body, mode, display, field, rule_id)
+            return
         try:
             entry, binary = catalog_entry_binary(int(rule_id))
         except OSError:
@@ -8979,6 +9056,50 @@ class Handler(BaseHTTPRequestHandler):
                                    "no parseable JSON", "raw_output": out, "stderr": err})
             return
         self._send_json(200 if info.get("ok") else 502, info)
+
+    def _legacy_apps_install(self, body, mode, display, field, rule_id):
+        """POST /api/apps/install on an Ambit1/2 (watch-protocol/10 L1): the Ambit1 only, through
+        tools/legacy_link.py app-install - the mode's link and row value, then the Apps store at
+        160000, as SuuntoLink's two captured installs (tools/legacy_apps.py says where each byte
+        comes from). The app's bytes are the catalogue's, as SuuntoLink stores them. Without
+        confirm:true the watch is read and checked and nothing is written. The Ambit2 family is
+        refused: no capture writes its Apps store."""
+        sys.path.insert(0, str(TOOLS_DIR))
+        import legacy_apps                                      # noqa: PLC0415
+        if selected_legacy_variant() != "Bluebird":
+            self._send_json(200, {"ok": False, "error": legacy_apps.AMBIT1_ONLY})
+            return
+        try:
+            entry, binary = catalog_entry_binary(int(rule_id))
+        except OSError:
+            self._send_json(502, {"ok": False, "error": "catalog not found under "
+                                   f"{CATALOG_DIR} - import SuuntoLink's catalogue first"})
+            return
+        if entry is None:
+            self._send_json(404, {"ok": False, "error": f"no catalog entry with ruleId={rule_id}"})
+            return
+        if "Bluebird" not in (entry.get("compatibleVariants") or []):
+            self._send_json(200, {"ok": False, "error": f"SuuntoLink's catalogue does not list "
+                                  f"{entry['name']} for the Ambit1"})
+            return
+        confirm = bool(body.get("confirm", False))
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            f.write(binary)
+            app_path = f.name
+        try:
+            args = ["app-install", f"@{int(mode)}", str(int(display)), str(int(field)), app_path,
+                    "--catalog", str(CATALOG_DIR)]
+            if confirm:
+                args += ["--write", "--backup-dir", str(BACKUP_DIR / "legacy_apps")]
+            code, out, err = run_tool("legacy_link.py", args, timeout=600)
+        finally:
+            Path(app_path).unlink(missing_ok=True)
+        info = self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "the app install failed"}
+        if info.get("wrote"):
+            read_cache_clear()
+        info.update(name=entry["name"], ruleId=entry["ruleId"], dryRun=not confirm)
+        self._send_json(200, info)
 
     def _handle_hrv_install(self, body):
         """POST /api/hrv/install - one-tap setup for the Health page's morning-HRV test:

@@ -339,6 +339,30 @@ captured on the Ambit1; removing a created mode gives back the write before it. 
 by `tools/legacy_sport_modes.py create_mode / delete_mode`; the rules are in
 `docs/ambit2_protocol_findings.md` section 3a.
 
+## 13. Putting an app on a mode (2026-11-26, watch-protocol/10 L1)
+
+SuuntoLink put two apps on this Ambit1 in `zzambit1full.pcap`: Sunrise/Sunset on Alpine Skiing,
+then Storm Alarm on Cycling. Each is a sport-mode region write, then a write of the whole store:
+
+- **The mode:** `0x010C { 0x010D [u16 the app's place in the store][u16 1][u16 0] }` appended to
+  its `0x0101`, and field 51 (0x0033) added to the bottom row of a 3-field screen. SuuntoLink's
+  row editor saves that row's values in its menu order, then the app: Cycling's
+  `[1, 12, 23, 10]` became `[12, 10, 1, 23, 51]`. Every other mode that shows an app gets its new
+  place (Alpine Skiing 0 -> 1).
+- **The store** (section 10's layout, the `count^2` byte being `byte0 ^ byte1 ^ 2`): each app is
+  the catalogue's bytes exactly (`IAMRULE...`, `data/suunto_apps`) followed by one checksum byte,
+  the XOR of the app's bytes and of its length's low byte. The rest of the 20000 bytes is 0xFF,
+  written in 512-byte chunks with the tail `[0x27100][0xFFFFFFFF]`. Before the first install it
+  had never been written (it read back `FF FF FF`). SuuntoLink's own builder
+  (BluebirdRules.cpp `saveRuleTreeToDevice`, decompiled) and openambit's `serialize_app_data`
+  agree.
+
+The second install put Storm Alarm first in the store. It is on the earlier mode, has the lower
+catalogue number, the lower bytes, and is the newer one, so the two captures do not say which
+of these orders SuuntoLink uses. `tools/legacy_apps.py install` writes a second app only when
+all of them agree, and both captured installs come out byte for byte
+(`tools/test_legacy_apps.py`). No capture removes an app, so Sommet does not remove one.
+
 ## 11. Displays (2026-11-26)
 
 The Ambit1's display records are the Ambit2's, byte for byte: see

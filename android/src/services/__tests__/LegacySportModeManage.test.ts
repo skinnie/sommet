@@ -2,8 +2,8 @@
 // tools/legacy_sport_modes.py create_mode / delete_mode / delete_multisport.
 // tools/test_legacy_sport_mode_manage.py builds this same synthetic region, applies these same
 // operations and checks the same FNV-1a; it also replays SuuntoLink's four captured creates and its
-// captured Triathlon delete through the Python writer, byte for byte. Not seen on a real watch
-// (watch-protocol/10 L3, 2026-11-26).
+// captured Triathlon delete through the Python writer, byte for byte, and (watch-protocol/10 L2) its
+// captured multisport create. Not seen on a real watch (watch-protocol/10 L3, 2026-11-26).
 
 const mockState: { flash: Uint8Array; writes: { addr: number; len: number; extra: number }[] } =
   { flash: new Uint8Array(0), writes: [] };
@@ -31,6 +31,7 @@ import {
   createLegacyModeRegion, deleteLegacyModeRegion, deleteLegacyMultisportRegion, decodeLegacyRegion,
   legacyNewModeFields, legacyUsage, legacyMenu, createLegacySportMode, deleteLegacySportMode,
   LEGACY_NEW_MODE_DISPLAYS, LEGACY_SELECTABLE_ACTIVITIES, LEGACY_VARIANTS,
+  createLegacyMultisportRegion, legacyMultisportLegChoices, createLegacyMultisport,
 } from '../AmbitLegacySportModes';
 
 const le16 = (v: number) => [v & 0xff, (v >> 8) & 0xff];
@@ -104,6 +105,45 @@ describe('Ambit1/2 sport-mode create and delete', () => {
     const menu = legacyMenu(a2, 'Duck');
     expect(menu.entries.map(e => [e.name, e.multisport, e.deletable])).toEqual([
       ['Running', false, false], ['Transition', false, false], ['Cycling', false, false], ['Duathlon', true, true]]);
+  });
+
+  it('creates a multisport with the Python writer\'s bytes', () => {
+    const steps: Uint8Array[] = [];
+    steps.push(createLegacyMultisportRegion(synthetic(90), 'Tri', 19, ['Cycling', 'Running', 'Transition', 'Cycling'], 'Duck', 4000));
+    steps.push(deleteLegacyMultisportRegion(steps[0], 'Duathlon', 'Duck'));
+    steps.push(createLegacyMultisportRegion(steps[1], 'Aventura', 61, ['Running', 'Cycling'], 'Colibri', 5000));
+    let h = 0x811c9dc5;
+    for (const s of steps) h = fnv1a(s, h);
+    expect(h.toString(16)).toBe('20d031b7');
+    const groups = Object.fromEntries(decodeLegacyRegion(steps[2]).groups.map(g => [g.name, g.legNames]));
+    expect(groups).toEqual({ Running: ['Running'], Tri: ['Cycling', 'Running', 'Transition', 'Cycling'],
+      Cycling: ['Cycling'], Aventura: ['Running', 'Cycling'] });
+  });
+
+  it('keeps SuuntoLink\'s multisport rules', () => {
+    const a2 = synthetic(90);
+    // The Transition only the Duathlon uses is offered after the modes with an entry of their own.
+    expect(legacyMultisportLegChoices(a2)).toEqual(['Running', 'Cycling', 'Transition']);
+    expect(legacyMenu(a2, 'Duck').legChoices).toEqual(['Running', 'Cycling', 'Transition']);
+    const two = createLegacyMultisportRegion(a2, 'Tri', 19, ['Running', 'Cycling'], 'Duck', 1);
+    expect(legacyUsage(two).multisport).toBe(2);
+    expect(() => createLegacyMultisportRegion(two, 'Three', 2, ['Running', 'Cycling'], 'Duck')).toThrow(/2\/2 multisport/);
+    expect(() => createLegacyMultisportRegion(a2, 'X', 19, ['Running', 'Cycling'], 'Greentit')).toThrow(/no multisport/);
+    expect(() => createLegacyMultisportRegion(synthetic(76), 'X', 19, ['Running', 'Cycling'], 'Bluebird')).toThrow(/no multisport/);
+    expect(() => createLegacyMultisportRegion(a2, 'X', 19, ['Running'], 'Duck')).toThrow(/2 to 6/);
+    expect(() => createLegacyMultisportRegion(a2, 'X', 19, Array(7).fill('Running'), 'Duck')).toThrow(/2 to 6/);
+    expect(() => createLegacyMultisportRegion(a2, 'X', 19, ['Running', 'Nope'], 'Duck')).toThrow(/offers as a leg/);
+    expect(() => createLegacyMultisportRegion(a2, 'X', 3, ['Running', 'Cycling'], 'Duck')).toThrow(/cannot hold/);
+    expect(() => createLegacyMultisportRegion(a2, 'Duathlon', 2, ['Running', 'Cycling'], 'Duck')).toThrow(/already has/);
+    expect(() => createLegacyMultisportRegion(a2, 'Seventeen chars!!', 2, ['Running', 'Cycling'], 'Duck')).toThrow(/16 characters/);
+  });
+
+  it('writes a multisport once with the commit tail', async () => {
+    mockState.flash = synthetic(90);
+    mockState.writes = [];
+    const after = await createLegacyMultisport('Tri', 19, ['Cycling', 'Running'], 'Duck');
+    expect(after.groups.find(g => g.name === 'Tri')?.legNames).toEqual(['Cycling', 'Running']);
+    expect(mockState.writes).toEqual([{ addr: 0x2000, len: 10240, extra: 0xffffffff }]);
   });
 
   it('uses SuuntoLink\'s defaults with values these watches hold', () => {

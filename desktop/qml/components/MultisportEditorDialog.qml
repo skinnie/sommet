@@ -35,6 +35,8 @@ ThemedDialog {
     property var availableModes: []
     // Combo names already taken (excluding the one being edited).
     property var takenNames: []
+    // SuuntoLink's getMaxNameLength for the connected watch (16 on the Ambit2 family).
+    property int maxNameLength: 63
 
     readonly property int dialogWidth: 460
     readonly property int minLegs: CustomModesService.minMultisportLegs
@@ -119,7 +121,7 @@ ThemedDialog {
             RoundedTextField {
                 id: nameField
                 width: parent.width
-                maximumLength: 63
+                maximumLength: root.maxNameLength
                 placeholderText: qsTr("e.g. Triathlon")
                 onTextChanged: root.modeName = text
             }

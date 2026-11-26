@@ -10,6 +10,9 @@ Checked here:
   - the four captured creates: Ambit1 Yoga, Adventure Racing, Alpine Skiing; Ambit2 Adventure
     Racing (settings, the seven displays, the menu entry with the lowest free id);
   - the captured delete: Ambit2 Triathlon, which takes the Transition only it used;
+  - the captured multisport create (watch-protocol/10 L2): Ambit2 write 1 -> 2, a Triathlon of
+    Cycling, Running, Openwater swim, and deleting it again gives write 1 back; the legs SuuntoLink
+    offers (the factory Transition among them) and its multisport refusals;
   - deleting each created mode gives back the write before its create, on both watches;
   - SuuntoLink's refusals: 10/10 used, a multisport's leg, a mode with no menu entry, the last;
   - a delete in the middle of the list moves every leg above it down by one (as SuuntoLink's
@@ -110,6 +113,47 @@ def test_ambit2_create_and_delete():
     return runs
 
 
+def test_ambit2_multisport_create(runs):
+    # Write 1 -> 2: SuuntoLink's editor makes a Triathlon (19) of Cycling, Running, Openwater swim,
+    # in the order picked; entry id 1 (the lowest free: 2-8 and 10 are taken) and its save time.
+    g = [x for x in LSM._group_list(runs[2])[1] if x["name"] == "Triathlon"][0]
+    kids = {t: b for t, b, _n in LSM._children(runs[2], g["at"] + 4, g["at"] + g["len"])}
+    stamp = struct.unpack_from("<I", runs[2], kids[LSM.TAG_GROUP_STAMP])[0]
+    got = LSM.create_multisport(runs[1], "Triathlon", 19, ["Cycling", "Running", "Openwater swim"],
+                                "Duck", now=stamp)
+    assert got == runs[2], [i for i in range(len(got)) if got[i] != runs[2][i]][:5]
+    assert LSM.delete_multisport(runs[2], "Triathlon", "Duck") == runs[1]
+    assert LSM.usage(runs[1])["multisport"] == 0 and LSM.usage(runs[2])["multisport"] == 1
+    # The leg picker: the modes with an entry of their own, then the Transition only the old
+    # Triathlon uses (write 0); a second multisport may use it, repeats allowed.
+    choices = LSM.multisport_leg_choices(runs[0])
+    assert choices[-1] == "Transition" and "Cycling" in choices, choices
+    two = LSM.create_multisport(runs[0], "Duo", 2, ["Running", "Transition", "Cycling", "Transition"],
+                                "Colibri", now=1)
+    assert LSM.usage(two)["multisport"] == 2
+    duo = [x for x in LSM.sport_mode_groups(two) if x["name"] == "Duo"][0]
+    assert duo["legNames"] == ["Running", "Transition", "Cycling", "Transition"], duo
+    refusals = {
+        "third": lambda: LSM.create_multisport(two, "Three", 61, ["Running", "Cycling"], "Duck"),
+        "Ambit1": lambda: LSM.create_multisport(runs[1], "X", 19, ["Running", "Cycling"], "Bluebird"),
+        "Ambit2 R": lambda: LSM.create_multisport(runs[1], "X", 19, ["Running", "Cycling"], "Greentit"),
+        "one leg": lambda: LSM.create_multisport(runs[1], "X", 19, ["Running"], "Duck"),
+        "seven legs": lambda: LSM.create_multisport(runs[1], "X", 19, ["Running"] * 7, "Duck"),
+        "unknown leg": lambda: LSM.create_multisport(runs[1], "X", 19, ["Running", "Nope"], "Duck"),
+        "not a multisport sport": lambda: LSM.create_multisport(runs[1], "X", 3, ["Running", "Cycling"], "Duck"),
+        "long name": lambda: LSM.create_multisport(runs[1], "Seventeen chars!!", 19, ["Running", "Cycling"], "Duck"),
+        "name taken": lambda: LSM.create_multisport(runs[1], "Cycling", 19, ["Running", "Cycling"], "Duck"),
+        "10/10": lambda: LSM.create_multisport(runs[5], "X", 19, ["Running", "Cycling"], "Duck"),
+    }
+    for what, call in refusals.items():
+        try:
+            call()
+            raise AssertionError(f"{what} accepted")
+        except ValueError:
+            pass
+    assert LSM.menu(runs[1], "Duck")["legChoices"] == LSM.multisport_leg_choices(runs[1])
+
+
 def test_middle_delete(runs):
     # Write 2 has the Triathlon (legs Cycling, Running, Openwater swim = places 1, 0, 4).
     # Deleting "Run a route" (place 2) moves every leg above it down; the names stay.
@@ -199,6 +243,35 @@ def synthetic_hash():
     return h, steps
 
 
+def multisport_synthetic_hash():
+    """The synthetic region's multisport creates, the same steps as the Android jest test."""
+    h = 0x811C9DC5
+    a2 = synthetic(90)
+    steps = [LSM.create_multisport(a2, "Tri", 19, ["Cycling", "Running", "Transition", "Cycling"],
+                                   "Duck", now=4000)]
+    steps.append(LSM.delete_multisport(steps[-1], "Duathlon", "Duck"))
+    steps.append(LSM.create_multisport(steps[-1], "Aventura", 61, ["Running", "Cycling"], "Colibri",
+                                       now=5000))
+    for st in steps:
+        h = fnv1a(st, h)
+    return h, steps
+
+
+def test_synthetic_multisport():
+    h, steps = multisport_synthetic_hash()
+    assert h == MULTISPORT_HASH, hex(h)
+    groups = {g["name"]: g["legNames"] for g in LSM.sport_mode_groups(steps[0])}
+    assert groups["Tri"] == ["Cycling", "Running", "Transition", "Cycling"], groups
+    # The Duathlon went with its Transition: the Tri still uses it, so it stays; legs renumbered.
+    assert {g["name"]: g["legNames"] for g in LSM.sport_mode_groups(steps[2])} == {
+        "Running": ["Running"], "Tri": ["Cycling", "Running", "Transition", "Cycling"],
+        "Cycling": ["Cycling"], "Aventura": ["Running", "Cycling"]}
+    assert [g["id"] for g in LSM._group_list(steps[0])[1]] == [2, 1, 3, 4]
+
+
+MULTISPORT_HASH = 0x20D031B7
+
+
 def test_synthetic():
     h, steps = synthetic_hash()
     assert h == 0x3D11ACA4, hex(h)
@@ -231,25 +304,31 @@ def test_cli_write():
         assert "Trilho" in names(state["flash"])
         out = legacy_link.sport_mode_delete("Trilho", "Duck", write=True, backup_dir=tmp)
         assert out["wrote"] and names(state["flash"]) == names(region)
+        out = legacy_link.multisport_create("Tri", 19, ["Cycling", "Running"], "Duck", write=True,
+                                            backup_dir=tmp)
+        assert out["wrote"] and "Tri" in {g["name"] for g in LSM.sport_mode_groups(state["flash"])}
         out = legacy_link.sport_mode_delete("Duathlon", "Duck", multisport=True, write=True,
                                             backup_dir=tmp)
         assert out["wrote"] and "Transition" not in names(state["flash"])
-        assert len(state["writes"]) == 3
+        assert len(state["writes"]) == 4
+        assert {w[:2] for w in state["writes"]} == {(0x2000, 10240)}
 
 
 if __name__ == "__main__":
     if "--hash" in sys.argv:
-        print(hex(synthetic_hash()[0]))
+        print(hex(synthetic_hash()[0]), hex(multisport_synthetic_hash()[0]))
         sys.exit(0)
     test_defaults_values()
     test_synthetic()
+    test_synthetic_multisport()
     test_cli_write()
     if not (AMBIT2.exists() and AMBIT1.exists()):
         print("legacy sport-mode create/delete: synthetic OK; captures absent, rest skipped")
         sys.exit(0)
     test_ambit1_creates()
     r2 = test_ambit2_create_and_delete()
+    test_ambit2_multisport_create(r2)
     test_middle_delete(r2)
-    print("legacy sport-mode create/delete: SuuntoLink's 4 creates and its Triathlon delete "
-          "replayed byte for byte, created modes removed back to the write before, refusals, "
-          "middle delete renumbering and synthetic bytes OK")
+    print("legacy sport-mode create/delete: SuuntoLink's 4 creates, its Triathlon delete and its "
+          "multisport create replayed byte for byte, created modes and the multisport removed back "
+          "to the write before, refusals, middle delete renumbering and synthetic bytes OK")

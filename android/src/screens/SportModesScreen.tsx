@@ -11,6 +11,7 @@ import { clearCustomModesCache } from '../services/CustomModesCache';
 import {
   writeLegacySportMode, LegacyModePatch, writeLegacyDisplays, LegacyGroup, LEGACY_ROW_LABELS,
   LegacyMenu, createLegacySportMode, deleteLegacySportMode, LEGACY_SELECTABLE_ACTIVITIES,
+  createLegacyMultisport, LEGACY_MULTISPORT_VARIANTS,
 } from '../services/AmbitLegacySportModes';
 import {
   readCustomModes, renameCustomMode, writeCustomModeField, writeCustomModeDisplayField,
@@ -71,11 +72,13 @@ const MULTISPORT_ACTIVITIES = SPORT_MODE_ROWS.multisportActivities
 type CreateKind = 'single' | 'multi';
 
 // Ambit1/2: the sports SuuntoLink offers for a new mode (ui/input.js movescountActivity) that have
-// its defaults for this model, minus the multisport containers, sorted by name like the list above.
+// its defaults for this model, sorted by name like the list above. Multisport, Triathlon and
+// Adventure racing are in that list too: SuuntoLink creates them as ordinary modes (an Adventure
+// Racing mode in both the Ambit1 and the Ambit2 capture), so they stay here on this family.
 function legacyCreatableActivities(variant?: string) {
   const per = (variant && SPORT_MODE_ROWS.activityDefaults[variant]) || {};
   return Object.keys(per).map(Number)
-    .filter(id => LEGACY_SELECTABLE_ACTIVITIES.has(id) && !SPORT_MODE_ROWS.multisportActivities.includes(id) && ACTIVITY_TYPES[id])
+    .filter(id => LEGACY_SELECTABLE_ACTIVITIES.has(id) && ACTIVITY_TYPES[id])
     .map(id => ({ id, name: ACTIVITY_TYPES[id].name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -99,8 +102,9 @@ export default function SportModesScreen() {
   // display rows); no Ambit3 structural read, which crashes on this family. See
   // CustomModesService.readCustomModes.
   const [isLegacy, setIsLegacy] = useState(false);
-  // Ambit1/2: the watch's menu groups; the multisports among them are listed read only, on the
-  // models SuuntoLink's capability record gives multisport (Ambit2, Ambit2 S; watch-protocol/10 L2).
+  // Ambit1/2: the watch's menu groups; the multisports among them are listed (created and deleted,
+  // never edited), on the models SuuntoLink's capability record gives multisport (Ambit2, Ambit2 S;
+  // watch-protocol/10 L2).
   const [legacyGroups, setLegacyGroups] = useState<LegacyGroup[]>([]);
   const legacyMultisport = isLegacy && !!(variant && SPORT_MODE_ROWS.variants[variant]?.supportsMultisportModes)
     ? legacyGroups.filter(g => g.isMultisport) : [];
@@ -253,7 +257,9 @@ export default function SportModesScreen() {
     const kind = createKind;
     setCreateKind(null);
     const activityId = createActivityId;
+    const chosen = legs;
     if (kind === 'single' && isLegacy) await runLegacyEdit(() => createLegacySportMode(name, activityId, variant ?? ''));
+    else if (kind === 'multi' && isLegacy) await runLegacyEdit(() => createLegacyMultisport(name, activityId, chosen, variant ?? ''));
     else if (kind === 'single') await runEdit(plans.create(name, createActivityId, variant));
     else if (kind === 'multi') await runEdit(plans.createMultisport(name, createActivityId, legs, variant));
   }
@@ -358,14 +364,19 @@ export default function SportModesScreen() {
   const busy = phase === 'connecting' || phase === 'reading';
   const selectedMode = modes?.find(m => m.settings.name === selectedName) ?? null;
   // The counts and Create buttons: the Ambit3 codec's summary, or on an Ambit1/2 the legacy menu
-  // (a multisport is not built on this family, so no Create Multisport there).
+  // (Create Multisport on the Ambit2 and 2S, as SuuntoLink's editor and its capture).
   const manage = summary
     ? { used: summary.used, maxUsed: summary.maxUsed, multi: summary.multi, maxMulti: summary.maxMulti, multiCreate: summary.maxMulti > 0 }
     : isLegacy && legacyMenu
       ? { used: legacyMenu.used, maxUsed: legacyMenu.max, multi: legacyMenu.multisport,
-          maxMulti: (variant && SPORT_MODE_ROWS.variants[variant]?.maxMultisportModes) || 0, multiCreate: false }
+          maxMulti: (variant && SPORT_MODE_ROWS.variants[variant]?.maxMultisportModes) || 0,
+          multiCreate: !!variant && LEGACY_MULTISPORT_VARIANTS.has(variant) }
       : null;
   const creatableActivities = isLegacy ? legacyCreatableActivities(variant) : CREATABLE_ACTIVITIES;
+  // The modes a new multisport may use: SuuntoLink's leg picker on an Ambit2 / 2S (the modes with an
+  // entry of their own, then those only a multisport uses), the codec's single modes on an Ambit3.
+  const legChoices = isLegacy ? (legacyMenu?.legChoices ?? [])
+    : (summary?.modes ?? []).filter(m => !m.multisport).map(m => m.name);
 
   // ── Detail view ──
   if (selectedMode) {
@@ -690,8 +701,8 @@ export default function SportModesScreen() {
         );
       })}
 
-      {/* Ambit2 / Ambit2 S: their multisports (the watch's menu groups with several legs). Deleted as
-          SuuntoLink deletes one (with the modes only it used); not built or changed here. */}
+      {/* Ambit2 / Ambit2 S: their multisports (the watch's menu groups with several legs). Created and
+          deleted as SuuntoLink does (a delete takes the modes only it used); not changed here. */}
       {legacyMultisport.map(m => {
         const activity = ACTIVITY_TYPES[m.activityId];
         return (
@@ -753,13 +764,14 @@ export default function SportModesScreen() {
                   {legs.length ? t.sportModesLegsChosen(legs.join(' → ')) : t.sportModesNoLegsYet}
                 </Text>
                 <View style={styles(theme).chipRow}>
-                  {(summary?.modes ?? []).filter(m => !m.multisport).map(m => (
+                  {legChoices.map(leg => (
                     <TouchableOpacity
-                      key={m.name}
+                      key={leg}
                       style={[styles(theme).chip]}
-                      onPress={() => setLegs(prev => [...prev, m.name])}
+                      // SuuntoLink's MAX_MULTISPORT_SPORT_MODES: six legs at most.
+                      onPress={() => setLegs(prev => (prev.length >= 6 ? prev : [...prev, leg]))}
                     >
-                      <Text style={styles(theme).chipText}>＋ {m.name}</Text>
+                      <Text style={styles(theme).chipText}>＋ {leg}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>

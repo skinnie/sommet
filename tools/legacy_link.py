@@ -505,6 +505,92 @@ def sport_mode_delete(name, variant, multisport=False, write=False, backup_dir=N
     return _sport_mode_region_rmw(name, lambda region: op(region, name, variant), write, backup_dir)
 
 
+def multisport_create(name, activity_id, legs, variant, write=False, backup_dir=None):
+    """Creates one multisport on an Ambit2 / 2S as SuuntoLink's editor does (legacy_sport_modes.
+    create_multisport: the menu entry the Ambit2 capture's write 1 -> 2 shows, legs in the order
+    given). One _sport_mode_region_rmw."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    return _sport_mode_region_rmw(
+        name, lambda region: LSM.create_multisport(region, name, activity_id, legs, variant),
+        write, backup_dir)
+
+
+def _apps_store_read():
+    """The Ambit1's Apps store (legacy_apps.STORE_ADDR, STORE_SIZE bytes) over 0x0b17."""
+    import legacy_apps as LA                                  # noqa: PLC0415
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        path = f.name
+    try:
+        info = run(["region-dump", hex(LA.STORE_ADDR), path, str(LA.STORE_SIZE)], timeout=300)
+        if not info.get("ok"):
+            raise RuntimeError(info.get("error", "the Apps store read failed"))
+        return pathlib.Path(path).read_bytes()
+    finally:
+        pathlib.Path(path).unlink(missing_ok=True)
+
+
+def _apps_rmw(label, change, write, backup_dir):
+    """One app change on an Ambit1, in SuuntoLink's order: the sport-mode region (its first 10240
+    bytes + [0x2000][0xFFFFFFFF]), then the Apps store (20000 bytes in the model's chunks +
+    [0x27100][0xFFFFFFFF]), each read back. `change(region, store)` -> (region, store). Without
+    `write` nothing is sent; with it both are copied to <backup_dir> first, and a store write that
+    fails puts the sport-mode region back (the 0x0b16 write SuuntoLink itself sends)."""
+    import time                                               # noqa: PLC0415
+    import legacy_apps as LA                                  # noqa: PLC0415
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    region = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
+    if len(region) != LSM.REGION_WRITE_BYTES:
+        raise RuntimeError(f"read {len(region)} of the sport-mode region's "
+                           f"{LSM.REGION_WRITE_BYTES} bytes: nothing written")
+    store = _apps_store_read()
+    new_region, new_store = change(region, store)
+    result = {"ok": True, "wrote": False, "mode": label,
+              "apps": len(LA.parse_store(new_store))}
+    if not write:
+        return result
+    from write_nav import DEFAULT_BACKUP_DIR                  # noqa: PLC0415
+    folder = pathlib.Path(backup_dir or DEFAULT_BACKUP_DIR / "legacy_apps")
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    (folder / f"sportmodes-{stamp}.bin").write_bytes(region)
+    (folder / f"apps-{stamp}.bin").write_bytes(store)
+    used = max(LSM.region_used(region), LSM.region_used(new_region))
+    flash_write(LSM.REGION_ADDR, new_region, LSM.COMMIT_EXTRA)
+    if LSM.read_region_live(LSM.REGION_WRITE_BYTES)[:used] != new_region[:used]:
+        raise RuntimeError(f"the sport modes did not read back as written (copies in {folder})")
+    try:
+        flash_write(LA.STORE_ADDR, new_store, LA.COMMIT_EXTRA)
+        if LA.parse_store(_apps_store_read()) != LA.parse_store(new_store):
+            raise RuntimeError("the Apps store did not read back as written")
+    except (RuntimeError, ValueError) as exc:
+        flash_write(LSM.REGION_ADDR, region, LSM.COMMIT_EXTRA)
+        raise RuntimeError(f"{exc}; the sport modes were put back (copies in {folder})") from None
+    result.update(wrote=True, backup=str(folder))
+    return result
+
+
+def app_install(mode, display, row, app_path, catalog_dir=None, write=False, backup_dir=None):
+    """Puts one Suunto App (its compiled bytes, `app_path`) on an Ambit1 sport mode as SuuntoLink
+    does (legacy_apps.install says which capture each byte comes from): the mode's link and row
+    value, then the Apps store. `catalog_dir` (catalog.json + catalog.bin) names the apps for the
+    store-order check."""
+    import legacy_apps as LA                                  # noqa: PLC0415
+    app = pathlib.Path(app_path).read_bytes()
+    rule_id_of = LA.catalog_lookup(catalog_dir)[0] if catalog_dir else None
+    return _apps_rmw(mode, lambda region, store: LA.install(region, store, mode, display, row, app,
+                                                              rule_id_of), write, backup_dir)
+
+
+def apps_list(catalog_dir=None):
+    """The Ambit1's Suunto Apps, one per sport mode that shows one (legacy_apps.installed), named
+    from SuuntoLink's catalogue when it is here. Read only."""
+    import legacy_apps as LA                                  # noqa: PLC0415
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    rule_id_of, name_of = LA.catalog_lookup(catalog_dir) if catalog_dir else (None, None)
+    region = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
+    return {"ok": True, "entries": LA.installed(region, _apps_store_read(), rule_id_of, name_of)}
+
+
 def sport_mode_mirror(source, write=False, backup_dir=None):
     """Makes this Ambit1/2's sport-mode region the bytes of another watch of the same model (the
     Copy page, watch-protocol/10 L14): `source` is that watch's region as read. Its used extent is
@@ -714,7 +800,13 @@ _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-cle
              "sport-mode-write-presets", "routes", "route-head",
              "route-region-save", "route-region-restore", "nav-restore-json", "route-send",
              "route-remove", "sport-mode-edit", "sport-mode-displays", "sport-mode-create",
-             "sport-mode-delete", "sport-mode-menu", "sport-mode-mirror", "pois-add")
+             "sport-mode-delete", "sport-mode-menu", "sport-mode-mirror", "pois-add",
+             "multisport-create", "app-install", "apps-list")
+
+
+def _mode_arg(text):
+    """A sport mode on the command line: its name, or @N for the N-th as the readers list them."""
+    return int(text[1:]) if text.startswith("@") and text[1:].isdigit() else text
 
 
 def _opt(flag):
@@ -832,6 +924,41 @@ def main():
                                                write=write, backup_dir=_opt("--backup-dir"))
                 else:
                     result = sport_mode_menu(variant)
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "multisport-create":
+            # multisport-create NAME ACTIVITY LEGS_JSON --variant V [--write] [--backup-dir DIR]
+            variant = _opt("--variant")
+            if len(sys.argv) < 5 or not variant:
+                sys.exit(f"usage: {sys.argv[0]} multisport-create NAME ACTIVITY LEGS_JSON "
+                         "--variant CODENAME [--write] [--backup-dir DIR]")
+            try:
+                legs = json.loads(sys.argv[4])
+                if not isinstance(legs, list) or not all(isinstance(x, str) for x in legs):
+                    raise ValueError("LEGS_JSON must be a list of sport-mode names")
+                result = multisport_create(sys.argv[2], int(sys.argv[3]), legs, variant,
+                                           write="--write" in sys.argv[5:],
+                                           backup_dir=_opt("--backup-dir"))
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "app-install":
+            # app-install MODE DISPLAY ROW APP.bin [--catalog DIR] [--write] [--backup-dir DIR]
+            # MODE is a name, or @N for the N-th mode as the readers list them.
+            if len(sys.argv) < 6:
+                sys.exit(f"usage: {sys.argv[0]} app-install MODE|@N DISPLAY ROW APP.bin "
+                         "[--catalog DIR] [--write] [--backup-dir DIR]")
+            try:
+                result = app_install(_mode_arg(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]),
+                                     sys.argv[5],
+                                     catalog_dir=_opt("--catalog"),
+                                     write="--write" in sys.argv[6:],
+                                     backup_dir=_opt("--backup-dir"))
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd == "apps-list":
+            # apps-list [--catalog DIR] : the Ambit1's apps, read only.
+            try:
+                result = apps_list(_opt("--catalog"))
             except ValueError as exc:
                 result = {"ok": False, "error": str(exc)}
         elif cmd in ("sport-mode-mirror", "pois-add"):

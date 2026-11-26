@@ -86,8 +86,9 @@ void CustomModesService::refresh()
             // "N/10 used" beside it, and the card says so rather than leaving it a puzzle.
             row[QStringLiteral("inWatchMenu")] =
                 mode.value(QStringLiteral("inWatchMenu")).toBool();
-            // Ambit1/2 only (watch-protocol/10 L3): whether SuuntoLink would delete this mode,
-            // and why not. The Ambit3's read has neither, so its cards keep no Delete.
+            // Whether SuuntoLink would delete this mode, and why not: the Ambit1/2 read
+            // (watch-protocol/10 L3) and, since 2026-11-26, the Ambit3 family's
+            // (server.py ambit3_delete_flags).
             row[QStringLiteral("deletable")] = mode.value(QStringLiteral("deletable")).toBool();
             row[QStringLiteral("deleteReason")] =
                 mode.value(QStringLiteral("deleteReason")).toString();
@@ -308,6 +309,10 @@ void CustomModesService::refreshActivities()
             row[QStringLiteral("color")] = entry.value(QStringLiteral("color")).toString();
             row[QStringLiteral("isMultisport")] =
                 entry.value(QStringLiteral("isMultisport")).toBool();
+            // In SuuntoLink's own create list (ui/input.js movescountActivity): what an Ambit1/2
+            // create offers, the three multisport sports included (watch-protocol/10).
+            row[QStringLiteral("suuntoLinkCreate")] =
+                entry.value(QStringLiteral("suuntoLinkCreate")).toBool();
             list.append(row);
         }
         m_activities = list;

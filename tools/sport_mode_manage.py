@@ -658,9 +658,13 @@ def main():
                     help="list the activity ids that can be created")
     ap.add_argument("--selftest", action="store_true",
                     help="replay the capture; needs no watch")
-    ap.add_argument("--json", action="store_true", help="machine-readable result")
+    ap.add_argument("--json", action="store_true",
+                    help="end with one JSON line: {ok, wrote, writes, sport_modes} or {ok: false, "
+                         "error}")
     ap.add_argument("--write", action="store_true",
                     help="actually write; without this nothing is sent")
+    ap.add_argument("--backup-dir", metavar="DIR",
+                    help="with --write, save the region as read here first")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -723,6 +727,8 @@ def main():
     if blob[:used] != rebuilt:
         print("REFUSING: this watch's CustomModes region does not re-encode byte-exact, "
               "so no modified version of it may be written.", file=sys.stderr)
+        _json_result(args, {"ok": False, "error": "this watch's sport-mode region does not "
+                            "re-encode byte for byte, so Sommet does not change it"})
         return 3
 
     if args.list or not any([args.create, args.delete, args.create_multisport,
@@ -755,20 +761,31 @@ def main():
             plan = delete_multisport(decoded, args.delete_multisport)
     except LimitError as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
+        _json_result(args, {"ok": False, "error": str(exc)})
         return 4
 
     final = plan[-1]
     print(describe(final, rows, args.variant))
     print(f"\n{len(plan)} region write(s) would be sent.")
-    if args.json:
-        print(json.dumps({"writes": len(plan), "sport_modes": final["sport_modes"]},
-                         indent=2))
+    # The backend reads the last JSON line of the output. This was json.dumps(..., indent=2)
+    # with no "ok", so the last line that parsed was a bare leg number: every create and delete
+    # from the desktop read as "not confirmed", even when it had been written (2026-11-26).
+    summary = {"ok": True, "wrote": False, "writes": len(plan),
+               "sport_modes": final["sport_modes"]}
     if not args.write:
         print("Dry run - nothing was sent. Add --write to apply.")
+        _json_result(args, summary)
         return 0
     if link is None:
         print("--write needs a real watch, not --from", file=sys.stderr)
+        _json_result(args, {"ok": False, "error": "--write needs a real watch, not --from"})
         return 5
+    if args.backup_dir:
+        folder = pathlib.Path(args.backup_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        backup = folder / time.strftime("custommodes-%Y%m%d-%H%M%S.bin")
+        backup.write_bytes(blob)
+        summary["backup"] = str(backup)
 
     # FIXED 2026-08-22, real bug caught live on André's Ambit3 Run: `custom_modes_write`
     # has no `write_plan` - this call has never actually reached a real watch before (the
@@ -793,7 +810,15 @@ def main():
                   commit=False)
         print(f"  wrote {n}/{len(bodies)} ({len(body)} bytes)")
     print("Done.")
+    summary["wrote"] = True
+    _json_result(args, summary)
     return 0
+
+
+def _json_result(args, obj):
+    """With --json, the one machine-readable line the backend parses, always the last."""
+    if args.json:
+        print(json.dumps(obj))
 
 
 if __name__ == "__main__":

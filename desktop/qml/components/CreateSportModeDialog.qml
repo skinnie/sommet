@@ -12,9 +12,11 @@ import SommetUi
 //
 // The activity list is the real catalogue - all 84 from assets/activity_types.json, the same
 // file the badges are drawn from - filtered live by the search box, because 84 is too many to
-// scroll. The three multisport containers are deliberately NOT offered here: a combo is made
-// from modes that already exist, so it has its own editor (MultisportEditorDialog) rather
-// than a slot in this list.
+// scroll. On an Ambit3 the three multisport containers are NOT offered here: a combo is made
+// from modes that already exist, so it has its own editor (MultisportEditorDialog), and the
+// Ambit3 writer refuses them as a single mode. On an Ambit1/2 (`suuntoLinkList`) the list is
+// SuuntoLink's own create list (ui/input.js movescountActivity), which has all three: SuuntoLink
+// creates an ordinary Adventure Racing mode in both the Ambit1 and the Ambit2 capture.
 ThemedDialog {
     id: root
 
@@ -36,6 +38,10 @@ ThemedDialog {
     // Names already taken, so the dialog can say so before a write is attempted rather than
     // after. The tool refuses either way - this just makes the refusal arrive earlier.
     property var existingNames: []
+    // SuuntoLink's create list instead of the catalogue minus the multisport sports (Ambit1/2).
+    property bool suuntoLinkList: false
+    // SuuntoLink's getMaxNameLength for the connected watch (16 on the Ambit1/2 and Traverse).
+    property int maxNameLength: 63
 
     readonly property int dialogWidth: 420
     readonly property bool nameTaken:
@@ -48,8 +54,7 @@ ThemedDialog {
         const needle = searchField.text.toLowerCase()
         const out = []
         for (let i = 0; i < all.length; i++) {
-            // A multisport container is not a sport you can record on its own.
-            if (all[i].isMultisport)
+            if (root.suuntoLinkList ? all[i].suuntoLinkCreate !== true : all[i].isMultisport)
                 continue
             if (needle.length === 0 || all[i].name.toLowerCase().indexOf(needle) !== -1)
                 out.push(all[i])
@@ -81,9 +86,9 @@ ThemedDialog {
             RoundedTextField {
                 id: nameField
                 width: parent.width
-                // 63 bytes is SuuntoLink's own getMaxNameLength() for this whole watch
-                // family; the field stops there rather than letting a write fail on it.
-                maximumLength: 63
+                // SuuntoLink's own getMaxNameLength() for the watch; the field stops there
+                // rather than letting a write fail on it.
+                maximumLength: root.maxNameLength
                 placeholderText: qsTr("e.g. Trail running")
                 onTextChanged: root.modeName = text
             }

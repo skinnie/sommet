@@ -40,10 +40,23 @@ ThemedDialog {
     // section below.
     property bool hasPendingEdits: false
     // Suunto Apps already installed on this mode. SuuntoLink's own getMaxSuuntoApps() for
-    // this watch family is 5, confirmed twice: from its module, and from André's Running2
-    // carrying exactly 5 rules referenced as field ids 51/52/53/107/108.
+    // the Ambit3 family is 5, confirmed twice: from its module, and from André's Running2
+    // carrying exactly 5 rules referenced as field ids 51/52/53/107/108; 4 on the Traverse and
+    // Traverse Alpha, 1 on the Ambit1 (sport_mode.js).
     property int appCount: 0
-    readonly property int maxApps: 5
+    readonly property int maxApps: DeviceService.model === "Bluebird" ? 1
+        : (DeviceService.model === "Jabiru" || DeviceService.model === "Loon") ? 4 : 5
+    // Where an app may go on this watch. The Ambit1 (watch-protocol/10 L1): the bottom row of a
+    // 3-field display, the one place SuuntoLink's two captured installs put one
+    // (tools/legacy_apps.py). The Ambit2 family: nowhere, no capture writes its Apps store.
+    readonly property string appsRefusal:
+        (DeviceCapabilities.supportsLegacySportModeManage && DeviceService.model !== "Bluebird")
+        ? qsTr("Suunto Apps are not written on the Ambit2, 2S or 2R: no capture shows "
+               + "SuuntoLink writing their apps.")
+        : (DeviceService.model === "Bluebird" && (displayTemplate !== 260 || rowName !== "BOTTOM"))
+        ? qsTr("On the Ambit1 an app goes on the bottom row of a 3-field display, the place "
+               + "SuuntoLink's own installs use. Open that row to add one.")
+        : ""
 
     // Field ids currently ticked, in the order chosen - the watch shows a multi-value row's
     // values in this order, so it is meaningful, not just a set.
@@ -237,6 +250,14 @@ ThemedDialog {
                     }
                 }
                 Text {
+                    visible: root.appsRefusal.length > 0
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    text: root.appsRefusal
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.fontSizeCaption
+                }
+                Text {
                     visible: root.appCount >= root.maxApps
                     width: parent.width
                     wrapMode: Text.WordWrap
@@ -261,6 +282,7 @@ ThemedDialog {
                     width: parent.width
                     visible: AppsService.hasCatalog
                     enabled: !root.hasPendingEdits && root.appCount < root.maxApps
+                             && root.appsRefusal.length === 0
                     placeholderText: qsTr("Search Suunto Apps...")
                     onTextChanged: AppsService.searchCatalog(text, DeviceService.model, -1)
                 }
@@ -292,6 +314,7 @@ ThemedDialog {
                     // Narrows as you type - André, item 6. Nothing is listed until there is
                     // something to narrow BY: 13,104 apps rendered flat is not a menu.
                     model: (root.hasPendingEdits || root.appCount >= root.maxApps
+                            || root.appsRefusal.length > 0
                             || appSearchField.text.trim().length === 0)
                            ? [] : AppsService.searchResults
                     delegate: Column {

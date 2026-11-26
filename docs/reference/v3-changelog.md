@@ -7,6 +7,34 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Ambit2 multisports, Adventure Racing, Ambit3 delete on desktop and Ambit1 Suunto Apps (watch-protocol/10)
+
+Nothing here was seen on a real watch: it is checked against SuuntoLink's own captures, its
+own code and by tests only.
+
+- **Create a multisport on an Ambit2 or 2S, desktop and Android.** A name, Multisport,
+  Triathlon or Adventure racing, and 2 to 6 of the watch's sport modes in the order you pick
+  (the factory Transition among them). Two multisports at most, inside the 10 sport modes, as
+  SuuntoLink. The Triathlon SuuntoLink made in its Ambit2 capture comes out byte for byte. A
+  multisport is still not changed after it is made: no capture shows that. The Ambit1 and the
+  Ambit2 R have no multisport.
+- **Adventure Racing, Triathlon and Multisport in the Ambit1/2 create list, desktop and
+  Android.** SuuntoLink offers them as ordinary sport modes on these watches, and both of its
+  captures make an Adventure Racing mode that way. The desktop list on this family is now
+  SuuntoLink's own list, so sports it does not offer there are gone from it.
+- **Desktop: Delete for sport modes and multisports on the Ambit3, Vertical and Traverse,** as
+  on Android, with the same question first and a copy of the watch's sport modes saved before
+  the write. The Delete link shows only where SuuntoLink allows one. The desktop's create and
+  delete on these watches always reported "not confirmed", even when the watch was written:
+  fixed. The Multisport button now offers the watch's sport modes as legs (it offered none).
+- **Ambit1: put a Suunto App on a sport mode (desktop).** From the Suunto Apps part of a row's
+  picker, on the bottom row of a 3-field display, one app per mode, as SuuntoLink's two
+  captured installs do; both come out byte for byte. A second app is written only in the case
+  SuuntoLink's capture shows; otherwise Sommet says why. Removing an app is not offered: no
+  capture shows it. Apps on the Ambit2, 2S and 2R are refused: no capture writes them.
+
+---
+
 ## 2026-11-26: Create and delete Ambit1/2 sport modes, and Copy to watch for this family (watch-protocol/10)
 
 Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own

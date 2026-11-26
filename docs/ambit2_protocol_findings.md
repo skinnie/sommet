@@ -114,6 +114,31 @@ delete byte for byte, and checks that deleting a created mode gives back the wri
 The limit is SuuntoLink's `countSportModes`: max(single entries + modes only a multisport uses,
 all entries), 10 on all four models.
 
+SuuntoLink's create list (`ui/input.js movescountActivity`) has no per-model filter and holds the
+three multisport sports too (Multisport 2, Triathlon 19, Adventure racing 61): the Adventure Racing
+modes above are ordinary modes. Both apps offer that list on this family (2026-11-26).
+
+### 3b. Creating a multisport (2026-11-26, watch-protocol/10 L2)
+
+Write 1 -> 2 is SuuntoLink's `showCreateMultisportMode`: one `addSportModeGroup(getNextGroupId,
+{ActivityID, Name, CustomModeIDs})` and nothing else in the region changes. The entry is appended
+to `0x0200`:
+
+    0x0210 { 0x0212 name (24), 0x0213 sport (19), 0x0214 1, 0x0214 0, 0x0214 4 (Cycling, Running,
+             Openwater swim: places in 0x0100, in the order picked), 0x02FE 1 (the lowest free
+             id), 0x02FF the save time }
+
+and the `0x0200` and root lengths grow by its 72 bytes. The editor's rules: a name of up to 16
+characters (`getMaxNameLength`), one of the three multisport sports (`getMultisportPhrases`), 2 to 6
+legs (`MAX_MULTISPORT_SPORT_MODES`, repeats allowed) from the modes with a menu entry of their own
+and the modes only a multisport uses (its `hiddenModes`, the factory Transition), at most 2
+multisports (`MAX_MULTISPORT_MODES`) and the 10 sport modes, and only where the capability record
+has `supportsMultisportModes` (Ambit2, Ambit2 S). The Triathlon is never changed in the other 157
+writes, so no capture shows an edit. Sommet writes the create this way on both apps
+(`tools/legacy_sport_modes.py create_multisport`, `AmbitLegacySportModes.ts
+createLegacyMultisportRegion`); `tools/test_legacy_sport_mode_manage.py` replays write 1 -> 2 byte
+for byte and deletes it back to write 1.
+
 ## 4. Displays and the sport-mode menu (2026-11-26, watch-protocol/10 L5, L2)
 
 The display list (`0x0105`) is the same record format as the Ambit3's, byte-identical on the
@@ -153,6 +178,6 @@ entries, `0x02FF` a save time. A group with several legs is a multisport: the ca
 Triathlon (activity 19). Both apps list them read only. The multisport changes in the
 capture are a delete of the Triathlon (with the Transition only it used) and a new Triathlon
 made right after, with legs Cycling, Running, Openwater swim (it had Openwater swim, Transition,
-Cycling, Transition, Running); see section 3a. Both apps delete a multisport this way; neither
-builds or edits one yet.
+Cycling, Transition, Running); see sections 3a and 3b. Both apps create and delete a multisport
+this way; neither edits one (no capture).
 
