@@ -2,7 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { base64ToBytes } from './Base64';
 import { getDeviceInfo, readObjectRaw } from '../native/AmbitUsbModule';
 
-// The Ambit3's own daily step counts (2026-10-18). Port of the desktop's tools/ambit_steps.py:
+// The watch's own daily step counts (2026-10-18; Vertical and Traverse 2026-11-26, from their
+// descriptors, not yet seen on those watches). Port of the desktop's tools/ambit_steps.py:
 // the watch keeps 30 daily counts in sml.DeviceHistory, oldest first, the last one being today
 // so far, read with the 0x1200 object query (id 0x97 on fw 2.4.17). Read from André's Peak over
 // USB on 2026-10-18; the field ids come from the watch's own schema descriptor:
@@ -22,23 +23,44 @@ import { getDeviceInfo, readObjectRaw } from '../native/AmbitUsbModule';
 // Samples fall on the quarter hours; the newest is the last one at or before the timestamp.
 
 export const DEVICE_HISTORY_QUERY = 0x97;
-const RECOVERY_ID = 0x92;
-const WEEKLY_ACTIVITY_ID = 0x94;
 const RECOVERY_UNIT_H = 22.5 / 60;
 const ACTIVITY_KEY = 'health.watchActivity';
 const RECOVERY_KEY = 'health.watchRecovery';
-const STEPS_ID = 0x12e;
-const TIMESTAMP_ID = 0x130;
 const DAYS = 30;
+
+/** The DeviceHistory query and field ids of one model, from its own schema descriptor (the
+ *  lookup by name in tools/ambit_steps.py ids_from_schema; tools/test_ambit_steps.py checks this
+ *  table against the descriptors). A model without ActivityTracking (the Traverse) has no
+ *  recovery or weekly ids. Android has no descriptor at hand, hence the table. */
+export interface StepsIds { query: number; steps: number; timestamp: number; recovery?: number; weekly?: number }
+const PEAK_IDS: StepsIds = { query: 0x97, steps: 0x12e, timestamp: 0x130, recovery: 0x92, weekly: 0x94 };
+const TRAVERSE_IDS: StepsIds = { query: 0x8b, steps: 0x105, timestamp: 0x108 };
+export const STEPS_IDS: Record<string, StepsIds> = {
+  emu: PEAK_IDS,                                               // Ambit3 Peak 2.4.17
+  finch: PEAK_IDS,                                             // Ambit3 Sport 2.4.17
+  ibisbill: PEAK_IDS,                                          // Ambit3 Run 2.4.17
+  kaka: { query: 0x96, steps: 0x13a, timestamp: 0x13c, recovery: 0x8f, weekly: 0x91 },   // Vertical 1.1.22
+  jabiru: TRAVERSE_IDS,                                        // Traverse 2.0.22
+  loon: TRAVERSE_IDS,                                          // Traverse Alpha 2.0.22 (same program)
+};
+
+/** The ids for the watch the device info names (codename or name), or null for a watch with
+ *  no daily steps (Kailash, Ambit1/2) or one not known. An "Ambit3" with no codename gets the
+ *  Peak's, as before; a firmware with another numbering is refused by the layout check. */
+export function stepsIdsFor(modelText: string): StepsIds | null {
+  const m = modelText.toLowerCase();
+  for (const code of Object.keys(STEPS_IDS)) if (m.includes(code)) return STEPS_IDS[code];
+  if (m.includes('traverse')) return TRAVERSE_IDS;
+  if (m.includes('vertical')) return STEPS_IDS.kaka;
+  if (m.includes('ambit3')) return PEAK_IDS;
+  return null;
+}
 const NO_COUNT = 0xffffffff;
 const STORE_KEY = 'health.watchSteps';
 // Each watch's own days, kept apart: {watch serial: {date: value}} (see storeByWatch).
 const STEPS_BY_WATCH_KEY = 'health.watchStepsByWatch';
 const ACTIVITY_BY_WATCH_KEY = 'health.watchActivityByWatch';
 const RECOVERY_BY_WATCH_KEY = 'health.watchRecoveryByWatch';
-// Ambit3 Peak, Sport, Run, Vertical (the model name the watch itself reports). The Kailash,
-// Traverse and Ambit1/2 number their fields differently or keep no daily steps.
-const AMBIT3_MODELS = ['emu', 'finch', 'ibisbill', 'kaka'];
 
 export interface StepsDay { date: string; steps: number; today: boolean }
 export interface ActivityDay { date: string; kcal: number; today: boolean }
@@ -99,7 +121,7 @@ function addDays(ymd: string, delta: number): string {
 
 /** Decodes the raw 0x1200 DeviceHistory reply. Null when it is not the expected layout (a
  *  firmware with another numbering), never a wrong number. */
-export function decodeWatchSteps(b64: string): WatchSteps | null {
+export function decodeWatchSteps(b64: string, ids: StepsIds = PEAK_IDS): WatchSteps | null {
   const b = base64ToBytes(b64);
   const at = findMagic(b);
   if (at < 6) return null;
@@ -107,11 +129,13 @@ export function decodeWatchSteps(b64: string): WatchSteps | null {
   if (u32(b, at - 6) !== 0) return null;
   let steps: [number, number] | null = null;
   let stamp = '';
-  const u16s: Record<number, number[]> = { [RECOVERY_ID]: [], [WEEKLY_ACTIVITY_ID]: [] };
+  const recoveryRaw: number[] = [];
+  const weekRaw: number[] = [];
   for (const [id, s, e] of sbemEntries(b, at)) {
-    if (u16s[id]) for (let o = s; o + 2 <= e; o += 2) u16s[id].push(b[o] | (b[o + 1] << 8));
-    if (id === STEPS_ID && steps === null) steps = [s, e];
-    if (id === TIMESTAMP_ID && !stamp) {
+    const ring = id === ids.recovery ? recoveryRaw : id === ids.weekly ? weekRaw : null;
+    if (ring) for (let o = s; o + 2 <= e; o += 2) ring.push(b[o] | (b[o + 1] << 8));
+    if (id === ids.steps && steps === null) steps = [s, e];
+    if (id === ids.timestamp && !stamp) {
       let end = s;
       while (end < e && b[end] !== 0) end++;
       stamp = String.fromCharCode(...Array.from(b.subarray(s, end)));
@@ -127,11 +151,11 @@ export function decodeWatchSteps(b64: string): WatchSteps | null {
     if (n === NO_COUNT) continue;
     days.push({ date: addDays(today, i - (DAYS - 1)), steps: n, today: i === DAYS - 1 });
   }
-  const week = u16s[WEEKLY_ACTIVITY_ID];
+  const week = weekRaw;
   const activity = week.map((kcal, i) => ({
     date: addDays(today, i - (week.length - 1)), kcal, today: i === week.length - 1,
   }));
-  const rec = u16s[RECOVERY_ID];
+  const rec = recoveryRaw;
   let recovery: WatchRecovery | null = null;
   if (rec.length > 0) {
     const quarter = Math.floor(Number(m[3]) / 15) * 15;
@@ -311,9 +335,9 @@ export function weekSteps(series: Array<{ date: string; steps?: number }>, now =
 export async function syncWatchSteps(): Promise<number> {
   try {
     const info = await getDeviceInfo();
-    const model = `${info?.model ?? ''} ${info?.name ?? ''}`.toLowerCase();
-    if (!AMBIT3_MODELS.some(c => model.includes(c)) && !model.includes('ambit3')) return 0;
-    const decoded = decodeWatchSteps(await readObjectRaw(DEVICE_HISTORY_QUERY));
+    const ids = stepsIdsFor(`${info?.model ?? ''} ${info?.name ?? ''}`);
+    if (!ids) return 0;                     // Kailash, Ambit1/2: no daily steps to read
+    const decoded = decodeWatchSteps(await readObjectRaw(ids.query), ids);
     if (!decoded) return 0;
     // Each watch's days are kept apart and merged (storeByWatch): its serial names it.
     const watch = String(info?.serial ?? '').trim() || 'watch';

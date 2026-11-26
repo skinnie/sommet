@@ -43,10 +43,19 @@ Samples fall on the quarter hours: the newest is the last quarter hour at or bef
 timestamp. They are returned decoded under "activity" and "recovery", and raw under
 "activity_tracking".
 
-The query id differs between firmware versions (the logbook is 0x8c on older Ambit3
-firmware, 0x8d on 2.4.17), so the id is looked up in the watch's own schema descriptor when
-one is on this computer, and otherwise only the 2.4.17 table is used. The reply is checked
-for the expected layout (a 120-byte steps entry and an ISO timestamp) before anything is
+Every id differs between models and firmware versions, so each one is looked up by its name
+in the watch's own schema descriptor (ids_from_schema), and only without a descriptor is the
+2.4.17 table used. Per model (2026-11-26, watch-protocol/10 batch B):
+
+    model, firmware          query  steps (30 x u32)  timestamp  recovery  weekly kcal
+    Peak/Sport/Run 2.4.17    0x97   0x12e             0x130      0x92      0x94
+    Ambit3 Vertical 1.1.22   0x96   0x13a             0x13c      0x8f      0x91
+    Traverse/Alpha 2.0.22    0x8b   0x105             0x108      -         -
+
+The Traverse keeps the same 30 daily counts but no ActivityTracking (no Activity display).
+The Kailash keeps no DeviceHistory steps (its step samples are in sml.TimelinePart) and the
+Ambit1/2 have no step counter (spec sheet, user guides, firmware). The reply is checked for
+the expected layout (a 120-byte steps entry and an ISO timestamp) before anything is
 returned, so a firmware with a different numbering gives an error rather than wrong numbers.
 
     ./tools/ambit_steps.py            # USB
@@ -76,22 +85,42 @@ def request(query_id, cursor=0):
     return struct.pack("<IHH", cursor, 1, 10) + sbem_schema.MAGIC + struct.pack("<H", query_id)
 
 
+# The fields by their names in the watch's own schema (path suffixes); a value is kept in the
+# reply under its group's entry when the field belongs to one (the 30 counts, the rings).
+FIELD_NAMES = {
+    "steps": ".ActivitySummary.LastDays.Steps+Value",
+    "timestamp": "sml.DeviceHistory.Timestamp",
+    "recovery": ".ActivityTracking+DailyRecovery",
+    "daily_activity": ".ActivityTracking+DailyActivity",
+    "weekly_activity": ".ActivityTracking+WeeklyActivity",
+    "total_weekly_activity": ".ActivityTracking+TotalWeeklyActivity",
+}
+
+
+def ids_from_schema(schema):
+    """The ids of this watch's DeviceHistory query and fields, found by name, or None when it
+    has no DeviceHistory query. A field the watch doesn't have (the Traverse's ActivityTracking)
+    is None."""
+    query = next((fid for fid, p in schema.queries.items() if p == "sml.DeviceHistory"), None)
+    if query is None:
+        return None
+    ids = {"query": query}
+    for key, name in FIELD_NAMES.items():
+        fid = next((f.fid for f in schema.fields.values() if f.path.endswith(name)), None)
+        group = None if fid is None else next(
+            (g for g, members in schema.groups.items() if fid in members), None)
+        ids[key] = group if group is not None else fid
+    return ids
+
+
 def resolve_ids(serial=None, fw=None, path=None):
     """(ids, source) for this watch: its own descriptor when one is found, else the 2.4.17
     table. `source` says which, for the JSON output."""
     path = path or sbem_schema.default_descriptor(serial, fw)
     if path.is_file():
         try:
-            schema = sbem_schema.load(path)
-            query = next((fid for fid, p in schema.queries.items()
-                          if p == "sml.DeviceHistory"), None)
-            if query is not None:
-                ids = dict(REFERENCE_IDS)
-                ids["query"] = query
-                if query != REFERENCE_IDS["query"]:
-                    # Other numbering: the group ids would differ too. Use only what the
-                    # descriptor names; the layout check below refuses anything else.
-                    ids.update({k: None for k in REFERENCE_IDS if k != "query"})
+            ids = ids_from_schema(sbem_schema.load(path))
+            if ids is not None:
                 return ids, f"descriptor {path.name.split('+')[-1]}"
         except (OSError, ValueError):
             pass
@@ -197,12 +226,12 @@ def decode_activity(raw, when):
 
 
 def _own_schema(link):
-    """The watch's own schema over the cable (sbem_schema.for_link: our cache, SuuntoLink's
-    folder, assets/, else read off the watch), so a machine without SuuntoLink still names the
-    ids of a firmware other than 2.4.17. None over Bluetooth (the schema read is untried there)
-    or when the read fails: then the stored lookup and the 2.4.17 table, as before."""
-    from write_nav import Link
-    if type(link) is not Link or getattr(link, "dry_run", False):
+    """The watch's own schema (sbem_schema.for_link: our cache, SuuntoLink's folder, assets/,
+    else read off the watch), so a machine without SuuntoLink still names the ids of a model or
+    firmware other than the Peak's 2.4.17. Over Bluetooth too since 2026-11-26: before, a
+    Vertical read over Bluetooth was asked with the Peak's ids. None when the read fails: then
+    the stored lookup and the 2.4.17 table, as before."""
+    if getattr(link, "dry_run", False):
         return None
     try:
         return sbem_schema.for_link(link)

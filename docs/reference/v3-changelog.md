@@ -26,6 +26,30 @@ lists, SuuntoLink's own code and the firmware. First fixes:
 
 ---
 
+## 2026-11-26: Daily steps from the Ambit3 Vertical, the Traverse and the Traverse Alpha (watch-protocol/10)
+
+André: "go but i think ambit 1 and 2 series don't have steps, check first on spec sheet and if
+needed on firmware".
+
+- **Vertical, Traverse and Traverse Alpha now give their daily steps**, desktop and Android.
+  They keep the same 30 daily counts as the Peak in their DeviceHistory, under their own entry
+  numbers (Vertical: query 0x96, steps 0x13a, time 0x13c; Traverse and Alpha: 0x8b, 0x105,
+  0x108). The desktop finds every number by name in the watch's own settings list, now over
+  Bluetooth too (a Vertical read by Bluetooth used to be asked with the Peak's numbers). Android
+  has a table per model made from the same lists, which a desktop test checks against them;
+  before, Android read a Vertical with the Peak's numbers and showed nothing. The Traverse has
+  no Activity display, so it gives steps only. Not yet seen on a real Vertical, Traverse or
+  Alpha; no capture holds their reply. If their record isn't 30 days long, the read refuses
+  rather than show wrong dates.
+- **Ambit1 and Ambit2: no step counter, confirmed.** The 2013 Suunto catalogue's Ambit spec
+  sheet has none, nor do the Ambit and Ambit2 user guides, and the watch programs have no step
+  counter (the Ambit2's only "Step" strings are its first-use wizard's; the Ambit3 Peak's
+  program has appStepCounter and "k steps").
+- The Kailash keeps its steps as timeline samples (sml.TimelinePart), which Suunto's own 7R app
+  never reads in our captures. Not read yet.
+
+---
+
 ## 2026-11-25: 0.2.67 in short: what to know before you update
 
 Every change since 0.2.66 is listed in the sections below. Before you update:

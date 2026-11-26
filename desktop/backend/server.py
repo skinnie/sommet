@@ -5946,8 +5946,10 @@ class Handler(BaseHTTPRequestHandler):
         """GET /api/watch/steps[?device=PID&serial=S] - the Ambit3's own daily step counts,
         the last 30 days, oldest first, the last one being today so far (tools/ambit_steps.py,
         read-only 0x1200 DeviceHistory query, read off André's Peak over USB 2026-10-18).
-        Reply {"ok", "days": [{"date", "steps", "today"}], "timestamp", ...}. The Kailash and
-        the Ambit1/2 keep no daily steps: they get {"ok": false, "unsupported": true}."""
+        Reply {"ok", "days": [{"date", "steps", "today"}], "timestamp", ...}. Peak, Sport, Run,
+        Vertical and Traverse (Alpha): each model's ids by name from its own descriptor
+        (ambit_steps.ids_from_schema). The Ambit1/2 have no step counter; the Kailash keeps its
+        steps as timeline samples, not read yet: both get {"ok": false, "unsupported": true}."""
         if demo_ambit():
             import datetime as _dt                           # noqa: PLC0415 - module-level name is the class
             today = _dt.date.today()
@@ -5969,7 +5971,9 @@ class Handler(BaseHTTPRequestHandler):
         if device_pid is None and device_serial is None:
             if selected_is_kailash() or selected_is_legacy():
                 self._send_json(200, {"ok": False, "unsupported": True,
-                                      "error": "this watch keeps no daily step counts"})
+                                      "error": "Sommet doesn't read this watch's steps yet"
+                                      if selected_is_kailash() else
+                                      "this watch has no step counter"})
                 return
             if use_ble():
                 sys.path.insert(0, str(TOOLS_DIR))

@@ -153,3 +153,49 @@ describe('weekSteps', () => {
       .toEqual([20000, 12000, '2026-10-19', '2026-10-25']);
   });
 });
+
+// watch-protocol/10 batch B (2026-11-26): the Vertical and the Traverse keep the same 30-day
+// record under their own ids (their descriptors; tools/test_ambit_steps.py checks the table).
+describe('steps ids per model', () => {
+  const { stepsIdsFor, STEPS_IDS } = require('../AmbitSteps');
+  function replyWith(ids: any, steps: number[], rings: boolean): string {
+    const magic = Array.from('SBEM0102').map(c => c.charCodeAt(0));
+    const stamp = '2026-11-26T09:20:00+03:00';
+    const bytes = [
+      ...u32s([0]), 1, 0, ...magic,
+      ...(rings ? [...entry(ids.recovery, [40, 0, 41, 0]), ...entry(ids.weekly, [0x84, 0x03, 0x78, 0x00])] : []),
+      ...entry(ids.steps, u32s(steps)),
+      ...entry(ids.timestamp, [...Array.from(stamp).map(c => c.charCodeAt(0)), 0]),
+    ];
+    return bytesToBase64(new Uint8Array(bytes));
+  }
+  const twoDays = [...Array(28).fill(0xffffffff), 9100, 412];
+
+  it('picks each model by codename or name; none for the Kailash and Ambit1/2', () => {
+    expect(stepsIdsFor('Emu Suunto Ambit3 Peak')).toBe(STEPS_IDS.emu);
+    expect(stepsIdsFor('Kaka Suunto Ambit3 Vertical')).toBe(STEPS_IDS.kaka);
+    expect(stepsIdsFor('Loon Suunto Traverse Alpha')).toBe(STEPS_IDS.loon);
+    expect(stepsIdsFor('Suunto Traverse')).toBe(STEPS_IDS.jabiru);
+    expect(stepsIdsFor('Hoopoe Suunto Kailash')).toBeNull();
+    expect(stepsIdsFor('Duck Suunto Ambit2')).toBeNull();
+    expect(stepsIdsFor('Bluebird Suunto Ambit')).toBeNull();
+  });
+
+  it('decodes a Vertical reply with its own ids', () => {
+    const r = decodeWatchSteps(replyWith(STEPS_IDS.kaka, twoDays, true), STEPS_IDS.kaka)!;
+    expect(r.days.map((d: any) => [d.date, d.steps])).toEqual([['2026-11-25', 9100], ['2026-11-26', 412]]);
+    expect(r.activity[r.activity.length - 1].kcal).toBe(120);
+    expect(r.recovery).not.toBeNull();
+  });
+
+  it('decodes a Traverse reply: days, no Activity display, no recovery', () => {
+    const r = decodeWatchSteps(replyWith(STEPS_IDS.jabiru, twoDays, false), STEPS_IDS.jabiru)!;
+    expect(r.days.map((d: any) => [d.date, d.steps])).toEqual([['2026-11-25', 9100], ['2026-11-26', 412]]);
+    expect(r.activity).toEqual([]);
+    expect(r.recovery).toBeNull();
+  });
+
+  it('refuses a Vertical reply read with the Peak ids (no wrong numbers)', () => {
+    expect(decodeWatchSteps(replyWith(STEPS_IDS.kaka, twoDays, true))).toBeNull();
+  });
+});
