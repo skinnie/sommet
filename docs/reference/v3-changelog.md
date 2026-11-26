@@ -59,7 +59,7 @@ captures and by tests only.
   with the other routes kept byte for byte. Then the waypoint list is written again without
   that route's waypoints. Copies of both are saved first. No capture shows SuuntoLink removing
   a route: the bytes follow the captured region layout and the route-send and POI-remove
-  writers. A watch's last route is not removed, because no capture shows an empty route region.
+  writers. A watch's last route can be removed too (André's choice): the route list is then empty, the same bytes Sommet builds for an empty list; no capture shows an empty route list.
 
 ---
 

@@ -65,9 +65,15 @@ describe('removeLegacyRouteFromRegion (same bytes as tools/legacy_route.py remov
       .toEqual(Buffer.from(appendLegacyRoutes(null, [a])));
   });
 
-  it('refuses the last route, an unknown name and an empty region', () => {
+  it('removes the last route, leaving the empty region (André, Q12 b)', () => {
     const one = appendLegacyRoutes(null, [a]);
-    expect(() => removeLegacyRouteFromRegion(one, 'Cap Roux loop')).toThrow(/only route/);
+    const r = removeLegacyRouteFromRegion(one, 'Cap Roux loop');
+    expect(Buffer.from(r.bytes)).toEqual(Buffer.from(appendLegacyRoutes(null, [])));
+    expect(r.left).toEqual([]);
+    expect(Buffer.from(appendLegacyRoutes(r.bytes, [a]))).toEqual(Buffer.from(one));
+  });
+
+  it('refuses an unknown name and an empty region', () => {
     expect(() => removeLegacyRouteFromRegion(both, 'Nope')).toThrow(/No route named/);
     expect(() => removeLegacyRouteFromRegion(null, 'Dramont')).toThrow(/no routes/);
   });

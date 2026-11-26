@@ -244,9 +244,11 @@ def remove(region, name):
     order); only the start index of a route whose block lay after the removed one moves down by
     its point count. The head is rebuilt as append() builds it (counts, CRC). No capture shows
     SuuntoLink removing a route: these are the captured region's own layout and the writer
-    route_send already uses. Raises ValueError for an unknown name, for the watch's last route
-    (an empty region is in no capture, and openambit never writes one), and for point blocks
-    that overlap or leave gaps (not a region this code wrote or has seen)."""
+    route_send already uses. The watch's last route may go too (André 2026-11-26, Q12 b): the
+    region is then the head with 0 routes, 0 points and the CRC of nothing, and the 50 empty
+    slots - exactly what build([]) makes. No capture shows an empty region, and openambit never
+    writes one (it skips the region write with 0 routes). Raises ValueError for an unknown name
+    and for point blocks that overlap or leave gaps (not a region this code wrote or has seen)."""
     if not region or len(region) < HEAD_LEN or int.from_bytes(region[:2], "little") != HEAD_MAGIC:
         raise ValueError("the watch has no routes")
     _m, _u2, _u3, count, _u4, points, _crc, _pad = struct.unpack(_HEAD, region[:HEAD_LEN])
@@ -256,9 +258,6 @@ def remove(region, name):
     if target not in names:
         raise ValueError(f"no route named {name!r} on the watch")
     k = names.index(target)
-    if count == 1:
-        raise ValueError("this is the watch's only route: removing the last one is not done yet "
-                         "(no capture shows an empty route region)")
     starts = [struct.unpack_from("<I", i, 16)[0] for i in infos]
     counts = [struct.unpack_from("<H", i, 20)[0] for i in infos]
     spans = sorted(zip(starts, counts))

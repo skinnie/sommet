@@ -9,7 +9,8 @@ git-ignored - skipped where absent) and the writers route_send already uses. Che
   - remove(append(region, [route]), route) gives the captured region back exactly;
   - the waypoint list without a route's waypoints packs to exactly the rest of the 0x0b05
     packets SuuntoLink sent;
-  - the last route, an unknown name and overlapping point blocks are refused;
+  - the last route leaves the empty region build([]) makes (André, Q12 b); an unknown name and
+    overlapping point blocks are refused;
   - route_remove(): backups first, region then list, read-back check, copies back on failure;
   - the bytes for the Android parity fixture (android/src/services/__tests__/LegacyRoute.test.ts).
 Not seen on a real watch.
@@ -62,7 +63,14 @@ def test_append_then_remove(region):
 
 def test_refusals():
     one = legacy_route.append(None, [{"name": "Only", "points": [(1.0, 2.0), (1.001, 2.001)], "distance_m": 150}])
-    for name, region in (("Only", one), ("Other", one), ("x", None)):
+    empty, gone = legacy_route.remove(one, "Only")
+    assert empty == legacy_route.build([]), "the last route doesn't leave build([])"
+    assert gone == {"name": "Only", "point_count": 2}
+    assert struct.unpack_from("<HI", empty, 4)[0] == 0
+    again = legacy_route.append(empty, [{"name": "Only", "points": [(1.0, 2.0), (1.001, 2.001)],
+                                         "distance_m": 150}])
+    assert again == one, "a route added to the empty region isn't what it was"
+    for name, region in (("Other", one), ("x", None)):
         try:
             legacy_route.remove(region, name)
             raise AssertionError(f"{name!r} removed")

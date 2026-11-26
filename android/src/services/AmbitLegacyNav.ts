@@ -274,7 +274,7 @@ export async function sendLegacyRoute(route: {
 // the route region rebuilt without the route (LegacyRoute.removeLegacyRouteFromRegion, the other
 // routes byte for byte, 0x0b18 tail 0xFFFFFA1A), then the waypoint list rewritten without the
 // waypoints tagged with its name. No capture shows SuuntoLink removing a route. Not yet seen on a
-// real watch. The watch's last route is refused (an empty region is in no capture).
+// real watch. The watch's last route may go too (André, Q12 b; an empty region is in no capture).
 
 /** The list without a removed route's own waypoints (route name = the route's). Kept when another
  * route left on the watch has the same name. Same rule as desktop legacy_link.waypoints_without_route. */

@@ -249,7 +249,7 @@ async function writeRoutesKeepingPois(routes: Parameters<typeof writeRoutes>[0])
  * route writes an empty route list. Ambit1/2 (2026-11-26): AmbitLegacyNav.removeLegacyRoute,
  * the route region without it and the waypoint list without its waypoints, copies of both
  * saved first (backups/LegacyRoutes/, backups/POIs/) - the desktop's legacy_link route_remove.
- * Not yet seen on a real Ambit1/2; their last route is refused. */
+ * Not yet seen on a real Ambit1/2 (the last route leaves an empty region, in no capture). */
 export async function removeRouteFromWatch(name: string): Promise<void> {
   await connect();
   try {

@@ -198,8 +198,10 @@ export function appendLegacyRoutes(region: Uint8Array | null, routes: NewLegacyR
  *  entries and point blocks are copied unchanged, the blocks in their stored order; only the start
  *  index of a route whose block lay after the removed one moves down. Head rebuilt as
  *  appendLegacyRoutes builds it. No capture shows SuuntoLink removing a route: this is the captured
- *  region layout, written the way route send writes it. Throws for an unknown name, for the
- *  watch's last route (no capture shows an empty region) and for overlapping point blocks. */
+ *  region layout, written the way route send writes it. The last route may go too (André
+ *  2026-11-26, Q12 b): the region is then the head with 0 routes and the 50 empty slots, what
+ *  appendLegacyRoutes(null, []) makes; no capture shows it. Throws for an unknown name and for
+ *  overlapping point blocks. */
 export function removeLegacyRouteFromRegion(region: Uint8Array | null, name: string):
     { bytes: Uint8Array; removed: { name: string; pointCount: number }; left: string[] } {
   if (!region || region.length < HEAD_LEN || (region[0] | (region[1] << 8)) !== HEAD_MAGIC) {
@@ -212,7 +214,6 @@ export function removeLegacyRouteFromRegion(region: Uint8Array | null, name: str
   const names = infos.map(i => rawName(i).trim());
   const k = names.indexOf(name.trim());
   if (k < 0) throw new Error(`No route named "${name}" on the watch.`);
-  if (count === 1) throw new Error("This is the watch's only route: removing the last one is not done yet (no capture shows an empty route region).");
   const starts = infos.map(i => new DataView(i.buffer).getUint32(16, true));
   const counts = infos.map(i => new DataView(i.buffer).getUint16(20, true));
   const spans = starts.map((s, i) => [s, counts[i]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
