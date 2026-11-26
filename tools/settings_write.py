@@ -224,49 +224,22 @@ KAILASH_SETTINGS = {
     # for every scalar field in this table.
     "home_latitude": "HomeLocation.Latitude",
     "home_longitude": "HomeLocation.Longitude",
-    # Real, 2026-08-10: entry 0x15, enum 0=GPS / 1=GPS+Glonass. READ-ONLY on purpose -
-    # it looks like the watch's GNSS selector and demonstrably is NOT.
-    #
-    # Tested directly on André's Kailash: with the watch's own "GPS & GLONASS" menu ON the
-    # field read 0, with it OFF the field read 0, and a byte-comparison of the two 152-byte
-    # settings blobs across that toggle showed 40 entries in, 40 out, ZERO bytes changed
-    # anywhere. The watch does not store its GNSS choice here. Writing 1 does change the
-    # field and a re-read confirms the field - but that is NOT evidence the receiver
-    # changed, a claim made and corrected the same day.
-    #
-    # Exposed because it is genuinely readable and part of the schema, but a UI must never
-    # offer it as a GLONASS switch. Wherever the watch keeps its real GNSS setting, it is
-    # not in the 0x1100 blob and has not been found yet.
-    "enabled_navigation_systems": "EnabledNavigationSystems",
-    # 2026-11-26 (watch-protocol/10 K7, André: "do it all for all devices"): the rest of the
-    # Kailash's own settings list, written with the same one-entry write (proven on this watch
-    # 2026-08-10). NotificationsOff is what the 7R app itself pushes (entry 0x13 in
-    # kailashsnotificationsandsethome); the others are in its descriptor and the user guide
-    # (2.2, 3.18) but no capture has a vendor app writing them: not yet seen written on the
-    # watch. Left out on purpose (André 2026-11-25: set on the watch, not from an app): the
-    # daily alarm, dual time and daylight saving. GpsBackgroundMode (0x2a) is in the descriptor
-    # but not in the watch's settings reply (7R captures: 41 entries, 0x01-0x27, 0x35, 0x36), so
-    # there is nothing to patch.
+    # NotificationsOff (entry 0x13): what the 7R app pushes from its Connectivity section
+    # (kailashsnotificationsandsethome). Not yet seen written by Sommet on the watch.
     "notifications_off": "NotificationsOff",
-    "gps_position_format": "GpsPositionFormat",
-    "compass_declination": "Compass.Declination",
-    "button_lock_time_mode": "ButtonLock.TimeMode",
-    "gps_time_keeping": "Time.GPSTimeKeeping",
-    "vertical_speed_time_unit": "Units.VerticalSpeedTimeUnit",
-    "view_exercise_compass": "Displays.ExerciseCompass",
-    "view_abc_compass": "Displays.AbcCompass",
-    "view_stopwatch": "Displays.Stopwatch",
-    "view_swimming_drill": "Displays.SwimmingDrill",
-    "view_countdown_timer": "Displays.CountdownTimer",
-    "view_activity_tracking": "Displays.ActivityTracking",
-    "view_alti_baro": "Displays.AltiBaro",
-    "view_step_counter": "Displays.StepCounter",
-    "shortcut_altitude": "Shortcuts.ShortcutAltitude",
-    "shortcut_sunset_sunrise": "Shortcuts.ShortcutSunsetSunrise",
-    "shortcut_steps": "Shortcuts.ShortcutSteps",
-    "shortcut_battery": "Shortcuts.ShortcutBattery",
-    "shortcut_seconds": "Shortcuts.ShortcutSeconds",
-    "shortcut_baro_trend": "Shortcuts.ShortcutBaroTrend",
+    # This table is the 7R app's settings and nothing more (André, 2026-11-26: "we literally
+    # did capture everything of the 7R app"): its settings screen (IMG_2741/2742: backlight
+    # mode and brightness, display contrast, language, storm alarm, tones, vibration, unit
+    # system, time and date format, home location), the NotificationsOff its captures push,
+    # and display_dark (seen switching on this watch). The Kailash's descriptor is shared with
+    # the Ambit3, so it also names fields this watch does nothing with. 19 of them (compass
+    # declination, the compass/stopwatch/countdown/swimming-drill/activity/alti-baro/step
+    # views, six shortcuts, position format, button lock, GPS time keeping, vertical speed
+    # unit) were offered on 2026-11-26 and removed the same day: the 7R app never shows or
+    # writes them, the declination has no menu on the watch (André) and reads 0 in every
+    # capture. EnabledNavigationSystems (entry 0x15) went too: it was a read-only row, and
+    # the watch does not keep its GPS/GLONASS choice there (toggled on the watch 2026-08-10,
+    # no byte changed); André 2026-08-11: "if we can't change it no point on being on a app".
     # NOTE: Kailash's clock (sml.DeviceSettings.Time.TimeISO8601, entry 0x34) is NOT
     # written through this table/write_one() - a `device_time` entry lived here briefly
     # based on a since-disproven hypothesis (that it went through this same 0x1101
@@ -280,9 +253,9 @@ KAILASH_SETTINGS = {
 # (`PI*x/(10^7*180)` - radians for on-device math; dividing by 1e7 alone gives plain
 # decimal degrees, the useful value for a human/UI). Not applied generically - no other
 # curated field here has a <MOD> tag yet - just named explicitly for these two.
-# Kailash keys that are readable but must never be offered as editable - see each one's own
-# note in KAILASH_SETTINGS for the evidence.
-KAILASH_READ_ONLY = {"enabled_navigation_systems"}
+# Kailash keys that are readable but must never be offered as editable. Empty since
+# 2026-11-26: a setting the app can't change isn't shown at all (see KAILASH_SETTINGS).
+KAILASH_READ_ONLY = set()
 
 _DEGREES_X1E7_KEYS = {"home_latitude", "home_longitude"}
 
@@ -876,8 +849,8 @@ def read_all(payload, descriptor, product_id=None):
         if product_id != KAILASH_PRODUCT_ID:
             value = _to_display(key, value)
         # Real, 2026-08-10: tell a UI what it may actually offer, instead of leaving it
-        # to guess from `kind`. `writable` is false for a field with no write path -
-        # today only Kailash's enabled_navigation_systems - so the UI shows the value
+        # to guess from `kind`. `writable` is false for a field with no write path
+        # (KAILASH_READ_ONLY, empty today) - so the UI shows the value
         # without an editor rather than sending a write this project has no reference
         # implementation for; and the min/max here are the ranges SuuntoLink's own UI
         # enforces, which are much tighter than the raw integer width describe_field()

@@ -137,36 +137,12 @@ export const KAILASH_SETTINGS_FIELDS: SettingField[] = [
     signed: true, byteOffset: 0, scale: 1e7 },
   { key: 'home_longitude', entryId: 0x36, kind: 'coord', byteWidth: 4,
     signed: true, byteOffset: 4, scale: 1e7 },
-  // 2026-11-26 (watch-protocol/10 K7): the rest of the Kailash's own settings list, as on the
-  // desktop (tools/settings_write.py KAILASH_SETTINGS). NotificationsOff is what the 7R app
-  // pushes; the others are in its descriptor, not yet seen written on the watch. Alarm, dual
-  // time and daylight saving left out (André: set on the watch).
+  // NotificationsOff: what the 7R app pushes from its Connectivity section. This table is the
+  // 7R app's settings and nothing more, as on the desktop (tools/settings_write.py
+  // KAILASH_SETTINGS, which says why): 19 other fields of the Kailash's descriptor, shared with
+  // the Ambit3 (compass declination, views, shortcuts...), were offered on 2026-11-26 and
+  // removed the same day. The 7R app never shows or writes them.
   { key: 'notifications_off', entryId: 0x13, kind: 'bool', byteWidth: 1 },
-  { key: 'gps_position_format', entryId: 0x04, kind: 'enum', byteWidth: 1,
-    choices: [{ value: 0, label: 'WGS84 d' }, { value: 1, label: 'WGS84 dm' }, { value: 2, label: 'WGS84 dms' }, { value: 3, label: 'UTM' }, { value: 4, label: 'MGRS' }, { value: 5, label: 'British (BNG)' }, { value: 6, label: 'Finnish (ETRS-TM35FIN)' }, { value: 7, label: 'Finnish (KKJ)' }, { value: 8, label: 'Irish (IG)' }, { value: 9, label: 'Swedish (RT90)' }, { value: 10, label: 'Swiss (CH1903)' }, { value: 11, label: 'UTM - NAD27 Alaska' }, { value: 12, label: 'UTM - NAD27 Conus' }, { value: 13, label: 'UTM - NAD83' }, { value: 14, label: 'NZTM2000' }] },
-  // Radians on the watch, degrees on screen: the generated KAILASH_FIELDS row and the desktop.
-  { key: 'compass_declination', entryId: 0x05, kind: 'number', byteWidth: 4, float: true,
-    scale: Math.PI / 180, control: 'declination', unit: '\u00b0', min: -90, max: 90 },
-  { key: 'button_lock_time_mode', entryId: 0x06, kind: 'enum', byteWidth: 1,
-    choices: [{ value: 0, label: 'All buttons' }, { value: 1, label: 'Actions only' }] },
-  { key: 'gps_time_keeping', entryId: 0x0a, kind: 'enum', byteWidth: 1,
-    choices: [{ value: 0, label: 'On' }, { value: 1, label: 'Off' }] },
-  { key: 'vertical_speed_time_unit', entryId: 0x20, kind: 'enum', byteWidth: 1,
-    choices: [{ value: 0, label: 'min' }, { value: 1, label: 'hour' }] },
-  { key: 'view_exercise_compass', entryId: 0x18, kind: 'bool', byteWidth: 1 },
-  { key: 'view_abc_compass', entryId: 0x19, kind: 'bool', byteWidth: 1 },
-  { key: 'view_stopwatch', entryId: 0x1a, kind: 'bool', byteWidth: 1 },
-  { key: 'view_swimming_drill', entryId: 0x1b, kind: 'bool', byteWidth: 1 },
-  { key: 'view_countdown_timer', entryId: 0x1c, kind: 'bool', byteWidth: 1 },
-  { key: 'view_activity_tracking', entryId: 0x1d, kind: 'bool', byteWidth: 1 },
-  { key: 'view_alti_baro', entryId: 0x1e, kind: 'bool', byteWidth: 1 },
-  { key: 'view_step_counter', entryId: 0x1f, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_altitude', entryId: 0x21, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_sunset_sunrise', entryId: 0x22, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_steps', entryId: 0x23, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_battery', entryId: 0x24, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_seconds', entryId: 0x25, kind: 'bool', byteWidth: 1 },
-  { key: 'shortcut_baro_trend', entryId: 0x26, kind: 'bool', byteWidth: 1 },
 ];
 
 const MAGIC = [0x53, 0x42, 0x45, 0x4d, 0x30, 0x31, 0x30, 0x32]; // "SBEM0102"

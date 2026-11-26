@@ -7,6 +7,19 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Kailash settings: the 7R app's, nothing more
+
+- The Kailash's settings in Sommet are again exactly what the 7R app offers, on the desktop
+  and Android: backlight mode and brightness, display contrast, language, storm alarm, tones,
+  vibration, unit system, time and date format, home location, notifications, plus dark display
+  (seen switching on the watch).
+- Removed: the 19 fields added the night before from the watch's settings layout (compass
+  declination, eight views, six shortcuts, position format, button lock, GPS time keeping,
+  vertical speed unit). That layout is shared with the Ambit3; the 7R app never shows or writes
+  them (its screens and all four captures), and the watch has no menu for the declination
+  (André). The read-only navigation-systems row went too: the watch doesn't keep its GPS/GLONASS
+  choice there, and a setting the app can't change isn't shown.
+
 ## 2026-11-26: The Kailash's first Bluetooth link to a computer
 
 - After pairing, the Kailash waits for the phone to speak first. The 7R app sends it a device

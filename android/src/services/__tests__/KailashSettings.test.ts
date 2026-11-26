@@ -48,20 +48,17 @@ beforeEach(() => {
 });
 
 describe('Kailash settings', () => {
-  it('lists the new settings with the entries of its own descriptor', () => {
-    const ids = Object.fromEntries(KAILASH_SETTINGS_FIELDS.map(f => [f.key, f.entryId]));
-    expect(ids.notifications_off).toBe(0x13);
-    expect(ids.gps_position_format).toBe(0x04);
-    expect(ids.compass_declination).toBe(0x05);
-    expect(ids.button_lock_time_mode).toBe(0x06);
-    expect(ids.gps_time_keeping).toBe(0x0a);
-    expect(ids.vertical_speed_time_unit).toBe(0x20);
-    expect(ids.view_step_counter).toBe(0x1f);
-    expect(ids.shortcut_baro_trend).toBe(0x26);
-    // Left out: set on the watch (André 2026-11-25), or not in the watch's settings reply.
-    const keys = KAILASH_SETTINGS_FIELDS.map(f => f.key);
-    expect(keys.filter(k => /^(daily_)?alarm|dual_time|daylight_saving|gps_background_mode/.test(k)))
-      .toEqual([]);
+  it("lists the 7R app's settings and nothing else", () => {
+    // The 7R app's settings screen (assets/APK/kailash/IMG_2741/2742), the NotificationsOff its
+    // captures push, and display_dark (seen switching on the watch). The descriptor's other
+    // fields (declination, views, shortcuts...) were removed on 2026-11-26: the 7R app never
+    // shows or writes them, and the watch has no menu for the declination.
+    expect(Object.fromEntries(KAILASH_SETTINGS_FIELDS.map(f => [f.key, f.entryId]))).toEqual({
+      date_format: 0x01, tones: 0x02, vibration: 0x03, units_mode: 0x07, language: 0x08,
+      time_format: 0x09, display_contrast: 0x0f, backlight_mode: 0x10, backlight_brightness: 0x11,
+      storm_alarm: 0x17, display_dark: 0x27, home_latitude: 0x36, home_longitude: 0x36,
+      notifications_off: 0x13,
+    });
   });
 
   it('writes one entry, never the bond record, and confirms it by a re-read', async () => {
@@ -80,14 +77,5 @@ describe('Kailash settings', () => {
     const sent = splitEntries(mockWrites[0])!;
     expect(sent.entries.map(([id]) => id)).toEqual([0x36]);
     expect(Array.from(sent.entries[0][1])).toEqual([...i32(451234567), ...i32(75000000)]);
-  });
-
-  it('writes the declination typed in degrees as float32 radians, as the desktop', async () => {
-    const r = await writeSetting('compass_declination', 2.5, KAILASH_SETTINGS_FIELDS, 'kailash');
-    expect(r.ok).toBe(true);
-    const data = splitEntries(mockWrites[0])!.entries[0][1];
-    expect(new DataView(data.buffer, data.byteOffset, 4).getFloat32(0, true)).toBeCloseTo(2.5 * Math.PI / 180, 6);
-    const f = KAILASH_SETTINGS_FIELDS.find(x => x.key === 'compass_declination')!;
-    expect([f.control, f.unit, f.min, f.max]).toEqual(['declination', '\u00b0', -90, 90]);
   });
 });

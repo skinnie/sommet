@@ -116,9 +116,14 @@ class KailashTable(unittest.TestCase):
         block = ts[ts.index("export const KAILASH_SETTINGS_FIELDS"):]
         block = block[:block.index("\n];")]
         android = {k: int(v, 16) for k, v in re.findall(r"key: '(\w+)', entryId: (0x[0-9a-f]+)", block)}
-        # enabled_navigation_systems: a read-only desktop row Android leaves out on purpose (the
-        # field doesn't follow the watch's real GPS/GLONASS choice; watch-protocol/10 batch A).
-        self.assertEqual(android, {k: v for k, v in ids.items() if k != "enabled_navigation_systems"})
+        self.assertEqual(android, ids)
+        # The 7R app's settings and nothing else (IMG_2741/2742, its NotificationsOff push, and
+        # display_dark seen on the watch); the 19 descriptor-only fields went on 2026-11-26.
+        self.assertEqual(set(S.KAILASH_SETTINGS), {
+            "date_format", "tones", "vibration", "units_mode", "language", "time_format",
+            "display_contrast", "backlight_mode", "backlight_brightness", "storm_alarm",
+            "display_dark", "home_latitude", "home_longitude", "notifications_off"})
+        self.assertEqual(S.KAILASH_READ_ONLY, set())
         for left in ("GpsBackgroundMode", "DualTimeActive", "DaylightSaving", "Alarms"):
             self.assertFalse(any(left in v for v in S.KAILASH_SETTINGS.values()), left)
 
