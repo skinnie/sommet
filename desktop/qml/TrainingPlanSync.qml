@@ -128,6 +128,9 @@ QtObject {
         if (!store.pending) return
         store.pending = false
         if (TrainingProgramService.installing || !DeviceService.deviceInfoOk) return
+        // Again here: on connect the model can still be the previous watch's (a Kailash plugged
+        // in while a Peak was linked, 2026-11-26), and the backend then refused it.
+        if (!DeviceCapabilities.supportsTrainingPlans) return
         const entries = store.entriesWithMode(store.draftEntries(), store.defaultMode)
         console.info("[plan-sync] syncing", entries.length, "workouts, default mode", store.defaultMode,
                     "autoStart", store.settings.autoStartOptIn)
