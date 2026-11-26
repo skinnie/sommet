@@ -34,25 +34,6 @@ many moves.
 
 ---
 
-## 2026-11-25: Per-model limits checked against the evidence, first fixes (watch-protocol/10)
-
-André: "why don't you check and do it all for all devices?". Every place Sommet refuses or
-hides something per watch model was checked against the captures, the watches' settings
-lists, SuuntoLink's own code and the firmware. First fixes:
-
-- **Apps on Android for the Traverse and Traverse Alpha**, as on the desktop. They have the
-  Apps engine and region, and the app install takes the region's place from the watch's own
-  memory map. Not yet seen on a real Traverse. Planned moves still can't go to a Traverse: it
-  has no TrainingProgram region, and the builder says so.
-- **No alti-baro profile on the Ambit2 S and Ambit2 R**, desktop and Android. They have no
-  barometer, and SuuntoLink's capability record says false for both. The row is left out and a
-  write is refused.
-- **A Kailash no longer gets an "On the watch" source in Routes** on the desktop, and no
-  failing settings read behind it. It has no routes. The old Ambit1/2 branch it fell into
-  had been unused since the Ambit1/2 got real routes. Android already did this.
-
----
-
 ## 2026-11-26: Daily steps from the Ambit3 Vertical, the Traverse and the Traverse Alpha (watch-protocol/10)
 
 André: "go but i think ambit 1 and 2 series don't have steps, check first on spec sheet and if
@@ -74,6 +55,25 @@ needed on firmware".
   program has appStepCounter and "k steps").
 - The Kailash keeps its steps as timeline samples (sml.TimelinePart), which Suunto's own 7R app
   never reads in our captures. Not read yet.
+
+---
+
+## 2026-11-25: Per-model limits checked against the evidence, first fixes (watch-protocol/10)
+
+André: "why don't you check and do it all for all devices?". Every place Sommet refuses or
+hides something per watch model was checked against the captures, the watches' settings
+lists, SuuntoLink's own code and the firmware. First fixes:
+
+- **Apps on Android for the Traverse and Traverse Alpha**, as on the desktop. They have the
+  Apps engine and region, and the app install takes the region's place from the watch's own
+  memory map. Not yet seen on a real Traverse. Planned moves still can't go to a Traverse: it
+  has no TrainingProgram region, and the builder says so.
+- **No alti-baro profile on the Ambit2 S and Ambit2 R**, desktop and Android. They have no
+  barometer, and SuuntoLink's capability record says false for both. The row is left out and a
+  write is refused.
+- **A Kailash no longer gets an "On the watch" source in Routes** on the desktop, and no
+  failing settings read behind it. It has no routes. The old Ambit1/2 branch it fell into
+  had been unused since the Ambit1/2 got real routes. Android already did this.
 
 ---
 
