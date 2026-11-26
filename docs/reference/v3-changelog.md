@@ -7,6 +7,34 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: 0.2.68 in short: what to know before you update
+
+Every change since 0.2.67 is listed in the sections below. Before you update:
+
+1. **Android and iOS: a watch with many moves syncs again** (GitHub #26). Every move was
+   downloaded again at every sync, and one damaged page of the move list crashed the app. Both
+   are fixed. The desktop was not affected.
+2. **Desktop sport modes on the Ambit3, Vertical and Traverse:** creating or deleting one no
+   longer reports "not confirmed" when the watch was written, the Multisport button offers the
+   watch's sport modes as legs, and sport modes and multisports can be deleted, as on Android.
+3. **Ambit1 and Ambit2: much more can be changed from Sommet,** on the desktop and Android:
+   a sport mode's settings and displays, creating and deleting sport modes, creating a
+   multisport (Ambit2 and 2S), removing a route (the last one too), and on the desktop Copy to
+   watch and a Suunto App on an Ambit1 sport mode. These are built from SuuntoLink's own
+   recorded changes and come out byte for byte the same; none of them has been seen on a real
+   Ambit1 or Ambit2.
+4. **Steps and ascent:** daily steps from the Ambit3 Vertical, the Traverse and the Traverse
+   Alpha, and the Vertical's ascent history (week, year, total) on the Health page.
+5. **Kailash: 20 more settings,** desktop and Android, and Android writes a Kailash setting
+   as that one entry. Android now shows the compass declination in degrees, as the desktop.
+6. **Not yet seen on a real watch.** These are checked with tests, not on the watch itself yet:
+   - everything under 3 above;
+   - steps and ascent on the Vertical, Traverse and Traverse Alpha;
+   - the 20 new Kailash settings;
+   - Apps on Android for the Traverse and Traverse Alpha.
+
+---
+
 ## 2026-11-26: Found in the review before 0.2.68
 
 - **Android, Kailash: the compass declination is shown and typed in degrees,** as on the
