@@ -94,6 +94,60 @@ def start(link, loop, command, payload=b"", timeout=5.0):
     return thread, result, sent(link.notify_chrc)[-1]
 
 
+# The 7R app's opener to the Kailash as it went over the air: assets/APK/kailash/kailashpair.pklg
+# frames 737-738 (the same in kailash7rpair.btsnoop frames 3074-3075).
+SEVEN_R_OPENER = bytes.fromhex("7e00000100000000000400000082060800d32cfa" "7d5e7e")
+
+
+def silent_link():
+    chrc, loop = Chrc(), Loop()
+    link = S.ServerLink(chrc, loop)
+    link.dry_run = False
+    link.subscribed()
+    return link, chrc, loop
+
+
+def test_a_silent_watch_gets_the_7r_opener():
+    link, chrc, loop = silent_link()
+    assert not link.open_if_silent(0.0)             # just subscribed: the watch may speak
+    loop.pump()
+    assert chrc.out == []
+    link._subscribed_at -= S.OPENER_AFTER_S + 0.5
+    assert link.open_if_silent(0.0)
+    loop.pump()
+    assert b"".join(chrc.out) == SEVEN_R_OPENER     # byte for byte as the 7R app sent it
+    chrc.out.clear()
+    assert not link.open_if_silent(9.0)             # once per link
+    link.on_message(watch(0x0002, HELLO, flags=0x02))
+    assert link.handshake_done.is_set() and link._pkt_num == 1
+    loop.pump()
+    assert chrc.out == []
+
+
+def test_a_watch_that_speaks_first_gets_no_opener():
+    link, chrc, loop = silent_link()
+    link.on_message(notice(1))                      # the Peak's own opener
+    link._subscribed_at -= S.OPENER_AFTER_S + 0.5
+    assert not link.open_if_silent(9.0)
+    loop.pump()
+    assert [(m.command, m.payload) for m in sent(chrc)] == [(0x0000, b"\x03\x00\x00\x00")]
+
+
+def test_the_opener_without_a_reported_subscription():
+    chrc, loop = Chrc(), Loop()
+    link = S.ServerLink(chrc, loop)                 # a bonded watch: BlueZ never said
+    assert not link.open_if_silent(1.0)
+    assert link.open_if_silent(S.OPENER_AFTER_S)
+    loop.pump()
+    assert b"".join(chrc.out) == SEVEN_R_OPENER
+    link.reset()                                    # the link dropped: the next one may get it
+    chrc.out.clear()
+    chrc.notifying = False
+    assert not link.open_if_silent(9.0)             # nobody subscribed: nothing to send to
+    chrc.notifying = True
+    assert link.open_if_silent(9.0)
+
+
 def test_sync_notice_is_answered():
     link, chrc, loop = linked()
     link.on_message(notice(0))

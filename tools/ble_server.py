@@ -570,6 +570,18 @@ SYNC_NOTICE_ACK = 0x09
 # hw): André's Peak 2026-10-25, request pkt 11 answered by 0x0002 pkt 11, flags 0x0a.
 REPLY_COMMAND = {0x0000: 0x0002}
 
+# The phone's own opener: 0x0000 device info, flags 0x01, connId 0, pktNum 0, payload
+# 82 06 08 00. The 7R app sends it to the Kailash right after the watch subscribes, before the
+# watch says anything (assets/APK/kailash/kailashpair.pklg frame 737, kailash7rpair.btsnoop
+# frame 3074), and the watch answers with its 0x0002 hello. The Kailash waits for it: André's
+# Kailash on the X230, 2026-11-26, paired and subscribed, then stayed silent until the
+# empty-link watchdog dropped it, link after link. The Peak on Linux and Android speaks first
+# (its 0x1201, answered above), so this goes out only when the watch has said nothing for
+# OPENER_AFTER_S after subscribing. protocol_ble.c's iOS path sends the same frame to every
+# model.
+PHONE_OPENER = bytes.fromhex("82060800")
+OPENER_AFTER_S = 2.0
+
 
 class WatchRefused(RuntimeError):
     """The watch answered with errFlags set: it refused the command (protocol_ble.c returns an
@@ -633,6 +645,9 @@ class ServerLink:
         # already documented for the native code.
         self.handshake_done = threading.Event()
         self.device_info = {}
+        self._heard = False            # any frame from the watch on this link
+        self._subscribed_at = None     # time.monotonic() of its subscription, when BlueZ told us
+        self._opener_sent = False
 
     def reset(self):
         """Called when the watch's ACL link drops without BlueZ ever calling StopNotify on
@@ -647,6 +662,9 @@ class ServerLink:
         link. Runs on the GLib loop (the disconnect and subscribe handlers)."""
         self.handshake_done.clear()
         self.device_info = {}
+        self._heard = False
+        self._subscribed_at = None
+        self._opener_sent = False
         self._pkt_num = 0
         self._conn_id = 0x0009
         self._reply = None
@@ -703,7 +721,32 @@ class ServerLink:
         self._send_raw(SYNC_NOTICE, flags=SYNC_NOTICE_ACK, conn_id=self._conn_id,
                        pkt_num=message.pkt_num, payload=b"")
 
+    def subscribed(self):
+        """The watch subscribed: the clock for open_if_silent() starts."""
+        self._subscribed_at = time.monotonic()
+
+    def open_if_silent(self, quiet_for):
+        """Sends PHONE_OPENER once per link when the watch subscribed and has said nothing for
+        OPENER_AFTER_S. `quiet_for` is the watchdog's own clock (since the link, or since the
+        passkey prompt), used when BlueZ never reported the subscription (a bonded watch keeps
+        its subscription). Runs on the GLib loop. True when it sent it."""
+        if self.handshake_done.is_set() or self._heard or self._opener_sent:
+            return False
+        if not self.notify_chrc.notifying:
+            return False
+        since = (time.monotonic() - self._subscribed_at if self._subscribed_at is not None
+                 else quiet_for)
+        if since < OPENER_AFTER_S:
+            return False
+        self._opener_sent = True
+        print(f"  the watch has said nothing for {since:.0f} s after subscribing - sending the "
+              "opener the 7R app sends (device info 0x0000)")
+        self._send_raw(0x0000, flags=0x01, conn_id=0x0000, pkt_num=0x0000,
+                       payload=PHONE_OPENER)
+        return True
+
     def _handle_handshake_frame(self, message):
+        self._heard = True
         if message.command == 0x1201:
             # The watch's opener. Byte-exact against the working Suunto capture
             # (protocol_ble.c's own comment, itself sourced from assets/ble 2026-08-09/):
@@ -1242,7 +1285,7 @@ class LinkState:
 
 
 def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent=None,
-                    state=None, session_started=lambda: False):
+                    state=None, session_started=lambda: False, on_quiet=None):
     """Scan, and connect to anything soliciting the NSP service.
 
     Deliberately an unfiltered scan. The Kotlin module hit exactly this on real hardware: the
@@ -1297,6 +1340,8 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         if agent is not None and agent.pending_passkey_device == path:
             state.quiet_since = now    # a passkey prompt is up: wait for it, then start over
             return True
+        if on_quiet is not None:
+            on_quiet(now - state.quiet_since)   # the phone's opener, for a watch that waits
         if now - state.quiet_since < EMPTY_LINK_S:
             return True                # keep checking
         print(f"  the watch linked but started no session in {EMPTY_LINK_S:.0f} s "
@@ -1676,6 +1721,7 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
         if not link.handshake_done.is_set():
             assembler.reset()
             link.reset()
+            link.subscribed()
 
     notify_chrc.on_subscribed = on_subscribed
 
@@ -1730,7 +1776,8 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     # soliciting our service, then connect to it while we host the server.
     start_discovery(bus, dbus, GLib, adapter, verbose,
                     on_disconnect=reset_link_on_disconnect, agent=agent,
-                    state=link_state, session_started=link.handshake_done.is_set)
+                    state=link_state, session_started=link.handshake_done.is_set,
+                    on_quiet=link.open_if_silent)
 
     if timeout > 0:
         def stop():

@@ -43,9 +43,9 @@ import zlib
 from pathlib import Path
 
 from ble_link import NspAssembler, _slip_unescape
-from ble_server import (NAME_PREFIXES, NOTIFY_CHAR_UUID, SCAN_ON_S, SCAN_PERIOD_S, SERVICE_UUID,
-                        SUUNTO_OUI, WRITE_CHAR_UUID, ControlSocketServer, ServerLink, _Stamped,
-                        handle_rx)
+from ble_server import (NAME_PREFIXES, NOTIFY_CHAR_UUID, OPENER_AFTER_S, SCAN_ON_S,
+                        SCAN_PERIOD_S, SERVICE_UUID, SUUNTO_OUI, WRITE_CHAR_UUID,
+                        ControlSocketServer, ServerLink, _Stamped, handle_rx)
 
 PORT_FILE = Path.home() / ".cache" / "Sommet" / "ble.port"
 
@@ -500,6 +500,14 @@ class WinHost:
         self._reorder.reset()
         self.assembler.reset()
         self.link.reset()
+        self.link.subscribed()
+        # A watch that waits for the phone to speak first (the Kailash) gets the 7R app's
+        # opener once it has said nothing for OPENER_AFTER_S (ble_server.PHONE_OPENER).
+        self.loop.call_later(OPENER_AFTER_S + 0.1, self._open_if_silent, self.device)
+
+    def _open_if_silent(self, dev):
+        if self.device is dev and dev is not None:
+            self.link.open_if_silent(OPENER_AFTER_S)
 
     def _on_write(self, _chrc, args):
         """On a WinRT thread. The request is fetched through its own completion callback, also

@@ -7,6 +7,16 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: The Kailash's first Bluetooth link to a computer
+
+- After pairing, the Kailash waits for the phone to speak first. The 7R app sends it a device
+  information request (0x0000, payload 82 06 08 00) as soon as the watch subscribes. The Peak
+  speaks first on Linux and Android, so the computer only waited, and the Kailash paired, sat
+  silent and was dropped after 8 s, link after link (André's Kailash on the X230).
+- The computer (Linux and Windows) now sends the same request, byte for byte as in the 7R
+  capture, when a watch has said nothing for 2 s after subscribing. A watch that speaks first
+  gets nothing new. Not yet seen working on a real Kailash.
+
 ## 2026-11-26: 0.2.68 in short: what to know before you update
 
 Every change since 0.2.67 is listed in the sections below. Before you update:
