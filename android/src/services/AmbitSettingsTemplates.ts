@@ -1810,6 +1810,220 @@ export const KAILASH_FIELDS: SettingField[] = [
         "label": "GPS+Glonass"
       }
     ]
+  },
+  {
+    "key": "notifications_off",
+    "entryId": 19,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "gps_position_format",
+    "entryId": 4,
+    "byteWidth": 1,
+    "kind": "enum",
+    "choices": [
+      {
+        "value": 0,
+        "label": "WGS84 d"
+      },
+      {
+        "value": 1,
+        "label": "WGS84 dm"
+      },
+      {
+        "value": 2,
+        "label": "WGS84 dms"
+      },
+      {
+        "value": 3,
+        "label": "UTM"
+      },
+      {
+        "value": 4,
+        "label": "MGRS"
+      },
+      {
+        "value": 5,
+        "label": "British (BNG)"
+      },
+      {
+        "value": 6,
+        "label": "Finnish (ETRS-TM35FIN)"
+      },
+      {
+        "value": 7,
+        "label": "Finnish (KKJ)"
+      },
+      {
+        "value": 8,
+        "label": "Irish (IG)"
+      },
+      {
+        "value": 9,
+        "label": "Swedish (RT90)"
+      },
+      {
+        "value": 10,
+        "label": "Swiss (CH1903)"
+      },
+      {
+        "value": 11,
+        "label": "UTM - NAD27 Alaska"
+      },
+      {
+        "value": 12,
+        "label": "UTM - NAD27 Conus"
+      },
+      {
+        "value": 13,
+        "label": "UTM - NAD83"
+      },
+      {
+        "value": 14,
+        "label": "NZTM2000"
+      }
+    ]
+  },
+  {
+    "key": "compass_declination",
+    "entryId": 5,
+    "byteWidth": 4,
+    "kind": "number",
+    "float": true,
+    "scale": 0.017453292519943295
+  },
+  {
+    "key": "button_lock_time_mode",
+    "entryId": 6,
+    "byteWidth": 1,
+    "kind": "enum",
+    "choices": [
+      {
+        "value": 0,
+        "label": "All buttons"
+      },
+      {
+        "value": 1,
+        "label": "Actions only"
+      }
+    ]
+  },
+  {
+    "key": "gps_time_keeping",
+    "entryId": 10,
+    "byteWidth": 1,
+    "kind": "enum",
+    "choices": [
+      {
+        "value": 0,
+        "label": "True"
+      },
+      {
+        "value": 1,
+        "label": "False"
+      }
+    ]
+  },
+  {
+    "key": "vertical_speed_time_unit",
+    "entryId": 32,
+    "byteWidth": 1,
+    "kind": "enum",
+    "choices": [
+      {
+        "value": 0,
+        "label": "min"
+      },
+      {
+        "value": 1,
+        "label": "hour"
+      }
+    ]
+  },
+  {
+    "key": "view_exercise_compass",
+    "entryId": 24,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_abc_compass",
+    "entryId": 25,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_stopwatch",
+    "entryId": 26,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_swimming_drill",
+    "entryId": 27,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_countdown_timer",
+    "entryId": 28,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_activity_tracking",
+    "entryId": 29,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_alti_baro",
+    "entryId": 30,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "view_step_counter",
+    "entryId": 31,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_altitude",
+    "entryId": 33,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_sunset_sunrise",
+    "entryId": 34,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_steps",
+    "entryId": 35,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_battery",
+    "entryId": 36,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_seconds",
+    "entryId": 37,
+    "byteWidth": 1,
+    "kind": "bool"
+  },
+  {
+    "key": "shortcut_baro_trend",
+    "entryId": 38,
+    "byteWidth": 1,
+    "kind": "bool"
   }
 ];
 
