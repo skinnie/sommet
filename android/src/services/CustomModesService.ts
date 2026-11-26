@@ -3,7 +3,7 @@ import { base64ToBytes } from './Base64';
 import { setCustomModesCache } from './CustomModesCache';
 import { decode, Display, ExerciseMode } from './CustomModesReader';
 import { isAmbit12 } from './AmbitSettingsService';
-import { readLegacySportModeRegion, LegacyGroup, LegacyMode } from './AmbitLegacySportModes';
+import { readLegacySportModeRegion, LegacyGroup, LegacyMode, LegacyMenu } from './AmbitLegacySportModes';
 import {
   renameMode as renameModeRaw, RenameModeResult,
   writeField as writeFieldRaw, WriteFieldResult,
@@ -38,6 +38,8 @@ export interface ReadCustomModesState {
   // Ambit1/2: the watch's sport-mode menu (region 0x2000's groups), the multisports among them.
   // Read only (watch-protocol/10 L2).
   legacyGroups?: LegacyGroup[];
+  // Ambit1/2: what may be deleted and SuuntoLink's 10-mode count (watch-protocol/10 L3).
+  legacyMenu?: LegacyMenu;
   error?: string;
 }
 
@@ -86,7 +88,7 @@ export async function readCustomModes(
       if (legacy) {
         const region = await readLegacySportModeRegion();
         const modes = region.modes.map((m, i) => legacyToExerciseMode(m, region.displays[i] ?? []));
-        onState({ phase: 'done', modes, legacy: true, legacyGroups: region.groups });
+        onState({ phase: 'done', modes, legacy: true, legacyGroups: region.groups, legacyMenu: region.menu });
         return;
       }
     }

@@ -153,6 +153,19 @@ PageFlickable {
 
     readonly property int maxDisplays: caps.maxDisplays ? caps.maxDisplays : 8
     readonly property int deviceMaxSportModes: caps.maxSportModes ? caps.maxSportModes : 10
+    // How many of those are used. An Ambit1/2 read carries SuuntoLink's own count (its
+    // multisports count, its Transition-only legs too, and an Ambit1 has no menu entries to
+    // count), so the Create button and "N/10 used" follow it there (watch-protocol/10 L3).
+    readonly property int sportModesUsed: DeviceCapabilities.supportsLegacySportModeManage
+        ? CustomModesService.sportModesUsed : CustomModesService.modes.length
+    // The last create or delete the watch refused, in SuuntoLink's words ("10/10 sport modes
+    // used: delete one first"); cleared by the next one that goes through.
+    property string manageMessage: ""
+
+    Connections {
+        target: CustomModesService
+        function onManageResult(ok, message) { root.manageMessage = ok ? "" : message }
+    }
     readonly property int deviceMaxMultisport:
         caps.maxMultisportModes !== undefined ? caps.maxMultisportModes : 0
 
@@ -454,7 +467,8 @@ PageFlickable {
                     }
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 36 - Theme.spacingMedium * 2 - 20
+                        width: parent.width - 36 - Theme.spacingMedium * 2
+                               - (msDelete.visible ? msDelete.implicitWidth : 20)
                         spacing: 2
                         Text {
                             text: msCard.modelData.name
@@ -466,6 +480,22 @@ PageFlickable {
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                         }
+                    }
+                    // Ambit2 / 2S: deleted as SuuntoLink deletes one, with the modes only it
+                    // uses (its Transition legs).
+                    Text {
+                        id: msDelete
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: msCard.modelData.deletable === true && !CustomModesService.writingMode
+                        text: qsTr("Delete")
+                        color: msDeleteHover.hovered ? Theme.error : Theme.mutedText
+                        font.pixelSize: Theme.fontSizeCaption
+                        font.underline: msDeleteHover.hovered
+                        HoverHandler {
+                            id: msDeleteHover
+                            cursorShape: Qt.PointingHandCursor
+                        }
+                        TapHandler { onTapped: deleteDialog.ask(msCard.modelData.name, true) }
                     }
                 }
             }
@@ -489,16 +519,16 @@ PageFlickable {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("%1/%2 used").arg(CustomModesService.modes.length)
+                text: qsTr("%1/%2 used").arg(root.sportModesUsed)
                                         .arg(root.deviceMaxSportModes)
-                color: CustomModesService.modes.length >= root.deviceMaxSportModes
+                color: root.sportModesUsed >= root.deviceMaxSportModes
                        ? Theme.error : Theme.mutedText
                 font.pixelSize: Theme.fontSizeBody
             }
             RoundedButton {
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("Create")
-                enabled: CustomModesService.modes.length < root.deviceMaxSportModes
+                enabled: root.sportModesUsed < root.deviceMaxSportModes
                          && !CustomModesService.writingMode
                 onClicked: createModeDialog.open()
             }
@@ -514,6 +544,15 @@ PageFlickable {
         }
 
 
+        Text {
+            width: parent.width
+            visible: root.manageMessage.length > 0
+            text: root.manageMessage
+            wrapMode: Text.WordWrap
+            color: Theme.error
+            font.pixelSize: Theme.fontSizeBody
+        }
+
         Repeater {
             model: CustomModesService.modes
             delegate: Card {
@@ -522,7 +561,10 @@ PageFlickable {
                 required property var modelData
                 readonly property bool busy: CustomModesService.writingMode === modelData.name
 
-                TapHandler { onTapped: root.selectedModeName = modeCard.modelData.name }
+                // Not when the tap was on Delete: both handlers see the same tap.
+                TapHandler {
+                    onTapped: if (!modeDeleteHover.hovered) root.selectedModeName = modeCard.modelData.name
+                }
 
                 Item {
                     width: parent.width
@@ -597,6 +639,22 @@ PageFlickable {
                             color: Theme.mutedText
                             font.pixelSize: Theme.fontSizeCaption
                             font.italic: true
+                        }
+                        // Ambit1/2 (watch-protocol/10 L3): only on a mode SuuntoLink would delete
+                        // (never a multisport's leg, the Transition with no menu entry, the last
+                        // one). Small and muted like a display's Remove; asks first.
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: modeCard.modelData.deletable === true && !CustomModesService.writingMode
+                            text: qsTr("Delete")
+                            color: modeDeleteHover.hovered ? Theme.error : Theme.mutedText
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.underline: modeDeleteHover.hovered
+                            HoverHandler {
+                                id: modeDeleteHover
+                                cursorShape: Qt.PointingHandCursor
+                            }
+                            TapHandler { onTapped: deleteDialog.ask(modeCard.modelData.name, false) }
                         }
                         Icon { glyph: Icons.chevronRight; size: 20; color: Theme.mutedText; anchors.verticalCenter: parent.verticalCenter }
                     }
@@ -1512,6 +1570,41 @@ PageFlickable {
         anchors.centerIn: Overlay.overlay
         onCreateRequested: (name, activityId) =>
             CustomModesService.createMode(name, activityId, DeviceService.model)
+    }
+
+    // Delete one sport mode or multisport (Ambit1/2, watch-protocol/10 L3): the watch's region
+    // is saved first, then rewritten without it.
+    ThemedDialog {
+        id: deleteDialog
+        property string targetName: ""
+        property bool multisport: false
+        function ask(name, isMultisport) {
+            targetName = name
+            multisport = isMultisport
+            open()
+        }
+        title: qsTr("Delete this sport mode?")
+        parent: Overlay.overlay
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(440, (parent ? parent.width : 440) - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Text {
+            text: deleteDialog.multisport
+                  ? qsTr("\"%1\" and the sport modes only it uses are removed from the watch. "
+                         + "A copy of the watch's sport modes is saved first.").arg(deleteDialog.targetName)
+                  : qsTr("\"%1\" is removed from the watch. A copy of the watch's sport modes "
+                         + "is saved first.").arg(deleteDialog.targetName)
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontSizeBody
+        }
+        onAccepted: {
+            root.manageMessage = ""
+            if (multisport)
+                CustomModesService.deleteMultisport(targetName)
+            else
+                CustomModesService.deleteMode(targetName)
+        }
     }
 
     MultisportEditorDialog {

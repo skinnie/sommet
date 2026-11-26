@@ -34,6 +34,11 @@ memory), so there's nothing safe to send for THAT specific piece yet.
     ./tools/legacy_link.py route-remove NAME [--write]
     ./tools/legacy_link.py sport-mode-edit MODE '{"autolapM": 1000}' [--write]
     ./tools/legacy_link.py sport-mode-displays MODE '[{"op": "add", "type": "1-row"}]' [--write]
+    ./tools/legacy_link.py sport-mode-create NAME ACTIVITY --variant Duck [--write]
+    ./tools/legacy_link.py sport-mode-delete NAME --variant Duck [--multisport] [--write]
+    ./tools/legacy_link.py sport-mode-menu --variant Duck
+    ./tools/legacy_link.py sport-mode-mirror SOURCE-REGION.bin [--write]
+    ./tools/legacy_link.py pois-add POIS.json [--write]
 """
 
 import json
@@ -480,6 +485,111 @@ def sport_mode_displays_edit(mode, edits, write=False, backup_dir=None):
                                   write, backup_dir)
 
 
+def sport_mode_create(name, activity_id, variant, write=False, backup_dir=None):
+    """Creates one sport mode on an Ambit1/2 as SuuntoLink does (legacy_sport_modes.create_mode
+    says which capture each byte comes from): its settings from the sport's SuuntoLink defaults,
+    SuuntoLink's seven new-mode displays and, on the Ambit2 family, its menu entry. One
+    _sport_mode_region_rmw. `variant` is the watch's codename (Bluebird, Duck, Colibri,
+    Greentit): it picks the record format and which of SuuntoLink's settings the model has."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    return _sport_mode_region_rmw(
+        name, lambda region: LSM.create_mode(region, name, activity_id, variant), write, backup_dir)
+
+
+def sport_mode_delete(name, variant, multisport=False, write=False, backup_dir=None):
+    """Deletes one sport mode (and its menu entry) or, with `multisport`, one multisport and the
+    modes only it used, with SuuntoLink's refusals (legacy_sport_modes.delete_mode /
+    delete_multisport). One _sport_mode_region_rmw."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    op = LSM.delete_multisport if multisport else LSM.delete_mode
+    return _sport_mode_region_rmw(name, lambda region: op(region, name, variant), write, backup_dir)
+
+
+def sport_mode_mirror(source, write=False, backup_dir=None):
+    """Makes this Ambit1/2's sport-mode region the bytes of another watch of the same model (the
+    Copy page, watch-protocol/10 L14): `source` is that watch's region as read. Its used extent is
+    written with the rest 0xFF, as SuuntoLink and every writer here leave the 10240 bytes, through
+    the same _sport_mode_region_rmw (a copy of this watch's region first, read-back after). The
+    caller checks the two watches are the same model (André, 2026-08-30). Refused when the source's
+    displays show a Suunto App or its modes link one (0x010C): this family's Apps are not copied
+    (no Apps writer), so those rows would point at the target's own apps."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    used = LSM.region_used(source)
+    if used > LSM.REGION_WRITE_BYTES:
+        raise ValueError(f"the source's sport modes use {used} bytes, past the "
+                         f"{LSM.REGION_WRITE_BYTES} SuuntoLink writes")
+    links = LSM.app_links(source)
+    if links:
+        raise ValueError("the source's sport modes show Suunto Apps ("
+                         + ", ".join(sorted(links)) + "): apps are not copied on an Ambit1/2 yet")
+    want = bytes(source[:used]) + b"\xff" * (LSM.REGION_WRITE_BYTES - used)
+
+    def patcher(region):
+        lens = {n for _o, n in LSM.named_blobs(region)}
+        if lens and lens != {n for _o, n in LSM.named_blobs(want)}:
+            raise ValueError("the two watches' sport-mode records differ: not the same model")
+        return want
+    return _sport_mode_region_rmw("all sport modes", patcher, write, backup_dir)
+
+
+def pois_add(new_pois, write=False, backup_dir=None):
+    """Adds POIs to an Ambit1/2, keeping every waypoint already on it, route waypoints included -
+    the list writer poi_remove and route_send use (SuuntoLink rewrites this family's list whole:
+    0x0b04, then one 0x0b05 each). `new_pois` are {name, lat, lon, type, ctime?}: the type as this
+    family numbers it, the ctime fields carried when the POI comes off another Ambit1/2, else 0
+    (what poi-add writes). Skips one already there (same name and position to 1e-5 degree).
+    Without `write` nothing is sent; with it, the list is saved to <backup_dir> first, read back
+    after, and the copy written back once if the count is wrong."""
+    import time                                               # noqa: PLC0415
+    import legacy_route                                       # noqa: PLC0415
+
+    current = waypoints()
+    if not current.get("ok"):
+        raise RuntimeError(current.get("error", "could not read the watch's waypoint list"))
+    listed = current.get("waypoints", [])
+    have = {(str(w.get("name", "")).strip().lower(), round(float(w.get("lat", 0.0)), 5),
+             round(float(w.get("lon", 0.0)), 5)) for w in listed}
+    added = []
+    for p in new_pois:
+        key = (str(p.get("name", "")).strip().lower(), round(float(p["lat"]), 5),
+               round(float(p["lon"]), 5))
+        if key in have:
+            continue
+        have.add(key)
+        rec = {"name": str(p.get("name", "")), "route_name": "", "lat": float(p["lat"]),
+               "lon": float(p["lon"]), "type": int(p.get("type", 0)) & 0xFF}
+        for k in ("ctime_year", "ctime_month", "ctime_day", "ctime_hour", "ctime_minute",
+                  "ctime_second"):
+            rec[k] = int((p.get("ctime") or {}).get(k, 0))
+        added.append(rec)
+    if len(listed) + len(added) > legacy_route.MAX_LIST_WAYPOINTS:
+        raise ValueError(f"{len(listed)} POIs and route waypoints are on the watch and {len(added)} "
+                         f"more would pass the {legacy_route.MAX_LIST_WAYPOINTS} it holds")
+    result = {"ok": True, "wrote": False, "added": [r["name"] for r in added], "kept": len(listed)}
+    if not write or not added:
+        return result
+    from write_nav import DEFAULT_BACKUP_DIR                  # noqa: PLC0415
+    folder = pathlib.Path(backup_dir or DEFAULT_BACKUP_DIR / "legacy_nav")
+    folder.mkdir(parents=True, exist_ok=True)
+    backup = folder / time.strftime("legacy-waypoints-%Y%m%d-%H%M%S.json")
+    backup.write_text(json.dumps(current))
+    waypoints_restore(listed + added)
+    back = waypoints()
+    if not back.get("ok") or len(back.get("waypoints", [])) != len(listed) + len(added):
+        waypoints_restore(listed)
+        raise RuntimeError(f"the watch did not keep the new list; the copy was written back ({backup})")
+    result.update(wrote=True, backup=str(backup))
+    return result
+
+
+def sport_mode_menu(variant):
+    """The watch's sport modes and multisports with what may be deleted and the 10-mode count
+    (legacy_sport_modes.menu). Read only."""
+    import legacy_sport_modes as LSM                          # noqa: PLC0415
+    region = LSM.read_region_live(LSM.REGION_WRITE_BYTES)
+    return dict(LSM.menu(region, variant), ok=True)
+
+
 def waypoints_without_route(waypoints, route_name, still_used=()):
     """The waypoint list without a removed route's own waypoints: those whose route_name is that
     route's (as route_send tags them, and SuuntoLink before it). Kept when another route left on
@@ -603,7 +713,8 @@ _COMMANDS = ("device-info", "settings", "waypoints", "logs", "poi-add", "poi-cle
              "gps-orbit-status", "gps-orbit-write",
              "sport-mode-write-presets", "routes", "route-head",
              "route-region-save", "route-region-restore", "nav-restore-json", "route-send",
-             "route-remove", "sport-mode-edit", "sport-mode-displays")
+             "route-remove", "sport-mode-edit", "sport-mode-displays", "sport-mode-create",
+             "sport-mode-delete", "sport-mode-menu", "sport-mode-mirror", "pois-add")
 
 
 def _opt(flag):
@@ -694,6 +805,49 @@ def main():
                 result = sport_mode_displays_edit(sys.argv[2], edits,
                                                   write="--write" in sys.argv[4:],
                                                   backup_dir=_opt("--backup-dir"))
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd in ("sport-mode-create", "sport-mode-delete", "sport-mode-menu"):
+            # sport-mode-create NAME ACTIVITY --variant V [--write] [--backup-dir DIR]
+            # sport-mode-delete NAME --variant V [--multisport] [--write] [--backup-dir DIR]
+            # sport-mode-menu --variant V
+            variant = _opt("--variant")
+            pos = []
+            for i, a in enumerate(sys.argv[2:]):
+                if not a.startswith("--") and sys.argv[1 + i] not in ("--variant", "--backup-dir"):
+                    pos.append(a)
+            need = {"sport-mode-create": 2, "sport-mode-delete": 1, "sport-mode-menu": 0}[cmd]
+            if not variant or len(pos) < need:
+                sys.exit(f"usage: {sys.argv[0]} sport-mode-create NAME ACTIVITY | sport-mode-delete "
+                         "NAME [--multisport] | sport-mode-menu, with --variant CODENAME "
+                         "[--write] [--backup-dir DIR]")
+            write = "--write" in sys.argv[2:]
+            try:
+                if cmd == "sport-mode-create":
+                    result = sport_mode_create(pos[0], int(pos[1]), variant, write=write,
+                                               backup_dir=_opt("--backup-dir"))
+                elif cmd == "sport-mode-delete":
+                    result = sport_mode_delete(pos[0], variant,
+                                               multisport="--multisport" in sys.argv[2:],
+                                               write=write, backup_dir=_opt("--backup-dir"))
+                else:
+                    result = sport_mode_menu(variant)
+            except ValueError as exc:
+                result = {"ok": False, "error": str(exc)}
+        elif cmd in ("sport-mode-mirror", "pois-add"):
+            # sport-mode-mirror REGION.bin [--write] [--backup-dir DIR] : the Copy page's
+            #     whole-region copy between two watches of one model.
+            # pois-add POIS.json [--write] [--backup-dir DIR] : add POIs, keep every waypoint.
+            if len(sys.argv) < 3 or sys.argv[2].startswith("--"):
+                sys.exit(f"usage: {sys.argv[0]} {cmd} FILE [--write] [--backup-dir DIR]")
+            write = "--write" in sys.argv[3:]
+            try:
+                if cmd == "sport-mode-mirror":
+                    result = sport_mode_mirror(pathlib.Path(sys.argv[2]).read_bytes(), write=write,
+                                               backup_dir=_opt("--backup-dir"))
+                else:
+                    result = pois_add(json.loads(pathlib.Path(sys.argv[2]).read_text()),
+                                      write=write, backup_dir=_opt("--backup-dir"))
             except ValueError as exc:
                 result = {"ok": False, "error": str(exc)}
         elif cmd == "sport-mode-write-presets":

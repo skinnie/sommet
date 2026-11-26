@@ -330,6 +330,15 @@ compiled binary: the real region decodes to **"Storm alarm"** and **"Sunrise/Sun
 
 The `IAMRULE` payload itself is byte-compatible, which is what makes apps cross-device.
 
+## 12. Creating and deleting a mode (2026-11-26)
+
+SuuntoLink created three modes in `zzambit1full.pcap` (Yoga, Adventure Racing, Alpine Skiing),
+each in two writes: the mode's `0x0101` appended with its 76-byte settings and a `0x01FF`, then
+its seven displays. The Ambit1 region has no menu entries, so nothing else changes. No delete is
+captured on the Ambit1; removing a created mode gives back the write before it. Both are written
+by `tools/legacy_sport_modes.py create_mode / delete_mode`; the rules are in
+`docs/ambit2_protocol_findings.md` section 3a.
+
 ## 11. Displays (2026-11-26)
 
 The Ambit1's display records are the Ambit2's, byte for byte: see

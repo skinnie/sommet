@@ -10,6 +10,7 @@ import { ExerciseMode, FIELD_TYPES, fieldTypeLabel, builtInScreenName } from '..
 import { clearCustomModesCache } from '../services/CustomModesCache';
 import {
   writeLegacySportMode, LegacyModePatch, writeLegacyDisplays, LegacyGroup, LEGACY_ROW_LABELS,
+  LegacyMenu, createLegacySportMode, deleteLegacySportMode, LEGACY_SELECTABLE_ACTIVITIES,
 } from '../services/AmbitLegacySportModes';
 import {
   readCustomModes, renameCustomMode, writeCustomModeField, writeCustomModeDisplayField,
@@ -69,6 +70,16 @@ const MULTISPORT_ACTIVITIES = SPORT_MODE_ROWS.multisportActivities
 
 type CreateKind = 'single' | 'multi';
 
+// Ambit1/2: the sports SuuntoLink offers for a new mode (ui/input.js movescountActivity) that have
+// its defaults for this model, minus the multisport containers, sorted by name like the list above.
+function legacyCreatableActivities(variant?: string) {
+  const per = (variant && SPORT_MODE_ROWS.activityDefaults[variant]) || {};
+  return Object.keys(per).map(Number)
+    .filter(id => LEGACY_SELECTABLE_ACTIVITIES.has(id) && !SPORT_MODE_ROWS.multisportActivities.includes(id) && ACTIVITY_TYPES[id])
+    .map(id => ({ id, name: ACTIVITY_TYPES[id].name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function SportModesScreen() {
   const theme = useV3Theme();
   // The watch may be connected over USB or BLE. Over BLE the link is already open and owned
@@ -93,6 +104,11 @@ export default function SportModesScreen() {
   const [legacyGroups, setLegacyGroups] = useState<LegacyGroup[]>([]);
   const legacyMultisport = isLegacy && !!(variant && SPORT_MODE_ROWS.variants[variant]?.supportsMultisportModes)
     ? legacyGroups.filter(g => g.isMultisport) : [];
+  // Ambit1/2: what may be deleted and SuuntoLink's 10-mode count, from the same region read
+  // (watch-protocol/10 L3: create and delete as SuuntoLink does, AmbitLegacySportModes).
+  const [legacyMenu, setLegacyMenu] = useState<LegacyMenu | null>(null);
+  const legacyDeletable = new Set((legacyMenu?.entries ?? []).filter(e => e.deletable)
+    .map(e => `${e.multisport ? 'multi' : 'mode'}:${e.name}`));
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | undefined>();
   const [writingMode, setWritingMode] = useState<string | null>(null);
@@ -144,18 +160,22 @@ export default function SportModesScreen() {
   async function handleRead() {
     let legacy = false;
     let groups: LegacyGroup[] = [];
+    let menu: LegacyMenu | null = null;
     await readCustomModes(s => {
       setPhase(s.phase);
       setError(s.error);
       if (s.modes) applyModes(s.modes);
       if (s.legacy) legacy = true;
       if (s.legacyGroups) groups = s.legacyGroups;
+      if (s.legacyMenu) menu = s.legacyMenu;
     }, overBle);
     setIsLegacy(legacy);
     setLegacyGroups(groups);
+    setLegacyMenu(menu);
     // Ambit1/2 have no Ambit3 structural view, and readSportModes() reads the same CustomModes
-    // region that crashes on this family - skip it entirely for legacy (the read-only list is
-    // all that's shown). Otherwise load the structural view (menu order, multisport, slots).
+    // region that crashes on this family - skip it entirely for legacy (its counts and what may
+    // be deleted come with the legacy read, `legacyMenu`). Otherwise load the structural view
+    // (menu order, multisport, slots).
     if (legacy) {
       setSummary(null);
       return;
@@ -193,12 +213,29 @@ export default function SportModesScreen() {
     }
   }
 
+  // Ambit1/2: one read-modify-write of region 0x2000 (AmbitLegacySportModes, a copy kept first),
+  // then the list is read again.
+  async function runLegacyEdit(action: () => Promise<unknown>) {
+    setWriteState({ phase: 'writing', step: 1, totalSteps: 1 });
+    try {
+      await action();
+      setWriteState({ phase: 'done' });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setWriteState({ phase: 'error', error: msg });
+      Alert.alert(t.error, msg);
+    }
+    await handleRead();
+  }
+
   function confirmDelete(name: string, multisport: boolean) {
     Alert.alert(t.sportModesDeleteTitle, t.sportModesDeleteMsg(name), [
       { text: t.cancel, style: 'cancel' },
       {
         text: t.sportModesDeleteBtn, style: 'destructive',
-        onPress: () => runEdit(multisport ? plans.deleteMultisport(name) : plans.delete(name)),
+        onPress: () => (isLegacy
+          ? runLegacyEdit(() => deleteLegacySportMode(name, variant ?? '', multisport))
+          : runEdit(multisport ? plans.deleteMultisport(name) : plans.delete(name))),
       },
     ]);
   }
@@ -215,7 +252,9 @@ export default function SportModesScreen() {
     if (!name || createActivityId == null) return;
     const kind = createKind;
     setCreateKind(null);
-    if (kind === 'single') await runEdit(plans.create(name, createActivityId, variant));
+    const activityId = createActivityId;
+    if (kind === 'single' && isLegacy) await runLegacyEdit(() => createLegacySportMode(name, activityId, variant ?? ''));
+    else if (kind === 'single') await runEdit(plans.create(name, createActivityId, variant));
     else if (kind === 'multi') await runEdit(plans.createMultisport(name, createActivityId, legs, variant));
   }
 
@@ -318,6 +357,15 @@ export default function SportModesScreen() {
 
   const busy = phase === 'connecting' || phase === 'reading';
   const selectedMode = modes?.find(m => m.settings.name === selectedName) ?? null;
+  // The counts and Create buttons: the Ambit3 codec's summary, or on an Ambit1/2 the legacy menu
+  // (a multisport is not built on this family, so no Create Multisport there).
+  const manage = summary
+    ? { used: summary.used, maxUsed: summary.maxUsed, multi: summary.multi, maxMulti: summary.maxMulti, multiCreate: summary.maxMulti > 0 }
+    : isLegacy && legacyMenu
+      ? { used: legacyMenu.used, maxUsed: legacyMenu.max, multi: legacyMenu.multisport,
+          maxMulti: (variant && SPORT_MODE_ROWS.variants[variant]?.maxMultisportModes) || 0, multiCreate: false }
+      : null;
+  const creatableActivities = isLegacy ? legacyCreatableActivities(variant) : CREATABLE_ACTIVITIES;
 
   // ── Detail view ──
   if (selectedMode) {
@@ -539,13 +587,13 @@ export default function SportModesScreen() {
       </Card>
 
       {/* ── Manage: create / delete / multisport (full-codec structural view) ── */}
-      {summary && (
+      {manage && (
         <Card style={{ width: '100%' }}>
           <View style={styles(theme).listRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles(theme).cardTitle}>{t.sportModesManageTitle}</Text>
               <Text style={styles(theme).sectionDesc}>
-                {t.sportModesCounts(summary.used, summary.maxUsed, summary.multi, summary.maxMulti)}
+                {t.sportModesCounts(manage.used, manage.maxUsed, manage.multi, manage.maxMulti)}
               </Text>
             </View>
           </View>
@@ -570,16 +618,16 @@ export default function SportModesScreen() {
 
           <View style={[styles(theme).row, { marginTop: 12 }]}>
             <TouchableOpacity
-              style={[styles(theme).smallBtn, { opacity: summary.used >= summary.maxUsed || manageBusy ? 0.4 : 1 }]}
-              disabled={summary.used >= summary.maxUsed || manageBusy}
+              style={[styles(theme).smallBtn, { opacity: manage.used >= manage.maxUsed || manageBusy ? 0.4 : 1 }]}
+              disabled={manage.used >= manage.maxUsed || manageBusy}
               onPress={() => openCreate('single')}
             >
               <Text style={styles(theme).smallBtnText}>{t.sportModesCreateBtn}</Text>
             </TouchableOpacity>
-            {summary.maxMulti > 0 && (
+            {manage.multiCreate && (
               <TouchableOpacity
-                style={[styles(theme).smallBtn, { opacity: summary.used >= summary.maxUsed || summary.multi >= summary.maxMulti || manageBusy ? 0.4 : 1 }]}
-                disabled={summary.used >= summary.maxUsed || summary.multi >= summary.maxMulti || manageBusy}
+                style={[styles(theme).smallBtn, { opacity: manage.used >= manage.maxUsed || manage.multi >= manage.maxMulti || manageBusy ? 0.4 : 1 }]}
+                disabled={manage.used >= manage.maxUsed || manage.multi >= manage.maxMulti || manageBusy}
                 onPress={() => openCreate('multi')}
               >
                 <Text style={styles(theme).smallBtnText}>{t.sportModesCreateMultiBtn}</Text>
@@ -609,7 +657,7 @@ export default function SportModesScreen() {
                     {t.sportModesDisplaysCount(realCount, maxDisplays)}
                   </Text>
                 </View>
-                {summary && (
+                {(summary || legacyDeletable.has(`mode:${name}`)) && (
                   <TouchableOpacity style={[styles(theme).smallBtn, styles(theme).deleteBtn]} disabled={manageBusy} onPress={() => confirmDelete(name, false)}>
                     <Text style={styles(theme).deleteBtnText}>{t.sportModesDeleteBtn}</Text>
                   </TouchableOpacity>
@@ -642,8 +690,8 @@ export default function SportModesScreen() {
         );
       })}
 
-      {/* Ambit2 / Ambit2 S: their multisports (the watch's menu groups with several legs), read only -
-          no capture shows how SuuntoLink builds or edits one. */}
+      {/* Ambit2 / Ambit2 S: their multisports (the watch's menu groups with several legs). Deleted as
+          SuuntoLink deletes one (with the modes only it used); not built or changed here. */}
       {legacyMultisport.map(m => {
         const activity = ACTIVITY_TYPES[m.activityId];
         return (
@@ -655,6 +703,11 @@ export default function SportModesScreen() {
                 <Text style={styles(theme).sectionDesc}>{m.legNames.map(n => n ?? '?').join(' → ')}</Text>
               </View>
               <Text style={styles(theme).multiBadge}>{t.sportModesMultiBadge}</Text>
+              {legacyDeletable.has(`multi:${m.name}`) && (
+                <TouchableOpacity style={[styles(theme).smallBtn, styles(theme).deleteBtn]} disabled={manageBusy} onPress={() => confirmDelete(m.name, true)}>
+                  <Text style={styles(theme).deleteBtnText}>{t.sportModesDeleteBtn}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </Card>
         );
@@ -680,7 +733,7 @@ export default function SportModesScreen() {
             <Text style={styles(theme).label}>{t.sportModesActivityLabel}</Text>
             <ScrollView style={{ maxHeight: createKind === 'multi' ? 120 : 220 }}>
               <View style={styles(theme).chipRow}>
-                {(createKind === 'multi' ? MULTISPORT_ACTIVITIES : CREATABLE_ACTIVITIES).map(a => (
+                {(createKind === 'multi' ? MULTISPORT_ACTIVITIES : creatableActivities).map(a => (
                   <TouchableOpacity
                     key={a.id}
                     style={[styles(theme).chip, createActivityId === a.id && styles(theme).chipActive]}

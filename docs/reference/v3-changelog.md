@@ -7,6 +7,29 @@ they land, on the way to what André/Vincent have been calling "V3": wireless sy
 
 ---
 
+## 2026-11-26: Create and delete Ambit1/2 sport modes, and Copy to watch for this family (watch-protocol/10)
+
+Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own
+captures and by tests only.
+
+- **Create a sport mode on an Ambit1, Ambit2, 2S or 2R, desktop and Android.** It gets what
+  SuuntoLink gives a new mode of that sport on that model: its pods, GPS and recording rate and
+  alti-baro from SuuntoLink's own table, SuuntoLink's starting displays and, on the Ambit2
+  family, a menu entry. The four creates in SuuntoLink's captures (three on the Ambit1, one on
+  the Ambit2) come out byte for byte. Ten modes at most, counted the way SuuntoLink counts them.
+- **Delete a sport mode, or an Ambit2 multisport, desktop and Android.** As SuuntoLink: not the
+  last one, not a mode a multisport uses, not a mode with no menu entry of its own (the factory
+  Transition). Deleting a multisport also removes the modes only it used, as the capture shows
+  for the Triathlon. A copy of the watch's sport modes is saved first. The desktop gets a Delete
+  link on those modes, and the refusal the watch gives is shown under the list.
+- **Copy to watch between two Ambit1/2 watches (desktop).** POIs and routes use this family's
+  own readers and writers, also between different models; settings and sport modes only
+  between two watches of the same model. Sport modes are not copied when their displays show a
+  Suunto App, because apps are not copied on this family yet. Swim styles are not read on these
+  watches. Android has no Copy page.
+
+---
+
 ## 2026-11-26: Ambit1/2 displays on both apps, and the Ambit2's multisports (watch-protocol/10)
 
 Nothing here was seen on a real Ambit1 or Ambit2: it is checked against SuuntoLink's own

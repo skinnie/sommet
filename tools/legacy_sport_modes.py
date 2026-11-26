@@ -28,7 +28,9 @@ This module only reads the watch. patch_region() builds the bytes of one sport-m
 (read-modify-write: the region as read, with one mode's fields changed) and patch_displays() those
 of a display edit; the writes themselves are legacy_link.sport_mode_edit() and
 sport_mode_displays_edit(). sport_mode_groups() lists the 0x0200 groups (the watch's sport-mode
-menu, multisports included), read only. Android does the same in AmbitLegacySportModes.ts.
+menu, multisports included). create_mode() / delete_mode() / delete_multisport() build the bytes
+of a create or delete as SuuntoLink makes them (legacy_link.sport_mode_create / _delete write
+them). Android does the same in AmbitLegacySportModes.ts.
 """
 
 import argparse
@@ -570,9 +572,9 @@ def sport_mode_groups(data):
     """The region's 0x0200 groups, as tools/custom_modes.py lists an Ambit3's SPORT_MODES: one per
     entry in the watch's sport-mode menu, [{"name", "activityId", "legs", "legNames",
     "isMultisport"}]. A group with several legs is a multisport (the Ambit2 capture's Triathlon:
-    Cycling, Running, Openwater swim); a leg is a place in the 0x0100 mode list. Read only:
-    Sommet does not write groups (one capture shows SuuntoLink rewriting one, after deleting a
-    mode, which is not enough to know how it builds them). The Ambit1 region has none."""
+    Cycling, Running, Openwater swim); a leg is a place in the 0x0100 mode list. create_mode
+    adds a sport mode's own entry and delete_mode / delete_multisport remove entries, as
+    SuuntoLink does; a multisport is not built or edited here. The Ambit1 region has none."""
     used = region_used(data)
     places = []
     for tag, body, ln in _children(data, 4, used):
@@ -604,6 +606,402 @@ def sport_mode_groups(data):
             group["legNames"] = [places[i] if 0 <= i < len(places) else None for i in group["legs"]]
             group["isMultisport"] = len(group["legs"]) > 1
             out.append(group)
+    return out
+
+
+# ─── Creating and deleting a sport mode (2026-11-26, watch-protocol/10 L3) ─────────────────────
+# What SuuntoLink 4.1.15 does, from its own code (ui/sport_mode_editor.js, ambit/sport_mode.js,
+# ui/input.js) and from its writes in both captures:
+#
+#   create  SuuntoLink's showCreateSportMode: defaultSettings(new id) with the chosen sport's
+#           getActivityDefaults row put in the form, then three region writes on an Ambit2 (the
+#           mode's settings, its displays, its menu entry = addSportModeGroup) and two on an
+#           Ambit1 (no groups: `Variant === AMBIT` skips the menu entry). Captured four times:
+#           Ambit1 Yoga (10), Adventure Racing (61), Alpine Skiing (20) in zzambit1full.pcap
+#           (writes 0-6), Ambit2 Adventure Racing in ambit2_suuntolink_settings_sportmodes.pcap
+#           (writes 2-5). Each new mode is appended to 0x0100 as
+#             0x0101 { 0x0102 settings, 0x01FF [u32 settings time][u32 display time],
+#                      0x0105 the same seven displays every time (NEW_MODE_DISPLAYS) }
+#           and, on the Ambit2, its menu entry appended to 0x0200 as
+#             0x0210 { 0x0212 name (24), 0x0213 sport, 0x0214 its place in 0x0100,
+#                      0x02FE [u32 entry id], 0x02FF [u32 time] }.
+#           Sommet writes the end state in one write (as the rename in patch_region does).
+#           The settings record is zero apart from: the name, the sport, the pods, alti-baro,
+#           GPS and recording interval from the sport's defaults, the interval timer's 99
+#           repetitions (defaultSettings) and, Ambit2 only, the mode id (getNextModeId: the
+#           lowest free one, 1 in the capture) at 18, backlight and display 0x00FF (null) at
+#           84/86. The entry id is getNextGroupId (lowest free: 9 in the capture).
+#   delete  SuuntoLink deletes a menu entry (deleteSportModeGroup). It refuses the last one, a
+#           mode with no entry of its own (the factory Transition) and a mode a multisport uses
+#           ("TXT_SPORT_MODE_NOT_DELETABLE"). Deleting a multisport also drops the modes only it
+#           used: Ambit2 write 0->1 (Triathlon and its Transition legs; the remaining entries are
+#           untouched, ids included). The Ambit3 capture of the same program
+#           (removeandaddsportsmodeandmultisport, saves 3->4, tools/sport_mode_manage.py) shows
+#           the same delete with the dropped mode in the MIDDLE of the list: the mode order is
+#           kept and every leg above it moves down by one. A deleted single mode takes its menu
+#           entry with it; removing a captured create gives back the write before it, byte for
+#           byte, on both watches.
+# The limit is SuuntoLink's countSportModes: max(single entries + modes only a multisport uses,
+# all entries), 10 on all four models (getMaxSportModes). Not captured on the 2S or 2R: those use
+# the Ambit2's record format, with SuuntoLink's per-model form (no alti-baro choice on either, no
+# bike/power/cadence pod on the 2R).
+TAG_STAMP = 0x01FF
+TAG_GROUP_ACTIVITY, TAG_GROUP_ID, TAG_GROUP_STAMP = 0x0213, 0x02FE, 0x02FF
+MAX_SPORT_MODES = 10                       # sport_mode.js getMaxSportModes, all four models
+# The four models and their settings record (the Ambit1's 76 bytes, the Ambit2 family's 90).
+LEGACY_VARIANTS = {"Bluebird": AMBIT1_BLOB_LEN, "Duck": AMBIT2_BLOB_LEN,
+                   "Colibri": AMBIT2_BLOB_LEN, "Greentit": AMBIT2_BLOB_LEN}
+# ui/input.js movescountActivity: the sports SuuntoLink's "create sport mode" list offers.
+SELECTABLE_ACTIVITIES = frozenset((
+    1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 39, 40, 58, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+    70, 71, 72, 73, 74, 75, 76, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+    94, 95, 96, 97, 98, 99))
+# sport_mode.js getFusedSpeedActivities (the same eight on all four): useAccelerometer() is true
+# for these, and SuuntoLink puts it in the pods field as 0x0004 (its own reader, USEHW bit 2; set
+# in every SuuntoLink save of the Ambit1's Running in zzambit1full.pcap, and on every factory
+# Running mode).
+FUSED_SPEED_ACTIVITIES = frozenset((3, 25, 28, 40, 75, 81, 82, 93))
+SWIM_ACTIVITIES = frozenset((6, 83))       # activity.js PoolSwimming, OpenwaterSwimming
+# Which of the form's inputs SuuntoLink shows per model (sport_mode.js supports*).
+_SUPPORTS = {
+    "Bluebird": {"alti": True, "foot": True, "bike": True, "power": True, "cadence": True},
+    "Duck": {"alti": True, "foot": True, "bike": True, "power": True, "cadence": True},
+    "Colibri": {"alti": False, "foot": True, "bike": True, "power": True, "cadence": True},
+    "Greentit": {"alti": False, "foot": True, "bike": False, "power": False, "cadence": False},
+}
+SENSOR_SEARCH = 0x0002   # set with any pod or the belt: every pods value in both captures
+NEW_MODE_DISPLAYS = b"".join(display_record(layout, rows, kind) for layout, kind, rows in (
+    (260, 10, ((0, 10, ()), (1, 11, ()), (2, 0, (5,)))),
+    (273, 4, ((0, 8, ()), (1, 8, ()), (2, 0, (16, 1, 65534)))),
+    (291, 5, ((0, 8, ()), (1, 40, ()), (2, 0, (16, 8, 1, 65534)))),
+    (290, 6, ((0, 24, ()), (1, 25, ()), (2, 0, (50, 26, 16)))),
+    (257, 65, ((1, 195, ()), (2, 196, ()), (3, 197, ()))),
+    (336, 7, ()),
+    (260, 50, ((0, 62, ()), (1, 61, ()), (2, 0, (5, 10, 21, 11, 28)))),
+))
+ROWS_JSON = HERE.parent / "assets" / "sportmode_rows.json"
+
+
+def activity_defaults(variant, activity_id, rows=None):
+    """SuuntoLink's getActivityDefaults row for this sport on this model (assets/
+    sportmode_rows.json, generated from SuuntoLink)."""
+    if rows is None:
+        rows = json.loads(ROWS_JSON.read_text())
+    d = rows.get("activityDefaults", {}).get(variant, {}).get(str(int(activity_id)))
+    if d is None:
+        raise ValueError(f"SuuntoLink has no defaults for sport {activity_id} on the {variant}")
+    return d
+
+
+def new_mode_fields(variant, activity_id, rows=None):
+    """The settings SuuntoLink's create form saves for a new mode of this sport on this model:
+    the sport's defaults as activityChanged() puts them in the form, then what updateSettings()
+    reads back. On the Ambit2 family a swim locks the belt and pods off and hides alti-baro
+    (an unset radio reads as 0); a model without the alti-baro choice reads 0 too."""
+    sup = _SUPPORTS[variant]
+    d = activity_defaults(variant, activity_id, rows)
+    locked = variant != "Bluebird" and int(activity_id) in SWIM_ACTIVITIES
+    hr = bool(d["hrBelt"]) and not locked
+    pods = 0x0001 if hr else 0
+    for key, bit, sup_key in (("powerPod", 0x0040, "power"), ("cadencePod", 0x0080, "cadence"),
+                              ("footPod", 0x0100, "foot"), ("bikePod", 0x0800, "bike")):
+        if d[key] and sup[sup_key] and not locked:
+            pods |= bit
+    if pods:
+        pods |= SENSOR_SEARCH
+    if int(activity_id) in FUSED_SPEED_ACTIVITIES:
+        pods |= 0x0004
+    return {"pods": pods, "alti": d["altiBaroProfile"] if sup["alti"] and not locked else 0,
+            "gps": d["gpsInterval"], "rec": d["recordingInterval"]}
+
+
+def new_mode_settings(variant, name, activity_id, mode_id=1, rows=None):
+    """The 0x0102 settings record of a new mode (76 bytes on the Ambit1, 90 on the Ambit2)."""
+    f = new_mode_fields(variant, activity_id, rows)
+    blen = LEGACY_VARIANTS[variant]
+    lay = {AMBIT1_BLOB_LEN: (18, 20, 22, 24, 38), AMBIT2_BLOB_LEN: (22, 24, 26, 28, 46)}[blen]
+    out = bytearray(blen)
+    out[0:NAME_LEN] = _name_bytes(name, NAME_LEN)
+    _put_u16(out, 16, activity_id)
+    for off, value in zip(lay, (f["pods"], f["alti"], f["gps"], f["rec"], 99)):
+        _put_u16(out, off, value)
+    if blen == AMBIT2_BLOB_LEN:
+        struct.pack_into("<I", out, 18, mode_id)          # CMIDLOW / CMIDHIGH
+        _put_u16(out, 84, 0x00FF)                         # BacklightMode null
+        _put_u16(out, 86, 0x00FF)                         # DisplayInvert null
+    return bytes(out)
+
+
+def _mode_list(data):
+    """[(header offset, record length, name, settings length)] of every 0x0101 in 0x0100, in
+    place order, and the 0x0100 header offset."""
+    used = region_used(data)
+    for tag, body, ln in _children(data, 4, used):
+        if tag != TAG_MODES:
+            continue
+        out = []
+        for t, b, n in _children(data, body, body + ln):
+            if t != TAG_MODE:
+                continue
+            name, blen = "", 0
+            for t2, b2, n2 in _children(data, b, b + n):
+                if t2 == TAG_SETTINGS:
+                    blen = n2
+                    if n2 >= NAME_LEN:
+                        name = bytes(data[b2:b2 + NAME_LEN]).split(b"\x00")[0].decode("latin-1")
+            out.append((b - 4, n + 4, name, blen))
+        return body - 4, out
+    raise ValueError("the sport-mode region has no mode list")
+
+
+def _group_list(data):
+    """(0x0200 header offset or None, [{"at", "len", "name", "legs", "id"}]) for each 0x0210."""
+    used = region_used(data)
+    for tag, body, ln in _children(data, 4, used):
+        if tag != TAG_GROUPS:
+            continue
+        out = []
+        for t, b, n in _children(data, body, body + ln):
+            if t != TAG_GROUP:
+                continue
+            g = {"at": b - 4, "len": n + 4, "name": "", "legs": [], "legs_at": [], "id": None}
+            for t2, b2, n2 in _children(data, b, b + n):
+                if t2 == TAG_GROUP_NAME:
+                    g["name"] = bytes(data[b2:b2 + n2]).split(b"\x00")[0].decode("latin-1")
+                elif t2 == TAG_GROUP_MODE and n2 == 2:
+                    g["legs"].append(_u16(data, b2))
+                    g["legs_at"].append(b2)
+                elif t2 == TAG_GROUP_ID and n2 == 4:
+                    g["id"] = struct.unpack_from("<I", data, b2)[0]
+            out.append(g)
+        return body - 4, out
+    return None, []
+
+
+def usage(data):
+    """SuuntoLink's countSportModes for this region: {"used", "max", "multisport"}. Ambit1 (no
+    menu entries in its region): every mode counts."""
+    _modes_at, modes = _mode_list(data)
+    groups_at, groups = _group_list(data)
+    if groups_at is None:
+        return {"used": sum(1 for m in modes if m[2]), "max": MAX_SPORT_MODES, "multisport": 0}
+    singles = [g for g in groups if len(g["legs"]) == 1]
+    own = {g["legs"][0] for g in singles}
+    hidden = {leg for g in groups if len(g["legs"]) > 1 for leg in g["legs"]} - own
+    return {"used": max(len(singles) + len(hidden), len(groups)), "max": MAX_SPORT_MODES,
+            "multisport": len(groups) - len(singles)}
+
+
+def _lowest_free(used):
+    n = 1
+    while n in used:
+        n += 1
+    return n
+
+
+def _rewrite(data, cuts, inserts):
+    """`data` with byte ranges cut and blobs inserted, every enclosing length fixed and the rest
+    of the region 0xFF. `cuts` [(offset, length)], `inserts` [(offset, bytes, [header offsets
+    of the records it goes inside])]; a cut's enclosing records are found from the tree."""
+    used = region_used(data)
+    edits = []                                      # (offset, removed length, added bytes, headers)
+    for off, ln in cuts:
+        edits.append((off, ln, b"", _enclosing(data, off)))
+    for off, blob, headers in inserts:
+        edits.append((off, 0, bytes(blob), headers))
+    out = bytearray(data[:used])
+    lengths = {}
+    for off, removed, added, headers in edits:
+        for h in headers:
+            lengths[h] = lengths.get(h, 0) + len(added) - removed
+    for h, delta in lengths.items():
+        _put_u16(out, h + 2, _u16(out, h + 2) + delta)
+    for off, removed, added, _h in sorted(edits, key=lambda e: e[0], reverse=True):
+        out[off:off + removed] = added
+    if len(out) > len(data):
+        raise ValueError(f"the sport modes would need {len(out)} of the region's {len(data)} bytes")
+    return bytes(out) + b"\xff" * (len(data) - len(out))
+
+
+def _enclosing(data, off):
+    """Header offsets of the records that strictly contain the record starting at `off`."""
+    out, start, end = [], 0, region_used(data)
+    while True:
+        hit = None
+        for tag, body, ln in _children(data, start, end):
+            if body - 4 < off < body + ln and tag in CONTAINERS:
+                hit = (body - 4, body, ln)
+        if hit is None:
+            return out
+        out.append(hit[0])
+        start, end = hit[1], hit[1] + hit[2]
+
+
+def _check_family(data, variant):
+    if variant not in LEGACY_VARIANTS:
+        raise ValueError(f"{variant!r} is not an Ambit1 or Ambit2 (Bluebird, Duck, Colibri, Greentit)")
+    lens = {blen for _h, _n, name, blen in _mode_list(data)[1] if name}
+    if lens and lens != {LEGACY_VARIANTS[variant]}:
+        raise ValueError(f"the region's settings records ({sorted(lens)} bytes) are not the "
+                         f"{variant}'s {LEGACY_VARIANTS[variant]}: nothing changed")
+
+
+def create_mode(data, name, activity_id, variant, now=None, rows=None):
+    """The region `data` with one new sport mode, as SuuntoLink creates one (see above).
+    `now` is a Unix time, or (settings time, display time, menu-entry time) as SuuntoLink's
+    three writes stamp them. Raises ValueError for anything SuuntoLink would refuse."""
+    import time                                             # noqa: PLC0415
+    _check_family(data, variant)
+    raw = str(name or "").strip()
+    if not raw:
+        raise ValueError("a sport mode needs a name")
+    if len(raw.encode("latin-1", "replace")) > NAME_LEN:
+        raise ValueError(f"a sport mode name holds {NAME_LEN} characters on this watch")
+    modes_at, modes = _mode_list(data)
+    if raw in {m[2] for m in modes}:
+        raise ValueError(f"the watch already has a sport mode named {raw!r}")
+    activity_id = int(activity_id)
+    if activity_id not in SELECTABLE_ACTIVITIES:
+        raise ValueError(f"sport {activity_id} is not one SuuntoLink offers for a sport mode")
+    use = usage(data)
+    if use["used"] >= use["max"]:
+        raise ValueError(f"{use['used']}/{use['max']} sport modes used: delete one first")
+    if now is None:
+        now = int(time.time())
+    t_set, t_disp, t_menu = (now, now, now) if isinstance(now, int) else tuple(int(x) for x in now)
+    ids = set()
+    for at, ln, _name, blen in modes:
+        for t2, b2, n2 in _children(data, at + 4, at + ln):
+            if t2 == TAG_SETTINGS and n2 == AMBIT2_BLOB_LEN:
+                ids.add(struct.unpack_from("<I", data, b2 + 18)[0])
+    settings = new_mode_settings(variant, raw, activity_id, _lowest_free(ids), rows)
+    record = _tlv(TAG_MODE, _tlv(TAG_SETTINGS, settings)
+                  + _tlv(TAG_STAMP, struct.pack("<II", t_set, t_disp))
+                  + _tlv(TAG_DISPLAYS, NEW_MODE_DISPLAYS))
+    modes_end = modes_at + 4 + _u16(data, modes_at + 2)
+    inserts = [(modes_end, record, [modes_at, 0])]
+    groups_at, groups = _group_list(data)
+    if variant != "Bluebird":
+        if groups_at is None:
+            raise ValueError("this Ambit2 region has no sport-mode menu (0x0200): nothing changed")
+        entry = _tlv(TAG_GROUP, _tlv(TAG_GROUP_NAME, _name_bytes(raw, GROUP_NAME_LEN))
+                     + _tlv(TAG_GROUP_ACTIVITY, struct.pack("<H", activity_id))
+                     + _tlv(TAG_GROUP_MODE, struct.pack("<H", len(modes)))
+                     + _tlv(TAG_GROUP_ID, struct.pack("<I", _lowest_free({g["id"] for g in groups})))
+                     + _tlv(TAG_GROUP_STAMP, struct.pack("<I", t_menu)))
+        inserts.append((groups_at + 4 + _u16(data, groups_at + 2), entry, [groups_at, 0]))
+    return _rewrite(data, [], inserts)
+
+
+def _delete(data, groups_gone, places_gone):
+    """The region without those menu entries and those modes; every leg above a removed mode
+    moves down, as SuuntoLink renumbers them (see above)."""
+    _modes_at, modes = _mode_list(data)
+    _groups_at, groups = _group_list(data)
+    cuts = [(modes[p][0], modes[p][1]) for p in places_gone]
+    cuts += [(g["at"], g["len"]) for g in groups_gone]
+    out = bytearray(data)
+    for g in groups:
+        if any(g is x for x in groups_gone):
+            continue
+        for leg, at in zip(g["legs"], g["legs_at"]):
+            _put_u16(out, at, leg - sum(1 for p in places_gone if p < leg))
+    return _rewrite(bytes(out), cuts, [])
+
+
+def delete_mode(data, name, variant):
+    """The region without one sport mode (and its menu entry on the Ambit2), with SuuntoLink's
+    refusals: the last entry, a mode a multisport uses, a mode with no entry of its own."""
+    _check_family(data, variant)
+    _modes_at, modes = _mode_list(data)
+    places = [i for i, m in enumerate(modes) if m[2] == name]
+    if not places:
+        raise ValueError(f"no sport mode named {name!r} on the watch")
+    place = places[0]
+    groups_at, groups = _group_list(data)
+    if groups_at is None:
+        if sum(1 for m in modes if m[2]) <= 1:
+            raise ValueError("the watch keeps at least one sport mode")
+        return _delete(data, [], [place])
+    users = [g["name"] for g in groups if len(g["legs"]) > 1 and place in g["legs"]]
+    if users:
+        raise ValueError(f"{name!r} is used by the multisport {', '.join(users)}: "
+                         "delete that first")
+    own = [g for g in groups if g["legs"] == [place]]
+    if not own:
+        raise ValueError(f"{name!r} has no entry of its own in the watch menu: SuuntoLink does "
+                         "not delete it")
+    if len(groups) - len(own) < 1:
+        raise ValueError("the watch keeps at least one sport mode")
+    return _delete(data, own, [place])
+
+
+def delete_multisport(data, name, variant):
+    """The region without one multisport entry and the modes only it used (Ambit2 capture:
+    Triathlon and its Transition)."""
+    _check_family(data, variant)
+    groups_at, groups = _group_list(data)
+    multi = [g for g in groups if g["name"] == name and len(g["legs"]) > 1]
+    if not multi:
+        raise ValueError(f"no multisport named {name!r} on the watch")
+    gone = multi[0]
+    if len(groups) <= 1:
+        raise ValueError("the watch keeps at least one sport mode")
+    still = {leg for g in groups if g is not gone for leg in g["legs"]}
+    return _delete(data, [gone], sorted(set(gone["legs"]) - still))
+
+
+def menu(data, variant):
+    """What the apps show and may delete: {"used", "max", "multisport", "modes": [{"name",
+    "activityId", "deletable", "reason"}], "multisports": [{"name", "activityId", "legNames",
+    "deletable", "reason"}]}. `reason` says why one may not be deleted."""
+    use = usage(data)
+    out = dict(use, modes=[], multisports=[])
+    for name, place in zip([data[o:o + NAME_LEN].split(b"\x00")[0].decode("latin-1")
+                            for o, _ in named_blobs(data)], named_mode_places(data)):
+        try:
+            delete_mode(data, name, variant)
+            reason = ""
+        except ValueError as exc:
+            reason = str(exc)
+        out["modes"].append({"name": name, "place": place, "deletable": not reason,
+                             "reason": reason})
+    for g in sport_mode_groups(data):
+        if not g["isMultisport"]:
+            continue
+        try:
+            delete_multisport(data, g["name"], variant)
+            reason = ""
+        except ValueError as exc:
+            reason = str(exc)
+        out["multisports"].append({"name": g["name"], "activityId": g["activityId"],
+                                   "legNames": g["legNames"], "deletable": not reason,
+                                   "reason": reason})
+    return out
+
+
+# The display rows that show a Suunto App (custom_modes.FIELD_TYPES FT_RULE_ENGINE_*), and the
+# record an Ambit1 mode links its app with (0x010C, seen on the capture's Cycling and Alpine
+# Skiing, which show app 1).
+APP_FIELDS = frozenset((0x0033, 0x0034, 0x0035, 0x006B, 0x006C, 0x006E, 0x0070))
+TAG_APP_LINK = 0x010C
+
+
+def app_links(data):
+    """Names of the modes whose displays show a Suunto App or that link one: their region cannot
+    be copied to another watch without its apps."""
+    out = set()
+    for at, ln, name, _blen in _mode_list(data)[1]:
+        for tag, body, n in _children(data, at + 4, at + ln):
+            if tag == TAG_APP_LINK:
+                out.add(name)
+            elif tag == TAG_DISPLAYS:
+                for t2, b2, n2 in _children(data, body, body + n):
+                    disp = parse_display(data[b2 - 4:b2 + n2]) if t2 == TAG_DISPLAY else None
+                    for row in (disp or {}).get("rows", []):
+                        if row[1] in APP_FIELDS or APP_FIELDS & set(row[2]):
+                            out.add(name)
     return out
 
 

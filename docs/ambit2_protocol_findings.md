@@ -75,6 +75,45 @@ Sommet writes the name, autolap, HR limits and pods this way on both apps
 (`tools/legacy_sport_modes.py patch_region`, `AmbitLegacySportModes.ts`), leaving the time
 records as read; `tools/test_legacy_sport_mode_edit.py` replays the captured writes.
 
+### 3a. Creating and deleting a sport mode (2026-11-26, watch-protocol/10 L3)
+
+SuuntoLink's own code (4.1.15 `ui/sport_mode_editor.js`, `ambit/sport_mode.js`, `ui/input.js`)
+and its writes agree. A create is `defaultSettings(new id)` with the chosen sport's
+`getActivityDefaults` row put in the form (pods, alti-baro, GPS and recording interval), saved
+as three region writes on the Ambit2 (settings, displays, menu entry) and two on the Ambit1
+(`Variant === AMBIT` skips the menu entry). Captured four times: Ambit1 Yoga, Adventure Racing
+and Alpine Skiing (`zzambit1full.pcap`, writes 0-6), Ambit2 Adventure Racing (this capture,
+writes 2-5). The new mode is appended to `0x0100`:
+
+    0x0101 { 0x0102 settings, 0x01FF [u32 settings time][u32 display time],
+             0x0105 the same seven displays every time (a 3-row Top 10, Center 11, Bottom [5],
+                    then the built-in views 4, 5, 6, 65, 7, 50) }
+
+The settings record is zero apart from the name, the sport, those four defaults, the interval
+timer's 99 repetitions and, on the Ambit2, the mode id at 18 (`getNextModeId`, the lowest free
+id: 1, the factory ones being 0x2E1B...) and 0x00FF (null) backlight and display at 84 and 86.
+The pods field is the belt (bit 0), the pods, 0x0002 with any of them, and 0x0004 for the eight
+`getFusedSpeedActivities` sports (SuuntoLink's own reader calls bit 2 UseAccelerometer). On the
+Ambit2 the menu entry is appended to `0x0200`: `0x0212` name (24), `0x0213` sport, `0x0214` the
+new place, `0x02FE` the lowest free entry id (9 here: 1-8 and 10 taken), `0x02FF` the time.
+
+SuuntoLink deletes a menu entry (`deleteSportModeGroup`) and refuses the last one, a mode with no
+entry of its own (the factory Transition) and a mode a multisport uses. Deleting a multisport also
+drops the modes only it used. That is write 0->1 here: it is the Triathlon entry that was
+deleted (the editor offers no delete for the Transition), and the Transition went with it.
+Write 1->2 is then a new multisport made in the editor (`showCreateMultisportMode`): legs Cycling,
+Running, Openwater swim in the order picked, entry id 1 (the lowest free again) and a `0x02FF`
+time the old entry did not have. The Ambit3 capture of the same program
+(`removeandaddsportsmodeandmultisport`, saves 3->4) shows the same delete with the dropped mode
+in the middle of the list: the order is kept and every leg above it moves down by one.
+
+Sommet writes create and delete this way on both apps (`tools/legacy_sport_modes.py
+create_mode / delete_mode / delete_multisport`, `AmbitLegacySportModes.ts`), each in one region
+write; `tools/test_legacy_sport_mode_manage.py` replays the four creates and the Triathlon
+delete byte for byte, and checks that deleting a created mode gives back the write before it.
+The limit is SuuntoLink's `countSportModes`: max(single entries + modes only a multisport uses,
+all entries), 10 on all four models.
+
 ## 4. Displays and the sport-mode menu (2026-11-26, watch-protocol/10 L5, L2)
 
 The display list (`0x0105`) is the same record format as the Ambit3's, byte-identical on the
@@ -111,9 +150,9 @@ patchLegacyDisplayRegion`; the Android screen offers the row change),
 The `0x0200` groups are the watch's sport-mode menu: `0x0212` name (24 bytes), `0x0213`
 activity, one `0x0214` per leg (a place in the `0x0100` list), `0x02FE` a u32 that numbers the
 entries, `0x02FF` a save time. A group with several legs is a multisport: the capture's
-Triathlon (activity 19). Both apps list them read only. The one multisport change in the
-capture is SuuntoLink deleting the Transition mode: that write drops the Triathlon group, the
-next one writes it back at the end with legs Cycling, Running, Openwater swim (it had Openwater
-swim, Transition, Cycling, Transition, Running). That is not enough to know how SuuntoLink
-builds or edits one, so neither app writes groups yet.
+Triathlon (activity 19). Both apps list them read only. The multisport changes in the
+capture are a delete of the Triathlon (with the Transition only it used) and a new Triathlon
+made right after, with legs Cycling, Running, Openwater swim (it had Openwater swim, Transition,
+Cycling, Transition, Running); see section 3a. Both apps delete a multisport this way; neither
+builds or edits one yet.
 

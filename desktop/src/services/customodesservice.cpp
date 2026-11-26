@@ -86,6 +86,11 @@ void CustomModesService::refresh()
             // "N/10 used" beside it, and the card says so rather than leaving it a puzzle.
             row[QStringLiteral("inWatchMenu")] =
                 mode.value(QStringLiteral("inWatchMenu")).toBool();
+            // Ambit1/2 only (watch-protocol/10 L3): whether SuuntoLink would delete this mode,
+            // and why not. The Ambit3's read has neither, so its cards keep no Delete.
+            row[QStringLiteral("deletable")] = mode.value(QStringLiteral("deletable")).toBool();
+            row[QStringLiteral("deleteReason")] =
+                mode.value(QStringLiteral("deleteReason")).toString();
             row[QStringLiteral("useHw")] = mode.value(QStringLiteral("useHw")).toInt();
             row[QStringLiteral("autolap")] = mode.value(QStringLiteral("autolap")).toInt();
             row[QStringLiteral("hrHigh")] = mode.value(QStringLiteral("hrHigh")).toInt();
@@ -171,12 +176,17 @@ void CustomModesService::refresh()
             for (const auto &n : slot.value(QStringLiteral("legNames")).toArray())
                 legs.append(n.toString());
             row[QStringLiteral("legNames")] = legs;
+            row[QStringLiteral("deletable")] = slot.value(QStringLiteral("deletable")).toBool();
             multisport.append(row);
         }
         m_multisportModes = multisport;
         // Every SPORT_MODES entry costs one of the watch's slots, singles and combos
-        // alike - SuuntoLink's own countSportModes(). See this class's header.
-        m_sportModesUsed = obj.value(QStringLiteral("sportModes")).toArray().size();
+        // alike - SuuntoLink's own countSportModes(). See this class's header. An Ambit1/2
+        // read carries that count itself (an Ambit1 has no menu entries in its region).
+        const auto usage = obj.value(QStringLiteral("usage")).toObject();
+        m_sportModesUsed = usage.contains(QStringLiteral("used"))
+            ? usage.value(QStringLiteral("used")).toInt()
+            : obj.value(QStringLiteral("sportModes")).toArray().size();
 
         setLastError(QString());
         emit modesChanged();

@@ -8,6 +8,8 @@ the interval timer are refused before anything runs, and the Ambit2 read hands t
 pods field and the stored HR limits (what an edit starts from). Display edits (2026-11-26, L5)
 go to legacy_link.py sport-mode-displays for all four models (the Ambit1's used to go to the C
 patcher, which wrote no commit tail), and the read lists the multisport groups (read only).
+Create and delete (L3) go to legacy_link.py sport-mode-create / -delete with the watch's model, a
+multisport only deleted; the read says which modes may be deleted and SuuntoLink's count.
 
     python3 tools/test_backend_legacy_edits.py
 """
@@ -116,8 +118,60 @@ class Legacy(unittest.TestCase):
         self.assertEqual((code, obj["formatType"]), (200, "ambit2"))
         self.assertEqual(obj["sportModes"], [{"name": "Duathlon", "activityId": 2, "legs": [0, 1],
                                               "legNames": ["Running", "Cycling"],
-                                              "isMultisport": True}])
+                                              "isMultisport": True, "deletable": False,
+                                              "deleteReason": "the watch keeps at least one sport mode"}])
         self.assertEqual([m["usedByMultisport"] for m in obj["exerciseModes"]], [True, True])
+        self.assertEqual([m["deletable"] for m in obj["exerciseModes"]], [False, False])
+
+    # ─── create and delete (watch-protocol/10 L3) ─────────────────────────────────────────────
+    def test_create_and_delete_reach_legacy_link(self):
+        saved = server.selected_legacy_variant
+        server.selected_legacy_variant = lambda: "Duck"
+        try:
+            self.h._handle_customodes_mode({"action": "create", "name": "Trilho", "activityId": 82,
+                                            "confirm": True})
+            self.h._handle_customodes_mode({"action": "delete", "name": "Trilho", "confirm": True})
+            self.h._handle_customodes_multisport({"action": "delete", "name": "Duathlon",
+                                                  "confirm": True})
+            self.h._handle_customodes_multisport({"action": "create", "name": "Tri", "activityId": 19,
+                                                  "legs": ["Running", "Cycling"], "confirm": True})
+            self.h._handle_customodes_mode({"action": "create", "name": "Dry", "activityId": 3})
+        finally:
+            server.selected_legacy_variant = saved
+        heads = [args[:args.index("--variant") + 2] for _s, args in self.calls]
+        self.assertEqual([s for s, _a in self.calls], ["legacy_link.py"] * 4)
+        self.assertEqual(heads, [
+            ["sport-mode-create", "Trilho", "82", "--variant", "Duck"],
+            ["sport-mode-delete", "Trilho", "--variant", "Duck"],
+            ["sport-mode-delete", "Duathlon", "--multisport", "--variant", "Duck"],
+            ["sport-mode-create", "Dry", "3", "--variant", "Duck"]])
+        self.assertEqual(["--write" in a for _s, a in self.calls], [True, True, True, False])
+        # The multisport create is refused with a reason, nothing run.
+        self.assertEqual([c for c, _o in self.sent], [200] * 5)
+        self.assertFalse(self.sent[3][1]["ok"])
+
+    def test_create_needs_the_model(self):
+        saved = server.selected_legacy_variant
+        server.selected_legacy_variant = lambda: None
+        try:
+            self.h._handle_customodes_mode({"action": "create", "name": "X", "activityId": 3,
+                                            "confirm": True})
+        finally:
+            server.selected_legacy_variant = saved
+        self.assertEqual((self.sent[0][0], self.calls), (409, []))
+
+    def test_read_says_what_may_be_deleted(self):
+        import test_legacy_sport_mode_manage as M
+        legacy_sport_modes.read_region_live = lambda length=0: M.synthetic(90)
+        server.run_tool = lambda script, args, **kw: (0, json.dumps({"ok": False}) + "\n", "")
+        self.h._customodes_read_legacy()
+        code, obj = self.sent[0]
+        self.assertEqual({m["name"]: m["deletable"] for m in obj["exerciseModes"]},
+                         {"Running": False, "Transition": False, "Cycling": False})
+        self.assertIn("Duathlon", obj["exerciseModes"][0]["deleteReason"])
+        self.assertEqual({g["name"]: g["deletable"] for g in obj["sportModes"]},
+                         {"Running": False, "Duathlon": True, "Cycling": False})
+        self.assertEqual(obj["usage"], {"used": 3, "max": 10, "multisport": 1})
 
     def test_ambit1_read_keeps_its_interval_timer(self):
         region = bytearray(test_legacy_display_edit.synthetic(76))

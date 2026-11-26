@@ -248,9 +248,14 @@ QtObject {
     // L2). Until the record has loaded this is false; the page reads it there.
     property bool supportsMultisport: CustomModesService.capabilities.supportsMultisportModes === true
     // Creating or editing a multisport: the Ambit3 family's SBEM writer only. On an Ambit2 /
-    // Ambit2 S the multisports are listed read only: one capture shows SuuntoLink rewriting the
-    // Triathlon after deleting a mode, which is not enough to know how it builds one.
+    // Ambit2 S the multisports are listed and can be deleted, as SuuntoLink deletes the
+    // capture's Triathlon (docs/ambit2_protocol_findings.md 3a); not built or edited here.
     property bool supportsMultisportWrite: supportsMultisport && !_isLegacy
+    // Creating and deleting a sport mode on the Ambit1/2 (watch-protocol/10 L3) goes through
+    // tools/legacy_link.py sport-mode-create / -delete, as SuuntoLink's captured creates and its
+    // captured Triathlon delete; the read says which modes may be deleted and how many of the
+    // 10 are used, in SuuntoLink's count. Not yet seen on a real Ambit1 or Ambit2.
+    property bool supportsLegacySportModeManage: _isLegacy
     property bool supportsApps: !_isLegacy
     property bool supportsNavigation: !_isLegacy
     property bool supportsBluetooth: !_isLegacy

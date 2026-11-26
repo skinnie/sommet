@@ -883,7 +883,9 @@ def _sync_diff_pois(src, tgt):
             "poi": {"name": p.get("name"), "lat": p.get("lat"), "lon": p.get("lon"),
                     "type": ambit_format.waypoint_type_between(
                         p.get("type", 0), src.get("model"), tgt.get("model")),
-                    **({"altitude": p["altitude"]} if "altitude" in p else {})},
+                    **({"altitude": p["altitude"]} if "altitude" in p else {}),
+                    # An Ambit1/2 POI's stored time, kept when it goes onto another one.
+                    **({"ctime": p["ctime"]} if "ctime" in p else {})},
             "from": None, "to": p.get("name"),
             "fromText": "—",  # em dash: not present on the target
             "toText": "%.5f, %.5f" % (float(p.get("lat", 0.0)), float(p.get("lon", 0.0))),
@@ -1092,6 +1094,23 @@ def selected_is_legacy():
     except Exception:  # noqa: BLE001 - not parseable means "don't know", not legacy
         info = None
     return bool(info) and info.get("model") in ("Bluebird", "Duck", "Colibri", "Greentit")
+
+
+LEGACY_VARIANT_BY_PID = {0x0010: "Bluebird", 0x0019: "Duck", 0x001A: "Colibri", 0x001D: "Greentit"}
+
+
+def selected_legacy_variant():
+    """The pinned (or plugged) Ambit1/2's codename, which picks its sport-mode record format and
+    the settings SuuntoLink gives a new mode on it; None when it is not one of the four."""
+    if SELECTED_PRODUCT_ID is not None:
+        return LEGACY_VARIANT_BY_PID.get(SELECTED_PRODUCT_ID)
+    code, out, err = run_tool("device_info.py", ["--json"])
+    try:
+        info = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+    except Exception:  # noqa: BLE001 - not parseable means "don't know"
+        info = {}
+    model = (info or {}).get("model")
+    return model if model in LEGACY_VARIANT_BY_PID.values() else None
 
 
 # Kailash (Hoopoe). Its product id is the one this project had to add a fallback bucket for
@@ -6157,34 +6176,8 @@ class Handler(BaseHTTPRequestHandler):
             os.environ["AMBIT_PRODUCT_ID"] = env_pid
         try:
             for f in fields:
-                key = f.get("field")
-                if key and key.startswith("unit_"):
-                    cli_key = "units." + key[len("unit_"):]
-                elif key == "alti_baro_mode" and SELECTED_PRODUCT_ID in self.LEGACY_NO_BAROMETER:
-                    results.append({"field": key, "ok": False,
-                                    "error": "this watch has no barometer"})
-                    continue
-                elif key in self.LEGACY_WRITABLE:
-                    cli_key = self.LEGACY_WRITE_KEY.get(key, key)
-                else:
-                    results.append({"field": key, "ok": False,
-                                     "error": "not writable on this watch"})
-                    continue
-                try:
-                    value = f.get("value")
-                    scale = self.LEGACY_WRITE_SCALE.get(key)
-                    if scale:
-                        value = int(round(float(value) * scale))
-                    elif key.startswith("bikepod_calibration"):
-                        # mm back to the stored factor x10000
-                        value = int(round(float(value) / self.BIKEPOD_REFERENCE_MM * 10000))
-                    with WATCH_LOCK:
-                        r = legacy_link.settings_write(cli_key, value,
-                                                        dry_run=not confirm)
-                    r["field"] = key
-                    results.append(r)
-                except (RuntimeError, ValueError, TypeError) as exc:
-                    results.append({"field": key, "ok": False, "error": str(exc)})
+                results.append(self._legacy_setting_write(legacy_link, f.get("field"),
+                                                          f.get("value"), confirm))
         finally:
             if env_pid:
                 if old_env is None:
@@ -6195,6 +6188,32 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200 if ok else 502,
                         {"ok": ok, "wrote": confirm and ok, "fields": results})
 
+    def _legacy_setting_write(self, legacy_link, key, value, confirm):
+        """One Ambit1/2 settings field through ambit_legacy_cli settings-write (0x0b01, a
+        read-modify-write of the watch's own record), as the Watch Settings page writes it; the
+        caller sets AMBIT_PRODUCT_ID. Returns that field's result."""
+        if key and key.startswith("unit_"):
+            cli_key = "units." + key[len("unit_"):]
+        elif key == "alti_baro_mode" and SELECTED_PRODUCT_ID in self.LEGACY_NO_BAROMETER:
+            return {"field": key, "ok": False, "error": "this watch has no barometer"}
+        elif key in self.LEGACY_WRITABLE:
+            cli_key = self.LEGACY_WRITE_KEY.get(key, key)
+        else:
+            return {"field": key, "ok": False, "error": "not writable on this watch"}
+        try:
+            scale = self.LEGACY_WRITE_SCALE.get(key)
+            if scale:
+                value = int(round(float(value) * scale))
+            elif key.startswith("bikepod_calibration"):
+                # mm back to the stored factor x10000
+                value = int(round(float(value) / self.BIKEPOD_REFERENCE_MM * 10000))
+            with WATCH_LOCK:
+                r = legacy_link.settings_write(cli_key, value, dry_run=not confirm)
+            r["field"] = key
+            return r
+        except (RuntimeError, ValueError, TypeError) as exc:
+            return {"field": key, "ok": False, "error": str(exc)}
+
     def _handle_settings_read_ambit1(self):
         """The Ambit1 half of GET /api/settings - its real settings in the Ambit3's schema.
 
@@ -6203,6 +6222,15 @@ class Handler(BaseHTTPRequestHandler):
         ambit_legacy_cli.c's cmd_settings_write). Only the fields whose meaning is confirmed
         are marked writable. Scaled fields (weight x100, bike POD calibration x10000) are
         converted by LEGACY_WRITE_SCALE on the way out, so the UI edits the real quantity."""
+        out, failed = self._legacy_settings_read()
+        if failed is not None:
+            self._send_json(502, failed)
+            return
+        self._send_json(200, {"ok": True, "variant": "Bluebird", "settings": out})
+
+    def _legacy_settings_read(self):
+        """The Ambit1/2's settings as the Watch Settings page shows them: ({key: entry}, None),
+        or (None, the error reply). Shared with the Copy page (watch-protocol/10 L14)."""
         sys.path.insert(0, str(TOOLS_DIR))
         import legacy_link                                      # noqa: PLC0415
         env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
@@ -6213,8 +6241,7 @@ class Handler(BaseHTTPRequestHandler):
             with WATCH_LOCK:
                 raw = legacy_link.settings()
         except RuntimeError as exc:
-            self._send_json(502, {"ok": False, "error": str(exc)})
-            return
+            return None, {"ok": False, "error": str(exc)}
         finally:
             if env_pid:
                 if old_env is None:
@@ -6222,8 +6249,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     os.environ["AMBIT_PRODUCT_ID"] = old_env
         if not raw.get("ok"):
-            self._send_json(502, raw)
-            return
+            return None, raw
 
         # Calibration factor -> the circumference SuuntoLink shows.
         for ck in ("bikepod_calibration", "bikepod_calibration2"):
@@ -6267,8 +6293,7 @@ class Handler(BaseHTTPRequestHandler):
             out[f"unit_{key}"] = {
                 "ok": True, "value": units[key], "path": f"units.{key}", "writable": True,
                 "screen": "units", "label": label, "control": "radio", "choices": choices}
-
-        self._send_json(200, {"ok": True, "variant": "Bluebird", "settings": out})
+        return out, None
 
     def _handle_settings_read(self):
         """GET /api/settings[?device=kailash] - Ambit3/Traverse by default; pass
@@ -7011,7 +7036,19 @@ class Handler(BaseHTTPRequestHandler):
         """The connected watch's DeviceSettings as {key: item}, reusing the exact
         settings_write.py --json the Watch Settings page reads (Kailash via its own curated
         --device kailash table). Fields this watch's schema does not have are dropped, not
-        errors. Returns (items_dict, error_or_None)."""
+        errors. Returns (items_dict, error_or_None). An Ambit1/2 reads through the Watch Settings
+        page's own legacy reader (watch-protocol/10 L14)."""
+        if model in LEGACY_VARIANT_BY_PID.values():
+            out, failed = self._legacy_settings_read()
+            if failed is not None:
+                return None, failed.get("error") or "settings read failed"
+            # The 2S and 2R have no barometer, whichever watch the app is pinned to.
+            no_baro = model in ("Colibri", "Greentit")
+            return {key: {"value": e.get("value"), "writable": bool(e.get("writable")),
+                          "kind": e.get("control"), "choices": e.get("choices"),
+                          "path": e.get("path")}
+                    for key, e in out.items()
+                    if not (no_baro and key == "alti_baro_mode")}, None
         args = ["--json"]
         if model == "Hoopoe":
             args += ["--device", "kailash"]
@@ -7035,7 +7072,25 @@ class Handler(BaseHTTPRequestHandler):
     def _sync_write_setting(self, model, key, value):
         """One real settings write via settings_write.py --set key=value --write (the exact
         0x1101 the Watch Settings page uses; Kailash through its own table). Returns the tool's
-        own JSON, whose `ok` is only true when its re-read confirms the new value took."""
+        own JSON, whose `ok` is only true when its re-read confirms the new value took. An
+        Ambit1/2 writes through the Watch Settings page's own legacy writer (0x0b01)."""
+        if model in LEGACY_VARIANT_BY_PID.values():
+            if key == "alti_baro_mode" and model in ("Colibri", "Greentit"):
+                return {"field": key, "ok": False, "error": "this watch has no barometer"}
+            sys.path.insert(0, str(TOOLS_DIR))
+            import legacy_link                                  # noqa: PLC0415
+            env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+            old_env = os.environ.get("AMBIT_PRODUCT_ID")
+            if env_pid:
+                os.environ["AMBIT_PRODUCT_ID"] = env_pid
+            try:
+                return self._legacy_setting_write(legacy_link, key, value, True)
+            finally:
+                if env_pid:
+                    if old_env is None:
+                        os.environ.pop("AMBIT_PRODUCT_ID", None)
+                    else:
+                        os.environ["AMBIT_PRODUCT_ID"] = old_env
         args = ["--set", f"{key}={value}", "--json", "--write"]
         if model == "Hoopoe":
             args += ["--device", "kailash"]
@@ -7048,9 +7103,23 @@ class Handler(BaseHTTPRequestHandler):
     def _sync_read_pois(self, model):
         """The connected watch's standalone POIs as [{name, type, lat, lon}], parsed from the
         same write_nav.py `pois` text /api/pois returns. Kailash has no POI region, so it is an
-        empty list rather than an error. Returns (items_list, error_or_None)."""
+        empty list rather than an error. Returns (items_list, error_or_None). An Ambit1/2: its
+        waypoint list (legacy_link.py waypoints) without the route waypoints, each POI with the
+        type as that family numbers it and its stored time, so a copy onto another Ambit1/2
+        carries the record as it was."""
         if model == "Hoopoe":
             return [], None
+        if model in LEGACY_VARIANT_BY_PID.values():
+            code, out, err = run_tool("legacy_link.py", ["waypoints"])
+            info = self._parse_last_json_line(out)
+            if not info or not info.get("ok"):
+                return None, (info or {}).get("error") or err or "POI read failed"
+            _routes, loose = self._legacy_route_groups(info.get("waypoints", []))
+            keys = ("ctime_year", "ctime_month", "ctime_day", "ctime_hour", "ctime_minute",
+                    "ctime_second")
+            return [{"name": w.get("name", ""), "type": int(w.get("type", 0)),
+                     "lat": float(w.get("lat", 0.0)), "lon": float(w.get("lon", 0.0)),
+                     "ctime": {k: int(w.get(k, 0)) for k in keys}} for w in loose], None
         code, out, err = run_tool("write_nav.py", ["pois"])
         if code != 0:
             return None, (err or out or "POI read failed").strip()
@@ -7064,6 +7133,7 @@ class Handler(BaseHTTPRequestHandler):
         path with --set-pois-json. The current routes are rewritten so they are preserved (a
         watch with no routes uses reset - same commit, nothing to lose). `pois` is the full
         desired list (target's existing POIs + additions, de-duplicated). Returns {ok}."""
+        pois = [{k: v for k, v in p.items() if k != "ctime"} for p in pois]
         # Capture the target's current routes so the nav rewrite preserves them.
         rcode, rout, rerr = run_tool("write_nav.py", ["nav", "--routes-gpx-json"])
         rinfo = self._parse_last_json_line(rout)
@@ -7092,13 +7162,49 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": (err or out or "POI set failed").strip()}
         return {"ok": True}
 
+    def _sync_write_pois_legacy(self, new_pois):
+        """Add POIs to the plugged-in Ambit1/2 (legacy_link.py pois-add: its whole waypoint list
+        rewritten with them, route waypoints kept, a copy first and a read-back after)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as pf:
+            pf.write(json.dumps(new_pois))
+            path = pf.name
+        try:
+            code, out, err = run_tool("legacy_link.py",
+                                      ["pois-add", path, "--write", "--backup-dir",
+                                       str(BACKUP_DIR / "legacy_nav")], timeout=600)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        return self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "POI write failed"}
+
     def _sync_read_routes(self, model):
         """The connected watch's routes as [{name, pointCount, gpx}], captured now so the
         snapshot can be written to the OTHER watch later without the source replugged. ONE flash
         read for all of them via write_nav.py nav --routes-gpx-json (not one slow USB read per
-        route - the Mac-speed fix, André 2026-08-30). Kailash has no routes -> []."""
+        route - the Mac-speed fix, André 2026-08-30). Kailash has no routes -> []. An Ambit1/2:
+        its route region (legacy_link.py routes), each route as a GPX of its points."""
         if model == "Hoopoe":
             return [], None
+        if model in LEGACY_VARIANT_BY_PID.values():
+            code, out, err = run_tool("legacy_link.py", ["routes"], timeout=900)
+            info = self._parse_last_json_line(out)
+            if info is None or not info.get("ok"):
+                return None, (info or {}).get("error") or err or "route read failed"
+            items = []
+            for r in info.get("routes", []) or []:
+                pts = r.get("points") or []
+                if not pts:
+                    continue
+                name = str(r.get("name", "")).strip()
+                esc = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+                         '<gpx version="1.1" creator="Sommet legacy_link.py">',
+                         '  <rte><name>%s</name>' % esc]
+                lines += ['    <rtept lat="%.7f" lon="%.7f"/>' % (float(lat), float(lon))
+                          for lat, lon in pts]
+                lines += ['  </rte>', '</gpx>']
+                items.append({"name": name, "pointCount": len(pts), "gpx": "\n".join(lines)})
+            return items, None
         code, out, err = run_tool("write_nav.py", ["nav", "--routes-gpx-json"])
         info = self._parse_last_json_line(out)
         if info is None or not info.get("ok"):
@@ -7111,10 +7217,14 @@ class Handler(BaseHTTPRequestHandler):
                           "gpx": r.get("gpx")})
         return items, None
 
-    def _sync_write_route(self, gpx_text):
+    def _sync_write_route(self, gpx_text, model=None):
         """Add one route via the same writer the Routes page uses - it reads the watch's
         existing routes first and includes them, so an add never deletes the others (the
-        2026-08-11 fix). Returns {ok}."""
+        2026-08-11 fix). Returns {ok}. An Ambit1/2 takes it as the Routes page sends one there:
+        its direction pins worked out by route_pins.py (Start/End when it finds none), then
+        legacy_link.py route-send (existing routes and POIs kept, copies first)."""
+        if model in LEGACY_VARIANT_BY_PID.values():
+            return self._sync_write_route_legacy(gpx_text)
         with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
             f.write(gpx_text)
             gpx_path = f.name
@@ -7133,13 +7243,42 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": (err or out or "route write failed").strip()}
         return {"ok": True}
 
+    def _sync_write_route_legacy(self, gpx_text):
+        def pins(extra):
+            with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+                f.write(gpx_text)
+                src = f.name
+            try:
+                _c, out_, err_ = run_tool("route_pins.py", [src, "--target", "ambit", "--json"] + extra)
+            finally:
+                Path(src).unlink(missing_ok=True)
+            return self._parse_last_json_line(out_) or {"ok": False, "error": (err_ or "").strip()}
+        pinned = pins([])
+        if not pinned.get("ok"):
+            pinned = pins(["--plain"])
+        if not pinned.get("ok"):
+            return {"ok": False, "error": pinned.get("error") or "could not prepare the route"}
+        with tempfile.NamedTemporaryFile("w", suffix=".gpx", delete=False) as f:
+            f.write(pinned["gpx"])
+            path = f.name
+        try:
+            code, out, err = run_tool("legacy_link.py", ["route-send", path, "--write"], timeout=900)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        return self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "route send failed"}
+
     def _sync_read_sportmodes(self, model):
         """The connected watch's sport modes as the raw CustomModes + Apps region bytes
         (base64), captured now via dump_sportmode_regions.py so the whole region can be mirrored
         onto the other watch later. Kailash/legacy have no CustomModes region -> unsupported.
-        Returns ({count, items:{appsB64, customModesB64}}, error_or_None)."""
+        Returns ({count, items:{appsB64, customModesB64}}, error_or_None). An Ambit1/2: its
+        sport-mode region (0x2000, SuuntoLink's 10240 bytes) as read, items {legacyRegionB64};
+        refused when its displays show a Suunto App (no Apps writer for this family yet)."""
         if model == "Hoopoe":
             return None, "Kailash has no custom sport modes"
+        if model in LEGACY_VARIANT_BY_PID.values():
+            return self._sync_read_sportmodes_legacy()
         with tempfile.NamedTemporaryFile(suffix="-apps.bin", delete=False) as fa, \
                 tempfile.NamedTemporaryFile(suffix="-cm.bin", delete=False) as fc:
             apath, cpath = fa.name, fc.name
@@ -7156,6 +7295,52 @@ class Handler(BaseHTTPRequestHandler):
             Path(cpath).unlink(missing_ok=True)
         return {"count": info.get("modeCount", 0), "signature": info.get("signature"),
                 "items": {"appsB64": apps_b64, "customModesB64": cm_b64}}, None
+
+    def _sync_read_sportmodes_legacy(self):
+        sys.path.insert(0, str(TOOLS_DIR))
+        import hashlib                                          # noqa: PLC0415
+        import legacy_sport_modes                               # noqa: PLC0415
+        env_pid = hex(SELECTED_PRODUCT_ID) if SELECTED_PRODUCT_ID is not None else None
+        old = os.environ.get("AMBIT_PRODUCT_ID")
+        if env_pid:
+            os.environ["AMBIT_PRODUCT_ID"] = env_pid
+        try:
+            with WATCH_LOCK:
+                region = legacy_sport_modes.read_region_live(legacy_sport_modes.REGION_WRITE_BYTES)
+            used = legacy_sport_modes.region_used(region)
+            links = legacy_sport_modes.app_links(region)
+            count = len(legacy_sport_modes.named_blobs(region))
+        except (RuntimeError, OSError, ValueError) as exc:
+            return None, str(exc)
+        finally:
+            if env_pid:
+                if old is None:
+                    os.environ.pop("AMBIT_PRODUCT_ID", None)
+                else:
+                    os.environ["AMBIT_PRODUCT_ID"] = old
+        if links:
+            return None, ("its sport modes show Suunto Apps (" + ", ".join(sorted(links))
+                          + "), and apps are not copied on an Ambit1 or Ambit2 yet")
+        return {"count": count, "signature": hashlib.sha1(bytes(region[:used])).hexdigest(),
+                "items": {"legacyRegionB64": base64.b64encode(bytes(region[:used])).decode()}}, None
+
+    def _sync_write_sportmodes_legacy(self, region_b64):
+        """Make the plugged-in Ambit1/2's sport modes the source's (same model, checked by the
+        plan): legacy_link.py sport-mode-mirror, a copy of the target's region first, read-back
+        after."""
+        if not region_b64:
+            return {"ok": False, "error": "source sport-mode snapshot is missing"}
+        with tempfile.NamedTemporaryFile(suffix="-sportmodes.bin", delete=False) as f:
+            f.write(base64.b64decode(region_b64))
+            path = f.name
+        try:
+            code, out, err = run_tool("legacy_link.py",
+                                      ["sport-mode-mirror", path, "--write", "--backup-dir",
+                                       str(BACKUP_DIR / "legacy_sport_modes")], timeout=300)
+        finally:
+            Path(path).unlink(missing_ok=True)
+        return self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "the sport-mode write failed"}
 
     def _sync_write_sportmodes(self, apps_b64, cm_b64):
         """Mirror the source's CustomModes + Apps regions onto the connected watch via
@@ -7179,9 +7364,13 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": err or "sync_write_sportmodes.py produced no JSON"}
         return info
 
-    def _sync_read_swimstyles(self):
+    def _sync_read_swimstyles(self, model=None):
         """The connected watch's learned swim styles via swim_styles.py --json (read-only 0x1100).
         Returns (items, error); items None when the watch has no swim style settings."""
+        if model in LEGACY_VARIANT_BY_PID.values():
+            # No capture shows where an Ambit1/2 keeps them (watch-protocol/10 L12), and its
+            # settings are not the 0x1100 record swim_styles.py reads.
+            return None, "Sommet does not read swim styles on an Ambit1 or Ambit2"
         code, out, err = run_tool("swim_styles.py", ["--json"])
         info = self._parse_last_json_line(out)
         if not info or not info.get("ok"):
@@ -7295,7 +7484,7 @@ class Handler(BaseHTTPRequestHandler):
                                                "signature": data.get("signature"),
                                                "items": data["items"]}
             elif cat == "swimStyles":
-                items, err = self._sync_read_swimstyles()
+                items, err = self._sync_read_swimstyles(dev["model"])
                 if err:
                     snap["categories"][cat] = {"supported": False, "error": err}
                 else:
@@ -7495,6 +7684,13 @@ class Handler(BaseHTTPRequestHandler):
                         "from": ch.get("from"), "to": ch.get("to"), "toText": ch.get("toText")}
             if not confirm:
                 results += [{**pbase(ch), "dryRun": True, "ok": True} for ch in poi_changes]
+            elif dev["model"] in LEGACY_VARIANT_BY_PID.values():
+                r = self._sync_write_pois_legacy([ch["poi"] for ch in poi_changes])
+                ok = bool(r.get("ok"))
+                results += [{**pbase(ch), "ok": ok,
+                             "error": None if ok else r.get("error")} for ch in poi_changes]
+                if ok:
+                    applied += len(poi_changes)
             else:
                 existing, rerr = self._sync_read_pois(dev["model"])
                 if rerr:
@@ -7546,7 +7742,7 @@ class Handler(BaseHTTPRequestHandler):
                 if category == "settings":
                     r = self._sync_write_setting(dev["model"], ch["key"], ch["to"])
                 elif category == "routes":  # add the missing route (existing routes preserved)
-                    r = self._sync_write_route(ch["route"]["gpx"])
+                    r = self._sync_write_route(ch["route"]["gpx"], dev["model"])
                 else:  # sportModes - whole-region mirror; bytes come from the source slot,
                        # kept server-side and never round-tripped through the client
                     src_slot = "A" if plan["direction"] == "AtoB" else "B"
@@ -7554,8 +7750,11 @@ class Handler(BaseHTTPRequestHandler):
                         src_snap = _SYNC_SNAPSHOTS.get(src_slot) or {}
                     sm_items = ((src_snap.get("categories") or {}).get("sportModes")
                                 or {}).get("items") or {}
-                    r = self._sync_write_sportmodes(sm_items.get("appsB64"),
-                                                    sm_items.get("customModesB64"))
+                    if dev["model"] in LEGACY_VARIANT_BY_PID.values():
+                        r = self._sync_write_sportmodes_legacy(sm_items.get("legacyRegionB64"))
+                    else:
+                        r = self._sync_write_sportmodes(sm_items.get("appsB64"),
+                                                        sm_items.get("customModesB64"))
                 results.append({**base, "ok": bool(r.get("ok")),
                                 "error": None if r.get("ok") else r.get("error")})
                 if r.get("ok"):
@@ -7658,6 +7857,15 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             groups = legacy_sport_modes.sport_mode_groups(region)
             places = legacy_sport_modes.named_mode_places(region)
+            # What may be deleted, with SuuntoLink's reason when not, and its 10-mode count
+            # (watch-protocol/10 L3). The rules are the same on the four models; only the
+            # record length (76 = Ambit1) tells them apart here.
+            try:
+                lens = {n for _o, n in legacy_sport_modes.named_blobs(region)}
+                menu = legacy_sport_modes.menu(
+                    region, "Bluebird" if lens == {legacy_sport_modes.AMBIT1_BLOB_LEN} else "Duck")
+            except ValueError:
+                menu = None
         except (RuntimeError, OSError, ValueError) as exc:
             self._send_json(502, {"ok": False, "error": str(exc)})
             return
@@ -7726,15 +7934,22 @@ class Handler(BaseHTTPRequestHandler):
                 # not delete one), and whether the mode has an entry of its own in the menu.
                 "usedByMultisport": place in in_multisport,
                 "inWatchMenu": place in in_menu,
+                "deletable": bool(menu and i < len(menu["modes"]) and menu["modes"][i]["deletable"]),
+                "deleteReason": (menu["modes"][i]["reason"] if menu and i < len(menu["modes"])
+                                 else "the sport-mode list could not be checked"),
             })
         # The menu's entries, the multisports among them (Ambit2/2S capture: Triathlon). Read
         # only on this family: no capture shows how SuuntoLink builds or edits one.
+        multi_del = {m["name"]: m for m in (menu or {}).get("multisports", [])}
         sport_modes = [{"name": g["name"], "activityId": g["activityId"], "legs": g["legs"],
-                        "legNames": g["legNames"], "isMultisport": g["isMultisport"]}
+                        "legNames": g["legNames"], "isMultisport": g["isMultisport"],
+                        "deletable": bool(multi_del.get(g["name"], {}).get("deletable")),
+                        "deleteReason": multi_del.get(g["name"], {}).get("reason", "")}
                        for g in groups]
         self._send_json(200, {
             "ok": True, "formatType": "ambit1" if ambit1 else "ambit2",
-            "exerciseModes": modes, "sportModes": sport_modes})
+            "exerciseModes": modes, "sportModes": sport_modes,
+            "usage": {k: menu[k] for k in ("used", "max", "multisport")} if menu else None})
 
     # Ambit1 Apps region. Base/size come from SuuntoLink's own Devices.xml per-device record
     # (rulestorelocation / rulestoresize), NOT libambit's PMEM20_APP_START - that constant is
@@ -8171,7 +8386,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False,
                                    "error": 'need a name and action "create" or "delete"'})
             return
+        legacy = selected_is_legacy() and not demo_ambit()
         if action == "delete":
+            if legacy:
+                self._legacy_sport_mode_manage(["sport-mode-delete", name], body)
+                return
             self._sport_mode_manage(["--delete", name], body)
             return
         activity = (body or {}).get("activityId")
@@ -8179,7 +8398,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False,
                                    "error": "creating a sport mode needs an activityId"})
             return
+        if legacy:
+            self._legacy_sport_mode_manage(["sport-mode-create", name, str(activity)], body)
+            return
         self._sport_mode_manage(["--create", name, "--activity", str(activity)], body)
+
+    def _legacy_sport_mode_manage(self, args, body):
+        """Ambit1/2 create and delete (watch-protocol/10 L3): one read-modify-write of the
+        sport-mode region through tools/legacy_link.py, as SuuntoLink creates and deletes a mode
+        (tools/legacy_sport_modes.py create_mode / delete_mode / delete_multisport say which
+        capture each byte comes from). Without confirm:true the watch is read and nothing is
+        written. A refusal (10/10 used, a multisport's leg, the last mode) is 200 with ok:false,
+        as on the Ambit3, so the page shows SuuntoLink's reason."""
+        variant = selected_legacy_variant()
+        if not variant:
+            self._send_json(409, {"ok": False, "error": "could not tell which Ambit1 or Ambit2 "
+                                  "this is: plug it in again"})
+            return
+        args = list(args) + ["--variant", variant]
+        if (body or {}).get("confirm"):
+            args += ["--write", "--backup-dir", str(BACKUP_DIR / "legacy_sport_modes")]
+        code, out, err = run_tool("legacy_link.py", args, timeout=300)
+        info = self._parse_last_json_line(out) or {
+            "ok": False, "error": (err or out or "").strip() or "the sport-mode write failed"}
+        if info.get("wrote"):
+            read_cache_clear()
+        self._send_json(200, info)
 
     def _handle_customodes_multisport(self, body):
         """POST /api/customodes/multisport - create, edit or delete a multisport combo.
@@ -8200,6 +8444,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"ok": False,
                                    "error": 'need a name and action "create", "edit" or '
                                             '"delete"'})
+            return
+        if selected_is_legacy() and not demo_ambit():
+            # Ambit2 / 2S: the captured delete (SuuntoLink's Triathlon, with the Transition only
+            # it used). Building or changing one is not written on this family (watch-protocol/10
+            # L2).
+            if action == "delete":
+                self._legacy_sport_mode_manage(["sport-mode-delete", name, "--multisport"], body)
+                return
+            self._send_json(200, {"ok": False, "error": "Sommet does not build or change a "
+                                  "multisport on an Ambit2 yet; it can delete one."})
             return
         if action == "delete":
             self._sport_mode_manage(["--delete-multisport", name], body)

@@ -2,6 +2,7 @@ import { readLegacyRegion, writeLegacyRegion, connect, disconnect, isBleTranspor
 import { base64ToBytes, bytesToBase64 } from './Base64';
 import { saveWatchBackup } from './WatchBackup';
 import { Display, decodeDisplayList } from './CustomModesReader';
+import { SPORT_MODE_ROWS } from './SportModeRows';
 
 // Ambit 1/2 (Bluebird) sport-mode READ - the one thing openambit can't do for this family
 // (it only blind-writes). Ported from the desktop tools/legacy_sport_modes.py, validated
@@ -521,6 +522,8 @@ export interface LegacyRegion {
   modes: LegacyMode[];
   displays: Display[][];       // per mode, same order as `modes`
   groups: LegacyGroup[];
+  /** What may be deleted and SuuntoLink's 10-mode count (legacyMenu), when read off the watch. */
+  menu?: LegacyMenu;
 }
 
 /** The region decoded: the named modes (as readLegacySportModes), each one's displays, and the menu
@@ -563,9 +566,295 @@ export function decodeLegacyRegion(data: Uint8Array): LegacyRegion {
   return { modes, displays, groups };
 }
 
-/** Read the connected Ambit1/2's sport modes, their displays and the menu groups, in one read. */
+/** Read the connected Ambit1/2's sport modes, their displays and the menu groups, in one read,
+ * with what may be deleted (the rules are the same on the four models; the record length tells
+ * the Ambit1 from the Ambit2 family). */
 export async function readLegacySportModeRegion(): Promise<LegacyRegion> {
   const b64 = await readLegacyRegion(REGION_ADDR, REGION_BYTES);
   if (!b64) return { modes: [], displays: [], groups: [] };
-  return decodeLegacyRegion(base64ToBytes(b64));
+  return withMenu(base64ToBytes(b64));
+}
+
+function withMenu(data: Uint8Array): LegacyRegion {
+  const region = decodeLegacyRegion(data);
+  try {
+    const ambit1 = modeBlobs(data).every(b => b.len === AMBIT1_BLOB);
+    return { ...region, menu: legacyMenu(data, ambit1 ? 'Bluebird' : 'Duck') };
+  } catch {
+    return region;
+  }
+}
+
+// ─── Creating and deleting a sport mode (2026-11-26, watch-protocol/10 L3) ───────────────────────
+// tools/legacy_sport_modes.py create_mode / delete_mode / delete_multisport, byte for byte (that
+// file says where each byte comes from: SuuntoLink's four captured creates and its captured
+// Triathlon delete, replayed by tools/test_legacy_sport_mode_manage.py; __tests__/
+// LegacySportModeManage.test.ts checks this port gives the same bytes). In short:
+//   create  appended to 0x0100: 0x0101 { 0x0102 settings, 0x01FF [settings time][display time],
+//           0x0105 SuuntoLink's seven new-mode displays }; on the Ambit2 family its menu entry
+//           appended to 0x0200: 0x0210 { 0x0212 name (24), 0x0213 sport, 0x0214 place,
+//           0x02FE lowest free id, 0x02FF time }. Settings from the sport's SuuntoLink defaults.
+//   delete  a mode with its own menu entry (never a multisport's leg, a mode without an entry or
+//           the last one), or a multisport with the modes only it used; legs above a removed mode
+//           move down by one.
+const TAG_STAMP = 0x01ff;
+const MAX_SPORT_MODES = 10;                 // sport_mode.js getMaxSportModes, all four models
+export const LEGACY_VARIANTS: Record<string, number> = { Bluebird: AMBIT1_BLOB, Duck: AMBIT2_BLOB, Colibri: AMBIT2_BLOB, Greentit: AMBIT2_BLOB };
+/** ui/input.js movescountActivity: the sports SuuntoLink's create list offers. */
+export const LEGACY_SELECTABLE_ACTIVITIES = new Set([
+  1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+  27, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 39, 40, 58, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+  70, 71, 72, 73, 74, 75, 76, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+  94, 95, 96, 97, 98, 99,
+]);
+const FUSED_SPEED_ACTIVITIES = new Set([3, 25, 28, 40, 75, 81, 82, 93]);   // getFusedSpeedActivities
+const SWIM_ACTIVITIES = new Set([6, 83]);
+const SUPPORTS: Record<string, { alti: boolean; foot: boolean; bike: boolean; power: boolean; cadence: boolean }> = {
+  Bluebird: { alti: true, foot: true, bike: true, power: true, cadence: true },
+  Duck: { alti: true, foot: true, bike: true, power: true, cadence: true },
+  Colibri: { alti: false, foot: true, bike: true, power: true, cadence: true },
+  Greentit: { alti: false, foot: true, bike: false, power: false, cadence: false },
+};
+const SENSOR_SEARCH = 0x0002;
+export const LEGACY_NEW_MODE_DISPLAYS: number[] = ([
+  [260, 10, [[0, 10, []], [1, 11, []], [2, 0, [5]]]],
+  [273, 4, [[0, 8, []], [1, 8, []], [2, 0, [16, 1, 65534]]]],
+  [291, 5, [[0, 8, []], [1, 40, []], [2, 0, [16, 8, 1, 65534]]]],
+  [290, 6, [[0, 24, []], [1, 25, []], [2, 0, [50, 26, 16]]]],
+  [257, 65, [[1, 195, []], [2, 196, []], [3, 197, []]]],
+  [336, 7, []],
+  [260, 50, [[0, 62, []], [1, 61, []], [2, 0, [5, 10, 21, 11, 28]]]],
+] as [number, number, Row[]][]).flatMap(([layout, kind, rows]) => displayRecord(layout, rows, kind));
+const le32 = (v: number) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+
+/** The settings SuuntoLink's create form saves for a new mode of this sport on this model. */
+export function legacyNewModeFields(variant: string, activityId: number) {
+  const sup = SUPPORTS[variant];
+  const d = SPORT_MODE_ROWS.activityDefaults[variant]?.[String(activityId)];
+  if (!sup || !d) throw new Error(`SuuntoLink has no defaults for sport ${activityId} on the ${variant}.`);
+  const locked = variant !== 'Bluebird' && SWIM_ACTIVITIES.has(activityId);
+  let pods = d.hrBelt && !locked ? 0x0001 : 0;
+  if (d.powerPod && sup.power && !locked) pods |= 0x0040;
+  if (d.cadencePod && sup.cadence && !locked) pods |= 0x0080;
+  if (d.footPod && sup.foot && !locked) pods |= 0x0100;
+  if (d.bikePod && sup.bike && !locked) pods |= 0x0800;
+  if (pods) pods |= SENSOR_SEARCH;
+  if (FUSED_SPEED_ACTIVITIES.has(activityId)) pods |= 0x0004;
+  return { pods, alti: sup.alti && !locked ? d.altiBaroProfile : 0, gps: d.gpsInterval, rec: d.recordingInterval };
+}
+
+function newModeSettings(variant: string, name: string, activityId: number, modeId: number): number[] {
+  const f = legacyNewModeFields(variant, activityId);
+  const len = LEGACY_VARIANTS[variant];
+  const out = new Array(len).fill(0);
+  latin1(name, NAME_LEN).forEach((c, i) => { out[i] = c; });
+  const put = (at: number, v: number) => { out[at] = v & 0xff; out[at + 1] = (v >> 8) & 0xff; };
+  put(16, activityId);
+  const offs = len === AMBIT1_BLOB ? [18, 20, 22, 24, 38] : [22, 24, 26, 28, 46];
+  [f.pods, f.alti, f.gps, f.rec, 99].forEach((v, i) => put(offs[i], v));
+  if (len === AMBIT2_BLOB) {
+    le32(modeId).forEach((c, i) => { out[18 + i] = c; });
+    put(84, 0x00ff);
+    put(86, 0x00ff);
+  }
+  return out;
+}
+
+interface ModeRec { at: number; len: number; name: string; blobLen: number; blobOff: number }
+interface GroupRec { at: number; len: number; name: string; legs: number[]; legsAt: number[]; id: number | null }
+
+function modeList(data: Uint8Array): { at: number; modes: ModeRec[] } {
+  for (const c of children(data, 4, regionUsed(data))) {
+    if (c.tag !== 0x0100) continue;
+    const modes: ModeRec[] = [];
+    for (const m of children(data, c.off, c.off + c.len)) {
+      if (m.tag !== 0x0101) continue;
+      const s = children(data, m.off, m.off + m.len).find(k => k.tag === TAG_SETTINGS);
+      modes.push({ at: m.off - 4, len: m.len + 4, blobLen: s ? s.len : 0, blobOff: s ? s.off : -1,
+        name: s && s.len >= NAME_LEN ? latin1Name(data.subarray(s.off, s.off + NAME_LEN)) : '' });
+    }
+    return { at: c.off - 4, modes };
+  }
+  throw new Error('The sport-mode region has no mode list.');
+}
+
+function groupList(data: Uint8Array): { at: number | null; groups: GroupRec[] } {
+  for (const c of children(data, 4, regionUsed(data))) {
+    if (c.tag !== 0x0200) continue;
+    const groups: GroupRec[] = [];
+    for (const g of children(data, c.off, c.off + c.len)) {
+      if (g.tag !== 0x0210) continue;
+      const rec: GroupRec = { at: g.off - 4, len: g.len + 4, name: '', legs: [], legsAt: [], id: null };
+      for (const k of children(data, g.off, g.off + g.len)) {
+        if (k.tag === 0x0212) rec.name = latin1Name(data.subarray(k.off, k.off + k.len));
+        else if (k.tag === 0x0214 && k.len === 2) { rec.legs.push(u16(data, k.off)); rec.legsAt.push(k.off); }
+        else if (k.tag === 0x02fe && k.len === 4) rec.id = u32(data, k.off);
+      }
+      groups.push(rec);
+    }
+    return { at: c.off - 4, groups };
+  }
+  return { at: null, groups: [] };
+}
+
+/** SuuntoLink's countSportModes: max(single entries + modes only a multisport uses, all entries). */
+export function legacyUsage(data: Uint8Array): { used: number; max: number; multisport: number } {
+  const { modes } = modeList(data);
+  const { at, groups } = groupList(data);
+  if (at === null) return { used: modes.filter(m => m.name).length, max: MAX_SPORT_MODES, multisport: 0 };
+  const singles = groups.filter(g => g.legs.length === 1);
+  const own = new Set(singles.map(g => g.legs[0]));
+  const hidden = new Set(groups.filter(g => g.legs.length > 1).flatMap(g => g.legs).filter(l => !own.has(l)));
+  return { used: Math.max(singles.length + hidden.size, groups.length), max: MAX_SPORT_MODES,
+    multisport: groups.length - singles.length };
+}
+
+const lowestFree = (used: Set<number | null>) => { let n = 1; while (used.has(n)) n++; return n; };
+
+/** Header offsets of the container records strictly enclosing the record at `off`. */
+function enclosing(data: Uint8Array, off: number): number[] {
+  const out: number[] = [];
+  let start = 0, end = regionUsed(data);
+  for (;;) {
+    const hit = children(data, start, end).find(c => c.off - 4 < off && off < c.off + c.len && CONTAINERS.has(c.tag));
+    if (!hit) return out;
+    out.push(hit.off - 4);
+    start = hit.off; end = hit.off + hit.len;
+  }
+}
+
+/** `data` with ranges cut and records inserted, every enclosing length fixed, the rest 0xFF. */
+function rewriteRecords(data: Uint8Array, cuts: [number, number][], inserts: [number, number[], number[]][]): Uint8Array {
+  const used = regionUsed(data);
+  const edits: { off: number; removed: number; added: number[]; headers: number[] }[] = [
+    ...cuts.map(([off, len]) => ({ off, removed: len, added: [] as number[], headers: enclosing(data, off) })),
+    ...inserts.map(([off, added, headers]) => ({ off, removed: 0, added, headers })),
+  ];
+  const out = Array.from(data.subarray(0, used));
+  const delta = new Map<number, number>();
+  for (const e of edits) for (const h of e.headers) delta.set(h, (delta.get(h) ?? 0) + e.added.length - e.removed);
+  for (const [h, d] of delta) {
+    const v = Math.max(0, Math.min(0xffff, u16(data, h + 2) + d));
+    out[h + 2] = v & 0xff; out[h + 3] = v >> 8;
+  }
+  for (const e of [...edits].sort((a, b) => b.off - a.off)) out.splice(e.off, e.removed, ...e.added);
+  if (out.length > data.length) throw new Error(`The sport modes would need ${out.length} of the region's ${data.length} bytes.`);
+  const res = new Uint8Array(data.length).fill(0xff);
+  res.set(out);
+  return res;
+}
+
+function checkFamily(data: Uint8Array, variant: string) {
+  if (!(variant in LEGACY_VARIANTS)) throw new Error(`${variant} is not an Ambit1 or Ambit2.`);
+  const lens = new Set(modeList(data).modes.filter(m => m.name).map(m => m.blobLen));
+  if (lens.size && (lens.size !== 1 || !lens.has(LEGACY_VARIANTS[variant]))) {
+    throw new Error(`The region's settings records are not the ${variant}'s: nothing changed.`);
+  }
+}
+
+/** The region with one new sport mode, as SuuntoLink creates one. `now` is a Unix time or the
+ * [settings, display, menu-entry] times of SuuntoLink's three writes. */
+export function createLegacyModeRegion(data: Uint8Array, name: string, activityId: number, variant: string,
+                                       now?: number | [number, number, number]): Uint8Array {
+  checkFamily(data, variant);
+  const raw = String(name ?? '').trim();
+  if (!raw) throw new Error('A sport mode needs a name.');
+  if (Array.from(raw).length > NAME_LEN) throw new Error(`A sport mode name holds ${NAME_LEN} characters on this watch.`);
+  const { at: modesAt, modes } = modeList(data);
+  if (modes.some(m => m.name === raw)) throw new Error(`The watch already has a sport mode named "${raw}".`);
+  if (!LEGACY_SELECTABLE_ACTIVITIES.has(activityId)) throw new Error(`Sport ${activityId} is not one SuuntoLink offers for a sport mode.`);
+  const use = legacyUsage(data);
+  if (use.used >= use.max) throw new Error(`${use.used}/${use.max} sport modes used: delete one first.`);
+  const t = now ?? Math.floor(Date.now() / 1000);
+  const [tSet, tDisp, tMenu] = Array.isArray(t) ? t : [t, t, t];
+  const ids = new Set<number | null>(modes.filter(m => m.blobLen === AMBIT2_BLOB).map(m => u32(data, m.blobOff + 18)));
+  const record = tlvOf(0x0101, [...tlvOf(TAG_SETTINGS, newModeSettings(variant, raw, activityId, lowestFree(ids))),
+    ...tlvOf(TAG_STAMP, [...le32(tSet), ...le32(tDisp)]), ...tlvOf(TAG_DISPLAYS, LEGACY_NEW_MODE_DISPLAYS)]);
+  const inserts: [number, number[], number[]][] = [[modesAt + 4 + u16(data, modesAt + 2), record, [modesAt, 0]]];
+  if (variant !== 'Bluebird') {
+    const { at: groupsAt, groups } = groupList(data);
+    if (groupsAt === null) throw new Error('This Ambit2 region has no sport-mode menu (0x0200): nothing changed.');
+    const entry = tlvOf(0x0210, [...tlvOf(0x0212, Array.from(latin1(raw, GROUP_NAME_LEN))),
+      ...tlvOf(0x0213, le16(activityId)), ...tlvOf(0x0214, le16(modes.length)),
+      ...tlvOf(0x02fe, le32(lowestFree(new Set(groups.map(g => g.id))))), ...tlvOf(0x02ff, le32(tMenu))]);
+    inserts.push([groupsAt + 4 + u16(data, groupsAt + 2), entry, [groupsAt, 0]]);
+  }
+  return rewriteRecords(data, [], inserts);
+}
+
+function deleteRecords(data: Uint8Array, groupsGone: GroupRec[], placesGone: number[]): Uint8Array {
+  const { modes } = modeList(data);
+  const { groups } = groupList(data);
+  const out = Uint8Array.from(data);
+  for (const g of groups) {
+    if (groupsGone.some(x => x.at === g.at)) continue;
+    g.legs.forEach((leg, i) => {
+      const v = leg - placesGone.filter(p => p < leg).length;
+      out[g.legsAt[i]] = v & 0xff; out[g.legsAt[i] + 1] = v >> 8;
+    });
+  }
+  return rewriteRecords(out, [...placesGone.map(p => [modes[p].at, modes[p].len] as [number, number]),
+    ...groupsGone.map(g => [g.at, g.len] as [number, number])], []);
+}
+
+/** The region without one sport mode (and its menu entry), with SuuntoLink's refusals. */
+export function deleteLegacyModeRegion(data: Uint8Array, name: string, variant: string): Uint8Array {
+  checkFamily(data, variant);
+  const { modes } = modeList(data);
+  const place = modes.findIndex(m => m.name === name);
+  if (place < 0) throw new Error(`No sport mode named "${name}" on the watch.`);
+  const { at, groups } = groupList(data);
+  if (at === null) {
+    if (modes.filter(m => m.name).length <= 1) throw new Error('The watch keeps at least one sport mode.');
+    return deleteRecords(data, [], [place]);
+  }
+  const users = groups.filter(g => g.legs.length > 1 && g.legs.includes(place)).map(g => g.name);
+  if (users.length) throw new Error(`"${name}" is used by the multisport ${users.join(', ')}: delete that first.`);
+  const own = groups.filter(g => g.legs.length === 1 && g.legs[0] === place);
+  if (!own.length) throw new Error(`"${name}" has no entry of its own in the watch menu: SuuntoLink does not delete it.`);
+  if (groups.length - own.length < 1) throw new Error('The watch keeps at least one sport mode.');
+  return deleteRecords(data, own, [place]);
+}
+
+/** The region without one multisport and the modes only it used (Ambit2 capture: Triathlon). */
+export function deleteLegacyMultisportRegion(data: Uint8Array, name: string, variant: string): Uint8Array {
+  checkFamily(data, variant);
+  const { groups } = groupList(data);
+  const gone = groups.find(g => g.name === name && g.legs.length > 1);
+  if (!gone) throw new Error(`No multisport named "${name}" on the watch.`);
+  if (groups.length <= 1) throw new Error('The watch keeps at least one sport mode.');
+  const still = new Set(groups.filter(g => g !== gone).flatMap(g => g.legs));
+  const places = [...new Set(gone.legs)].filter(l => !still.has(l)).sort((a, b) => a - b);
+  return deleteRecords(data, [gone], places);
+}
+
+export interface LegacyMenuEntry { name: string; activityId: number; legNames: (string | null)[]; multisport: boolean; deletable: boolean; reason: string }
+export interface LegacyMenu { used: number; max: number; multisport: number; entries: LegacyMenuEntry[] }
+
+/** The watch's sport modes and multisports with what may be deleted, and the count SuuntoLink keeps. */
+export function legacyMenu(data: Uint8Array, variant: string): LegacyMenu {
+  const why = (f: () => unknown) => { try { f(); return ''; } catch (e: any) { return e?.message ?? String(e); } };
+  const region = decodeLegacyRegion(data);
+  const entries: LegacyMenuEntry[] = region.modes.map(m => {
+    const reason = why(() => deleteLegacyModeRegion(data, m.name, variant));
+    return { name: m.name, activityId: m.activityId, legNames: [m.name], multisport: false, deletable: !reason, reason };
+  });
+  for (const g of region.groups.filter(x => x.isMultisport)) {
+    const reason = why(() => deleteLegacyMultisportRegion(data, g.name, variant));
+    entries.push({ name: g.name, activityId: g.activityId, legNames: g.legNames, multisport: true, deletable: !reason, reason });
+  }
+  return { ...legacyUsage(data), entries };
+}
+
+/** Create one sport mode on the connected Ambit1/2 (one region read-modify-write). `variant` is
+ * the watch's codename: it picks the record format and the settings SuuntoLink gives a new mode. */
+export async function createLegacySportMode(name: string, activityId: number, variant: string): Promise<LegacyRegion> {
+  return withMenu(await rewriteLegacyRegion(data => createLegacyModeRegion(data, name, activityId, variant)));
+}
+
+/** Delete one sport mode, or with `multisport` one multisport, on the connected Ambit1/2. */
+export async function deleteLegacySportMode(name: string, variant: string, multisport = false): Promise<LegacyRegion> {
+  return withMenu(await rewriteLegacyRegion(data => (multisport
+    ? deleteLegacyMultisportRegion(data, name, variant) : deleteLegacyModeRegion(data, name, variant))));
 }
