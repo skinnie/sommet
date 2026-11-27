@@ -17,6 +17,8 @@ sys.path.insert(0, str(HERE.parent / "desktop" / "backend"))
 sys.path.insert(0, str(HERE))
 import ble_bridge as B  # noqa: E402
 import server  # noqa: E402
+import no_live_bluetooth  # noqa: E402
+no_live_bluetooth.cut_off(server)
 
 
 class Command(unittest.TestCase):

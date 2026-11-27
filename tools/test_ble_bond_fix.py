@@ -285,6 +285,8 @@ class BackendWiring(unittest.TestCase):
         import tempfile
         sys.path.insert(0, str(HERE.parent / "desktop" / "backend"))
         import server
+        import no_live_bluetooth
+        no_live_bluetooth.cut_off(server)
         self.server = server
         self.tmp = tempfile.TemporaryDirectory()
         self.saved = (server.PAIRING_FIX_FILE, server._PAIRING_FIX[0], server.ble_bridge.bridge,

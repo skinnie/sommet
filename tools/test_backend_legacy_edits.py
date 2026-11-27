@@ -26,6 +26,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "desktop" / "backend"))
 sys.path.insert(0, str(HERE))
 import server  # noqa: E402
+import no_live_bluetooth  # noqa: E402
+no_live_bluetooth.cut_off(server)
 import legacy_sport_modes  # noqa: E402
 from test_legacy_sport_mode_edit import synthetic  # noqa: E402
 import test_legacy_display_edit  # noqa: E402

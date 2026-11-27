@@ -10,6 +10,8 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "desktop" / "backend"))
 import server  # noqa: E402
+import no_live_bluetooth  # noqa: E402
+no_live_bluetooth.cut_off(server)
 
 lock = server._WatchLock()
 assert lock.acquire() and lock.acquire()          # same thread: in again, no wait

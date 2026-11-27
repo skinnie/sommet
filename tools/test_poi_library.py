@@ -16,6 +16,8 @@ sys.path.insert(0, str(HERE))
 import ambit_format as F  # noqa: E402
 import poi_library as L  # noqa: E402
 import server  # noqa: E402
+import no_live_bluetooth  # noqa: E402
+no_live_bluetooth.cut_off(server)
 
 
 class Store(unittest.TestCase):

@@ -10,6 +10,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "desktop" / "backend"))
 sys.path.insert(0, str(HERE))
 import server  # noqa: E402
+import no_live_bluetooth  # noqa: E402
+no_live_bluetooth.cut_off(server)
 
 TAUGHT = [{"id": 0, "style": "Other", "vectors": [0, 0, 0, 0]},
           {"id": 1, "style": "Butterfly", "vectors": [2445, 2870, 442, 0]},

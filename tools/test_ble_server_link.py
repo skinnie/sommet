@@ -284,7 +284,7 @@ def test_a_link_bluez_will_not_let_go():
     state.lost_by_bluez(path, paired=True)
     status = state.status()
     assert status["linked_device"] is None and status["bluez_stuck"] == "dev_0C_8C_DC_00_00_01"
-    assert status["pairing_hint"] == S.HINT_BLUEZ_STUCK and state.quick_drops == 0
+    assert status["pairing_hint"] is None and state.quick_drops == 0
     assert state.released("/org/bluez/hci0/dev_AA_BB_CC_00_00_02") is False
     assert state.released(path) is True and state.status()["bluez_stuck"] is None
     assert state.status()["pairing_hint"] is None
@@ -292,6 +292,30 @@ def test_a_link_bluez_will_not_let_go():
     state.lost_by_bluez(path, paired=True)
     state.forgotten(path)                     # forgetting the device clears it as well
     assert state.stuck is None
+
+
+def test_a_stuck_link_is_not_a_pairing_hint():
+    # 2026-11-27, André pairing a Kailash: BlueZ still listed an Ambit3 as connected, the daemon
+    # reported that as the pairing hint, and the desktop stopped "Connecting" with "Turn
+    # Bluetooth off and on". The Kailash linked a second later and synced; both links stayed up
+    # side by side. A stuck link is another watch's state, not the answer to this pairing.
+    state = S.LinkState()
+    ambit = "/org/bluez/hci0/dev_0C_8C_DC_00_00_01"
+    kailash = "/org/bluez/hci0/dev_AA_BB_CC_00_00_02"
+    state.linked(ambit)
+    state.connected_at -= 18
+    state.lost_by_bluez(ambit, paired=True)
+    status = state.status()
+    assert status["bluez_stuck"] == "dev_0C_8C_DC_00_00_01"
+    assert status["pairing_hint"] is None
+    state.linked(kailash)
+    state.on_session()
+    status = state.status()
+    assert status["linked_device"] == "dev_AA_BB_CC_00_00_02" and status["pairing_hint"] is None
+    # No hint asks for Bluetooth to be switched off: that drops every other device on the
+    # computer (watch-link rule, André 2026-11-25).
+    for hint in (S.HINT_PAIR_AGAIN, S.HINT_PAIR_AGAIN_BOTH):
+        assert "off and on" not in hint.lower()
 
 
 class FakeAdapter:

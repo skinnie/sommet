@@ -1199,12 +1199,14 @@ REFUSED_RETRY_S = 300.0
 # knows the older "Not Connected" answer, logs "Failed to disconnect device: Disconnected
 # (0x0e)", never marks the device disconnected, and never replies to the D-Bus call. Asking
 # again gets the same answer (2026-10-25, 19:06 and 21:41). Connect() then has nothing to do,
-# so the watch can't link until Bluetooth is turned off and on, the device is forgotten, or
-# the computer restarts. The daemon checks DROP_CHECK_TIMEOUT_S after each drop it asks for.
+# so that watch can't link again until BlueZ lets it go. The daemon checks DROP_CHECK_TIMEOUT_S
+# after each drop it asks for. Other watches still link: on 2026-11-27 a Kailash paired and
+# synced while BlueZ held an Ambit3 like this, both links up side by side (hcitool con). So it
+# is only logged and reported as `bluez_stuck`, never as the pairing hint: as the hint it made
+# the desktop give up on the Kailash and tell André to turn Bluetooth off and on, which would
+# drop every other device on the computer (watch-link rule, 2026-11-25).
 DROP_CHECK_TIMEOUT_S = 10
-HINT_BLUEZ_STUCK = ("This computer's Bluetooth lost track of the watch: it still lists it as "
-                    "connected. Turn Bluetooth off and on (or restart the computer), then "
-                    "press Sync now on the watch.")
+NOTE_BLUEZ_STUCK = ("not dialed again until BlueZ lets it go; other watches can still link")
 
 
 def retry_floor(state):
@@ -1228,12 +1230,12 @@ class LinkState:
 
     def status(self):
         return {"linked_device": self.path.split("/")[-1] if self.path else None,
-                "pairing_hint": HINT_BLUEZ_STUCK if self.stuck else self.pairing_hint,
+                "pairing_hint": self.pairing_hint,
                 "bluez_stuck": self.stuck.split("/")[-1] if self.stuck else None,
                 "quick_drops": self.quick_drops, "last_drop": self.last_drop}
 
     def lost_by_bluez(self, path, paired):
-        """BlueZ still lists `path` as connected after a drop we asked for (HINT_BLUEZ_STUCK).
+        """BlueZ still lists `path` as connected after a drop we asked for (NOTE_BLUEZ_STUCK).
         The link is over: recorded as a drop, and the watch waits until BlueZ lets it go."""
         self.dropped(path, paired)
         self.stuck = path
@@ -1351,7 +1353,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         return False
 
     def drop_link(path):
-        """Disconnects `path`, then checks BlueZ let it go (see HINT_BLUEZ_STUCK). If it
+        """Disconnects `path`, then checks BlueZ let it go (see NOTE_BLUEZ_STUCK). If it
         still lists the watch as connected, the link is over for us anyway: the session is
         reset, the scan resumes, and the watch is not dialed until BlueZ releases it."""
         def check(error=None):
@@ -1359,7 +1361,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
                 print(f"  could not drop the link: {error}")
             if state.path != path or not device_prop(path, "Connected", False):
                 return                 # gone: on_connection_state has handled it
-            print(f"  BlueZ still lists {short(path)} as connected: {HINT_BLUEZ_STUCK}")
+            print(f"  BlueZ still lists {short(path)} as connected: {NOTE_BLUEZ_STUCK}")
             state.lost_by_bluez(path, bool(device_prop(path, "Paired", False)))
             seen.discard(path)
             resume_discovery()
@@ -1510,7 +1512,7 @@ def start_discovery(bus, dbus, glib, adapter, verbose, on_disconnect=None, agent
         # (RSSI etc.) can arrive many times a second, so `seen` alone doesn't throttle
         # anything here.
         if path == state.stuck:
-            return                     # BlueZ still lists it as connected (HINT_BLUEZ_STUCK)
+            return                     # BlueZ still lists it as connected (NOTE_BLUEZ_STUCK)
         since_last = time.monotonic() - last_attempt_at.get(path, 0.0)
         if since_last < retry_floor(state) and path not in retry_now:
             return
