@@ -335,7 +335,8 @@ HINT_PAIR_WINDOWS = ("Windows did not finish pairing. On the watch choose “Pai
                      "the Windows notifications.")
 HINT_ADAPTER_STUCK = ("Windows sees the watch but its Bluetooth adapter refuses to connect. "
                       "Unplug the Bluetooth adapter and plug it back in (or turn Bluetooth off "
-                      "and on in Windows), then choose “Sync now” on the watch.")
+                      "and on in Windows), then choose “Sync now” on the watch (a Kailash "
+                      "calls again by itself).")
 
 
 class LinkState:

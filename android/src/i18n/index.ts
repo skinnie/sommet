@@ -110,15 +110,15 @@ const fr = {
   // Real bug, 2026-08-21: a live BLE link can drop on its own (watch-driven, short-lived
   // session) with no user action — this message + the existing connect-error retry UI is
   // what the user now sees instead of a silently stale "Connected" label.
-  homeBleDisconnectedError: 'La montre a fermé la liaison Bluetooth. Sur la montre, choisissez « Sync now », puis touchez « Connecter … en Bluetooth ».',
-  homeBleAdapterOffError: 'Le Bluetooth de cet appareil a été coupé. Rallumez-le, choisissez « Sync now » sur la montre, puis touchez « Connecter … en Bluetooth ».',
-  homeBleSessionEnded: 'La montre a terminé la session Bluetooth. Choisissez « Sync now » sur la montre : Sommet se reconnecte tout seul.',
-  watchBleClosedError: 'La montre a fermé la liaison Bluetooth. Sur la montre, choisissez « Sync now », puis touchez « Connecter … en Bluetooth » dans Accueil, et réessayez.',
+  homeBleDisconnectedError: 'La montre a fermé la liaison Bluetooth. Sur la montre, choisissez « Sync now » (une Kailash rappelle d’elle-même), puis touchez « Connecter … en Bluetooth ».',
+  homeBleAdapterOffError: 'Le Bluetooth de cet appareil a été coupé. Rallumez-le, choisissez « Sync now » sur la montre (une Kailash rappelle d’elle-même), puis touchez « Connecter … en Bluetooth ».',
+  homeBleSessionEnded: 'La montre a terminé la session Bluetooth. Choisissez « Sync now » sur la montre : Sommet se reconnecte tout seul. Une Kailash rappelle d’elle-même, ce qui peut prendre un moment.',
+  watchBleClosedError: 'La montre a fermé la liaison Bluetooth. Sur la montre, choisissez « Sync now » (une Kailash rappelle d’elle-même), puis touchez « Connecter … en Bluetooth » dans Accueil, et réessayez.',
   sportModesBackupFailed: 'Impossible d’enregistrer une copie des modes sport de la montre, rien n’a été écrit',
   homePairWatchPill: 'Associer',
   homeForgetWatchBtn: 'Oublier un appareil Bluetooth',
   homeForgetWatchPill: 'Oublier',
-  homeForgetWatchConfirm: (name: string) => `Oublier ${name} ? Vos activités restent. Pour le réutiliser en Bluetooth, associez-le depuis le menu de la montre (« Pair with app »). Sur la montre, faites aussi Bluetooth > Unpair > Forget.`,
+  homeForgetWatchConfirm: (name: string) => `Oublier ${name} ? Vos activités restent. Pour le réutiliser en Bluetooth, associez-le depuis le menu de la montre (« Pair with app » ; sur une Kailash, Options › CONNECTIVITY › « Pair MobileApp? »). Sur la montre, faites aussi Bluetooth > Unpair > Forget.`,
   homeForgetWatchDone: (name: string) => `${name} est oubliée sur cet appareil.`,
   homeForgetWatchFailed: 'Android n’a pas laissé Sommet retirer cette association. Vous pouvez le faire dans ses réglages Bluetooth.',
   homeForgetWatchSettings: 'Ouvrir les réglages Bluetooth',
@@ -126,7 +126,8 @@ const fr = {
   homeBleReadyMsg:
     "Sur la montre : menu « Pair Mobile App » (première association) ou « Sync now » " +
     "(déjà associée) maintenant — la fenêtre Bluetooth de la montre ne reste " +
-    "active que quelques secondes. Ambit3, Traverse et Kailash, expérimental.",
+    "active que quelques secondes. Une Kailash s’associe depuis Options › CONNECTIVITY › " +
+    "« Pair MobileApp? », puis se connecte d’elle-même. Ambit3, Traverse et Kailash, expérimental.",
   homeBleReadyBtn: 'Prêt',
   homeConnectingBle: 'Connexion Bluetooth…',
   homeActivitiesBtn: 'ACTIVITÉS',
@@ -1072,15 +1073,15 @@ const en: typeof fr = {
   homeConnectRetryBtn: 'Retry',
   homeBleConnectBtn: 'Pair via Bluetooth',
   homeBleConnectWatchBtn: (name: string) => `Connect ${name} via Bluetooth`,
-  homeBleDisconnectedError: 'The watch closed the Bluetooth link. Choose "Sync now" on the watch, then tap "Connect … via Bluetooth".',
-  homeBleAdapterOffError: 'Bluetooth was turned off on this device. Turn it back on, choose "Sync now" on the watch, then tap "Connect … via Bluetooth".',
-  homeBleSessionEnded: 'The watch ended the Bluetooth session. Choose "Sync now" on the watch and Sommet reconnects by itself.',
-  watchBleClosedError: 'The watch closed the Bluetooth link. Choose "Sync now" on the watch, tap "Connect … via Bluetooth" on Home, then try again.',
+  homeBleDisconnectedError: 'The watch closed the Bluetooth link. Choose "Sync now" on the watch (a Kailash calls again by itself), then tap "Connect … via Bluetooth".',
+  homeBleAdapterOffError: 'Bluetooth was turned off on this device. Turn it back on, choose "Sync now" on the watch (a Kailash calls again by itself), then tap "Connect … via Bluetooth".',
+  homeBleSessionEnded: 'The watch ended the Bluetooth session. Choose "Sync now" on the watch and Sommet reconnects by itself. A Kailash calls again by itself, which can take a while.',
+  watchBleClosedError: 'The watch closed the Bluetooth link. Choose "Sync now" on the watch (a Kailash calls again by itself), tap "Connect … via Bluetooth" on Home, then try again.',
   sportModesBackupFailed: 'Could not save a copy of the watch’s sport modes, so nothing was written',
   homePairWatchPill: 'Pair',
   homeForgetWatchBtn: 'Forget Bluetooth device',
   homeForgetWatchPill: 'Forget',
-  homeForgetWatchConfirm: (name: string) => `Forget ${name}? Your activities stay. To use it over Bluetooth again, pair it from the watch's own menu (“Pair with app”). On the watch, also do Bluetooth > Unpair > Forget.`,
+  homeForgetWatchConfirm: (name: string) => `Forget ${name}? Your activities stay. To use it over Bluetooth again, pair it from the watch's own menu (“Pair with app”; on a Kailash, Options › CONNECTIVITY › “Pair MobileApp?”). On the watch, also do Bluetooth > Unpair > Forget.`,
   homeForgetWatchDone: (name: string) => `${name} is forgotten on this device.`,
   homeForgetWatchFailed: 'Android did not let Sommet remove this pairing. You can do it in its Bluetooth settings.',
   homeForgetWatchSettings: 'Open Bluetooth settings',
@@ -1088,7 +1089,8 @@ const en: typeof fr = {
   homeBleReadyMsg:
     "On the watch: menu \"Pair Mobile App\" (first pairing) or \"Sync now\" (already " +
     "paired) now — the watch's Bluetooth window only stays open for a few " +
-    "seconds. Ambit3, Traverse, and Kailash, experimental.",
+    "seconds. A Kailash pairs from Options › CONNECTIVITY › \"Pair MobileApp?\" and then " +
+    "connects by itself. Ambit3, Traverse, and Kailash, experimental.",
   homeBleReadyBtn: 'Ready',
   homeConnectingBle: 'Connecting via Bluetooth…',
   homeActivitiesBtn: 'ACTIVITIES',

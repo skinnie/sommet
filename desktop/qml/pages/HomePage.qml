@@ -1263,13 +1263,17 @@ PageFlickable {
                                             ? qsTr("A watch is already connected by Bluetooth")
                                             // Linux: Sommet's own box asks for the code (no
                                             // password since 2026-11-25, watch-protocol/09).
+                                            // A Kailash has no "Sync now": it pairs from
+                                            // CONNECTIVITY (its user guide, 3.17.1) and then
+                                            // calls by itself (André, 2026-11-27). Which watch
+                                            // comes is not known before it pairs, so both.
                                             : Qt.platform.os === "linux"
-                                              ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows into Sommet")
+                                              ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows into Sommet. A Kailash pairs from Options › CONNECTIVITY › “Pair MobileApp?”, then connects by itself")
                                               // Windows' own pop-up asks for the code (André,
                                               // 2026-11-21: the way pairing works there).
                                               : Qt.platform.os === "windows"
-                                                ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows in the Windows pop-up")
-                                                : qsTr("Start “Pair with app” or “Sync now” on the watch"),
+                                                ? qsTr("Start “Pair with app” or “Sync now” on the watch. The first time, type the code it shows in the Windows pop-up. A Kailash pairs from Options › CONNECTIVITY › “Pair MobileApp?”, then connects by itself")
+                                                : qsTr("Start “Pair with app” or “Sync now” on the watch. A Kailash pairs from Options › CONNECTIVITY › “Pair MobileApp?”, then connects by itself"),
                                       // Only blocked while a watch is ALREADY connected over
                                       // Bluetooth - a watch on USB doesn't stop pairing one (André,
                                       // 2026-09-26: "greyed out even if the watch is in pair mode").
@@ -1351,17 +1355,24 @@ PageFlickable {
                         visible: DeviceService.bleAttempting && !DeviceService.bleSubscribed
                         // Linux: no password step any more (André, 2026-11-25: "linking a watch
                         // should never affect the system"); Sommet's own box asks for the code.
+                        // The Kailash sentence: see the pair dialog's hint above.
                         text: Qt.platform.os === "linux"
                               ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
                                      "watch now. Its offer is short: if nothing happens, choose " +
                                      "it again. The first time, Sommet asks for the code the " +
-                                     "watch shows")
+                                     "watch shows. A Kailash pairs from Options › CONNECTIVITY › " +
+                                     "“Pair MobileApp?”; once paired it connects by itself, " +
+                                     "which can take a while")
                               : Qt.platform.os === "windows"
                                 ? qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
                                        "watch now — its window is short. The first time, " +
-                                       "Windows shows a pop-up: type the code the watch shows there")
+                                       "Windows shows a pop-up: type the code the watch shows there. " +
+                                       "A Kailash pairs from Options › CONNECTIVITY › “Pair MobileApp?”; " +
+                                       "once paired it connects by itself, which can take a while")
                                 : qsTr("Choose “Pair with app” (first time) or “Sync now” on the " +
-                                       "watch now — its window is short")
+                                       "watch now — its window is short. A Kailash pairs from " +
+                                       "Options › CONNECTIVITY › “Pair MobileApp?”; once paired it " +
+                                       "connects by itself, which can take a while")
                         wrapMode: Text.WordWrap
                         width: parent.width
                         color: Theme.mutedText
@@ -1933,6 +1944,9 @@ PageFlickable {
                         ? qsTr("Forget the Wahoo ELEMNT in Sommet? It comes back the next time you plug it in.")
                       : forgetConfirm.device.kind === "magene"
                         ? qsTr("Forget the Magene C406? It goes back to its pair screen - pair it again from “Pair another device by Bluetooth”.")
+                      : /^Kailash/.test(forgetConfirm.device.name || "")
+                        ? qsTr("Forget %1? To use it over Bluetooth again, pair it from the watch's own menu (Options › CONNECTIVITY › “Pair MobileApp?”).")
+                              .arg(forgetConfirm.device.name)
                         : qsTr("Forget %1? To use it over Bluetooth again, pair it from the watch's own menu (“Pair with app”).")
                               .arg(forgetConfirm.device.name || qsTr("this watch"))
             }

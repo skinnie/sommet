@@ -1754,7 +1754,8 @@ def listen(verbose=False, timeout=0, forget=False, serve_socket=True):
     def registered():
         print(f"  NSP service registered ({SERVICE_UUID})")
         print('  now trigger "Pair Mobile App" (first time) or "Sync now" (already paired) '
-              "on the watch - its solicitation window is short.")
+              "on the watch - its solicitation window is short. A Kailash has no Sync now: "
+              "it pairs from CONNECTIVITY, then calls by itself.")
 
     def failed(error):
         print(f"  registration failed: {error}")
